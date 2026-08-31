@@ -118,7 +118,7 @@ button.inverted:hover {
   src: url('/HYMaQiDuo-55W.subset.woff2') format('woff2');
   font-display: swap;
 }
-* {
+*:not(.katex):not(.katex *) {
   font-family: var(--font-main);
   color: var(--color-text);
 }
