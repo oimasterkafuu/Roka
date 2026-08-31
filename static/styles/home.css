@@ -485,13 +485,27 @@ body.home .like-btn .heart svg {
   height: 14px;
   display: block;
 }
+/* 直接控制 SVG path 的填充色，不依赖 currentColor 继承，确保各状态下颜色一致。 */
+body.home .like-btn .heart svg path {
+  fill: #6b7686;
+  transition: fill 0.15s ease-in-out;
+}
+body.home .feed-actions .like-btn:hover .heart svg path {
+  fill: teal;
+}
 body.home .like-btn.liked,
 body.home .like-btn.liked .heart {
   color: #e0245e;
 }
+body.home .like-btn.liked .heart svg path {
+  fill: #e0245e;
+}
 body.home .feed-actions .like-btn.liked:hover,
 body.home .feed-actions .like-btn.liked:hover .heart {
   color: #c81e52;
+}
+body.home .feed-actions .like-btn.liked:hover .heart svg path {
+  fill: #c81e52;
 }
 
 /* 编辑态 */
