@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
@@ -99,6 +99,15 @@ export class ReplayStore {
   }
 
   async loadReplay(id: string): Promise<ReplayData> {
+    const content = await this.readRawReplay(id);
+    const replay = await decodeReplayBinary<ReplayActionData>(content);
+    return this.buildReplayFromActions(replay);
+  }
+
+  /**
+   * 读取回放的原始存储文件（ops-v1 操作流，几百字节），用于“下载回放”。
+   */
+  async readRawReplay(id: string): Promise<Buffer> {
     if (!isReplayIdValid(id)) {
       throw new Error('Invalid replay id.');
     }
@@ -107,9 +116,34 @@ export class ReplayStore {
     if (!replayPath.startsWith(replayRoot)) {
       throw new Error('Invalid replay path.');
     }
-    const content = await readFile(replayPath);
+    return readFile(replayPath);
+  }
+
+  /**
+   * 将上传的原始回放文件（ops-v1 操作流）解码并重建为可观看的回放数据。
+   * 版本不符或数据损坏时抛错，由上层返回“不兼容”。
+   */
+  async buildReplayFromRaw(content: Buffer): Promise<ReplayData> {
     const replay = await decodeReplayBinary<ReplayActionData>(content);
+    if (!replay || replay.version !== 'ops-v1') {
+      throw new Error('回放版本不兼容。');
+    }
     return this.buildReplayFromActions(replay);
+  }
+
+  /**
+   * 删除回放（原始文件 + 索引项）。用于清理已不兼容的旧回放。
+   */
+  async deleteReplay(id: string): Promise<void> {
+    if (!isReplayIdValid(id)) {
+      return;
+    }
+    await rm(path.join(this.replayDir, `${id}${REPLAY_EXT}`), { force: true });
+    const items = await this.loadIndex();
+    const next = items.filter((item) => item.id !== id);
+    if (next.length !== items.length) {
+      await this.saveIndex(next);
+    }
   }
 
   async listReplays(): Promise<ReplayListItem[]> {
