@@ -91,31 +91,77 @@ button.inverted:hover {
   background-color: var(--color-primary-hover);
   box-shadow: 0 2px 6px rgba(37, 48, 66, 0.22);
 }
+/* 字体优先从 GitHub 源码的 jsDelivr CDN 镜像加载（按国内可用性排序），本地文件兜底 */
 @font-face {
   font-family: Quicksand;
-  src: url('/Quicksand-Regular.otf');
+  src:
+    url('https://testingcf.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Regular.otf')
+      format('opentype'),
+    url('https://gcore.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Regular.otf')
+      format('opentype'),
+    url('https://cdn.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Regular.otf')
+      format('opentype'),
+    url('/Quicksand-Regular.otf') format('opentype');
+  font-display: swap;
 }
 @font-face {
   font-family: Quicksand-Light;
-  src: url('/Quicksand-Light.otf');
+  src:
+    url('https://testingcf.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Light.otf')
+      format('opentype'),
+    url('https://gcore.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Light.otf')
+      format('opentype'),
+    url('https://cdn.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Light.otf')
+      format('opentype'),
+    url('/Quicksand-Light.otf') format('opentype');
+  font-display: swap;
 }
 @font-face {
   font-family: Quicksand-Bold;
-  src: url('/Quicksand-Bold.otf');
+  src:
+    url('https://testingcf.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Bold.otf')
+      format('opentype'),
+    url('https://gcore.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Bold.otf')
+      format('opentype'),
+    url('https://cdn.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/Quicksand-Bold.otf')
+      format('opentype'),
+    url('/Quicksand-Bold.otf') format('opentype');
+  font-display: swap;
 }
 @font-face {
   font-family: HYMaQiDuo;
-  src: url('/HYMaQiDuo-45W.subset.woff2') format('woff2');
+  src:
+    url('https://testingcf.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-45W.subset.woff2')
+      format('woff2'),
+    url('https://gcore.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-45W.subset.woff2')
+      format('woff2'),
+    url('https://cdn.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-45W.subset.woff2')
+      format('woff2'),
+    url('/HYMaQiDuo-45W.subset.woff2') format('woff2');
   font-display: swap;
 }
 @font-face {
   font-family: HYMaQiDuo-Light;
-  src: url('/HYMaQiDuo-35W.subset.woff2') format('woff2');
+  src:
+    url('https://testingcf.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-35W.subset.woff2')
+      format('woff2'),
+    url('https://gcore.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-35W.subset.woff2')
+      format('woff2'),
+    url('https://cdn.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-35W.subset.woff2')
+      format('woff2'),
+    url('/HYMaQiDuo-35W.subset.woff2') format('woff2');
   font-display: swap;
 }
 @font-face {
   font-family: HYMaQiDuo-Bold;
-  src: url('/HYMaQiDuo-55W.subset.woff2') format('woff2');
+  src:
+    url('https://testingcf.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-55W.subset.woff2')
+      format('woff2'),
+    url('https://gcore.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-55W.subset.woff2')
+      format('woff2'),
+    url('https://cdn.jsdelivr.net/gh/oimasterkafuu/Roka@4af0fb10a5335a6ee735f7e8a8736418028fd157/static/HYMaQiDuo-55W.subset.woff2')
+      format('woff2'),
+    url('/HYMaQiDuo-55W.subset.woff2') format('woff2');
   font-display: swap;
 }
 *:not(.katex):not(.katex *) {
