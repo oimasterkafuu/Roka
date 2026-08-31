@@ -88,6 +88,134 @@
         background: #e6f3f3;
         line-height: 1.7;
       }
+      .tutorial-panel ul.terrain-list {
+        margin: 8px 0 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .terrain-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 0 0 8px 0;
+      }
+      .terrain-icon-cell {
+        width: 28px;
+        height: 28px;
+        flex: none;
+        margin-top: 1px;
+        border: 1px solid black;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: 20px 20px;
+        box-sizing: border-box;
+      }
+      .terrain-icon-cell.plain {
+        background-color: gray;
+      }
+      .terrain-icon-cell.general {
+        background-color: red;
+        background-image: url('/crown.png');
+      }
+      .terrain-icon-cell.city {
+        background-color: gray;
+        background-image: url('/city.png');
+      }
+      .terrain-icon-cell.mountain {
+        background-color: #dcdcdc;
+        background-image: url('/mountain.png');
+      }
+      .terrain-icon-cell.swamp {
+        background-color: gray;
+        background-image: url('/swamp.png');
+      }
+      .terrain-text {
+        margin: 0;
+        line-height: 1.6;
+      }
+      .map-example-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .map-example-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+      }
+      .map-example-control select {
+        height: 30px;
+        min-width: 110px;
+        padding: 0 8px;
+        border: 1px solid #d5dce6;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #253042;
+        font-family: Quicksand, HYMaQiDuo;
+      }
+      .map-example-status {
+        font-size: 13px;
+        opacity: 0.86;
+      }
+      .map-example-single {
+        margin-top: 12px;
+        border: 1px solid #e3e8f0;
+        border-radius: 8px;
+        background: #f7f9fb;
+        padding: 10px;
+      }
+      .map-example-single h4 {
+        margin: 0;
+        font-size: 16px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .map-example-meta {
+        margin-top: 4px;
+        font-size: 12px;
+        opacity: 0.86;
+        line-height: 1.6;
+        word-break: break-all;
+      }
+      .map-example-board-wrap {
+        margin-top: 8px;
+        border: 1px solid #e3e8f0;
+        background: #ffffff;
+        overflow: hidden;
+        max-width: 100%;
+        padding: 6px;
+      }
+      .map-example-board {
+        width: max-content;
+        min-width: 100%;
+      }
+      .map-example-board table {
+        border-spacing: 0;
+      }
+      .map-example-board td {
+        background-position: center;
+        background-repeat: no-repeat;
+        position: relative;
+        border: 1px solid black;
+        text-align: center;
+        text-shadow: 0 0 2px black;
+        padding: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        color: white;
+        user-select: none;
+        box-sizing: border-box;
+        width: var(--cell-size, 12px);
+        height: var(--cell-size, 12px);
+        max-width: var(--cell-size, 12px);
+        max-height: var(--cell-size, 12px);
+        min-width: var(--cell-size, 12px);
+        min-height: var(--cell-size, 12px);
+        background-size: var(--icon-size, 10px) var(--icon-size, 10px);
+        font-size: var(--font-size, 10px);
+      }
     </style>
   </head>
 
@@ -120,20 +248,66 @@
 
       <section class="tutorial-panel">
         <h3>地图与地形</h3>
-        <ul>
-          <li><b>普通地块</b>：可占领、可驻兵、可建造的基本地形。</li>
-          <li><b>山脉</b>：不可通行、不可占领，会阻挡扩张路线。</li>
-          <li><b>沼泽</b>：可占领、可驻兵并参与连通，但永不产兵、不可建造，常用于保持连通与卡位。</li>
-          <li>
-            <b>主城（皇冠）</b>：玩家核心据点，每 Tick +1
-            兵力；失守全部主城即出局。可由指挥所升级而来（见下文建造）。
+        <ul class="terrain-list">
+          <li class="terrain-item">
+            <span class="terrain-icon-cell plain" aria-hidden="true"></span>
+            <p class="terrain-text"><b>普通地块</b>：可占领、可驻兵、可建造的基本地形。</p>
           </li>
-          <li>
-            <b>指挥所（城市）</b>：只能由玩家消耗 50 兵力建造的战略据点；与普通地块一样每 50 Tick +1
-            兵力（不享受爆发期加成），同时是连通锚点。
+          <li class="terrain-item">
+            <span class="terrain-icon-cell mountain" aria-hidden="true"></span>
+            <p class="terrain-text"><b>山脉</b>：不可通行、不可占领，会阻挡扩张路线。</p>
+          </li>
+          <li class="terrain-item">
+            <span class="terrain-icon-cell swamp" aria-hidden="true"></span>
+            <p class="terrain-text">
+              <b>沼泽</b>：可占领、可驻兵并参与连通，但永不产兵、不可建造，常用于保持连通与卡位。
+            </p>
+          </li>
+          <li class="terrain-item">
+            <span class="terrain-icon-cell general" aria-hidden="true"></span>
+            <p class="terrain-text">
+              <b>主城（皇冠）</b>：玩家核心据点，每 Tick +1
+              兵力；失守全部主城即出局。可由指挥所升级而来（见下文建造）。
+            </p>
+          </li>
+          <li class="terrain-item">
+            <span class="terrain-icon-cell city" aria-hidden="true"></span>
+            <p class="terrain-text">
+              <b>指挥所（城市）</b>：只能由玩家消耗 50 兵力建造的战略据点；与普通地块一样每 50 Tick +1
+              兵力（不享受爆发期加成），同时是连通锚点。
+            </p>
           </li>
         </ul>
         <div class="tutorial-note">全程无战争迷雾，全图对所有玩家开放可见。</div>
+      </section>
+
+      <section class="tutorial-panel">
+        <h3>地图示例</h3>
+        <p>如果觉得地图的名字晦涩难懂，可以生成一张示例地图参考。</p>
+        <div class="map-example-toolbar">
+          <label class="map-example-control"
+            >地图类型：
+            <select id="map-example-mode">
+              <option value="random">标准地图</option>
+              <option value="maze">峡谷回廊</option>
+              <option value="archipelago">群岛要塞</option>
+              <option value="mediterranean">地中海</option>
+            </select>
+          </label>
+          <label class="map-example-control"
+            >人数：
+            <select id="map-example-players"></select>
+          </label>
+          <button id="generate-map-example-btn" class="small">生成地图</button>
+          <span id="map-example-status" class="map-example-status"></span>
+        </div>
+        <article id="map-example-single" class="map-example-single">
+          <h4 id="map-example-title">地图示例</h4>
+          <div id="map-example-meta" class="map-example-meta"></div>
+          <div class="map-example-board-wrap">
+            <div id="map-example-board" class="map-example-board"></div>
+          </div>
+        </article>
       </section>
 
       <section class="tutorial-panel">
@@ -239,14 +413,159 @@
     </div>
 
     <script>
+      let lastMapExampleData = null;
+      let resizeTimer = 0;
+
+      function mapModeLabel(mapMode) {
+        if (mapMode === 'maze') return '峡谷回廊';
+        if (mapMode === 'archipelago') return '群岛要塞';
+        if (mapMode === 'mediterranean') return '地中海';
+        return '标准地图';
+      }
+
+      function resolveScaleClass(cellSize) {
+        if (cellSize <= 20) return 1;
+        if (cellSize <= 25) return 2;
+        if (cellSize <= 32) return 3;
+        if (cellSize <= 40) return 4;
+        if (cellSize <= 50) return 5;
+        return 6;
+      }
+
+      function buildCellHtml(code, army, scaleClass) {
+        let cls = `s${scaleClass}`;
+        let txt = '';
+        let isGeneral = false;
+        if (code < 200) {
+          if (code < 50) {
+            cls += ` c${code}`;
+          } else if (code < 100) {
+            cls += ` c${code - 50} city`;
+          } else if (code < 150) {
+            cls += ` c${code - 100} general`;
+            isGeneral = true;
+          } else {
+            cls += ` c${code - 150} swamp`;
+          }
+          // 皇冠格只展示皇冠图案，不渲染兵力数字；其他格子数字照常。
+          if (!isGeneral && (army || code === 50)) {
+            txt = String(army);
+          }
+        } else if (code === 200) {
+          cls += ' empty';
+        } else if (code === 201) {
+          cls += ' mountain empty';
+        } else if (code === 202) {
+          cls += ' fog';
+        } else if (code === 203) {
+          cls += ' obstacle fog';
+        } else if (code === 204) {
+          cls += ' swamp';
+        } else if (code === 205) {
+          cls += ' swamp fog';
+        }
+        if (txt.length > 0 && scaleClass === 1) {
+          txt = `<div class="txt">${txt}</div>`;
+        }
+        return `<td class="${cls}">${txt}</td>`;
+      }
+
+      function renderExampleBoard(container, example) {
+        const wrap = container.parentElement;
+        const availableWidth = Math.max(40, wrap.clientWidth - 2);
+        const cellSize = Math.max(4, Math.floor(availableWidth / example.m));
+        const scaleClass = resolveScaleClass(cellSize);
+        container.style.setProperty('--cell-size', `${cellSize}px`);
+        container.style.setProperty('--icon-size', `${Math.max(3, Math.floor(cellSize * 0.8))}px`);
+        container.style.setProperty('--font-size', `${Math.max(6, Math.floor(cellSize * 0.45))}px`);
+
+        let html = '<table><tbody>';
+        for (let i = 0; i < example.n; i += 1) {
+          html += '<tr>';
+          for (let j = 0; j < example.m; j += 1) {
+            const idx = i * example.m + j;
+            html += buildCellHtml(example.grid_type[idx], example.army_cnt[idx], scaleClass);
+          }
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+      }
+
+      function renderMapExample(data) {
+        if (!data || !data.example) {
+          return;
+        }
+        lastMapExampleData = data;
+        const example = data.example;
+        document.getElementById('map-example-title').textContent = mapModeLabel(example.map_mode);
+        document.getElementById('map-example-meta').textContent =
+          `${example.n} x ${example.m} · ${data.players} 人`;
+        document.getElementById('map-example-mode').value = String(example.map_mode || 'random');
+        document.getElementById('map-example-players').value = String(data.players);
+        renderExampleBoard(document.getElementById('map-example-board'), example);
+      }
+
+      function rerenderMapExamplesForResize() {
+        if (!lastMapExampleData || !lastMapExampleData.example) {
+          return;
+        }
+        renderExampleBoard(document.getElementById('map-example-board'), lastMapExampleData.example);
+      }
+
+      function setMapExampleStatus(text) {
+        document.getElementById('map-example-status').textContent = text;
+      }
+
+      function getSelectedMapMode() {
+        return String(document.getElementById('map-example-mode').value || 'random');
+      }
+
+      function getSelectedMapPlayers() {
+        const parsed = Number.parseInt(
+          String(document.getElementById('map-example-players').value || '4'),
+          10,
+        );
+        if (!Number.isFinite(parsed)) {
+          return 4;
+        }
+        return Math.max(2, Math.min(16, parsed));
+      }
+
+      function initMapPlayerOptions() {
+        const select = document.getElementById('map-example-players');
+        let html = '';
+        for (let i = 2; i <= 16; i += 1) {
+          html += `<option value="${i}">${i}</option>`;
+        }
+        select.innerHTML = html;
+        select.value = '4';
+      }
+
+      async function loadMapExample() {
+        setMapExampleStatus('加载中…');
+        const params = new URLSearchParams({
+          map_mode: getSelectedMapMode(),
+          players: String(getSelectedMapPlayers()),
+        });
+        const res = await fetch(`/api/map-examples?${params.toString()}`, { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error('load map example failed');
+        }
+        const data = await res.json();
+        renderMapExample(data);
+        setMapExampleStatus('');
+      }
+
       async function loadUser() {
         const res = await fetch('/api/auth/me');
         if (!res.ok) {
           location.href = '/login';
-          return;
+          return false;
         }
         const data = await res.json();
         document.getElementById('account-name').textContent = data.username;
+        return true;
       }
 
       document.getElementById('back-home-btn').addEventListener('click', function () {
@@ -261,7 +580,31 @@
         location.href = '/tutorial/interactive';
       });
 
-      loadUser();
+      document.getElementById('generate-map-example-btn').addEventListener('click', async function () {
+        try {
+          await loadMapExample();
+        } catch {
+          setMapExampleStatus('加载失败，请稍后重试。');
+        }
+      });
+
+      window.addEventListener('resize', function () {
+        window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(rerenderMapExamplesForResize, 120);
+      });
+
+      async function main() {
+        const authed = await loadUser();
+        if (!authed) return;
+        initMapPlayerOptions();
+        try {
+          await loadMapExample();
+        } catch {
+          setMapExampleStatus('加载失败，请稍后重试。');
+        }
+      }
+
+      main();
     </script>
   </body>
 </html>
