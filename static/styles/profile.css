@@ -169,6 +169,8 @@ body.profile .profile-stat-label {
 /* Rating 历史图 */
 body.profile .rating-chart-svg {
   display: block;
+  width: 100%;
+  height: auto;
 }
 
 /* 通用表格（回放） */
