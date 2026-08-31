@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { deserialize, serialize } from 'node:v8';
 import { promisify } from 'node:util';
@@ -66,6 +66,9 @@ export class FeedStore {
   private posts: FeedPost[] = [];
 
   private readonly lastPostTimeByAuthor = new Map<string, number>();
+
+  // 写盘串行化：persist 经 promise 链排队，避免并发写交错。
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string) {
     this.binaryFilePath = path.join(dataDir, 'feeds.bin');
@@ -201,9 +204,17 @@ export class FeedStore {
     return comment;
   }
 
-  private async persist(): Promise<void> {
+  private persist(): Promise<void> {
     const data: FeedFile = { posts: this.posts };
-    const binary = await encodeFeedFileBinary(data);
-    await writeFile(this.binaryFilePath, binary);
+    // serialize 同步执行，调用时即拿到状态快照；压缩与写盘排队串行执行。
+    const binaryPromise = encodeFeedFileBinary(data);
+    const task = this.writeQueue.then(async () => {
+      const binary = await binaryPromise;
+      const tmpPath = `${this.binaryFilePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+      await writeFile(tmpPath, binary);
+      await rename(tmpPath, this.binaryFilePath);
+    });
+    this.writeQueue = task.catch(() => undefined);
+    return task;
   }
 }
