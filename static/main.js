@@ -200,7 +200,9 @@ function base64ToArrayBuffer(b64) {
 
 if (location.pathname.substr(0, 8) == '/replays') {
   is_replay = true;
-  replay_id = location.pathname.substr(9);
+  // pathname 中是 URL 编码后的 id（含 + 的回放 id 会变成 %2B），先解码一次，
+  // 后续请求时统一再做一次 encodeURIComponent，避免双重编码导致服务端找不到回放。
+  replay_id = decodeURIComponent(location.pathname.substr(9));
   var replayFetch;
   if (replay_id == 'local') {
     // 首页“上传并查看回放”：服务器已把上传的 .rpl 转码为可播放二进制，暂存于 sessionStorage。
@@ -213,7 +215,7 @@ if (location.pathname.substr(0, 8) == '/replays') {
       resolve(base64ToArrayBuffer(b64));
     });
   } else {
-    replayFetch = fetch('/api/getreplay/' + replay_id).then(function (res) {
+    replayFetch = fetch('/api/getreplay/' + encodeURIComponent(replay_id)).then(function (res) {
       if (!res.ok) {
         throw new Error('load failed');
       }
@@ -869,7 +871,7 @@ $(document).ready(function () {
     socket.emit('return_room');
   });
   $($('#status-alert').children()[0].children[6]).on('click', function (e) {
-    window.open('/replays/' + replay_id, '_blank');
+    window.open('/replays/' + encodeURIComponent(replay_id), '_blank');
   });
   $($('#status-alert').children()[0].children[8]).on('click', _exit);
   $('#surrender-confirm').on('click', function () {
