@@ -31,7 +31,7 @@
 
 - 提交作者必须配置为：
   - `user.name`: `oimasterkafuu`
-  - `user.email`: `oimasterkafuu@users.noreply.github.com`
+  - `user.email`: `hi@oim.moe`（与 GPG 密钥 uid 一致）
 - 所有提交必须使用 GPG 签名（`commit.gpgsign=true`）：
   - `user.signingkey`: `BEF250058DD26AF6FA0BA5834BFA82BF714AA7FE`（uid 为 `oimasterkafuu <hi@oim.moe>`）
   - 密钥备份由维护者保管，导入后可用 `git log --show-signature` 验证。
