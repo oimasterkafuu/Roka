@@ -1,6 +1,6 @@
 //map format
 //n,m,turn
-//grid_type[n][m] byte 0~49=army 50~99=city 100~149=generals 150~199=swamp with army 200=empty 201=mountain 204=swamp (no fog: 202/203/205 are deprecated and never sent)
+//grid_type[n][m] byte 0~49=army 50~99=city 100~149=generals 150~199=swamp with army 200=empty 201=mountain 204=swamp
 //army_cnt[n][m] int
 
 $(document).ready(function () {
@@ -153,7 +153,6 @@ var grid_type,
   isolated,
   have_build,
   have_route = Array(4);
-var surrender_progress = {};
 var route;
 var general_order = Array();
 
@@ -174,9 +173,6 @@ var chat_focus = false,
 var is_replay = false,
   replay_id = false,
   replay_data = [],
-  replay_mask_user_id = 0,
-  replay_player_names = [],
-  replay_player_teams = [],
   rcnt = 0,
   cur_turn = 0,
   is_autoplaying = false,
@@ -211,102 +207,10 @@ if (location.pathname.substr(0, 8) == '/replays') {
 function replayStart() {
   rcnt++;
   if (rcnt == 2) {
-    loadReplayMaskMeta();
-    renderReplayMaskUserOptions();
     init_map(replay_data.n, replay_data.m);
     in_game = true;
     cur_turn = 0;
     update(replay_data.initial);
-  }
-}
-
-function loadReplayMaskMeta() {
-  replay_player_names = [];
-  replay_player_teams = [];
-  replay_mask_user_id = 0;
-  if (!replay_data) {
-    return;
-  }
-  var meta = replay_data.meta || {};
-  var playerNames = Array.isArray(meta.player_names) ? meta.player_names : [];
-  var playerTeams = Array.isArray(meta.player_teams) ? meta.player_teams : [];
-  var count = Math.min(playerNames.length, playerTeams.length);
-  if (count > 0) {
-    for (var i = 0; i < count; i++) {
-      replay_player_names.push(String(playerNames[i] || ''));
-      replay_player_teams.push(Number(playerTeams[i] || 0));
-    }
-    return;
-  }
-
-  var initial = replay_data.initial || {};
-  var leaderboard = Array.isArray(initial.leaderboard) ? initial.leaderboard : [];
-  var maxId = 0;
-  for (var i = 0; i < leaderboard.length; i++) {
-    var entryId = Number(leaderboard[i].id || 0);
-    if (entryId > maxId) {
-      maxId = entryId;
-    }
-  }
-  if (maxId <= 0) {
-    return;
-  }
-  replay_player_names = new Array(maxId);
-  replay_player_teams = new Array(maxId);
-  for (var i = 0; i < maxId; i++) {
-    replay_player_names[i] = '';
-    replay_player_teams[i] = 0;
-  }
-  for (var i = 0; i < leaderboard.length; i++) {
-    var entry = leaderboard[i];
-    var idx = Number(entry.id || 0) - 1;
-    if (idx < 0 || idx >= maxId) {
-      continue;
-    }
-    replay_player_names[idx] = String(entry.uid || '');
-    replay_player_teams[idx] = Number(entry.team || 0);
-  }
-}
-
-function renderReplayMaskUserOptions() {
-  var select = $('#replay-mask-user');
-  if (select.length == 0) {
-    return;
-  }
-  var html = '<option value="0">全图（无遮罩）</option>';
-  for (var i = 0; i < replay_player_names.length; i++) {
-    if (!replay_player_teams[i]) {
-      continue;
-    }
-    var userId = i + 1;
-    var userName = replay_player_names[i] || '玩家 ' + userId;
-    html +=
-      '<option value="' +
-      userId +
-      '">' +
-      htmlescape(userName) +
-      '（队伍 ' +
-      replay_player_teams[i] +
-      '）</option>';
-  }
-  select.html(html);
-  select.val(String(replay_mask_user_id));
-}
-
-function setReplayMaskUser() {
-  var nextUserId = parseInt($('#replay-mask-user').val() || '0', 10);
-  if (isNaN(nextUserId) || nextUserId < 0) {
-    nextUserId = 0;
-  }
-  if (
-    nextUserId > 0 &&
-    (nextUserId > replay_player_teams.length || !Number(replay_player_teams[nextUserId - 1] || 0))
-  ) {
-    nextUserId = 0;
-  }
-  replay_mask_user_id = nextUserId;
-  if (in_game) {
-    render();
   }
 }
 
@@ -658,7 +562,6 @@ $(document).ready(function () {
     $('#replay-turn-jump-input').on('keypress', function (e) {
       if (e.charCode == 10 || e.charCode == 13) jumpToTurn();
     });
-    $('#replay-mask-user').on('change', setReplayMaskUser);
     $('#replay-turn-jump-button').on('click', jumpToTurn);
     $($('#replay-bottom-bar')[0].children[0]).on('click', backTurn);
     $($('#replay-bottom-bar')[0].children[1]).on('click', switchAutoplay);

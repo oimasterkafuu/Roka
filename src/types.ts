@@ -82,7 +82,6 @@ export interface UpdatePayload {
   leaderboard: LeaderboardEntry[];
   turn: number;
   kills: Record<string, string>;
-  surrender_progress: Record<number, number>;
   game_end: boolean;
   is_diff: boolean;
   replay?: string;
@@ -96,7 +95,6 @@ export interface ReplayPatchPayload {
   leaderboard: LeaderboardEntry[];
   turn: number;
   kills: Record<string, string>;
-  surrender_progress: Record<number, number>;
   game_end: boolean;
 }
 

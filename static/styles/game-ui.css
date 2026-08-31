@@ -72,29 +72,8 @@
   padding: 5px 8px;
   width: 56px;
 }
-#replay-mask-user-wrap {
-  color: #253042;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-  padding: 5px 10px 5px 18px;
-}
 #replay-top-left button {
   margin: 0;
-}
-#replay-mask-user {
-  min-height: 34px;
-  width: 132px;
-  max-width: 132px;
-  margin-left: 4px;
-  font-size: 14px;
-  padding: 5px 8px;
-  color: #253042;
-  background-color: #ffffff;
-}
-#replay-mask-user option {
-  color: #253042;
-  background-color: #ffffff;
 }
 
 #replay-bottom {

@@ -20,7 +20,6 @@ import {
   ISOLATED_DECAY_RATIO,
   ISOLATED_GRACE_TICKS,
   LEFT_GAME,
-  SURRENDER_FADE_TICKS,
 } from './game-engine/constants';
 import { selectMazeGenerals, selectRandomGenerals } from './game-engine/general-selection';
 import { buildFinalRank, buildLeaderboard } from './game-engine/leaderboard';
@@ -28,7 +27,6 @@ import { buildFullVisionArrays } from './game-engine/map-encoding';
 import { buildReplayPatch, getDiff } from './game-engine/replay-helpers';
 import { buildScheduledReplayActions } from './game-engine/replay-scheduling';
 import { buildReplayPlayerOps, buildTurnMoves } from './game-engine/replay-turns';
-import { applySurrenderFinalize, buildSurrenderProgress } from './game-engine/surrender';
 import { applyTickGrowth } from './game-engine/tick-growth';
 import {
   ChatScope,
@@ -169,10 +167,6 @@ export class GameEngine {
 
   private readonly externalSpectatorSids: Set<string>;
 
-  private readonly surrenderStartTurn: number[];
-
-  private readonly surrenderFinalized: boolean[];
-
   private readonly afkLastMoveTurn: number[];
 
   private readonly afkLastMoveAt: number[];
@@ -277,8 +271,6 @@ export class GameEngine {
     this.replayTurnMoves = [];
     this.replayTurnSurrenders = Array.from({ length: pcnt }, () => new Set<number>());
     this.externalSpectatorSids = new Set<string>();
-    this.surrenderStartTurn = Array.from({ length: pcnt }, () => -1);
-    this.surrenderFinalized = Array.from({ length: pcnt }, () => false);
     this.afkLastMoveTurn = Array.from({ length: pcnt }, () => 0);
     this.afkLastMoveAt = Array.from({ length: pcnt }, () => this.startAt);
     this.enableAfkSurrender = gid !== '__replay_build__';
@@ -621,7 +613,6 @@ export class GameEngine {
       leaderboard: this.buildLeaderboard(),
       turn: this.turn,
       kills: {},
-      surrender_progress: this.buildSurrenderProgress(),
       game_end: gameEnd,
       is_diff: false,
     };
@@ -679,7 +670,6 @@ export class GameEngine {
     const kills = this.recentKills;
     this.recentKills = {};
     const leaderboard = this.buildLeaderboard();
-    const surrenderProgress = this.buildSurrenderProgress();
 
     for (let p = -1; p < this.playerSids.length; p += 1) {
       if (p !== -1 && !this.watching[p]) {
@@ -711,7 +701,6 @@ export class GameEngine {
             leaderboard,
             turn: this.turn,
             kills,
-            surrender_progress: surrenderProgress,
             game_end: stat,
             is_diff: false,
           }
@@ -723,7 +712,6 @@ export class GameEngine {
             leaderboard,
             turn: this.turn,
             kills,
-            surrender_progress: surrenderProgress,
             game_end: stat,
             is_diff: true,
           };
@@ -770,7 +758,6 @@ export class GameEngine {
       leaderboard: this.buildLeaderboard(),
       turn: this.turn,
       kills: {},
-      surrender_progress: this.buildSurrenderProgress(),
       game_end: gameEnd,
       is_diff: false,
     };
@@ -870,12 +857,11 @@ export class GameEngine {
   }
 
   /**
-   * 败者出局：领土【不】转移给攻击方，全部保持原归属并直接进入孤军状态
-   * （标记 isolated、isolatedAge=1，但不执行断链减半），指挥所/主城一律降级为
-   * 普通格以确保没有任何锚点可重连，之后按既有孤军规则自然衰减至中立。
-   * attacker = 0（系统接管 AFK/掉线）走同一代码路径，不再特殊处理。
+   * 拆除一名玩家的全部锚点（主城/指挥所降级为普通格），并将其所有领土
+   * 直接打入孤军状态（标记 isolated、isolatedAge=1，但不执行断链减半），
+   * 之后按既有孤军规则自然衰减至中立。
    */
-  private kill(attacker: number, victim: number): void {
+  private teardownEmpire(victim: number): void {
     for (let i = 0; i < this.n; i += 1) {
       for (let j = 0; j < this.m; j += 1) {
         if (this.owner[i][j] === victim) {
@@ -887,10 +873,16 @@ export class GameEngine {
         }
       }
     }
+  }
+
+  /**
+   * 败者出局：领土【不】转移给攻击方，全部保持原归属并直接进入孤军衰减。
+   * attacker = 0（系统接管 AFK/掉线）走同一代码路径，不再特殊处理。
+   */
+  private kill(attacker: number, victim: number): void {
+    this.teardownEmpire(victim);
 
     this.markEliminated(victim - 1);
-    this.surrenderStartTurn[victim - 1] = -1;
-    this.surrenderFinalized[victim - 1] = true;
 
     if (attacker > 0 && victim > 0) {
       this.recentKills[this.md5(this.playerSids[victim - 1])] = this.names[attacker - 1];
@@ -1059,27 +1051,40 @@ export class GameEngine {
   }
 
   /**
-   * 重算全部玩家的领土连通（以己方主城/指挥所为锚点的四方向连通），
-   * 并处理断链减半、孤军衰减、重连翻倍的即时状态转移。
+   * 重算全部玩家的领土连通，并处理断链减半、孤军衰减、重连翻倍的即时状态转移。
+   * 连通按【队伍】计算：以队内任意存活成员的主城/指挥所为锚点，经由队内存活成员
+   * 的格子四方向连通——只要整支队伍在某一块里还握有任意一座主城/指挥所，
+   * 该块内全队领土都保持正常可操控。已出局玩家的领土不参与连通（kill/投降时已
+   * 强制打入孤军），继续衰减直至中立。
    * 断裂衰减节奏：断链瞬间减半（1 兵特例保持为 1）后进入 5 回合（10 Tick）宽限期，
    * 宽限期内只快速闪烁不衰减；第 11 Tick 起每回合（2 Tick）执行一次 5% 衰减。
    */
+  private isAliveTeamMember(ownerId: number, teamId: number): boolean {
+    return this.team[ownerId - 1] === teamId && this.pstat[ownerId - 1] !== LEFT_GAME;
+  }
+
   private applyConnectivity(): void {
     const connected: Grid<boolean> = Array.from({ length: this.n }, () =>
       Array.from({ length: this.m }, () => false),
     );
 
     const visitQueue: number[] = [];
+    const processedTeams = new Set<number>();
     for (let p = 0; p < this.playerSids.length; p += 1) {
       if (this.pstat[p] === LEFT_GAME) {
         continue;
       }
-      const ownerId = p + 1;
+      const teamId = this.team[p];
+      if (processedTeams.has(teamId)) {
+        continue;
+      }
+      processedTeams.add(teamId);
       visitQueue.length = 0;
       for (let i = 0; i < this.n; i += 1) {
         for (let j = 0; j < this.m; j += 1) {
           const tile = this.gridType[i][j];
-          if (this.owner[i][j] === ownerId && (tile === -2 || tile === -1)) {
+          const ownerId = this.owner[i][j];
+          if (ownerId > 0 && (tile === -2 || tile === -1) && this.isAliveTeamMember(ownerId, teamId)) {
             connected[i][j] = true;
             visitQueue.push(i * this.m + j);
           }
@@ -1098,7 +1103,8 @@ export class GameEngine {
           if (!this.chkxy(nx, ny) || connected[nx][ny]) {
             continue;
           }
-          if (this.owner[nx][ny] !== ownerId || this.gridType[nx][ny] === 1) {
+          const nOwner = this.owner[nx][ny];
+          if (nOwner <= 0 || !this.isAliveTeamMember(nOwner, teamId) || this.gridType[nx][ny] === 1) {
             continue;
           }
           connected[nx][ny] = true;
@@ -1111,14 +1117,6 @@ export class GameEngine {
       for (let j = 0; j < this.m; j += 1) {
         const ownerId = this.owner[i][j];
         if (ownerId <= 0) {
-          this.isolated[i][j] = false;
-          this.isolatedAge[i][j] = 0;
-          continue;
-        }
-        // 投降淡出中的玩家领土保持稳定、不进入孤军；被击杀出局的玩家
-        // （kill 已将其全部领土标记为孤军并降级锚点）继续走下方孤军衰减，
-        // 直至兵力归零变中立。
-        if (this.pstat[ownerId - 1] === LEFT_GAME && !this.surrenderFinalized[ownerId - 1]) {
           this.isolated[i][j] = false;
           this.isolatedAge[i][j] = 0;
           continue;
@@ -1243,7 +1241,6 @@ export class GameEngine {
       this.afkLastMoveAt[p] = nowMs;
     }
     this.applyAfkSurrender(nowMs);
-    this.applySurrenderFinalize();
 
     const aliveTeams: Record<number, true> = {};
     for (const p of order) {
@@ -1303,42 +1300,52 @@ export class GameEngine {
     }
   }
 
+  /**
+   * 投降 = 立即放弃所有控制权：
+   * - 若队伍内还有其他存活成员，全部领土（含兵力）转移给编号最小的存活队友，
+   *   主城降级为指挥所（哨所）；
+   * - 否则（FFA 或队伍已无其他存活成员），主城与所有指挥所被拆除为普通空地，
+   *   领土直接打入孤军，进入自然衰减流程。
+   */
   private applySurrenderByIndex(playerIndex: number, reason: '投降' | '挂机'): boolean {
     if (this.pstat[playerIndex] === LEFT_GAME) {
       return false;
     }
     this.replayTurnSurrenders[playerIndex].add(this.turn + 1);
+    const heir = this.findSurrenderHeir(playerIndex);
+    if (heir >= 0) {
+      this.transferEmpire(playerIndex + 1, heir + 1);
+    } else {
+      this.teardownEmpire(playerIndex + 1);
+    }
     this.markEliminated(playerIndex);
-    this.surrenderStartTurn[playerIndex] = this.turn + 1;
-    this.surrenderFinalized[playerIndex] = false;
     this.recentKills[this.md5(this.playerSids[playerIndex])] = reason;
     this.pmove[playerIndex] = [];
     return true;
   }
 
-  private applySurrenderFinalize(): void {
-    applySurrenderFinalize({
-      turn: this.turn,
-      fadeTicks: SURRENDER_FADE_TICKS,
-      playerCount: this.playerSids.length,
-      n: this.n,
-      m: this.m,
-      owner: this.owner,
-      armyCnt: this.armyCnt,
-      gridType: this.gridType,
-      surrenderStartTurn: this.surrenderStartTurn,
-      surrenderFinalized: this.surrenderFinalized,
-    });
+  private findSurrenderHeir(playerIndex: number): number {
+    const teamId = this.team[playerIndex];
+    for (let p = 0; p < this.playerSids.length; p += 1) {
+      if (p !== playerIndex && this.team[p] === teamId && this.pstat[p] !== LEFT_GAME) {
+        return p;
+      }
+    }
+    return -1;
   }
 
-  private buildSurrenderProgress(): Record<number, number> {
-    return buildSurrenderProgress({
-      turn: this.turn,
-      fadeTicks: SURRENDER_FADE_TICKS,
-      playerCount: this.playerSids.length,
-      surrenderStartTurn: this.surrenderStartTurn,
-      surrenderFinalized: this.surrenderFinalized,
-    });
+  private transferEmpire(fromOwner: number, toOwner: number): void {
+    for (let i = 0; i < this.n; i += 1) {
+      for (let j = 0; j < this.m; j += 1) {
+        if (this.owner[i][j] !== fromOwner) {
+          continue;
+        }
+        this.owner[i][j] = toOwner;
+        if (this.gridType[i][j] === -2) {
+          this.gridType[i][j] = -1;
+        }
+      }
+    }
   }
 
   private scheduleImmediateTick(): void {

@@ -335,8 +335,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th>整体结构</th>
             <td>
               <code
-                >{ grid_type, army_cnt, isolated, lst_move, leaderboard, turn, kills, surrender_progress,
-                game_end, is_diff, replay? }</code
+                >{ grid_type, army_cnt, isolated, lst_move, leaderboard, turn, kills, game_end, is_diff,
+                replay? }</code
               >
             </td>
           </tr>
@@ -394,12 +394,6 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>kills</code></th>
             <td>
               <code>Record&lt;sid_md5, killer_name&gt;</code>。当你被击败时，键为你的 <code>set_id</code>。
-            </td>
-          </tr>
-          <tr>
-            <th><code>surrender_progress</code></th>
-            <td>
-              <code>Record&lt;owner_id, ratio&gt;</code>，ratio 范围 <code>0..1</code>，用于渲染投降衰减效果。
             </td>
           </tr>
           <tr>
@@ -482,11 +476,17 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           </li>
           <li>兵力无上限。</li>
           <li>
-            连通与孤军：与己方所有主城/指挥所断开的领土成为孤军（见 <code>update.isolated</code>
+            连通与孤军：连通按<b>队伍</b>计算——经由连续的本队存活成员格子四方向连通到队内任意存活成员的
+            主城/指挥所即为正常领土（只要队伍在这一块里还握有任意一座主城/指挥所，全队的这块领土都可操控）；
+            否则成为孤军（见 <code>update.isolated</code>
             ），断链瞬间兵力减半（⌊n/2⌋，1 兵保持为 1）；前 5 回合（10
             Tick）为宽限期（只快速闪烁、不衰减），第 6 回合（第 11 Tick）起每回合（每 2 Tick）衰减 max(1,
             ⌈当前兵力×5%⌉)，归零变中立；重新连通立即恢复且兵力
             ×2。被切断的领土会持续衰减，扩张时务必保持连通。
+          </li>
+          <li>
+            投降 = 立即放弃所有控制权：若队内仍有其他存活成员，全部领土（含兵力）转移给编号最小的存活队友，
+            主城降级为指挥所；否则主城与所有指挥所拆除为普通空地，领土直接沦为孤军进入自然衰减。
           </li>
         </ul>
       </section>
@@ -531,7 +531,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           </tr>
           <tr>
             <th><code>surrender</code></th>
-            <td>投降并转观战。</td>
+            <td>
+              投降并转观战：立即放弃所有控制权（有存活队友时领土转移给队友，主城降级为指挥所；否则锚点拆除、领土沦为孤军衰减）。
+            </td>
           </tr>
           <tr>
             <th><code>return_room</code> / <code>leave</code></th>

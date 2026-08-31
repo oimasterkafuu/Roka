@@ -1,95 +1,3 @@
-const replay_vision_dx = [0, -1, 1, 0, 0, -1, -1, 1, 1];
-const replay_vision_dy = [0, 0, 0, -1, 1, -1, 1, -1, 1];
-
-function getReplayOwnerId(cellType) {
-  if (cellType < 0) {
-    return 0;
-  }
-  if (cellType < 50) {
-    return cellType;
-  }
-  if (cellType < 100) {
-    return cellType - 50;
-  }
-  if (cellType < 150) {
-    return cellType - 100;
-  }
-  if (cellType < 200) {
-    return cellType - 150;
-  }
-  return 0;
-}
-
-function encodeReplayMaskedCellType(cellType, visible, ownerId, army) {
-  if (cellType >= 150 && cellType < 200) {
-    return visible ? ownerId + 150 : 205;
-  }
-  if (cellType == 204) {
-    return visible ? 204 : 205;
-  }
-  if (cellType == 201) {
-    return visible ? 201 : 203;
-  }
-  if (cellType >= 50 && cellType < 100) {
-    return visible ? ownerId + 50 : 203;
-  }
-  if (cellType >= 100 && cellType < 150) {
-    return visible ? ownerId + 100 : 202;
-  }
-  if (!visible) {
-    return 202;
-  }
-  if (cellType == 200) {
-    return 200;
-  }
-  if (cellType < 50) {
-    return ownerId > 0 || army > 0 ? ownerId : 200;
-  }
-  return cellType;
-}
-
-function buildReplayMaskedView() {
-  if (!is_replay || replay_mask_user_id <= 0) {
-    return null;
-  }
-  var viewerTeam = Number(replay_player_teams[replay_mask_user_id - 1] || 0);
-  if (viewerTeam <= 0) {
-    return null;
-  }
-
-  var maskedGrid = new Array(n);
-  var maskedArmy = new Array(n);
-  for (var i = 0; i < n; i++) {
-    maskedGrid[i] = new Array(m);
-    maskedArmy[i] = new Array(m);
-    for (var j = 0; j < m; j++) {
-      var visible = false;
-      for (var d = 0; d < replay_vision_dx.length; d++) {
-        var nx = i + replay_vision_dx[d];
-        var ny = j + replay_vision_dy[d];
-        if (nx < 0 || ny < 0 || nx >= n || ny >= m) {
-          continue;
-        }
-        var nearbyOwner = getReplayOwnerId(grid_type[nx][ny]);
-        if (nearbyOwner > 0 && Number(replay_player_teams[nearbyOwner - 1] || 0) == viewerTeam) {
-          visible = true;
-          break;
-        }
-      }
-      var fullCellType = grid_type[i][j];
-      var ownerId = getReplayOwnerId(fullCellType);
-      var fullArmy = army_cnt[i][j];
-      maskedGrid[i][j] = encodeReplayMaskedCellType(fullCellType, visible, ownerId, fullArmy);
-      maskedArmy[i][j] = visible ? fullArmy : 0;
-    }
-  }
-
-  return {
-    grid_type: maskedGrid,
-    army_cnt: maskedArmy,
-  };
-}
-
 function render() {
   setRoomTopLeftVisible(false);
   $('#menu').css('display', 'none');
@@ -117,11 +25,6 @@ function render() {
   }
   var displayGrid = grid_type;
   var displayArmy = army_cnt;
-  var replayMaskedView = buildReplayMaskedView();
-  if (replayMaskedView) {
-    displayGrid = replayMaskedView.grid_type;
-    displayArmy = replayMaskedView.army_cnt;
-  }
   var ownSelected =
     selx >= 0 &&
     sely >= 0 &&
@@ -135,20 +38,15 @@ function render() {
         txt = '';
       var cellType = displayGrid[i][j];
       var cellArmy = displayArmy[i][j];
-      var ownerId = 0;
       if (cellType < 200) {
         if (cellType < 50) {
           cls += ' c' + cellType;
-          ownerId = cellType;
         } else if (cellType < 100) {
           cls += ' c' + (cellType - 50) + ' city';
-          ownerId = cellType - 50;
         } else if (cellType < 150) {
           cls += ' c' + (cellType - 100) + ' general';
-          ownerId = cellType - 100;
         } else if (cellType < 200) {
           cls += ' c' + (cellType - 150) + ' swamp';
-          ownerId = cellType - 150;
         }
         if (cellType % 50 == player) {
           cls += ' selectable';
@@ -162,14 +60,8 @@ function render() {
         cls += ' empty';
       } else if (cellType == 201) {
         cls += ' mountain empty';
-      } else if (cellType == 202) {
-        cls += ' fog';
-      } else if (cellType == 203) {
-        cls += ' obstacle fog';
       } else if (cellType == 204) {
         cls += ' swamp';
-      } else if (cellType == 205) {
-        cls += ' swamp fog';
       }
       if (i == selx && j == sely) {
         if (selt == 1) {
@@ -196,16 +88,6 @@ function render() {
       if ($('#t' + i + '_' + j).attr('class') != cls) {
         $('#t' + i + '_' + j).attr('class', cls);
       }
-      var style = '';
-      if (ownerId > 0) {
-        var fadeProgress = Number(surrender_progress[ownerId] || 0);
-        if (fadeProgress > 0) {
-          style = getSurrenderMixedColor(ownerId, fadeProgress);
-        }
-      }
-      if ($('#t' + i + '_' + j).attr('style') != style) {
-        $('#t' + i + '_' + j).attr('style', style);
-      }
       if ($('#t' + i + '_' + j).html() != txt) {
         $('#t' + i + '_' + j).html(txt);
       }
@@ -218,7 +100,6 @@ function update(data) {
   if (!is_replay) {
     game_ended = Boolean(data.game_end);
   }
-  surrender_progress = data.surrender_progress || {};
   if (data.is_diff) {
     for (var i = 0; i * 2 < data.grid_type.length; i++) {
       var t = data.grid_type[i * 2];
