@@ -345,6 +345,15 @@ body.home .lb-rating {
   color: #6b7686;
 }
 
+/* 新手期未定型 rating 的「?」上标提示 */
+body.home .rating-provisional {
+  font-size: 0.7em;
+  color: #9aa4b2;
+  vertical-align: super;
+  margin-left: 1px;
+  cursor: help;
+}
+
 /* 页脚入口 */
 body.home .home-footer {
   text-align: center;

@@ -166,6 +166,60 @@ body.profile .profile-stat-label {
   margin-top: 2px;
 }
 
+/* 新手期未定型 rating 的「?」上标提示 */
+body.profile .rating-provisional {
+  font-size: 0.7em;
+  color: #9aa4b2;
+  vertical-align: super;
+  margin-left: 1px;
+  cursor: help;
+}
+
+/* 最近 Rating 变更 */
+body.profile .rating-changes {
+  margin-top: 12px;
+}
+body.profile .rating-changes-title {
+  font-size: 12px;
+  color: #9aa4b2;
+  margin-bottom: 6px;
+}
+body.profile .rating-changes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+body.profile .rating-change-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+body.profile .rating-change-delta {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  min-width: 40px;
+}
+body.profile .rating-change-delta.delta-pos {
+  color: #008000;
+}
+body.profile .rating-change-delta.delta-neg {
+  color: #d63535;
+}
+body.profile .rating-change-delta.delta-zero {
+  color: #9aa4b2;
+}
+body.profile .rating-change-value {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  color: #253042;
+}
+body.profile .rating-change-time {
+  font-size: 11px;
+  color: #9aa4b2;
+}
+
 /* Rating 历史图 */
 body.profile .rating-chart-svg {
   display: block;
