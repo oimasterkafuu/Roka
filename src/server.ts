@@ -579,6 +579,7 @@ const boot = async (): Promise<void> => {
     const body = request.body as { text?: unknown };
     try {
       const post = await feedStore.create(authUser.username, String(body?.text ?? ''));
+      io.emit('home_feeds');
       return reply.send({ post: decorateFeedPost(post, authUser.username) });
     } catch (error) {
       if (error instanceof FeedCooldownException) {
@@ -603,6 +604,7 @@ const boot = async (): Promise<void> => {
     }
     try {
       const updated = await feedStore.update(post.id, String(body?.text ?? ''));
+      io.emit('home_feeds');
       return reply.send({ post: decorateFeedPost(updated as FeedPost, authUser.username) });
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : '编辑失败。' });
@@ -623,6 +625,7 @@ const boot = async (): Promise<void> => {
       return reply.code(403).send({ error: '没有权限删除该动态。' });
     }
     await feedStore.remove(post.id);
+    io.emit('home_feeds');
     return reply.send({ ok: true });
   });
 
@@ -636,6 +639,7 @@ const boot = async (): Promise<void> => {
     if (!result) {
       return reply.code(404).send({ error: '动态不存在。' });
     }
+    io.emit('home_feeds');
     return reply.send(result);
   });
 
@@ -654,6 +658,7 @@ const boot = async (): Promise<void> => {
       if (!comment) {
         return reply.code(404).send({ error: '动态不存在。' });
       }
+      io.emit('home_feeds');
       return reply.send({ comment });
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : '评论失败。' });
@@ -675,6 +680,7 @@ const boot = async (): Promise<void> => {
     const body = request.body as { text?: unknown };
     try {
       const announcement = await announcementStore.set(String(body?.text ?? ''), authUser.username);
+      io.emit('home_announcement');
       return reply.send(announcement);
     } catch (error) {
       return reply.code(400).send({
@@ -938,6 +944,12 @@ const boot = async (): Promise<void> => {
       return;
     }
 
+    // 首页只接收全局失效通知：不参与「同一用户单连接」互斥，
+    // 否则打开首页会踢掉该用户在游戏页/其他标签页的连接（反之亦然）。
+    if (socket.handshake.query?.home === '1') {
+      return;
+    }
+
     authService.disconnectOtherUserSockets(username, socket.id);
     authService.trackSocket(username, socket.id);
     socket.join(`sid_${socket.id}`);
@@ -1014,6 +1026,7 @@ const boot = async (): Promise<void> => {
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         lobbyService.sendLobbySystemMessage(io, roomVal, `${username} 加入了自定义房间。`);
+        lobbyService.emitHomeRooms(io);
         if (lobbyService.isLobbyGameRunning(room)) {
           lobbyService.gameInstances.get(roomVal)?.addSpectator(socket.id);
         }
@@ -1076,6 +1089,7 @@ const boot = async (): Promise<void> => {
         lobbyService.getLobbyVal(gid),
         `${nickname} 加入了${teamName}。`,
       );
+      lobbyService.emitHomeRooms(io);
     });
 
     socket.on('change_ready', (data: { ready: unknown }) => {
@@ -1101,6 +1115,7 @@ const boot = async (): Promise<void> => {
       }
 
       lobbyService.checkReady(io, gid);
+      lobbyService.emitHomeRooms(io);
     });
 
     socket.on('change_game_conf', (data: Record<string, unknown>) => {
@@ -1210,6 +1225,7 @@ const boot = async (): Promise<void> => {
             `${players[0].uid} 将${lobbyService.formatConfLabel(key)}改为 ${lobbyService.formatConfValue(key, nextConf[key])}。`,
           );
         }
+        lobbyService.emitHomeRooms(io);
       } catch {
         return;
       }
