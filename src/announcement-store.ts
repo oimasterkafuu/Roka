@@ -25,6 +25,9 @@ export class AnnouncementStore {
 
   private current: Announcement = { text: '', updatedAt: 0, updatedBy: '' };
 
+  // 写盘串行化：persist 经 promise 链排队，避免并发写交错。
+  private writeQueue: Promise<void> = Promise.resolve();
+
   constructor(dataDir: string) {
     this.filePath = path.join(dataDir, 'announcement.json');
   }
@@ -68,9 +71,15 @@ export class AnnouncementStore {
     return this.get();
   }
 
-  private async persist(): Promise<void> {
-    const tmpPath = `${this.filePath}.${process.pid}.tmp`;
-    await writeFile(tmpPath, JSON.stringify(this.current, null, 2));
-    await rename(tmpPath, this.filePath);
+  private persist(): Promise<void> {
+    // 调用时即序列化当前状态快照；写盘排队串行执行。
+    const snapshot = JSON.stringify(this.current, null, 2);
+    const task = this.writeQueue.then(async () => {
+      const tmpPath = `${this.filePath}.${process.pid}.tmp`;
+      await writeFile(tmpPath, snapshot);
+      await rename(tmpPath, this.filePath);
+    });
+    this.writeQueue = task.catch(() => undefined);
+    return task;
   }
 }

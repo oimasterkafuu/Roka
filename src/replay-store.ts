@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
@@ -50,6 +50,9 @@ export class ReplayStore {
 
   private readonly buildReplayFromActions: ReplayStoreOptions['buildReplayFromActions'];
 
+  // 写盘串行化：索引更新与回放文件写入经 promise 链排队，避免并发写交错。
+  private writeQueue: Promise<void> = Promise.resolve();
+
   constructor(replayDir: string, options: ReplayStoreOptions) {
     this.replayDir = replayDir;
     this.indexFile = path.join(replayDir, REPLAY_INDEX_BIN);
@@ -74,26 +77,42 @@ export class ReplayStore {
   }
 
   private async saveIndex(items: ReplayListItem[]): Promise<void> {
-    await writeFile(this.indexFile, serialize(items));
+    const tmpPath = `${this.indexFile}.${process.pid}.tmp`;
+    await writeFile(tmpPath, serialize(items));
+    await rename(tmpPath, this.indexFile);
+  }
+
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const result = this.writeQueue.then(task);
+    this.writeQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   async saveReplay(replay: ReplayActionData, summary: ReplaySaveSummary): Promise<string> {
     const binary = await encodeReplayBinary(replay);
     const replayId = getReplayId(binary);
     const replayPath = path.join(this.replayDir, `${replayId}${REPLAY_EXT}`);
-    await writeFile(replayPath, binary);
 
-    const replayItem: ReplayListItem = {
-      time: Math.floor(Date.now() / 1000),
-      id: replayId,
-      rank: [...summary.rank],
-      turn: summary.turn,
-    };
+    await this.enqueue(async () => {
+      const tmpPath = `${replayPath}.${process.pid}.tmp`;
+      await writeFile(tmpPath, binary);
+      await rename(tmpPath, replayPath);
 
-    const items = await this.loadIndex();
-    items.push(replayItem);
-    items.sort((a, b) => b.time - a.time);
-    await this.saveIndex(items);
+      const replayItem: ReplayListItem = {
+        time: Math.floor(Date.now() / 1000),
+        id: replayId,
+        rank: [...summary.rank],
+        turn: summary.turn,
+      };
+
+      const items = await this.loadIndex();
+      items.push(replayItem);
+      items.sort((a, b) => b.time - a.time);
+      await this.saveIndex(items);
+    });
 
     return replayId;
   }
@@ -138,12 +157,14 @@ export class ReplayStore {
     if (!isReplayIdValid(id)) {
       return;
     }
-    await rm(path.join(this.replayDir, `${id}${REPLAY_EXT}`), { force: true });
-    const items = await this.loadIndex();
-    const next = items.filter((item) => item.id !== id);
-    if (next.length !== items.length) {
-      await this.saveIndex(next);
-    }
+    await this.enqueue(async () => {
+      await rm(path.join(this.replayDir, `${id}${REPLAY_EXT}`), { force: true });
+      const items = await this.loadIndex();
+      const next = items.filter((item) => item.id !== id);
+      if (next.length !== items.length) {
+        await this.saveIndex(next);
+      }
+    });
   }
 
   async listReplays(): Promise<ReplayListItem[]> {
