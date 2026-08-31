@@ -342,6 +342,9 @@ export class GameEngine {
   }
 
   static async buildReplayFromActions(replay: ReplayActionData): Promise<ReplayData> {
+    if (!replay || replay.version !== 'ops-v1') {
+      throw new Error('回放版本不兼容。');
+    }
     const dummyPlayerSids = replay.meta.player_names.map((_, index) => `replay_sid_${index}`);
     const dummyPlayerIds = replay.meta.player_names.map((_, index) => `replay_id_${index}`);
 

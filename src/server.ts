@@ -24,6 +24,15 @@ import { WebhookUpdater } from './server/webhook-updater';
 const runtimeEnv = ensureRuntimeEnv();
 const app = Fastify({ logger: true });
 
+// 回放上传：接收原始 .rpl 文件（ops-v1 操作流，通常仅几百字节）。
+app.addContentTypeParser(
+  'application/octet-stream',
+  { parseAs: 'buffer', bodyLimit: 1024 * 1024 },
+  (_request, payload, done) => {
+    done(null, payload);
+  },
+);
+
 const dataDir = process.env.ROKA_DATA_DIR
   ? path.resolve(process.env.ROKA_DATA_DIR)
   : path.join(process.cwd(), 'data');
@@ -795,7 +804,45 @@ const boot = async (): Promise<void> => {
       const binary = encodeReplayPatchBinary(replay);
       return reply.type('application/octet-stream').send(binary);
     } catch {
+      // 加载/重建失败说明该回放已与当前版本不兼容，直接从库中删除。
+      await replayStore.deleteReplay(id);
+      return reply.code(404).send({ error: '回放不存在或已因不兼容被删除。' });
+    }
+  });
+
+  // 下载回放：直接返回原始 .rpl 存储文件（ops-v1 操作流，通常仅几百字节）。
+  app.get('/api/downloadreplay/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!isReplayIdValid(id)) {
+      return reply.type('text/plain').send('');
+    }
+    try {
+      const raw = await replayStore.readRawReplay(id);
+      return reply
+        .header('Content-Disposition', `attachment; filename="roka-replay-${id}.rpl"`)
+        .type('application/octet-stream')
+        .send(raw);
+    } catch {
       return reply.code(404).send({ error: '回放不存在。' });
+    }
+  });
+
+  // 上传回放：客户端 POST 原始 .rpl 文件，服务端解码重建并转码为可观看的 RPB 二进制。
+  app.post('/api/replay-upload', async (request, reply) => {
+    const authUser = (request as AuthRequest).authUser;
+    if (!authUser) {
+      return reply.code(401).send({ error: '未登录或登录已失效。' });
+    }
+    try {
+      const content = request.body;
+      if (!Buffer.isBuffer(content) || content.length === 0) {
+        throw new Error('empty body');
+      }
+      const replay = await replayStore.buildReplayFromRaw(content);
+      const binary = encodeReplayPatchBinary(replay);
+      return reply.type('application/octet-stream').send(binary);
+    } catch {
+      return reply.code(422).send({ error: '回放文件不兼容或已损坏。' });
     }
   });
 

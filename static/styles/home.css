@@ -597,6 +597,43 @@ body.home .feed-pager .pager-ellipsis {
   padding: 0 2px;
 }
 
+/* 上传并查看回放 */
+body.home .replay-upload {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+body.home .replay-upload-name {
+  font-size: 12px;
+  color: #6b7686;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.home .replay-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+body.home .replay-modal-card {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 22px 30px;
+  text-align: center;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.18);
+}
+body.home .replay-modal-card p {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+
 @media (max-width: 560px) {
   body.home .brand-name {
     font-size: 26px;

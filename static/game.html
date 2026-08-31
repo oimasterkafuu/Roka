@@ -208,7 +208,25 @@
         <div id="replay-turn-jump-button" class="inline-button">→</div>
       </div>
       <button id="replay-autoplay-btn" class="small" style="display: block">自动播放</button>
+      <button id="replay-download-btn" class="small" style="display: block">下载回放</button>
       <button id="replay-exit-btn" class="small" style="display: block">退出</button>
+    </div>
+
+    <div class="alert center" id="replay-error-alert" style="display: none">
+      <center>
+        <h1
+          style="
+            margin: 15px 0px 5px;
+            text-align: center;
+            font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+            white-space: nowrap;
+          "
+        >
+          回放不兼容
+        </h1>
+        <p style="text-align: center; margin-bottom: 0">该回放文件与当前版本不兼容或已损坏，无法播放。</p>
+        <button id="replay-error-back" class="small inverted" style="margin-top: 16px">返回首页</button>
+      </center>
     </div>
 
     <div id="replay-bottom" class="fixed-center-horizontal" style="display: none">

@@ -99,6 +99,21 @@
                 下一页
               </button>
             </div>
+            <div class="replay-upload">
+              <input
+                type="file"
+                id="replay-upload-file"
+                accept=".rpl,application/octet-stream"
+                style="display: none"
+              />
+              <button id="replay-upload-pick" type="button" class="btn btn-secondary btn-sm">
+                选择回放文件
+              </button>
+              <span id="replay-upload-name" class="replay-upload-name"></span>
+              <button id="replay-upload-view" type="button" class="btn btn-primary btn-sm" disabled>
+                查看
+              </button>
+            </div>
           </section>
         </div>
 
@@ -164,6 +179,13 @@
             <a href="/about">关于</a>
           </footer>
         </div>
+      </div>
+    </div>
+
+    <div id="replay-incompat-modal" class="replay-modal" style="display: none">
+      <div class="replay-modal-card">
+        <p>回放文件与当前版本不兼容或已损坏，无法查看。</p>
+        <button id="replay-incompat-ok" type="button" class="btn btn-primary btn-sm">知道了</button>
       </div>
     </div>
 
@@ -411,6 +433,57 @@
       });
       $('#replays-next').on('click', function () {
         loadReplays(replaysOffset + REPLAYS_LIMIT);
+      });
+
+      /* ---------- 上传并查看回放 ---------- */
+
+      function arrayBufferToBase64(buf) {
+        var bytes = new Uint8Array(buf);
+        var bin = '';
+        for (var i = 0; i < bytes.length; i += 0x8000) {
+          bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(bin);
+      }
+
+      $('#replay-upload-pick').on('click', function () {
+        $('#replay-upload-file').trigger('click');
+      });
+      $('#replay-upload-file').on('change', function () {
+        var file = this.files && this.files[0];
+        $('#replay-upload-name').text(file ? file.name : '');
+        $('#replay-upload-view').prop('disabled', !file);
+      });
+      $('#replay-incompat-ok').on('click', function () {
+        $('#replay-incompat-modal').hide();
+      });
+      $('#replay-upload-view').on('click', async function () {
+        var input = $('#replay-upload-file')[0];
+        var file = input.files && input.files[0];
+        if (!file) {
+          return;
+        }
+        var $btn = $(this).prop('disabled', true);
+        try {
+          // 把原始 .rpl 文件 POST 给服务器，由服务器解码重建并转码为可播放二进制。
+          var res = await fetch('/api/replay-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: file,
+          });
+          if (!res.ok) {
+            throw new Error('incompatible');
+          }
+          var viewable = await res.arrayBuffer();
+          // 原始 .rpl 一并暂存，回放页“下载回放”可原样取回。
+          sessionStorage.setItem('roka_local_replay_raw', arrayBufferToBase64(await file.arrayBuffer()));
+          sessionStorage.setItem('roka_local_replay', arrayBufferToBase64(viewable));
+          location.href = '/replays/local';
+        } catch (e) {
+          $('#replay-incompat-modal').css('display', 'flex');
+        } finally {
+          $btn.prop('disabled', false);
+        }
       });
 
       /* ---------- 公告 ---------- */

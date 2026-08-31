@@ -185,22 +185,48 @@ window.addEventListener('beforeunload', function (e) {
   return '';
 });
 
+function showReplayError() {
+  $('#replay-error-alert').css('display', '');
+}
+
+function base64ToArrayBuffer(b64) {
+  var bin = atob(b64);
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
 if (location.pathname.substr(0, 8) == '/replays') {
   is_replay = true;
   replay_id = location.pathname.substr(9);
-  fetch('/api/getreplay/' + replay_id)
-    .then(function (res) {
+  var replayFetch;
+  if (replay_id == 'local') {
+    // 首页“上传并查看回放”：服务器已把上传的 .rpl 转码为可播放二进制，暂存于 sessionStorage。
+    replayFetch = new Promise(function (resolve, reject) {
+      var b64 = sessionStorage.getItem('roka_local_replay');
+      if (!b64) {
+        reject(new Error('missing local replay'));
+        return;
+      }
+      resolve(base64ToArrayBuffer(b64));
+    });
+  } else {
+    replayFetch = fetch('/api/getreplay/' + replay_id).then(function (res) {
       if (!res.ok) {
         throw new Error('load failed');
       }
       return res.arrayBuffer();
-    })
+    });
+  }
+  replayFetch
     .then(function (buf) {
       replay_data = decodeReplayBinary(buf);
       replayStart();
     })
     .catch(function () {
-      location.href = '/replays';
+      showReplayError();
     });
 }
 
@@ -568,6 +594,33 @@ $(document).ready(function () {
     $($('#replay-bottom-bar')[0].children[2]).on('click', nextTurn);
     $('#replay-autoplay-btn').on('click', switchAutoplay);
     $('#replay-exit-btn').on('click', _exit);
+    $('#replay-error-back').on('click', function () {
+      location.href = '/';
+    });
+    $('#replay-download-btn').on('click', function () {
+      var a = document.createElement('a');
+      if (replay_id == 'local') {
+        // 本地上传的回放：把用户上传的原始 .rpl 文件原样给回。
+        var b64 = sessionStorage.getItem('roka_local_replay_raw');
+        if (!b64) {
+          return;
+        }
+        a.href = URL.createObjectURL(
+          new Blob([base64ToArrayBuffer(b64)], { type: 'application/octet-stream' }),
+        );
+        a.download = 'roka-replay-local.rpl';
+      } else {
+        // 服务器回放：单独请求原始 .rpl 存储文件，而非解码后的可播放二进制。
+        a.href = '/api/downloadreplay/' + encodeURIComponent(replay_id);
+        a.download = 'roka-replay-' + replay_id + '.rpl';
+      }
+      document.body.appendChild(a);
+      a.click();
+      if (replay_id == 'local') {
+        URL.revokeObjectURL(a.href);
+      }
+      a.remove();
+    });
     $('#tabs-replay-autoplay').each(function () {
       for (var i = 1; i < this.children.length; i++) {
         initTab(this, this.children[i], setAutoplayRate);
