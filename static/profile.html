@@ -1,0 +1,90 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
+    />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"
+      integrity="sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <link rel="stylesheet" href="/main.css" />
+    <link rel="stylesheet" href="/styles/rating.css" />
+    <link rel="stylesheet" href="/styles/profile.css" />
+    <title>Roka - 个人主页</title>
+  </head>
+
+  <body class="profile">
+    <div class="profile-wrap">
+      <header class="profile-topbar">
+        <button id="back-home-btn" type="button" class="btn btn-ghost btn-sm">← 返回首页</button>
+        <a id="account-name" href="#"></a>
+      </header>
+
+      <div id="profile-not-found" class="card" style="display: none">
+        <p class="panel-empty">用户不存在。</p>
+      </div>
+
+      <div id="profile-main" style="display: none">
+        <section class="card">
+          <div>
+            <span id="p-name" class="profile-name"></span>
+            <span id="p-title" class="profile-title"></span>
+            <span id="p-admin" class="admin-badge" style="display: none">管理员</span>
+          </div>
+          <div class="profile-stats">
+            <div class="profile-stat">
+              <div class="profile-stat-value" id="p-rating">-</div>
+              <div class="profile-stat-label">Rating</div>
+            </div>
+            <div class="profile-stat">
+              <div class="profile-stat-value" id="p-games">-</div>
+              <div class="profile-stat-label">对局数</div>
+            </div>
+            <div class="profile-stat">
+              <div class="profile-stat-value" id="p-days">-</div>
+              <div class="profile-stat-label">注册天数</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">Rating 历史</h2>
+          <div id="rating-chart"></div>
+          <p id="rating-chart-empty" class="panel-empty" style="display: none">暂无 Rating 记录。</p>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">他的动态</h2>
+          <div id="feed-list"></div>
+          <div id="feed-empty" class="feed-empty" style="display: none">TA 还没有发布动态。</div>
+          <div id="feed-pager" class="feed-pager" style="display: none"></div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title">他的回放</h2>
+          <table class="mini-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>回合</th>
+                <th>结果</th>
+              </tr>
+            </thead>
+            <tbody id="replays-body"></tbody>
+          </table>
+          <p id="replays-empty" class="panel-empty" style="display: none">暂无回放。</p>
+          <div class="panel-pager">
+            <button id="replays-prev" type="button" class="btn btn-secondary btn-sm" disabled>上一页</button>
+            <button id="replays-next" type="button" class="btn btn-secondary btn-sm" disabled>下一页</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script src="/profile.js"></script>
+  </body>
+</html>

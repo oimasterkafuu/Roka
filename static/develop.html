@@ -1,0 +1,216 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
+    />
+    <link rel="stylesheet" href="/main.css" />
+    <title>Roka - 网站开发</title>
+    <style>
+      #app {
+        max-width: 920px;
+        margin: 84px auto 36px;
+        padding: 0 12px;
+        text-align: left;
+      }
+      .dev-title {
+        margin: 0 0 10px 0;
+        font-size: 34px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .dev-subtitle {
+        margin: 0 0 16px 0;
+        line-height: 1.7;
+        opacity: 0.9;
+      }
+      .dev-panel {
+        margin: 0 0 14px 0;
+        padding: 16px 18px;
+        border: 1px solid #e3e8f0;
+        border-radius: 10px;
+        background: #ffffff;
+        box-shadow:
+          0 1px 3px rgba(37, 48, 66, 0.08),
+          0 6px 18px rgba(37, 48, 66, 0.05);
+      }
+      .dev-panel h3 {
+        margin: 0 0 10px 0;
+        font-size: 18px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .dev-panel p {
+        margin: 0;
+        line-height: 1.7;
+      }
+      .dev-panel p + p {
+        margin-top: 8px;
+      }
+      .dev-panel ol,
+      .dev-panel ul {
+        margin: 8px 0 0 20px;
+        line-height: 1.7;
+      }
+      .dev-link {
+        color: teal;
+        word-break: break-all;
+      }
+      .dev-strong-checklist {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid rgba(0, 128, 128, 0.35);
+        border-radius: 8px;
+        background: #e6f3f3;
+      }
+      .cta-row {
+        margin-top: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .cta-row button {
+        min-width: 160px;
+      }
+      .code-snippet {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid #e3e8f0;
+        border-radius: 8px;
+        background: #f7f9fb;
+        overflow-x: auto;
+        font-family: Consolas, 'Courier New', monospace;
+        line-height: 1.5;
+        font-size: 13px;
+        white-space: pre;
+      }
+    </style>
+  </head>
+
+  <body style="overflow: auto; height: auto">
+    <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
+      <button id="back-home-btn" class="small">返回首页</button>
+    </div>
+    <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
+      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span>
+    </div>
+
+    <div id="app">
+      <h1 class="dev-title">Roka 网站开发</h1>
+      <p class="dev-subtitle">众人拾柴火焰高。在游玩时，如果你有新想法，欢迎参与开发。</p>
+
+      <section class="dev-panel">
+        <h3>仓库与提交流程</h3>
+        <p>
+          主仓库：
+          <a
+            class="dev-link"
+            href="https://github.com/oimasterkafuu/Roka"
+            target="_blank"
+            rel="noopener noreferrer"
+            >https://github.com/oimasterkafuu/Roka</a
+          >
+        </p>
+        <ol>
+          <li>在 GitHub 上 fork 仓库到你自己的账号。</li>
+          <li>clone 你的 fork，并创建一个只聚焦单一主题的分支。</li>
+          <li>完成功能开发后推送分支，并发起 PR。</li>
+          <li>PR 描述请说明动机、实现方式、影响范围和验证结果。</li>
+        </ol>
+      </section>
+
+      <section class="dev-panel">
+        <h3>环境要求</h3>
+        <ul>
+          <li>Node.js（建议 20+，自带 Corepack）。</li>
+          <li>
+            包管理器统一使用 <code>pnpm</code>（版本由 <code>package.json</code> 的
+            <code>packageManager</code> 字段锁定，通过 Corepack 管理）；请勿使用 npm 或 yarn。
+          </li>
+        </ul>
+        <pre class="code-snippet"><code>corepack enable
+corepack prepare --activate</code></pre>
+      </section>
+
+      <section class="dev-panel">
+        <h3>本地开发与检查</h3>
+        <pre class="code-snippet"><code>pnpm install        # 首次安装依赖
+pnpm run dev        # 启动开发服务器（tsx，默认 http://localhost:23333）
+pnpm run build      # 类型检查并构建到 dist/
+pnpm run lint       # ESLint 检查
+pnpm run format     # Prettier 自动格式化</code></pre>
+        <div class="dev-strong-checklist">
+          <b>提交前建议至少确认：</b>
+          <ul>
+            <li>
+              <code>pnpm run lint</code>、<code>pnpm run build</code>、<code>pnpm run format</code> 均通过。
+            </li>
+            <li>不混入无关改动，提交主题单一。</li>
+            <li><code>pnpm-lock.yaml</code> 与 <code>package.json</code> 保持一致。</li>
+            <li>修改了行为（运行方式、接口、配置等）时，已同步更新 <code>README.md</code>。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="dev-panel">
+        <h3>目录结构</h3>
+        <pre class="code-snippet"><code>src/           后端源码（TypeScript + Fastify + Socket.IO）
+  game-engine/ 对局规则引擎
+  map/         地图生成
+  server/      服务拆分模块
+static/        纯静态前端（页面、样式、客户端脚本）
+bot-template/  机器人模板（含可运行的测试 bot）
+dist/          构建产物（请勿手动编辑）</code></pre>
+      </section>
+
+      <section class="dev-panel">
+        <h3>提交规范</h3>
+        <p>
+          提交信息遵循 Conventional Commits：<code>&lt;type&gt;(&lt;scope&gt;): &lt;subject&gt;</code>，常用
+          type 有
+          <code>feat</code>、<code>fix</code>、<code>refactor</code>、<code>perf</code>、<code>docs</code>、
+          <code>style</code>、<code>test</code>、<code>chore</code>、<code>ci</code>、<code>revert</code>。
+          详细要求见仓库根目录的 <code>AGENTS.md</code>。
+        </p>
+      </section>
+
+      <section class="dev-panel">
+        <h3>网站开发内容边界</h3>
+        <ul>
+          <li>大厅、房间、回放、认证、验证码、匹配逻辑等页面与服务端行为。</li>
+          <li>Socket.IO 协议新增字段时，请同步更新前端消费与文档。</li>
+          <li>地图生成、渲染和性能优化可在独立 PR 进行。</li>
+        </ul>
+      </section>
+
+      <section class="dev-panel">
+        <h3>机器人开发</h3>
+        <p>想要用代码征服这款游戏？我们提供完善的机器人开发文档。</p>
+        <div class="cta-row">
+          <button id="goto-bot-dev" class="small inverted">查看机器人开发文档</button>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      async function loadUser() {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+          location.href = '/login';
+          return;
+        }
+        const data = await res.json();
+        document.getElementById('account-name').textContent = data.username;
+      }
+
+      document.getElementById('back-home-btn').addEventListener('click', function () {
+        location.href = '/';
+      });
+
+      document.getElementById('goto-bot-dev').addEventListener('click', function () {
+        location.href = '/develop/bot';
+      });
+
+      loadUser();
+    </script>
+  </body>
+</html>

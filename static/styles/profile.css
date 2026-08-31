@@ -1,0 +1,407 @@
+/* 个人主页 /u/:username 样式：与首页同一套明亮卡片语言。 */
+
+html:has(> body.profile) {
+  background-color: #eef1f6;
+}
+
+body.profile {
+  background-color: #eef1f6;
+  position: static;
+  height: auto;
+  min-height: 100vh;
+  overflow: auto;
+}
+
+body.profile * {
+  color: #253042;
+}
+
+body.profile .profile-wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+  box-sizing: border-box;
+}
+
+/* 顶部 chrome */
+body.profile .profile-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+body.profile #account-name {
+  font-size: 15px;
+  text-decoration: none;
+}
+
+/* 卡片 */
+body.profile .card {
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 3px rgba(37, 48, 66, 0.08),
+    0 8px 24px rgba(37, 48, 66, 0.05);
+  padding: 20px;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+body.profile .card-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #253042;
+}
+
+/* 按钮 */
+body.profile .btn {
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 14px;
+  padding: 9px 20px;
+  margin: 0;
+  transition: background-color 0.15s ease-in-out;
+}
+body.profile .btn-primary {
+  background-color: teal;
+  color: #ffffff;
+}
+body.profile .btn-primary:hover {
+  background-color: #006e6e;
+  color: #ffffff;
+  box-shadow: none;
+}
+body.profile .btn-secondary {
+  background-color: #e6f3f3;
+  color: teal;
+}
+body.profile .btn-secondary:hover {
+  background-color: #d3eaea;
+  color: #006e6e;
+  box-shadow: none;
+}
+body.profile .btn-secondary:disabled {
+  background-color: #f0f3f7;
+  color: #9aa4b2;
+  cursor: not-allowed;
+}
+body.profile .btn-ghost {
+  background-color: transparent;
+  color: #6b7686;
+  border: 1px solid #d5dce6 !important;
+}
+body.profile .btn-ghost:hover {
+  background-color: #f3f5f9;
+  color: #253042;
+  box-shadow: none;
+}
+body.profile .btn-sm {
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+/* 输入框 */
+body.profile input[type='text'],
+body.profile textarea {
+  background-color: #ffffff;
+  border: 1px solid #d5dce6 !important;
+  border-radius: 8px;
+  color: #253042;
+  font-size: 15px;
+  padding: 9px 12px;
+  min-height: 0;
+  box-sizing: border-box;
+}
+body.profile input[type='text']:focus,
+body.profile textarea:focus {
+  border-color: teal !important;
+}
+body.profile ::placeholder {
+  color: #9aa4b2;
+  opacity: 1;
+}
+
+/* 用户信息卡 */
+body.profile .profile-name {
+  font-size: 24px;
+  font-weight: 700;
+  word-break: break-all;
+}
+body.profile .profile-title {
+  font-size: 13px;
+  color: #9aa4b2;
+  margin-left: 8px;
+}
+body.profile .admin-badge {
+  display: inline-block;
+  background-color: #fde8e8;
+  color: #d63535;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+body.profile .profile-stats {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+body.profile .profile-stat {
+  flex: 1;
+  background-color: #f7f9fb;
+  border-radius: 8px;
+  padding: 10px 4px;
+  text-align: center;
+}
+body.profile .profile-stat-value {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  font-size: 19px;
+}
+body.profile .profile-stat-label {
+  font-size: 11px;
+  color: #9aa4b2;
+  margin-top: 2px;
+}
+
+/* Rating 历史图 */
+body.profile .rating-chart-svg {
+  display: block;
+}
+
+/* 通用表格（回放） */
+body.profile .mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+body.profile .mini-table th {
+  text-align: left;
+  font-size: 12px;
+  color: #9aa4b2;
+  font-weight: 400;
+  padding: 4px 6px;
+  border-bottom: 1px solid #eef1f6;
+  white-space: nowrap;
+}
+body.profile .mini-table td {
+  padding: 7px 6px;
+  border-bottom: 1px solid #f3f5f9;
+  word-break: break-all;
+}
+body.profile .mini-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.12s ease-in-out;
+}
+body.profile .mini-table tbody tr:hover {
+  background-color: #f3f9f9;
+}
+body.profile .mini-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+body.profile .panel-empty {
+  color: #9aa4b2;
+  font-size: 13px;
+  padding: 16px 0;
+  text-align: center;
+}
+body.profile .panel-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+/* 动态列表 */
+body.profile .feed-item {
+  padding: 14px 0;
+  border-bottom: 1px solid #eef1f6;
+}
+body.profile .feed-item:first-child {
+  padding-top: 4px;
+}
+body.profile .feed-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+body.profile .feed-author {
+  font-size: 14px;
+}
+body.profile .feed-time {
+  font-size: 12px;
+  color: #9aa4b2;
+}
+body.profile .feed-body-wrap {
+  position: relative;
+  margin: 6px 0 8px;
+}
+body.profile .feed-text {
+  font-size: 15px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+body.profile .feed-text p {
+  margin: 0 0 8px;
+}
+body.profile .feed-text img {
+  max-width: 100%;
+}
+body.profile .feed-body-wrap.collapsed .feed-text {
+  max-height: 220px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+}
+body.profile .feed-expand-btn {
+  background-color: transparent;
+  box-shadow: none;
+  color: teal;
+  font-size: 13px;
+  padding: 4px 0;
+  margin: 0;
+}
+body.profile .feed-expand-btn:hover {
+  color: #006e6e;
+  text-decoration: underline;
+  box-shadow: none;
+}
+body.profile .feed-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+body.profile .feed-actions button {
+  background-color: transparent;
+  box-shadow: none;
+  color: #6b7686;
+  font-size: 13px;
+  padding: 4px 8px;
+  margin: 0;
+  border-radius: 6px;
+}
+body.profile .feed-actions button:hover {
+  background-color: #f3f5f9;
+  color: teal;
+  box-shadow: none;
+}
+body.profile .feed-actions .feed-delete-btn:hover {
+  color: #d63535;
+}
+body.profile .like-btn .heart {
+  margin-right: 4px;
+}
+body.profile .like-btn.liked,
+body.profile .like-btn.liked .heart {
+  color: #e0245e;
+}
+body.profile .feed-actions .like-btn.liked:hover,
+body.profile .feed-actions .like-btn.liked:hover .heart {
+  color: #c81e52;
+}
+
+/* 编辑态 */
+body.profile .feed-edit textarea {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 6px 0 8px;
+}
+body.profile .feed-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 评论区 */
+body.profile .comment-section {
+  margin-top: 10px;
+  background-color: #f7f9fb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+body.profile .comment-item {
+  padding: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+body.profile .comment-item + .comment-item {
+  border-top: 1px solid #eceff4;
+}
+body.profile .comment-author {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  margin-right: 6px;
+}
+body.profile .comment-text {
+  word-break: break-word;
+}
+body.profile .comment-text p {
+  margin: 0;
+}
+body.profile .comment-time {
+  font-size: 11px;
+  color: #9aa4b2;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+body.profile .comment-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+body.profile .comment-input-row .comment-input {
+  flex: 1;
+  font-size: 13px;
+  padding: 8px 12px;
+  min-height: 0;
+}
+
+body.profile .feed-empty {
+  text-align: center;
+  color: #9aa4b2;
+  font-size: 14px;
+  padding: 24px 0;
+}
+
+/* 分页条 */
+body.profile .feed-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+body.profile .feed-pager button {
+  background-color: #ffffff;
+  border: 1px solid #d5dce6 !important;
+  box-shadow: none;
+  color: #253042;
+  font-size: 13px;
+  padding: 5px 12px;
+  margin: 0;
+  border-radius: 6px;
+}
+body.profile .feed-pager button:hover {
+  background-color: #f3f5f9;
+  box-shadow: none;
+}
+body.profile .feed-pager button:disabled {
+  color: #b6bec9;
+  background-color: #f7f9fb;
+  cursor: not-allowed;
+}
+body.profile .feed-pager button.current {
+  background-color: teal;
+  border-color: teal !important;
+  color: #ffffff;
+}
+body.profile .feed-pager .pager-ellipsis {
+  color: #9aa4b2;
+  font-size: 13px;
+  padding: 0 2px;
+}

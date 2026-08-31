@@ -1,0 +1,263 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
+    />
+    <link rel="stylesheet" href="/main.css" />
+    <title>Roka - 文字版教程</title>
+    <style>
+      #app {
+        max-width: 920px;
+        margin: 84px auto 36px;
+        padding: 0 12px;
+        text-align: left;
+      }
+      .tutorial-title {
+        margin: 0 0 10px 0;
+        font-size: 34px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .tutorial-subtitle {
+        margin: 0 0 16px 0;
+        line-height: 1.7;
+        opacity: 0.9;
+      }
+      .tutorial-panel {
+        margin: 0 0 14px 0;
+        padding: 16px 18px;
+        border: 1px solid #e3e8f0;
+        border-radius: 10px;
+        background: #ffffff;
+        box-shadow:
+          0 1px 3px rgba(37, 48, 66, 0.08),
+          0 6px 18px rgba(37, 48, 66, 0.05);
+      }
+      .tutorial-panel h3 {
+        margin: 0 0 10px 0;
+        font-size: 18px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .tutorial-panel h4 {
+        margin: 12px 0 6px 0;
+        font-size: 15px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .tutorial-panel p {
+        margin: 0;
+        line-height: 1.7;
+      }
+      .tutorial-panel p + p {
+        margin-top: 8px;
+      }
+      .tutorial-panel ul,
+      .tutorial-panel ol {
+        margin: 8px 0 0 20px;
+        line-height: 1.7;
+      }
+      .tutorial-panel li {
+        margin: 0 0 4px 0;
+      }
+      .kbd {
+        display: inline-block;
+        min-width: 18px;
+        padding: 0 6px;
+        border: 1px solid #d5dce6;
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        background: #f3f5f9;
+        font-size: 12px;
+        line-height: 20px;
+        text-align: center;
+        color: #253042;
+        white-space: nowrap;
+      }
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        margin: 14px 0;
+      }
+      .tutorial-note {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid rgba(0, 128, 128, 0.35);
+        border-radius: 8px;
+        background: #e6f3f3;
+        line-height: 1.7;
+      }
+    </style>
+  </head>
+
+  <body style="overflow: auto; height: auto">
+    <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
+      <button id="back-home-btn" class="small">返回首页</button>
+    </div>
+    <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
+      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span>
+    </div>
+
+    <div id="app">
+      <h1 class="tutorial-title">Roka 文字版教程</h1>
+      <p class="tutorial-subtitle">本页完整介绍 Roka 的全部规则。建议先通读本页，再进入互动教程上手实操。</p>
+
+      <div class="cta-row">
+        <button id="goto-interactive-top" class="inverted">进入互动教程 →</button>
+      </div>
+
+      <section class="tutorial-panel">
+        <h3>目标与胜负</h3>
+        <ul>
+          <li>每位玩家拥有 1 座主城（皇冠），目标是成为最后存活的玩家/队伍。</li>
+          <li>失去所有主城即出局；攻下敌方最后一座主城即可将其淘汰。</li>
+          <li>
+            玩家出局后，其残余领土<b>不再转移</b>给攻击方，全部沦为孤军（不触发断链减半），随后按孤军规则逐渐衰减消亡。
+          </li>
+        </ul>
+      </section>
+
+      <section class="tutorial-panel">
+        <h3>地图与地形</h3>
+        <ul>
+          <li><b>普通地块</b>：可占领、可驻兵、可建造的基本地形。</li>
+          <li><b>山脉</b>：不可通行、不可占领，会阻挡扩张路线。</li>
+          <li><b>沼泽</b>：可占领、可驻兵并参与连通，但永不产兵、不可建造，常用于保持连通与卡位。</li>
+          <li>
+            <b>主城（皇冠）</b>：玩家核心据点，每 Tick +1
+            兵力；失守全部主城即出局。可由指挥所升级而来（见下文建造）。
+          </li>
+          <li>
+            <b>指挥所（城市）</b>：只能由玩家消耗 50 兵力建造的战略据点；与普通地块一样每 50 Tick +1
+            兵力（不享受爆发期加成），同时是连通锚点。
+          </li>
+        </ul>
+        <div class="tutorial-note">全程无战争迷雾，全图对所有玩家开放可见。</div>
+      </section>
+
+      <section class="tutorial-panel">
+        <h3>回合与兵力生产</h3>
+        <ul>
+          <li>
+            1 Tick = 0.5 秒（1x 速度）。顶部回合以“半回合”显示：<span class="kbd">回合 1</span> →
+            <span class="kbd">回合 1.</span> →
+            <span class="kbd">回合 2</span>，无点与有点是同一整回合的两个阶段。
+          </li>
+          <li>主城每 Tick +1 兵力。</li>
+          <li>正常状态的普通地块与指挥所每 50 Tick（25 回合）+1 兵力。</li>
+          <li>
+            第 26~50 Tick 为全局<b>爆发期</b>：正常状态的普通地块每 Tick 额外 +1
+            兵力；此时地图外圈会出现逐渐减弱的红边提示。
+          </li>
+          <li>孤军、沼泽、中立格不生产兵力；兵力无上限。</li>
+        </ul>
+      </section>
+
+      <section class="tutorial-panel">
+        <h3>基本操作</h3>
+        <h4>选中与视角</h4>
+        <ul>
+          <li>鼠标左键点击己方格：选中；点击空白背景：取消选中；拖动地图平移，滚轮缩放。</li>
+          <li><span class="kbd">空格</span>：跳转选中到曼哈顿距离最近的己方主城。</li>
+        </ul>
+        <h4>推兵（移动/进攻）</h4>
+        <ul>
+          <li>
+            <span class="kbd">W/A/S/D</span> 或方向键：从选中格向对应方向推兵。默认<b>全兵</b>推出（只留 1
+            兵看守）。
+          </li>
+          <li><span class="kbd">Z</span> + 方向：下一步<b>半兵</b>（50%，一次性，执行后失效）。</li>
+          <li>
+            <span class="kbd">Shift</span> + 方向：<b>智能分兵</b>——为其他方向的威胁保留兵力（保留量 =
+            其他三方向非己方相邻格「兵力-1」之和 + 1），不消耗 Z。
+          </li>
+          <li>推兵进入操作队列，每 Tick 每名玩家最多执行一条队列操作。</li>
+        </ul>
+        <h4>建造</h4>
+        <ul>
+          <li><span class="kbd">X</span>：在选中的己方正常普通地块上排队建造指挥所，消耗 50 兵力。</li>
+          <li>
+            <span class="kbd">C</span>：将己方指挥所排队升级为主城，消耗 50 兵力；在普通地块上按 C
+            会自动连排“建指挥所 + 升级主城”两步。
+          </li>
+          <li>建造与推兵共用同一队列；执行时条件不满足会自动跳过，不产生消耗。沼泽/山脉上禁止建造。</li>
+        </ul>
+        <h4>其他</h4>
+        <ul>
+          <li><span class="kbd">Q</span>：清空操作队列；<span class="kbd">E</span>：撤销最后一步。</li>
+          <li>
+            <span class="kbd">Enter</span>：公屏聊天；<span class="kbd">T</span>：队伍聊天；
+            <span class="kbd">Esc</span>：打开/关闭投降确认。
+          </li>
+        </ul>
+      </section>
+
+      <section class="tutorial-panel">
+        <h3>攻击与占领</h3>
+        <ul>
+          <li>攻击兵力必须<b>严格大于</b>防守兵力才能占领目标格。</li>
+          <li>
+            未严格大于（含相等）时进攻失败，但双方互损：进攻方损失全部推出兵力，防守方等量减兵（最低到
+            0），归属与建筑不变。
+          </li>
+          <li>
+            占领有损耗：占领成功后，目标格新兵力 =
+            <b>攻击兵力 − 守军兵力</b>；被占领的指挥所/主城会被摧毁（降级为普通地块）。
+          </li>
+          <li>向己方格推兵是调兵：兵力直接叠加（队友格同理，但不改变主城归属）。</li>
+        </ul>
+      </section>
+
+      <section class="tutorial-panel">
+        <h3>连通与孤军</h3>
+        <ul>
+          <li>
+            己方格经由连续己方格（普通地块或己方沼泽）四方向连通到己方任意主城/指挥所，即为正常领土；否则成为<b>孤军</b>（闪烁提示）。
+          </li>
+          <li>断链瞬间兵力立即减半（⌊n/2⌋，1 兵保持为 1）。</li>
+          <li>断链后前 <b>5 回合（10 Tick）</b>为宽限期：孤军快速闪烁，兵力暂不衰减。</li>
+          <li>
+            第 6 回合（第 11 Tick）起进入衰减期：每回合（每 2 Tick）衰减 max(1, ⌈当前兵力 ×
+            5%⌉)，兵力归零后变为中立格。
+          </li>
+          <li>孤军不可选中、不可推兵、不可建造、不产兵、无爆发加成。</li>
+          <li>孤军重新连通回己方主城/指挥所时立即恢复正常，且每格兵力 ×2。</li>
+        </ul>
+        <div class="tutorial-note">
+          攻下敌方最后一座主城后，其所有残余领土直接沦为孤军（不触发断链减半、不转移归属），随后逐渐衰减至中立。扩张时务必保持连通。
+        </div>
+      </section>
+
+      <div class="cta-row">
+        <button id="goto-interactive-bottom" class="inverted">进入互动教程 →</button>
+      </div>
+    </div>
+
+    <script>
+      async function loadUser() {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+          location.href = '/login';
+          return;
+        }
+        const data = await res.json();
+        document.getElementById('account-name').textContent = data.username;
+      }
+
+      document.getElementById('back-home-btn').addEventListener('click', function () {
+        location.href = '/';
+      });
+
+      document.getElementById('goto-interactive-top').addEventListener('click', function () {
+        location.href = '/tutorial/interactive';
+      });
+
+      document.getElementById('goto-interactive-bottom').addEventListener('click', function () {
+        location.href = '/tutorial/interactive';
+      });
+
+      loadUser();
+    </script>
+  </body>
+</html>

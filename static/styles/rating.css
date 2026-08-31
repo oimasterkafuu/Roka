@@ -1,0 +1,50 @@
+/* Codeforces 风格 Rating 名字颜色。
+   用法：<a class="rt-xxx" href="/u/名字">，名字一律加粗。 */
+
+.rt-unrated,
+.rt-gray,
+.rt-green,
+.rt-cyan,
+.rt-blue,
+.rt-violet,
+.rt-orange,
+.rt-red {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.rt-unrated {
+  color: #999999 !important;
+}
+.rt-gray {
+  color: #808080 !important;
+}
+.rt-green {
+  color: #008000 !important;
+}
+.rt-cyan {
+  color: #03a89e !important;
+}
+.rt-blue {
+  color: #0000ff !important;
+}
+.rt-violet {
+  color: #aa00aa !important;
+}
+.rt-orange {
+  color: #ff8c00 !important;
+}
+.rt-red {
+  color: #ff0000 !important;
+}
+
+a.rt-unrated:hover,
+a.rt-gray:hover,
+a.rt-green:hover,
+a.rt-cyan:hover,
+a.rt-blue:hover,
+a.rt-violet:hover,
+a.rt-orange:hover,
+a.rt-red:hover {
+  text-decoration: underline;
+}
