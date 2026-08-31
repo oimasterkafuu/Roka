@@ -283,6 +283,16 @@
 
       /* ---------- 登录态与个人信息 ---------- */
 
+      // 新手期未定型（基准分未发完）时，在 rating 数字右侧加小号「?」提示。
+      function setRatingWithProvisional($el, rating, provisional) {
+        $el.empty().text(Math.round(rating));
+        if (provisional === true) {
+          $('<span class="rating-provisional">?</span>')
+            .attr('title', '基准分尚未发完，rating 未定型')
+            .appendTo($el);
+        }
+      }
+
       async function loadUser() {
         var res = await fetch('/api/auth/me');
         if (!res.ok) {
@@ -311,7 +321,7 @@
             .addClass(p.colorClass || 'rt-unrated')
             .attr('href', '/u/' + encodeURIComponent(p.username));
           $('#me-title').text(p.title || '');
-          $('#me-rating').text(Math.round(p.rating));
+          setRatingWithProvisional($('#me-rating'), p.rating, p.provisional);
           $('#me-games').text(p.ratingGames);
           $('#me-days').text(p.registeredDays);
           $('#me-admin').toggle(p.isAdmin === true);
@@ -553,7 +563,8 @@
               .appendTo($li);
             var $name = $('<span class="lb-name"></span>').appendTo($li);
             userLink(item.username, item.colorClass, item.title).appendTo($name);
-            $('<span class="lb-rating"></span>').text(Math.round(item.rating)).appendTo($li);
+            var $rating = $('<span class="lb-rating"></span>').appendTo($li);
+            setRatingWithProvisional($rating, item.rating, item.provisional);
             $list.append($li);
           });
         } catch (e) {

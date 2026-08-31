@@ -135,13 +135,76 @@ async function loadProfile() {
     .text(p.username)
     .addClass(p.colorClass || 'rt-unrated');
   $('#p-title').text(p.title || '');
-  $('#p-rating').text(Math.round(p.rating));
+  setRatingWithProvisional($('#p-rating'), p.rating, p.provisional);
+  $('#p-max-rating').text(Math.round(getMaxRating(p.ratingHistory || [], p.rating)));
   $('#p-games').text(p.ratingGames);
   $('#p-days').text(p.registeredDays);
   $('#p-admin').toggle(p.isAdmin === true);
   $('#profile-main').show();
+  renderRatingChanges(p.ratingHistory || []);
   renderRatingChart(p.ratingHistory || []);
   return true;
+}
+
+// 新手期未定型（基准分未发完）时，在 rating 数字右侧加小号「?」提示。
+function setRatingWithProvisional($el, rating, provisional) {
+  $el.empty().text(Math.round(rating));
+  if (provisional === true) {
+    $('<span class="rating-provisional">?</span>')
+      .attr('title', '基准分尚未发完，rating 未定型')
+      .appendTo($el);
+  }
+}
+
+// 最高 Rating：历史记录与当前显示分取最大值；无历史时即当前分。
+function getMaxRating(history, currentRating) {
+  var max = Number.isFinite(currentRating) ? currentRating : 0;
+  (Array.isArray(history) ? history : []).forEach(function (point) {
+    if (Number.isFinite(point.r) && point.r > max) {
+      max = point.r;
+    }
+  });
+  return max;
+}
+
+// 最近 6 局 Rating 变更：相邻历史点差值，带符号着色与相对时间。
+function renderRatingChanges(history) {
+  var $box = $('#rating-changes');
+  var $list = $('#rating-changes-list');
+  $list.empty();
+  var points = (Array.isArray(history) ? history : []).filter(function (p) {
+    return Number.isFinite(p.t) && Number.isFinite(p.r);
+  });
+  if (points.length < 2) {
+    $box.hide();
+    return;
+  }
+  // 取末尾 7 个点以算最近 6 条 delta；最旧一条没有前驱，不展示。
+  var recent = points.slice(-7);
+  var items = [];
+  for (var i = 1; i < recent.length; i++) {
+    items.push({
+      t: recent[i].t,
+      r: recent[i].r,
+      delta: recent[i].r - recent[i - 1].r,
+    });
+  }
+  // 新的在前。
+  items.reverse();
+  items.forEach(function (item) {
+    var delta = Math.round(item.delta);
+    var cls = delta > 0 ? 'delta-pos' : delta < 0 ? 'delta-neg' : 'delta-zero';
+    var text = (delta > 0 ? '+' : '') + delta;
+    var $li = $('<li class="rating-change-item"></li>');
+    $('<span class="rating-change-delta"></span>').addClass(cls).text(text).appendTo($li);
+    $('<span class="rating-change-value"></span>').text(Math.round(item.r)).appendTo($li);
+    $('<span class="rating-change-time"></span>')
+      .text(relativeTime(item.t))
+      .attr('title', fullTime(item.t))
+      .appendTo($li);
+    $list.append($li);
+  });
+  $box.show();
 }
 
 /* ---------- Rating 历史折线图（纯 SVG） ---------- */
@@ -190,6 +253,8 @@ function renderRatingChart(history) {
       return p.r;
     }),
   );
+  // 历史最高 rating，用于突出显示峰值数据点。
+  var peakR = rMax;
   if (tMax === tMin) {
     tMax = tMin + 1;
   }
@@ -280,15 +345,16 @@ function renderRatingChart(history) {
     'stroke-linecap': 'round',
   });
 
-  // 数据点
+  // 数据点；历史最高点用更大半径 + 金色突出显示，tooltip 不变。
   points.forEach(function (p) {
+    var isPeak = p.r === peakR;
     var c = el('circle', {
       cx: x(p.t),
       cy: y(p.r),
-      r: 3,
-      fill: '#ffffff',
-      stroke: 'teal',
-      'stroke-width': 1.5,
+      r: isPeak ? 5 : 3,
+      fill: isPeak ? '#ffd54a' : '#ffffff',
+      stroke: isPeak ? '#d4a017' : 'teal',
+      'stroke-width': isPeak ? 2 : 1.5,
     });
     var title = document.createElementNS(ns, 'title');
     title.textContent = Math.round(p.r) + ' · ' + fullTime(p.t);

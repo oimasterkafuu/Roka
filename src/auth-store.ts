@@ -1,5 +1,5 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { deserialize, serialize } from 'node:v8';
 import { promisify } from 'node:util';
@@ -27,6 +27,7 @@ export interface PublicProfile {
   username: string;
   rating: number;
   ratingGames: number;
+  provisional: boolean;
   createdAt: number;
   isAdmin: boolean;
   ratingHistory: RatingHistoryPoint[];
@@ -36,6 +37,7 @@ export interface TopRatedEntry {
   username: string;
   rating: number;
   ratingGames: number;
+  provisional: boolean;
 }
 
 interface UserFile {
@@ -60,6 +62,17 @@ const toDisplayRating = (rating: number, ratingGames: number): number => {
   }
   const shift = DEFAULT_RATING / 2 ** ratingGames;
   return Math.max(0, Math.round(rating - shift));
+};
+
+/**
+ * 新手期未定型：还有基准分未发完（1200 / 2^对局数 >= 1）且显示分尚未到 1200。
+ * 用于前端在 rating 数字右侧加「?」提示。
+ */
+export const isProvisionalRating = (rating: number, ratingGames: number): boolean => {
+  if (!Number.isFinite(rating) || !Number.isFinite(ratingGames)) {
+    return false;
+  }
+  return toDisplayRating(rating, ratingGames) < DEFAULT_RATING && DEFAULT_RATING / 2 ** ratingGames >= 1;
 };
 
 const RATING_HISTORY_MAX = 1000;
@@ -159,6 +172,9 @@ export class UserStore {
   private readonly binaryFilePath: string;
 
   private usersByKey = new Map<string, StoredUser>();
+
+  // 写盘串行化：persist 经 promise 链排队，避免并发写交错。
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(dataDir: string) {
     this.binaryFilePath = path.join(dataDir, 'users.bin');
@@ -289,9 +305,13 @@ export class UserStore {
     };
   }
 
-  getDisplayRating(usernameInput: string): { rating: number; ratingGames: number } {
+  getDisplayRating(usernameInput: string): { rating: number; ratingGames: number; provisional: boolean } {
     const { rating, ratingGames } = this.getRating(usernameInput);
-    return { rating: toDisplayRating(rating, ratingGames), ratingGames };
+    return {
+      rating: toDisplayRating(rating, ratingGames),
+      ratingGames,
+      provisional: isProvisionalRating(rating, ratingGames),
+    };
   }
 
   async applyRatingUpdates(updates: Array<{ username: string; delta: number }>): Promise<void> {
@@ -329,10 +349,13 @@ export class UserStore {
     if (!user) {
       return null;
     }
+    const rating = user.rating ?? DEFAULT_RATING;
+    const ratingGames = user.ratingGames ?? 0;
     return {
       username: user.username,
-      rating: toDisplayRating(user.rating ?? DEFAULT_RATING, user.ratingGames ?? 0),
-      ratingGames: user.ratingGames ?? 0,
+      rating: toDisplayRating(rating, ratingGames),
+      ratingGames,
+      provisional: isProvisionalRating(rating, ratingGames),
       createdAt: user.createdAt,
       isAdmin: user.isAdmin === true,
       ratingHistory: Array.isArray(user.ratingHistory) ? [...user.ratingHistory] : [],
@@ -351,6 +374,7 @@ export class UserStore {
         username: user.username,
         rating: toDisplayRating(user.rating ?? DEFAULT_RATING, ratingGames),
         ratingGames,
+        provisional: isProvisionalRating(user.rating ?? DEFAULT_RATING, ratingGames),
       });
     }
     entries.sort((a, b) => b.rating - a.rating);
@@ -393,11 +417,19 @@ export class UserStore {
     return scryptSync(password, salt, 64).toString('hex');
   }
 
-  private async persist(): Promise<void> {
+  private persist(): Promise<void> {
     const data: UserFile = {
       users: [...this.usersByKey.values()],
     };
-    const binary = await encodeUserFileBinary(data);
-    await writeFile(this.binaryFilePath, binary);
+    // serialize 同步执行，调用时即拿到状态快照；压缩与写盘排队串行执行。
+    const binaryPromise = encodeUserFileBinary(data);
+    const task = this.writeQueue.then(async () => {
+      const binary = await binaryPromise;
+      const tmpPath = `${this.binaryFilePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+      await writeFile(tmpPath, binary);
+      await rename(tmpPath, this.binaryFilePath);
+    });
+    this.writeQueue = task.catch(() => undefined);
+    return task;
   }
 }
