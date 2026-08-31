@@ -11,6 +11,12 @@
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"
+      integrity="sha384-ZCmVL/dTQHh41JxtZe73klDRFSJ/zixGCGt5lhnLQGjSWfAnlXSg+GSnRACaK5lc"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
     <link rel="stylesheet" href="/main.css" />
     <link rel="stylesheet" href="/styles/rating.css" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css" />
@@ -242,12 +248,6 @@
         );
       }
 
-      // 回放时间为 Unix 秒，按 UTC+8 展示（沿用旧回放页习惯）。
-      function replayTime(timeSec) {
-        var d = new Date((timeSec + 8 * 3600) * 1000);
-        return d.toJSON().substr(0, 19).replace('T', ' ');
-      }
-
       // 带 rating 颜色的用户名链接；用户名一律走文本插入防 XSS。
       function userLink(username, colorClass, title) {
         var $a = $('<a></a>')
@@ -353,7 +353,7 @@
         location.href = '/login';
       });
 
-      /* ---------- 房间列表（5 秒自动刷新） ---------- */
+      /* ---------- 房间列表（socket 失效通知刷新） ---------- */
 
       async function loadRooms() {
         try {
@@ -386,7 +386,7 @@
             $body.append($tr);
           });
         } catch (e) {
-          // 自动刷新失败时静默，下轮重试
+          // 加载失败时静默，等待下次失效通知
         }
       }
 
@@ -414,7 +414,11 @@
               .on('click', function () {
                 location.href = '/replays/' + encodeURIComponent(item.id);
               });
-            $('<td></td>').text(replayTime(item.time)).appendTo($tr);
+            // item.time 为 Unix 秒：相对时间展示，完整时间放 title。
+            $('<td></td>')
+              .text(relativeTime(item.time * 1000))
+              .attr('title', fullTime(item.time * 1000))
+              .appendTo($tr);
             $('<td></td>').text(item.turn).appendTo($tr);
             $('<td></td>')
               .text((item.rank || []).join(' › '))
@@ -945,12 +949,30 @@
           }
           loadMyProfile();
           loadRooms();
-          setInterval(loadRooms, 5000);
           loadReplays(0);
           loadAnnouncement();
           loadLeaderboard();
           var page = parseInt(new URLSearchParams(location.search).get('page'), 10) || 1;
           loadFeeds(page);
+
+          // 各面板改由 socket 失效通知驱动刷新（事件无 payload，收到后重新 fetch）。
+          // query.home 标记为首页监听连接，服务端不会用它参与同账号连接互斥。
+          var socket = io({ query: { home: '1' } });
+          socket.on('home_rooms', function () {
+            loadRooms();
+          });
+          socket.on('home_replays', function () {
+            loadReplays(replaysOffset);
+          });
+          socket.on('home_leaderboard', function () {
+            loadLeaderboard();
+          });
+          socket.on('home_announcement', function () {
+            loadAnnouncement();
+          });
+          socket.on('home_feeds', function () {
+            loadFeeds(feedPage);
+          });
         });
     </script>
   </body>

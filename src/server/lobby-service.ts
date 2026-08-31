@@ -290,6 +290,13 @@ class LobbyService {
     io.to(`game_${this.getLobbyVal(gid)}`).emit('room_update', this.generateRoomConfig(gid));
   }
 
+  /**
+   * 首页「房间列表」失效通知：无 payload，客户端收到后自行重新 fetch。
+   */
+  emitHomeRooms(io: SocketIOServer): void {
+    io.emit('home_rooms');
+  }
+
   async startGame(io: SocketIOServer, lobbyId: string): Promise<void> {
     const conf = this.lobbyConfig.get(lobbyId);
     const players = this.lobbyPlayers.get(lobbyId);
@@ -355,7 +362,11 @@ class LobbyService {
         }
       },
       endGame: (gid, result) => {
-        this.applyGameResult(result);
+        // 回放已在 finishGame 之前写入（saveHistory 被 await）；rating 结算完成后
+        // 再广播首页排行榜失效，保证客户端重新 fetch 时拿到新数据。
+        void this.applyGameResult(result).finally(() => {
+          io.emit('home_leaderboard');
+        });
         const lobby = this.gameLobbyId.get(gid);
         const participants = this.gamePlayers.get(gid);
         if (participants) {
@@ -381,6 +392,9 @@ class LobbyService {
           }
           this.emitRoomUpdate(io, lobby);
         }
+
+        this.emitHomeRooms(io);
+        io.emit('home_replays');
       },
       md5: (input: string): string => this.md5(input),
       replayStore: this.replayStore,
@@ -390,6 +404,7 @@ class LobbyService {
     this.gameInstances.set(gameId, game);
     this.gameLobbyId.set(gameId, lobbyId);
     this.gamePlayers.set(gameId, activePlayers);
+    this.emitHomeRooms(io);
   }
 
   checkReady(io: SocketIOServer, gid: string): void {
@@ -446,6 +461,7 @@ class LobbyService {
     if (uid) {
       this.sendLobbySystemMessage(io, roomVal, `${uid} 离开了自定义房间。`);
     }
+    this.emitHomeRooms(io);
     this.checkReady(io, lobbyId);
   }
 
@@ -537,7 +553,7 @@ class LobbyService {
    * 统一 Rating：多人 ELO 推广。队伍名次取队内最好名次，
    * 队伍 Rating 取队内平均；得分按名次线性分布，K = 24。
    */
-  private applyGameResult(result: GameResultEntry[]): void {
+  private async applyGameResult(result: GameResultEntry[]): Promise<void> {
     if (result.length < 2) {
       return;
     }
@@ -583,7 +599,7 @@ class LobbyService {
       }
     }
 
-    void this.userStore.applyRatingUpdates(updates).catch(() => undefined);
+    await this.userStore.applyRatingUpdates(updates).catch(() => undefined);
   }
 
   private getReq(players: LobbyPlayer[]): number {
