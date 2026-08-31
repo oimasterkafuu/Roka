@@ -50,6 +50,18 @@ const brotliDecompressAsync = promisify(brotliDecompress);
  */
 const DEFAULT_RATING = 1200;
 
+/**
+ * Codeforces 风格新手 Rating：内部从 DEFAULT_RATING 起算并参与 ELO 结算，
+ * 对外显示分从 0 起步，按 1200 / 2^对局数 的 delta 快速逼近真实分后渐渐放慢。
+ */
+const toDisplayRating = (rating: number, ratingGames: number): number => {
+  if (!Number.isFinite(rating) || !Number.isFinite(ratingGames) || ratingGames <= 0) {
+    return 0;
+  }
+  const shift = DEFAULT_RATING / 2 ** ratingGames;
+  return Math.max(0, Math.round(rating - shift));
+};
+
 const RATING_HISTORY_MAX = 1000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -277,6 +289,11 @@ export class UserStore {
     };
   }
 
+  getDisplayRating(usernameInput: string): { rating: number; ratingGames: number } {
+    const { rating, ratingGames } = this.getRating(usernameInput);
+    return { rating: toDisplayRating(rating, ratingGames), ratingGames };
+  }
+
   async applyRatingUpdates(updates: Array<{ username: string; delta: number }>): Promise<void> {
     let changed = false;
     for (const update of updates) {
@@ -289,7 +306,8 @@ export class UserStore {
       if (!Array.isArray(user.ratingHistory)) {
         user.ratingHistory = [];
       }
-      user.ratingHistory.push({ t: Date.now(), r: user.rating });
+      // 历史曲线记录对外显示分，保持与个人主页展示一致。
+      user.ratingHistory.push({ t: Date.now(), r: toDisplayRating(user.rating, user.ratingGames) });
       if (user.ratingHistory.length > RATING_HISTORY_MAX) {
         user.ratingHistory = user.ratingHistory.slice(-RATING_HISTORY_MAX);
       }
@@ -313,7 +331,7 @@ export class UserStore {
     }
     return {
       username: user.username,
-      rating: user.rating ?? DEFAULT_RATING,
+      rating: toDisplayRating(user.rating ?? DEFAULT_RATING, user.ratingGames ?? 0),
       ratingGames: user.ratingGames ?? 0,
       createdAt: user.createdAt,
       isAdmin: user.isAdmin === true,
@@ -331,7 +349,7 @@ export class UserStore {
       }
       entries.push({
         username: user.username,
-        rating: user.rating ?? DEFAULT_RATING,
+        rating: toDisplayRating(user.rating ?? DEFAULT_RATING, ratingGames),
         ratingGames,
       });
     }

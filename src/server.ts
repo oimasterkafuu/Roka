@@ -136,7 +136,7 @@ interface DecoratedFeedPost {
 }
 
 const decorateFeedPost = (post: FeedPost, viewer: string | null): DecoratedFeedPost => {
-  const { rating, ratingGames } = userStore.getRating(post.author);
+  const { rating, ratingGames } = userStore.getDisplayRating(post.author);
   const tier = ratingTier(rating, ratingGames);
   return {
     ...post,
@@ -538,7 +538,7 @@ const boot = async (): Promise<void> => {
     }
     return reply.send({
       username: authUser.username,
-      rating: userStore.getRating(authUser.username),
+      rating: userStore.getDisplayRating(authUser.username),
       isAdmin: userStore.isAdminUser(authUser.username),
     });
   });
