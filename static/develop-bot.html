@@ -547,7 +547,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
         <pre class="code-snippet"><code>// 已知 n, m 和本地 fullGrid/fullArmy/fullIsolated（长度 n*m）
 function applyDiff(pairs, target) {
   if (!Array.isArray(pairs)) return;
-  for (let i = 0; i + 1 < pairs.length; i += 2) {
+  for (let i = 0; i + 1 &lt; pairs.length; i += 2) {
     target[pairs[i]] = pairs[i + 1];
   }
 }
