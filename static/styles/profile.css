@@ -293,8 +293,19 @@ body.profile .feed-actions button:hover {
 body.profile .feed-actions .feed-delete-btn:hover {
   color: #d63535;
 }
+body.profile .like-btn {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
 body.profile .like-btn .heart {
+  display: inline-flex;
   margin-right: 4px;
+}
+body.profile .like-btn .heart svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 body.profile .like-btn.liked,
 body.profile .like-btn.liked .heart {

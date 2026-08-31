@@ -471,8 +471,19 @@ body.home .feed-actions button:hover {
 body.home .feed-actions .feed-delete-btn:hover {
   color: #d63535;
 }
+body.home .like-btn {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
 body.home .like-btn .heart {
+  display: inline-flex;
   margin-right: 4px;
+}
+body.home .like-btn .heart svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 body.home .like-btn.liked,
 body.home .like-btn.liked .heart {

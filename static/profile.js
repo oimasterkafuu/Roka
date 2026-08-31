@@ -160,7 +160,7 @@ function renderRatingChart(history) {
   var padL = 48;
   var padR = 16;
   var padT = 16;
-  var padB = 34;
+  var padB = 14;
   var plotW = W - padL - padR;
   var plotH = H - padT - padB;
 
@@ -252,39 +252,7 @@ function renderRatingChart(history) {
     );
   }
 
-  // 横轴日期刻度（最多 5 个）
-  var tickCount = Math.min(5, points.length);
-  var usedX = {};
-  for (i = 0; i < tickCount; i++) {
-    var idx = Math.round((i * (points.length - 1)) / Math.max(1, tickCount - 1));
-    var t = points[idx].t;
-    var xx = x(t);
-    var key = Math.round(xx);
-    if (usedX[key]) {
-      continue;
-    }
-    usedX[key] = true;
-    var d = new Date(t);
-    el(
-      'text',
-      {
-        x: xx,
-        y: H - padB + 18,
-        'text-anchor': 'middle',
-        'font-size': 11,
-        fill: '#9aa4b2',
-      },
-      d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()),
-    );
-    el('line', {
-      x1: xx,
-      y1: H - padB,
-      x2: xx,
-      y2: H - padB + 4,
-      stroke: '#c4ccd8',
-      'stroke-width': 1,
-    });
-  }
+  // 横轴为时间轴，但不绘制日期刻度文字（过于密集），只保留折线本身。
 
   // 坐标轴线
   el('line', { x1: padL, y1: padT, x2: padL, y2: H - padB, stroke: '#d5dce6', 'stroke-width': 1 });
@@ -391,7 +359,12 @@ function createPostElement(post) {
   var $actions = $('<div class="feed-actions"></div>');
   var $likeBtn = $('<button type="button" class="like-btn"></button>');
   $likeBtn.toggleClass('liked', post.likes.indexOf(currentUsername) !== -1);
-  $('<span class="heart"></span>').text('♥').appendTo($likeBtn);
+  $('<span class="heart"></span>')
+    // 自定义 SVG 爱心，避免 ♥ 字符在不同设备上渲染不一致（有的平台会变成 emoji）。
+    .html(
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+    )
+    .appendTo($likeBtn);
   $('<span class="like-count"></span>').text(post.likes.length).appendTo($likeBtn);
   $likeBtn.appendTo($actions);
   $('<button type="button" class="comment-toggle"></button>')
