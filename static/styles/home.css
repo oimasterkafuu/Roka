@@ -1,0 +1,596 @@
+/* 首页专属明亮风格：仅在 body.home 下生效，覆盖 base.css 的暗色全局规则，
+   不影响游戏页等其他页面。 */
+
+html:has(> body.home) {
+  background-color: #eef1f6;
+}
+
+body.home {
+  background-color: #eef1f6;
+  position: static;
+  height: auto;
+  min-height: 100vh;
+  overflow: auto;
+}
+
+body.home * {
+  color: #253042;
+}
+
+body.home .home-wrap {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 20px 20px 40px;
+  box-sizing: border-box;
+}
+
+/* 顶栏 */
+body.home .home-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+body.home .brand-name {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  font-size: 30px;
+  color: teal;
+  margin-right: 10px;
+}
+body.home .brand-sub {
+  font-size: 13px;
+  color: #6b7686;
+}
+body.home .account {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+body.home #account-name {
+  font-size: 15px;
+}
+
+/* 三栏布局 */
+body.home .home-grid {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+body.home .home-col {
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  body.home .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 卡片 */
+body.home .card {
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 3px rgba(37, 48, 66, 0.08),
+    0 8px 24px rgba(37, 48, 66, 0.05);
+  padding: 18px;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+body.home .card-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #253042;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* 按钮（覆盖 base.css 的白底阴影风） */
+body.home .btn {
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 14px;
+  padding: 9px 20px;
+  margin: 0;
+  transition: background-color 0.15s ease-in-out;
+}
+body.home .btn-primary {
+  background-color: teal;
+  color: #ffffff;
+}
+body.home .btn-primary:hover {
+  background-color: #006e6e;
+  color: #ffffff;
+  box-shadow: none;
+}
+body.home .btn-primary:disabled {
+  background-color: #9fb8b8;
+  color: #ffffff;
+  cursor: not-allowed;
+}
+body.home .btn-secondary {
+  background-color: #e6f3f3;
+  color: teal;
+}
+body.home .btn-secondary:hover {
+  background-color: #d3eaea;
+  color: #006e6e;
+  box-shadow: none;
+}
+body.home .btn-secondary:disabled {
+  background-color: #f0f3f7;
+  color: #9aa4b2;
+  cursor: not-allowed;
+}
+body.home .btn-ghost {
+  background-color: transparent;
+  color: #6b7686;
+  border: 1px solid #d5dce6 !important;
+}
+body.home .btn-ghost:hover {
+  background-color: #f3f5f9;
+  color: #253042;
+  box-shadow: none;
+}
+body.home .btn-sm {
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+/* 输入框 */
+body.home input[type='text'],
+body.home textarea {
+  background-color: #ffffff;
+  border: 1px solid #d5dce6 !important;
+  border-radius: 8px;
+  color: #253042;
+  font-size: 15px;
+  padding: 9px 12px;
+  min-height: 0;
+  box-sizing: border-box;
+}
+body.home input[type='text']:focus,
+body.home textarea:focus {
+  border-color: teal !important;
+}
+body.home ::placeholder {
+  color: #9aa4b2;
+  opacity: 1;
+}
+
+/* 个人信息卡 */
+body.home .profile-card-name {
+  font-size: 19px;
+  word-break: break-all;
+}
+body.home .profile-card-title {
+  font-size: 12px;
+  color: #9aa4b2;
+  margin-left: 6px;
+}
+body.home .admin-badge {
+  display: inline-block;
+  background-color: #fde8e8;
+  color: #d63535;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+body.home .profile-stats {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+body.home .profile-stat {
+  flex: 1;
+  background-color: #f7f9fb;
+  border-radius: 8px;
+  padding: 8px 4px;
+  text-align: center;
+}
+body.home .profile-stat-value {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  font-size: 17px;
+}
+body.home .profile-stat-label {
+  font-size: 11px;
+  color: #9aa4b2;
+  margin-top: 2px;
+}
+body.home .profile-card-link {
+  display: block;
+  margin-top: 12px;
+  font-size: 13px;
+  color: teal;
+  text-decoration: none;
+}
+body.home .profile-card-link:hover {
+  text-decoration: underline;
+}
+
+/* 进入房间 */
+body.home .room-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+body.home #room-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+/* 通用列表表格（房间/回放） */
+body.home .mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+body.home .mini-table th {
+  text-align: left;
+  font-size: 12px;
+  color: #9aa4b2;
+  font-weight: 400;
+  padding: 4px 6px;
+  border-bottom: 1px solid #eef1f6;
+  white-space: nowrap;
+}
+body.home .mini-table td {
+  padding: 7px 6px;
+  border-bottom: 1px solid #f3f5f9;
+  word-break: break-all;
+}
+body.home .mini-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.12s ease-in-out;
+}
+body.home .mini-table tbody tr:hover {
+  background-color: #f3f9f9;
+}
+body.home .mini-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+body.home .mini-table tr.replay-mine td {
+  background-color: #fff8c4;
+}
+body.home .mini-table tr.replay-mine:hover td {
+  background-color: #fff3a8;
+}
+body.home .panel-empty {
+  color: #9aa4b2;
+  font-size: 13px;
+  padding: 12px 0;
+  text-align: center;
+}
+body.home .panel-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+body.home .panel-pager .pager-info {
+  font-size: 12px;
+  color: #9aa4b2;
+}
+
+/* 公告 */
+body.home .announcement-text {
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+body.home .announcement-meta {
+  font-size: 11px;
+  color: #9aa4b2;
+  margin-top: 8px;
+}
+body.home .announcement-edit textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.5;
+}
+body.home .announcement-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* 排行榜 */
+body.home .leaderboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+body.home .leaderboard-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 14px;
+  border-bottom: 1px solid #f3f5f9;
+}
+body.home .leaderboard-list li:last-child {
+  border-bottom: 0;
+}
+body.home .lb-rank {
+  width: 20px;
+  text-align: right;
+  color: #9aa4b2;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+body.home .lb-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.home .lb-rating {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  font-size: 13px;
+  color: #6b7686;
+}
+
+/* 页脚入口 */
+body.home .home-footer {
+  text-align: center;
+  font-size: 13px;
+}
+body.home .home-footer a {
+  color: #6b7686;
+  text-decoration: none;
+}
+body.home .home-footer a:hover {
+  color: teal;
+}
+body.home .home-footer .dot {
+  color: #c4ccd8;
+  margin: 0 8px;
+}
+
+/* 动态发布框 */
+body.home .composer textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  font-size: 15px;
+  line-height: 1.5;
+}
+body.home .composer-hint {
+  font-size: 12px;
+  color: #9aa4b2;
+  margin-top: 6px;
+}
+body.home .composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+body.home .feed-count {
+  font-size: 12px;
+  color: #9aa4b2;
+}
+body.home .feed-cooldown {
+  font-size: 12px;
+  color: #d63535;
+  margin-right: 8px;
+}
+
+/* 动态列表 */
+body.home #feed-list {
+  margin-top: 16px;
+}
+body.home .feed-item {
+  padding: 14px 0;
+  border-bottom: 1px solid #eef1f6;
+}
+body.home .feed-item:first-child {
+  padding-top: 4px;
+}
+body.home .feed-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+body.home .feed-author {
+  font-size: 14px;
+}
+body.home .feed-time {
+  font-size: 12px;
+  color: #9aa4b2;
+}
+body.home .feed-body-wrap {
+  position: relative;
+  margin: 6px 0 8px;
+}
+body.home .feed-text {
+  font-size: 15px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+body.home .feed-text p {
+  margin: 0 0 8px;
+}
+body.home .feed-text img {
+  max-width: 100%;
+}
+body.home .feed-body-wrap.collapsed .feed-text {
+  max-height: 220px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+}
+body.home .feed-expand-btn {
+  background-color: transparent;
+  box-shadow: none;
+  color: teal;
+  font-size: 13px;
+  padding: 4px 0;
+  margin: 0;
+}
+body.home .feed-expand-btn:hover {
+  color: #006e6e;
+  text-decoration: underline;
+  box-shadow: none;
+}
+body.home .feed-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+body.home .feed-actions button {
+  background-color: transparent;
+  box-shadow: none;
+  color: #6b7686;
+  font-size: 13px;
+  padding: 4px 8px;
+  margin: 0;
+  border-radius: 6px;
+}
+body.home .feed-actions button:hover {
+  background-color: #f3f5f9;
+  color: teal;
+  box-shadow: none;
+}
+body.home .feed-actions .feed-delete-btn:hover {
+  color: #d63535;
+}
+body.home .like-btn .heart {
+  margin-right: 4px;
+}
+body.home .like-btn.liked,
+body.home .like-btn.liked .heart {
+  color: #e0245e;
+}
+body.home .feed-actions .like-btn.liked:hover,
+body.home .feed-actions .like-btn.liked:hover .heart {
+  color: #c81e52;
+}
+
+/* 编辑态 */
+body.home .feed-edit textarea {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 6px 0 8px;
+}
+body.home .feed-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 评论区 */
+body.home .comment-section {
+  margin-top: 10px;
+  background-color: #f7f9fb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+body.home .comment-item {
+  padding: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+body.home .comment-item + .comment-item {
+  border-top: 1px solid #eceff4;
+}
+body.home .comment-author {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  margin-right: 6px;
+}
+body.home .comment-text {
+  word-break: break-word;
+}
+body.home .comment-text p {
+  margin: 0;
+}
+body.home .comment-time {
+  font-size: 11px;
+  color: #9aa4b2;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+body.home .comment-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+body.home .comment-input-row .comment-input {
+  flex: 1;
+  font-size: 13px;
+  padding: 8px 12px;
+  min-height: 0;
+}
+
+body.home .feed-empty {
+  text-align: center;
+  color: #9aa4b2;
+  font-size: 14px;
+  padding: 24px 0;
+}
+
+/* 动态分页条 */
+body.home .feed-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+body.home .feed-pager button {
+  background-color: #ffffff;
+  border: 1px solid #d5dce6 !important;
+  box-shadow: none;
+  color: #253042;
+  font-size: 13px;
+  padding: 5px 12px;
+  margin: 0;
+  border-radius: 6px;
+}
+body.home .feed-pager button:hover {
+  background-color: #f3f5f9;
+  box-shadow: none;
+}
+body.home .feed-pager button:disabled {
+  color: #b6bec9;
+  background-color: #f7f9fb;
+  cursor: not-allowed;
+}
+body.home .feed-pager button.current {
+  background-color: teal;
+  border-color: teal !important;
+  color: #ffffff;
+}
+body.home .feed-pager .pager-ellipsis {
+  color: #9aa4b2;
+  font-size: 13px;
+  padding: 0 2px;
+}
+
+@media (max-width: 560px) {
+  body.home .brand-name {
+    font-size: 26px;
+  }
+  body.home .room-row {
+    flex-direction: column;
+  }
+}

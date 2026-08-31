@@ -1,0 +1,634 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
+    />
+    <link rel="stylesheet" href="/main.css" />
+    <title>Roka - 机器人开发协议</title>
+    <style>
+      #app {
+        max-width: 1040px;
+        margin: 84px auto 36px;
+        padding: 0 12px;
+        text-align: left;
+      }
+      .dev-title {
+        margin: 0 0 10px 0;
+        font-size: 34px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .dev-subtitle {
+        margin: 0 0 16px 0;
+        line-height: 1.7;
+        opacity: 0.9;
+      }
+      .dev-panel {
+        margin: 0 0 14px 0;
+        padding: 16px 18px;
+        border: 1px solid #e3e8f0;
+        border-radius: 10px;
+        background: #ffffff;
+        box-shadow:
+          0 1px 3px rgba(37, 48, 66, 0.08),
+          0 6px 18px rgba(37, 48, 66, 0.05);
+      }
+      .dev-panel h2,
+      .dev-panel h3 {
+        margin: 0 0 10px 0;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .dev-panel h2 {
+        font-size: 20px;
+      }
+      .dev-panel h3 {
+        margin-top: 14px;
+        font-size: 16px;
+      }
+      .dev-panel p {
+        margin: 0;
+        line-height: 1.7;
+      }
+      .dev-panel p + p {
+        margin-top: 8px;
+      }
+      .dev-panel ul,
+      .dev-panel ol {
+        margin: 8px 0 0 20px;
+        line-height: 1.7;
+      }
+      .dev-link {
+        color: teal;
+        word-break: break-all;
+      }
+      .protocol-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        margin-top: 8px;
+      }
+      .protocol-table th,
+      .protocol-table td {
+        border-top: 1px solid #eceff4;
+        text-align: left;
+        vertical-align: top;
+        padding: 10px 8px;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      .protocol-table tr:first-child th,
+      .protocol-table tr:first-child td {
+        border-top: none;
+      }
+      .protocol-table th {
+        width: 220px;
+        color: teal;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .code-snippet {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid #e3e8f0;
+        border-radius: 8px;
+        background: #f7f9fb;
+        overflow-x: auto;
+        font-family: Consolas, 'Courier New', monospace;
+        line-height: 1.5;
+        font-size: 13px;
+        white-space: pre;
+      }
+      .tips {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border: 1px solid rgba(0, 128, 128, 0.35);
+        border-radius: 8px;
+        background: #e6f3f3;
+      }
+      .nav-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+    </style>
+  </head>
+
+  <body style="overflow: auto; height: auto">
+    <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
+      <button id="back-develop-btn" class="small">返回网站开发页</button>
+    </div>
+    <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
+      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span>
+    </div>
+
+    <div id="app">
+      <h1 class="dev-title">Roka 机器人开发协议</h1>
+      <p class="dev-subtitle">
+        本文档与服务端实现（<code>src/server.ts</code>、<code>src/game-engine/</code>）逐条核对， 人类和 AI
+        都可以直接照着写出一个可用的 bot。仓库：
+        <a
+          class="dev-link"
+          href="https://github.com/oimasterkafuu/Roka"
+          target="_blank"
+          rel="noopener noreferrer"
+          >https://github.com/oimasterkafuu/Roka</a
+        >
+      </p>
+
+      <section class="dev-panel">
+        <h2>1. 快速开始</h2>
+        <p>
+          仓库内置参考实现
+          <a
+            class="dev-link"
+            href="https://github.com/oimasterkafuu/Roka/tree/main/bot-template/random-patch-bot"
+            target="_blank"
+            rel="noopener noreferrer"
+            ><code>bot-template/random-patch-bot</code></a
+          >：它加入房间、自动准备、维护本地全图缓存，每回合随机挑一个合法动作发送
+          <code>attack</code>。建议先把它跑通，再在其状态机之上替换决策逻辑。
+        </p>
+        <h3>获取 token</h3>
+        <p>
+          登录有验证码，bot 无法自动登录。先在浏览器登录，然后从开发者工具的 Cookie 中复制
+          <code>auth_token</code> 的值（即登录 JWT）。
+        </p>
+        <h3>环境变量</h3>
+        <table class="protocol-table">
+          <tr>
+            <th><code>BOT_SERVER</code></th>
+            <td>服务端地址，默认 <code>http://127.0.0.1:23333</code>。</td>
+          </tr>
+          <tr>
+            <th><code>BOT_ROOM</code></th>
+            <td>必填。要加入的房间号。</td>
+          </tr>
+          <tr>
+            <th><code>BOT_TOKEN</code></th>
+            <td>必填。上一步复制的 <code>auth_token</code> Cookie 值。</td>
+          </tr>
+          <tr>
+            <th><code>BOT_TEAM</code></th>
+            <td>组队模式下的目标队伍号，默认 <code>1</code>；非组队模式会被规整为参赛。</td>
+          </tr>
+          <tr>
+            <th><code>BOT_AUTO_READY</code></th>
+            <td>默认 <code>1</code>（自动参赛并准备）；设为 <code>0</code> 关闭。</td>
+          </tr>
+          <tr>
+            <th><code>BOT_ACTION_DELAY_MS</code></th>
+            <td>每回合决策后的发送延迟毫秒数，默认 <code>120</code>。</td>
+          </tr>
+        </table>
+        <pre class="code-snippet"><code>cd bot-template/random-patch-bot
+pnpm install
+BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=your-room BOT_TOKEN=your-auth-token pnpm start</code></pre>
+      </section>
+
+      <section class="dev-panel">
+        <h2>2. 连接与鉴权</h2>
+        <table class="protocol-table">
+          <tr>
+            <th>Socket 地址</th>
+            <td>与站点同源，Socket.IO 默认路径 <code>/socket.io/</code>。</td>
+          </tr>
+          <tr>
+            <th>transport</th>
+            <td>服务端支持 <code>websocket</code> 与 <code>polling</code>。</td>
+          </tr>
+          <tr>
+            <th>鉴权字段</th>
+            <td>
+              握手优先读取 <code>auth.token</code>（即 Cookie <code>auth_token</code> 中的
+              JWT）；未提供时回退读取握手 Cookie 里的 <code>auth_token</code>。
+            </td>
+          </tr>
+          <tr>
+            <th>Bot 专用令牌</th>
+            <td>
+              服务端可用环境变量 <code>ROKA_BOT_TOKENS</code>（格式
+              <code>"token1:username1,token2:username2"</code>）配置合成 bot 账号：握手
+              <code>auth.token</code> 命中表项时直接以对应用户名放行，无需注册。
+            </td>
+          </tr>
+          <tr>
+            <th>鉴权失败</th>
+            <td>连接被拒绝，客户端收到 <code>connect_error</code>（消息如「未登录或登录已失效。」）。</td>
+          </tr>
+          <tr>
+            <th>身份标识 <code>set_id</code></th>
+            <td>
+              连接后服务器下发 <code>set_id</code>（字符串），值为当前 socket id 的 MD5。后续在
+              <code>room_update.players[].sid</code>、<code>init_map.player_ids</code> 与
+              <code>update.kills</code> 中都用这个 ID 标识自己。
+            </td>
+          </tr>
+          <tr>
+            <th>单会话限制</th>
+            <td>同一用户名同时只允许一个 socket：新连接成功后，该账号的旧连接会被服务端直接断开（顶号）。</td>
+          </tr>
+        </table>
+        <pre class="code-snippet"><code>// JS 连接示例（socket.io-client）
+const { io } = require('socket.io-client');
+const socket = io(BOT_SERVER, {
+  transports: ['websocket', 'polling'],
+  auth: { token: BOT_TOKEN }
+});
+socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre>
+      </section>
+
+      <section class="dev-panel">
+        <h2>3. 房间阶段协议（开局前）</h2>
+
+        <h3>3.1 Client → Server</h3>
+        <table class="protocol-table">
+          <tr>
+            <th><code>join_game_room</code></th>
+            <td>
+              <code>{ room: string }</code>。房间号服务端限制长度 <code>1..15</code>；建议只使用
+              <code>[0-9A-Za-z_-]</code>。
+            </td>
+          </tr>
+          <tr>
+            <th><code>change_team</code></th>
+            <td>
+              <code>{ team: number }</code>。<code>0</code> 表示观战；<code>1..16</code>
+              表示参赛/队伍号。非组队模式下，非 0 会被规整为参赛。
+            </td>
+          </tr>
+          <tr>
+            <th><code>change_ready</code></th>
+            <td><code>{ ready: boolean }</code>。仅参赛者有效，且仅在房间未开局时生效。</td>
+          </tr>
+          <tr>
+            <th><code>change_game_conf</code></th>
+            <td>
+              可选字段 patch：<code>speed</code>（0.5~4）、<code>allow_team</code>（bool）、
+              <code>map_mode</code
+              >（<code>random|maze|archipelago|mediterranean</code>）、<code>map_token</code>（最长 32）。
+              仅房主可改。
+            </td>
+          </tr>
+        </table>
+
+        <h3>3.2 Server → Client</h3>
+        <table class="protocol-table">
+          <tr>
+            <th><code>room_update</code></th>
+            <td>
+              房间状态快照：
+              <code>{ speed, allow_team, map_token, map_mode, in_game, players, ready, need }</code>。
+            </td>
+          </tr>
+          <tr>
+            <th><code>room_update.players[]</code></th>
+            <td>
+              每项为 <code>{ sid, uid, team, ready }</code>：<code>sid</code> 为该玩家 socket id 的 MD5；<code
+                >uid</code
+              >
+              为用户名；<code>team</code> 为 0（观战）或队伍号； <code>ready</code> 为准备状态。
+            </td>
+          </tr>
+          <tr>
+            <th><code>ready</code> / <code>need</code></th>
+            <td>当前已准备人数 / 开局所需人数。<code>need &lt;= 1</code> 时不会开局。</td>
+          </tr>
+          <tr>
+            <th><code>starting</code></th>
+            <td><code>{}</code>。满足开局条件后广播，表示即将进入对局，随后收到 <code>init_map</code>。</td>
+          </tr>
+          <tr>
+            <th><code>chat_message</code></th>
+            <td>
+              聊天消息：<code>{ sender, color, text, team }</code>。<code>color=0</code> 时通常是系统消息。
+            </td>
+          </tr>
+        </table>
+      </section>
+
+      <section class="dev-panel">
+        <h2>4. 对局阶段协议（开局后）</h2>
+
+        <h3>4.1 开局事件 <code>init_map</code></h3>
+        <table class="protocol-table">
+          <tr>
+            <th><code>n</code> / <code>m</code></th>
+            <td>地图行数 / 列数。格子下标 <code>idx = x * m + y</code>（行优先）。</td>
+          </tr>
+          <tr>
+            <th><code>player_ids</code></th>
+            <td>
+              所有玩家的 MD5 SID 数组。用 <code>set_id</code> 在其中查找下标（从 0 开始）， 你的 owner id =
+              <code>index + 1</code>；查不到即为观战。
+            </td>
+          </tr>
+          <tr>
+            <th><code>general</code></th>
+            <td><code>[x, y]</code>，你自己的主城坐标；观战者为 <code>[-1, -1]</code>。</td>
+          </tr>
+        </table>
+
+        <h3>4.2 回合事件 <code>update</code></h3>
+        <table class="protocol-table">
+          <tr>
+            <th>整体结构</th>
+            <td>
+              <code
+                >{ grid_type, army_cnt, isolated, lst_move, leaderboard, turn, kills, surrender_progress,
+                game_end, is_diff, replay? }</code
+              >
+            </td>
+          </tr>
+          <tr>
+            <th><code>turn</code></th>
+            <td>
+              半回合计数（前端显示为 <code>Math.floor(turn/2)</code>）。1 Tick = 0.5 秒（速度 1x），speed
+              0.5~4 只缩放 Tick 间隔。
+            </td>
+          </tr>
+          <tr>
+            <th><code>is_diff = false</code></th>
+            <td>
+              <code>grid_type</code>、<code>army_cnt</code>、<code>isolated</code> 都是长度
+              <code>n*m</code> 的全量数组，按行优先展开。
+            </td>
+          </tr>
+          <tr>
+            <th><code>is_diff = true</code></th>
+            <td>
+              <code>grid_type</code>/<code>army_cnt</code>/<code>isolated</code> 均为 index-value 对：
+              <code>[idx0, val0, idx1, val1, ...]</code>。机器人需要在本地缓存全图并增量合并 （<code
+                >isolated</code
+              >
+              在差分帧中可能为空数组，表示本帧无孤军状态变化）。
+            </td>
+          </tr>
+          <tr>
+            <th><code>isolated</code> 取值</th>
+            <td>
+              <code>0</code> 正常；<code>1</code> 断链宽限期（断链后前 5 回合 / 10
+              Tick，只闪烁、尚未衰减）；<code>2</code> 衰减期（第 11 Tick 起每回合 / 每 2 Tick 衰减 max(1,
+              ⌈兵力×5%⌉)，归零变中立）。
+            </td>
+          </tr>
+          <tr>
+            <th><code>lst_move</code></th>
+            <td>
+              <code>{ x, y, dx, dy, half, mode, op, skip }</code
+              >。表示服务器已执行的最近行动（用于客户端队列确认）。<code>op</code>：<code>'m'</code>
+              推兵、<code>'b'</code> 建成指挥所、<code>'c'</code> 升级主城（后两者 <code>dx=dy=-1</code>）。
+              无动作时为 <code>{-1,-1,-1,-1,false,0,'m'}</code>。<code>skip</code>
+              为本 Tick 被执行操作之前因条件不满足被自动丢弃的队首操作数（无执行时为本 Tick
+              全部丢弃数）；失效操作会被服务器直接移出队列，后续操作在同一 Tick 继续尝试执行。
+            </td>
+          </tr>
+          <tr>
+            <th><code>leaderboard[]</code></th>
+            <td>
+              每项结构：<code>{ team, uid, army, land, class_, dead, id }</code>。<code>class_</code> 可为
+              <code>''</code>、<code>'afk'</code>、<code>'dead'</code>。
+            </td>
+          </tr>
+          <tr>
+            <th><code>kills</code></th>
+            <td>
+              <code>Record&lt;sid_md5, killer_name&gt;</code>。当你被击败时，键为你的 <code>set_id</code>。
+            </td>
+          </tr>
+          <tr>
+            <th><code>surrender_progress</code></th>
+            <td>
+              <code>Record&lt;owner_id, ratio&gt;</code>，ratio 范围 <code>0..1</code>，用于渲染投降衰减效果。
+            </td>
+          </tr>
+          <tr>
+            <th><code>game_end</code></th>
+            <td><code>true</code> 表示该帧为终局帧。</td>
+          </tr>
+          <tr>
+            <th><code>replay</code></th>
+            <td>可选字符串，仅在终局附近出现，表示回放 ID。</td>
+          </tr>
+        </table>
+
+        <h3>4.3 格子编码（<code>grid_type</code> 线上编码）</h3>
+        <table class="protocol-table">
+          <tr>
+            <th><code>0..49</code></th>
+            <td>普通地块，owner id = code（0 表示中立空地）。服务端内部记为 <code>0</code>。</td>
+          </tr>
+          <tr>
+            <th><code>50..99</code></th>
+            <td>
+              指挥所，owner id = code - 50（内部 <code>-1</code>）。只能由玩家建造（<code>build</code>
+              操作，相当于 X 键，消耗 50 兵），地图不再预置；与普通地块一样每 50 Tick +1
+              兵（不享受爆发期加成），是连通锚点。
+            </td>
+          </tr>
+          <tr>
+            <th><code>100..149</code></th>
+            <td>
+              主城（将军），owner id = code - 100（内部 <code>-2</code>）。每 Tick +1 兵；失去所有主城即出局。
+            </td>
+          </tr>
+          <tr>
+            <th><code>150..199</code></th>
+            <td>己方沼泽，owner id = code - 150（内部 <code>2</code>）。不产兵、不可建造，但参与连通。</td>
+          </tr>
+          <tr>
+            <th><code>200</code></th>
+            <td>可见空地（中立）。</td>
+          </tr>
+          <tr>
+            <th><code>201</code></th>
+            <td>可见山脉（内部 <code>1</code>），不可通行。</td>
+          </tr>
+          <tr>
+            <th><code>202 / 203 / 205</code></th>
+            <td>（已废弃）旧版战争迷雾编码。现已无战雾，服务器不会下发。</td>
+          </tr>
+          <tr>
+            <th><code>204</code></th>
+            <td>可见中立沼泽。</td>
+          </tr>
+        </table>
+        <p style="margin-top: 8px">
+          <code>army_cnt</code> 与 <code>grid_type</code> 同维度。没有战争迷雾：<code>update</code>
+          始终携带全图真实状态（全图可见）。
+        </p>
+
+        <h3>4.4 规则要点（与旧版 / generals.io 的差异）</h3>
+        <ul>
+          <li>主城每 Tick +1 兵；普通地块与指挥所每 50 Tick +1（仅正常状态；指挥所不享受爆发加成）。</li>
+          <li>第 26~50 Tick 为全局爆发期：正常普通领土每 Tick 额外 +1。</li>
+          <li>
+            无战争迷雾：全图始终可见，<code>update</code> 始终为全图真实状态（202/203/205 迷雾编码已废弃）。
+          </li>
+          <li>
+            城市（指挥所）不再由地图预置，只能由玩家建造：X 建指挥所消耗 50 兵，C 升级主城再消耗 50 兵。
+          </li>
+          <li>
+            攻击兵力必须<b>严格大于</b>防守兵力才能占领；未严格大于（含相等）时进攻失败但双方互损：进攻方损失全部推出兵力，防守方等量扣除（最低到
+            0，归属与建筑不变）。
+          </li>
+          <li>
+            占领有损耗：占领成功后目标格新兵力 =
+            <b>攻击兵力 − 守军兵力</b>；被占领的指挥所/主城会被摧毁（降级为普通地块）。
+          </li>
+          <li>
+            攻下敌方最后一座主城 →
+            该玩家出局，残余领土<b>不再转移</b>给攻击方，全部沦为孤军（不触发断链减半），随后按孤军规则逐渐衰减至中立。
+          </li>
+          <li>兵力无上限。</li>
+          <li>
+            连通与孤军：与己方所有主城/指挥所断开的领土成为孤军（见 <code>update.isolated</code>
+            ），断链瞬间兵力减半（⌊n/2⌋，1 兵保持为 1）；前 5 回合（10
+            Tick）为宽限期（只快速闪烁、不衰减），第 6 回合（第 11 Tick）起每回合（每 2 Tick）衰减 max(1,
+            ⌈当前兵力×5%⌉)，归零变中立；重新连通立即恢复且兵力
+            ×2。被切断的领土会持续衰减，扩张时务必保持连通。
+          </li>
+        </ul>
+      </section>
+
+      <section class="dev-panel">
+        <h2>5. 对局内可发送操作</h2>
+        <table class="protocol-table">
+          <tr>
+            <th><code>attack</code></th>
+            <td>
+              <code>{ x, y, dx, dy, mode, half }</code>。坐标均为 <code>[row, col]</code>。
+              <code>(x,y)</code> 是起点，<code>(dx,dy)</code> 是目标，要求四邻接。推兵量由
+              <code>mode</code> 决定：<code>2</code> 全冲（只留 1 兵看守）、<code>1</code>
+              半兵（智能分兵理论推出量减半取整，一次性）、<code>0</code>
+              智能分兵（为其他三方向的非己方相邻格保留「兵力-1」之和 + 1）。<code>half</code>
+              保留作兼容（<code>half=true</code> 等价 <code>mode=1</code>）。
+            </td>
+          </tr>
+          <tr>
+            <th><code>build</code></th>
+            <td>
+              <code>{ x, y, op }</code>。<code>op='b'</code> 建造指挥所（相当于 X 键），<code>op='c'</code>
+              升级主城（相当于 C 键），均消耗 50 兵。与 <code>attack</code> 共用同一队列，每 Tick
+              每玩家最多执行一条队列操作。入队只校验地形（普通地块），可排在队列很靠后的未来位置；
+              执行时才校验归属/兵力/连通，条件不满足会自动跳过（通过
+              <code>lst_move.skip</code> 告知丢弃数量），不会产生消耗。在普通地块上连发 <code>b</code> +
+              <code>c</code>
+              两条即可两 Tick 后建成主城（相当于在普通地块按 C 键）。
+            </td>
+          </tr>
+          <tr>
+            <th><code>clear_queue</code></th>
+            <td>清空当前玩家待执行操作队列。</td>
+          </tr>
+          <tr>
+            <th><code>pop_queue</code></th>
+            <td>删除队尾一条待执行操作。</td>
+          </tr>
+          <tr>
+            <th><code>send_message</code></th>
+            <td><code>{ text, team }</code>。team=true 表示队伍频道。</td>
+          </tr>
+          <tr>
+            <th><code>surrender</code></th>
+            <td>投降并转观战。</td>
+          </tr>
+          <tr>
+            <th><code>return_room</code> / <code>leave</code></th>
+            <td>退出对局返回房间。服务端会回 <code>left</code>。</td>
+          </tr>
+        </table>
+      </section>
+
+      <section class="dev-panel">
+        <h2>6. 增量帧合并示例</h2>
+        <pre class="code-snippet"><code>// 已知 n, m 和本地 fullGrid/fullArmy/fullIsolated（长度 n*m）
+function applyDiff(pairs, target) {
+  if (!Array.isArray(pairs)) return;
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    target[pairs[i]] = pairs[i + 1];
+  }
+}
+
+function applyUpdate(frame) {
+  if (frame.is_diff) {
+    applyDiff(frame.grid_type, fullGrid);
+    applyDiff(frame.army_cnt, fullArmy);
+    if (frame.isolated) applyDiff(frame.isolated, fullIsolated);
+  } else {
+    fullGrid = frame.grid_type.slice();
+    fullArmy = frame.army_cnt.slice();
+    fullIsolated = (frame.isolated || new Array(n * m).fill(0)).slice();
+  }
+}</code></pre>
+        <div class="tips">
+          <b>提示：</b>
+          <ul>
+            <li>任何时刻都维护一份全量缓存，避免只依赖 diff 帧。</li>
+            <li>收到 <code>is_diff=false</code> 全量帧时，用它重置本地状态。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="dev-panel">
+        <h2>7. 常见坑</h2>
+        <ul>
+          <li>
+            <b>单会话顶号</b>：同一用户名新连接会顶掉旧连接。bot 与浏览器同账号并存时会互相挤掉，建议给 bot
+            单独注册账号（或使用服务端 <code>ROKA_BOT_TOKENS</code> 合成账号）。
+          </li>
+          <li>
+            <b>队列节流</b>：每 Tick 每名玩家最多执行一条队列操作。一帧内连发多条 <code>attack</code>/<code
+              >build</code
+            >
+            只是入队，不会立刻全部生效；规划节奏时按 Tick 计算。
+          </li>
+          <li>
+            <b>推兵模式优先级</b>：按键上 Shift（智能分兵，<code>mode=0</code>）&gt;
+            Z（半兵，<code>mode=1</code>）&gt; 普通（全冲，<code>mode=2</code>）。<b>注意</b>：不显式传
+            <code>mode</code> 且 <code>half=false</code>（或省略）时，服务端会按
+            <code>mode=0</code> 智能分兵处理——旧式
+            <code>{ x, y, dx, dy, half: false }</code> 并不等于全冲；要全冲请显式传 <code>mode: 2</code>。
+          </li>
+          <li>
+            <b>操作确认</b>：服务端不回 ACK，用 <code>update.lst_move</code> 对照本地队列：
+            <code>skip</code> 条队首操作被丢弃后，本 Tick 执行的那一条与 <code>lst_move</code> 匹配。
+          </li>
+          <li>
+            <b>孤军不可操作</b>：<code>isolated != 0</code> 的格子不可推兵、不可建造，推兵校验会直接失败。
+          </li>
+        </ul>
+        <div class="nav-row">
+          <button id="goto-home" class="small">返回首页</button>
+          <button id="goto-web-dev" class="small inverted">返回网站开发页</button>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      async function loadUser() {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+          location.href = '/login';
+          return;
+        }
+        const data = await res.json();
+        document.getElementById('account-name').textContent = data.username;
+      }
+
+      document.getElementById('back-develop-btn').addEventListener('click', function () {
+        location.href = '/develop';
+      });
+
+      document.getElementById('goto-home').addEventListener('click', function () {
+        location.href = '/';
+      });
+
+      document.getElementById('goto-web-dev').addEventListener('click', function () {
+        location.href = '/develop';
+      });
+
+      loadUser();
+    </script>
+  </body>
+</html>

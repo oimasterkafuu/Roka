@@ -1,0 +1,183 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
+    />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"
+      integrity="sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <link rel="stylesheet" href="/main.css" />
+    <title>Roka - 登录</title>
+  </head>
+
+  <body>
+    <div class="center center-tag" style="width: min(92vw, 520px)">
+      <div class="background" style="padding: 18px 20px">
+        <h2 style="margin: 4px 0 12px; font-family: Quicksand-Bold, HYMaQiDuo-Bold">账号登录</h2>
+        <p id="auth-error" style="color: #c0392b; min-height: 20px; margin: 0 0 10px"></p>
+        <input
+          id="auth-username"
+          type="text"
+          placeholder="用户名（3-20 位：字母/数字/_）"
+          style="width: 100%; box-sizing: border-box; margin-bottom: 8px"
+        />
+        <input
+          id="auth-password"
+          type="password"
+          placeholder="密码（6-72 位）"
+          style="width: 100%; box-sizing: border-box; margin-bottom: 8px"
+        />
+        <input
+          id="auth-website"
+          type="text"
+          tabindex="-1"
+          autocomplete="off"
+          aria-hidden="true"
+          style="position: absolute; left: -99999px; opacity: 0; pointer-events: none"
+        />
+        <div style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center">
+          <input
+            id="auth-captcha"
+            type="text"
+            placeholder="验证码"
+            maxlength="6"
+            style="flex: 1; min-width: 0; box-sizing: border-box; text-transform: uppercase"
+          />
+          <img
+            id="captcha-image"
+            alt="验证码"
+            width="132"
+            height="46"
+            title="点击刷新验证码"
+            style="border-radius: 6px; border: 1px solid #7cc7c7; background: #ecfeff; cursor: pointer"
+          />
+        </div>
+        <div style="display: flex; gap: 8px; margin: 6px 0">
+          <button id="login-btn" style="flex: 1; margin: 0">登录</button>
+          <button id="register-btn" class="inverted" style="flex: 1; margin: 0">注册</button>
+        </div>
+        <div
+          style="
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid #eceff4;
+            font-size: 12px;
+            line-height: 1.6;
+            color: #6b7686;
+            text-align: left;
+          "
+        >
+          <b style="font-size: 12px; color: #6b7686">密码安全说明</b>
+          <p style="margin: 4px 0 0; font-size: 12px; color: #6b7686">
+            密码使用 scrypt 密钥派生（每用户 16 字节随机盐，64 字节输出，Node
+            <code style="font-size: 11px">crypto.scryptSync</code
+            >）；服务端只存储盐与哈希，绝不保存明文。登录校验使用
+            <code style="font-size: 11px">timingSafeEqual</code> 恒定时间比较，防时序攻击。
+            <a
+              href="https://github.com/oimasterkafuu/Roka/blob/main/src/auth-store.ts"
+              target="_blank"
+              rel="noopener noreferrer"
+              style="color: teal; font-size: 12px"
+              >查看实现源码</a
+            >
+          </p>
+        </div>
+      </div>
+    </div>
+    <script>
+      var captchaId = '';
+
+      async function refreshCaptcha(showErrorMessage) {
+        try {
+          const res = await fetch('/api/auth/captcha', { cache: 'no-store' });
+          const data = await res.json().catch(function () {
+            return {};
+          });
+          if (!res.ok || !data.captchaId || !data.captchaSvg) {
+            throw new Error('captcha-load-failed');
+          }
+          captchaId = String(data.captchaId);
+          $('#captcha-image').attr('src', String(data.captchaSvg));
+          $('#auth-captcha').val('');
+          return true;
+        } catch (err) {
+          captchaId = '';
+          $('#captcha-image').attr('src', '');
+          if (showErrorMessage) {
+            $('#auth-error').text('验证码加载失败，请稍后重试。');
+          }
+          return false;
+        }
+      }
+
+      async function submitAuth(action) {
+        var username = $('#auth-username').val().trim();
+        var password = $('#auth-password').val();
+        var captchaCode = String($('#auth-captcha').val()).trim().toUpperCase();
+        $('#auth-error').text('');
+        if (!username || !password || !captchaCode) {
+          $('#auth-error').text('用户名、密码和验证码不能为空。');
+          return;
+        }
+        if (!captchaId) {
+          $('#auth-error').text('验证码已失效，请刷新后重试。');
+          await refreshCaptcha(false);
+          return;
+        }
+        try {
+          var website = String($('#auth-website').val() || '').trim();
+          const res = await fetch('/api/auth/' + action, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, captchaId, captchaCode, website }),
+          });
+          const data = await res.json().catch(function () {
+            return {};
+          });
+          if (!res.ok) {
+            $('#auth-error').text(data.error || '请求失败，请稍后重试。');
+            await refreshCaptcha(false);
+            return;
+          }
+          location.href = '/';
+        } catch (err) {
+          $('#auth-error').text('网络异常，请重试。');
+          await refreshCaptcha(false);
+        }
+      }
+
+      $('#captcha-image').on('click', function () {
+        refreshCaptcha(true);
+      });
+      $('#login-btn').on('click', function () {
+        submitAuth('login');
+      });
+      $('#register-btn').on('click', function () {
+        submitAuth('register');
+      });
+      $('#auth-captcha').on('input', function () {
+        var normalized = String($(this).val())
+          .replace(/[^a-zA-Z0-9]/g, '')
+          .toUpperCase();
+        $(this).val(normalized);
+      });
+      $('#auth-password').on('keypress', function (e) {
+        if (e.keyCode == 13) {
+          submitAuth('login');
+        }
+      });
+      $('#auth-captcha').on('keypress', function (e) {
+        if (e.keyCode == 13) {
+          submitAuth('login');
+        }
+      });
+
+      refreshCaptcha(true);
+    </script>
+  </body>
+</html>

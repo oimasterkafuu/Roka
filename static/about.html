@@ -1,0 +1,657 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
+    />
+    <link rel="stylesheet" href="/main.css" />
+    <title>Roka - 关于</title>
+    <style>
+      #app {
+        max-width: 1200px;
+        margin: 84px auto 36px;
+        padding: 0 12px;
+        text-align: left;
+      }
+      .about-title {
+        margin: 0 0 10px 0;
+        font-size: 34px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .about-subtitle {
+        margin: 0 0 16px 0;
+        line-height: 1.7;
+        opacity: 0.9;
+      }
+      .about-panel {
+        margin: 0 0 14px 0;
+        padding: 16px 18px;
+        border: 1px solid #e3e8f0;
+        border-radius: 10px;
+        background: #ffffff;
+        box-shadow:
+          0 1px 3px rgba(37, 48, 66, 0.08),
+          0 6px 18px rgba(37, 48, 66, 0.05);
+      }
+      .about-panel h3 {
+        margin: 0 0 10px 0;
+        font-size: 18px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .about-panel p {
+        margin: 0;
+        line-height: 1.7;
+        opacity: 0.95;
+      }
+      .source-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      .source-table th,
+      .source-table td {
+        padding: 10px 8px;
+        border-top: 1px solid #eceff4;
+        vertical-align: top;
+        text-align: left;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      .source-table tr:first-child th,
+      .source-table tr:first-child td {
+        border-top: none;
+      }
+      .source-table th {
+        width: 130px;
+        color: teal;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .about-link {
+        color: teal;
+        word-break: break-all;
+      }
+      .about-note {
+        margin-top: 10px;
+        font-size: 13px;
+        opacity: 0.78;
+      }
+      .rule-intro-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .rule-block h4 {
+        margin: 0 0 8px 0;
+        font-size: 15px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .rule-list {
+        margin: 0;
+        padding-left: 18px;
+        line-height: 1.7;
+      }
+      .rule-list li {
+        margin: 0 0 4px 0;
+      }
+      .terrain-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .terrain-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 0 0 8px 0;
+      }
+      .terrain-icon-cell {
+        width: 28px;
+        height: 28px;
+        flex: none;
+        margin-top: 1px;
+        border: 1px solid black;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: 20px 20px;
+        box-sizing: border-box;
+      }
+      .terrain-icon-cell.general {
+        background-color: red;
+        background-image: url('/crown.png');
+      }
+      .terrain-icon-cell.city {
+        background-color: gray;
+        background-image: url('/city.png');
+      }
+      .terrain-icon-cell.mountain {
+        background-color: #dcdcdc;
+        background-image: url('/mountain.png');
+      }
+      .terrain-icon-cell.swamp {
+        background-color: gray;
+        background-image: url('/swamp.png');
+      }
+      .terrain-text {
+        margin: 0;
+        line-height: 1.6;
+      }
+      .kbd {
+        display: inline-block;
+        min-width: 18px;
+        padding: 0 6px;
+        border: 1px solid #d5dce6;
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        background: #f3f5f9;
+        font-size: 12px;
+        line-height: 20px;
+        text-align: center;
+        color: #253042;
+        white-space: nowrap;
+      }
+      @media (max-width: 760px) {
+        .rule-intro-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .map-example-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .map-example-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+      }
+      .map-example-control select {
+        height: 30px;
+        min-width: 110px;
+        padding: 0 8px;
+        border: 1px solid #d5dce6;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #253042;
+        font-family: Quicksand, HYMaQiDuo;
+      }
+      .map-example-status {
+        font-size: 13px;
+        opacity: 0.86;
+      }
+      .map-example-single {
+        margin-top: 12px;
+        border: 1px solid #e3e8f0;
+        border-radius: 8px;
+        background: #f7f9fb;
+        padding: 10px;
+      }
+      .map-example-single h4 {
+        margin: 0;
+        font-size: 16px;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .map-example-meta {
+        margin-top: 4px;
+        font-size: 12px;
+        opacity: 0.86;
+        line-height: 1.6;
+        word-break: break-all;
+      }
+      .map-example-board-wrap {
+        margin-top: 8px;
+        border: 1px solid #e3e8f0;
+        background: #ffffff;
+        overflow: hidden;
+        max-width: 100%;
+        padding: 6px;
+      }
+      .map-example-board {
+        width: max-content;
+        min-width: 100%;
+      }
+      .map-example-board table {
+        border-spacing: 0;
+      }
+      .map-example-board td {
+        background-position: center;
+        background-repeat: no-repeat;
+        position: relative;
+        border: 1px solid black;
+        text-align: center;
+        text-shadow: 0 0 2px black;
+        padding: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        color: white;
+        user-select: none;
+        box-sizing: border-box;
+        width: var(--cell-size, 12px);
+        height: var(--cell-size, 12px);
+        max-width: var(--cell-size, 12px);
+        max-height: var(--cell-size, 12px);
+        min-width: var(--cell-size, 12px);
+        min-height: var(--cell-size, 12px);
+        background-size: var(--icon-size, 10px) var(--icon-size, 10px);
+        font-size: var(--font-size, 10px);
+      }
+    </style>
+  </head>
+
+  <body style="overflow: auto; height: auto">
+    <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
+      <button id="back-home-btn" class="small">返回首页</button>
+    </div>
+    <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
+      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span>
+    </div>
+
+    <div id="app">
+      <h1 class="about-title">关于 Roka</h1>
+      <p class="about-subtitle">
+        Roka 是一个多人策略对战项目。当前版本聚焦于自定义房间、实时对局、回放和账号系统，
+        并在原有玩法基础上做了适配与扩展。
+      </p>
+
+      <section class="about-panel">
+        <h3>项目说明</h3>
+        <p>
+          本项目不是官方 generals.io 服务。页面中的来源信息用于致谢与许可证合规说明，
+          便于追溯核心玩法、实现参考和协议来源。
+        </p>
+      </section>
+
+      <section class="about-panel">
+        <h3>基础规则与地形</h3>
+        <div class="rule-intro-grid">
+          <div class="rule-block">
+            <h4>基本规则</h4>
+            <ul class="rule-list">
+              <li>
+                每位玩家有 1 座主城（皇冠），主城被攻陷即被淘汰；其残余领土不再被接管，全部沦为孤军逐渐消亡。
+              </li>
+              <li>主城每个“半回合”增 1 兵力；普通领地与指挥所每 50 个“半回合”增 1 兵力。</li>
+              <li>第 26~50 个“半回合”为爆发期：正常状态的普通领地每个“半回合”额外增 1 兵力。</li>
+              <li>山脉不可通行；沼泽不产兵也不可建造，但可占领存兵，用于保持连通与卡位。</li>
+              <li>
+                与己方所有主城/指挥所断开连接的领土会沦为孤军（闪烁提示）：兵力立即减半（1 兵保持为 1），前 5
+                回合只快速闪烁不衰减，第 6 回合起每回合衰减 5%，归零变中立；重新连通时兵力翻倍恢复。
+              </li>
+              <li>地图模式会影响地形结构与前期扩张路线。</li>
+            </ul>
+          </div>
+          <div class="rule-block">
+            <h4>地形说明</h4>
+            <ul class="terrain-list">
+              <li class="terrain-item">
+                <span class="terrain-icon-cell general" aria-hidden="true"></span>
+                <p class="terrain-text"><b>主城（皇冠）</b>：玩家核心据点，失守即出局。</p>
+              </li>
+              <li class="terrain-item">
+                <span class="terrain-icon-cell city" aria-hidden="true"></span>
+                <p class="terrain-text">
+                  <b>指挥所（城市）</b>：战略据点兼连通锚点，与普通地块一样每 50 个“半回合”增 1
+                  兵力（不享受爆发期加成）；地图不再预置，只能由玩家消耗 50
+                  兵力建造（X）或将己方指挥所升级为主城（C）。
+                </p>
+              </li>
+              <li class="terrain-item">
+                <span class="terrain-icon-cell mountain" aria-hidden="true"></span>
+                <p class="terrain-text"><b>山脉</b>：阻挡移动的不可通行地形。</p>
+              </li>
+              <li class="terrain-item">
+                <span class="terrain-icon-cell swamp" aria-hidden="true"></span>
+                <p class="terrain-text"><b>沼泽</b>：不产兵、不可建造，仅用于连通与卡位。</p>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="about-panel">
+        <h3>回合与操作说明</h3>
+        <div class="rule-intro-grid">
+          <div class="rule-block">
+            <h4>回合显示与增兵</h4>
+            <ul class="rule-list">
+              <li>
+                顶部回合采用“半回合显示”：<br />
+                <span class="kbd">回合 1</span> → <span class="kbd">回合 1.</span> →
+                <span class="kbd">回合 2</span> → <span class="kbd">回合 2.</span>
+              </li>
+              <li>无点与有点属于同一整回合的两个阶段，不是两个完整回合。</li>
+              <li>所有已占领普通领地与指挥所每 25 回合（50 个“半回合”）增加 1 兵力。</li>
+              <li>主城每个“半回合”额外增加 1 兵力。</li>
+              <li>每轮第 26~50 个“半回合”为爆发期：正常状态的普通领地每个“半回合”再额外增加 1 兵力。</li>
+              <li>全程无战争迷雾，全图对所有玩家开放可见。</li>
+              <li>
+                攻击时，兵力按相减结算，且必须严格大于守军才能占领；占领有损耗，占领后新兵力 = 攻击兵力 −
+                守军兵力。自己的格子需要看守者，所以最多派出“当前兵力 - 1”。
+              </li>
+            </ul>
+            <div style="margin-top: 12px">
+              <button id="open-tutorial-btn" class="small">进入互动教程</button>
+            </div>
+          </div>
+          <div class="rule-block">
+            <h4>鼠标与键盘</h4>
+            <ul class="rule-list">
+              <li>鼠标左键拖动：平移地图；滚轮：缩放地图。</li>
+              <li>点击己方格：选中；点击空白背景：取消当前选中。</li>
+              <li>
+                <span class="kbd">W/A/S/D</span> 或 <span class="kbd">↑/←/↓/→</span>：从选中格移动/进攻。
+              </li>
+              <li>
+                <span class="kbd">Z</span>：下一步半兵（50%，一次性）；<span class="kbd">Shift</span
+                >：智能分兵（为其他方向威胁保留兵力）；默认全兵推出（只留 1 兵看守）。
+              </li>
+              <li>
+                <span class="kbd">X</span>：在选中的普通地排队建造指挥所（50 兵）；
+                <span class="kbd">C</span>：排队升级主城（50 兵），在普通地上按 C 会自动连排“建指挥所 +
+                升级主城”两步。
+              </li>
+              <li>建造进入操作队列，下一回合执行；执行时条件不满足会自动跳过，不产生消耗。</li>
+              <li><span class="kbd">Q</span>：清空操作队列；<span class="kbd">E</span>：撤销最后一步。</li>
+              <li><span class="kbd">Enter</span>：公屏聊天；<span class="kbd">T</span>：队伍聊天。</li>
+              <li><span class="kbd">Esc</span>：打开/关闭投降确认。</li>
+              <li><span class="kbd">Space</span>：跳转回主城。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="about-panel">
+        <h3>来源与参考</h3>
+        <table class="source-table">
+          <tr>
+            <th>项目源码</th>
+            <td>
+              oimasterkafuu / Roka
+              <br />
+              <a
+                class="about-link"
+                href="https://github.com/oimasterkafuu/Roka"
+                target="_blank"
+                rel="noopener noreferrer"
+                >https://github.com/oimasterkafuu/Roka</a
+              >
+            </td>
+            <td>AGPL-3.0</td>
+          </tr>
+          <tr>
+            <th>原始玩法</th>
+            <td>
+              generals.io
+              <br />
+              <a class="about-link" href="https://generals.io/" target="_blank" rel="noopener noreferrer"
+                >https://generals.io/</a
+              >
+            </td>
+            <td>Closed-source</td>
+          </tr>
+          <tr>
+            <th>原始玩法</th>
+            <td>
+              Konkr.io
+              <br />
+              <a class="about-link" href="https://konkr.io/" target="_blank" rel="noopener noreferrer"
+                >https://konkr.io/</a
+              >
+            </td>
+            <td>Closed-source（闭源，未发布源码）</td>
+          </tr>
+          <tr>
+            <th>复刻基础</th>
+            <td>
+              mcfx0 / generals.io_copy
+              <br />
+              <a
+                class="about-link"
+                href="https://github.com/mcfx/generals.io_copy"
+                target="_blank"
+                rel="noopener noreferrer"
+                >https://github.com/mcfx/generals.io_copy</a
+              >
+            </td>
+            <td>BSD 3-Clause License</td>
+          </tr>
+          <tr>
+            <th>灵感启发</th>
+            <td>
+              By-Ha / Checkmate
+              <br />
+              <a
+                class="about-link"
+                href="https://github.com/By-Ha/Checkmate"
+                target="_blank"
+                rel="noopener noreferrer"
+                >https://github.com/By-Ha/Checkmate</a
+              >
+            </td>
+            <td>MIT License</td>
+          </tr>
+        </table>
+      </section>
+
+      <section class="about-panel">
+        <h3>地图示例</h3>
+        <p>如果觉得地图的名字晦涩难懂，可以生成一张示例地图参考。</p>
+        <div class="map-example-toolbar">
+          <label class="map-example-control"
+            >地图类型：
+            <select id="map-example-mode">
+              <option value="random">标准地图</option>
+              <option value="maze">峡谷回廊</option>
+              <option value="archipelago">群岛要塞</option>
+              <option value="mediterranean">地中海</option>
+            </select>
+          </label>
+          <label class="map-example-control"
+            >人数：
+            <select id="map-example-players"></select>
+          </label>
+          <button id="generate-map-example-btn" class="small">生成地图</button>
+          <span id="map-example-status" class="map-example-status"></span>
+        </div>
+        <article id="map-example-single" class="map-example-single">
+          <h4 id="map-example-title">地图示例</h4>
+          <div id="map-example-meta" class="map-example-meta"></div>
+          <div class="map-example-board-wrap">
+            <div id="map-example-board" class="map-example-board"></div>
+          </div>
+        </article>
+      </section>
+    </div>
+
+    <script>
+      let lastMapExampleData = null;
+      let resizeTimer = 0;
+
+      function mapModeLabel(mapMode) {
+        if (mapMode === 'maze') return '峡谷回廊';
+        if (mapMode === 'archipelago') return '群岛要塞';
+        if (mapMode === 'mediterranean') return '地中海';
+        return '标准地图';
+      }
+
+      function resolveScaleClass(cellSize) {
+        if (cellSize <= 20) return 1;
+        if (cellSize <= 25) return 2;
+        if (cellSize <= 32) return 3;
+        if (cellSize <= 40) return 4;
+        if (cellSize <= 50) return 5;
+        return 6;
+      }
+
+      function buildCellHtml(code, army, scaleClass) {
+        let cls = `s${scaleClass}`;
+        let txt = '';
+        if (code < 200) {
+          if (code < 50) {
+            cls += ` c${code}`;
+          } else if (code < 100) {
+            cls += ` c${code - 50} city`;
+          } else if (code < 150) {
+            cls += ` c${code - 100} general`;
+          } else {
+            cls += ` c${code - 150} swamp`;
+          }
+          if (army || code === 50) {
+            txt = String(army);
+          }
+        } else if (code === 200) {
+          cls += ' empty';
+        } else if (code === 201) {
+          cls += ' mountain empty';
+        } else if (code === 202) {
+          cls += ' fog';
+        } else if (code === 203) {
+          cls += ' obstacle fog';
+        } else if (code === 204) {
+          cls += ' swamp';
+        } else if (code === 205) {
+          cls += ' swamp fog';
+        }
+        if (txt.length > 0 && scaleClass === 1) {
+          txt = `<div class="txt">${txt}</div>`;
+        }
+        return `<td class="${cls}">${txt}</td>`;
+      }
+
+      function renderExampleBoard(container, example) {
+        const wrap = container.parentElement;
+        const availableWidth = Math.max(40, wrap.clientWidth - 2);
+        const cellSize = Math.max(4, Math.floor(availableWidth / example.m));
+        const scaleClass = resolveScaleClass(cellSize);
+        container.style.setProperty('--cell-size', `${cellSize}px`);
+        container.style.setProperty('--icon-size', `${Math.max(3, Math.floor(cellSize * 0.8))}px`);
+        container.style.setProperty('--font-size', `${Math.max(6, Math.floor(cellSize * 0.45))}px`);
+
+        let html = '<table><tbody>';
+        for (let i = 0; i < example.n; i += 1) {
+          html += '<tr>';
+          for (let j = 0; j < example.m; j += 1) {
+            const idx = i * example.m + j;
+            html += buildCellHtml(example.grid_type[idx], example.army_cnt[idx], scaleClass);
+          }
+          html += '</tr>';
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+      }
+
+      function renderMapExample(data) {
+        if (!data || !data.example) {
+          return;
+        }
+        lastMapExampleData = data;
+        const example = data.example;
+        document.getElementById('map-example-title').textContent = mapModeLabel(example.map_mode);
+        document.getElementById('map-example-meta').textContent =
+          `${example.n} x ${example.m} · ${data.players} 人`;
+        document.getElementById('map-example-mode').value = String(example.map_mode || 'random');
+        document.getElementById('map-example-players').value = String(data.players);
+        renderExampleBoard(document.getElementById('map-example-board'), example);
+      }
+
+      function rerenderMapExamplesForResize() {
+        if (!lastMapExampleData || !lastMapExampleData.example) {
+          return;
+        }
+        renderExampleBoard(document.getElementById('map-example-board'), lastMapExampleData.example);
+      }
+
+      function setMapExampleStatus(text) {
+        document.getElementById('map-example-status').textContent = text;
+      }
+
+      function getSelectedMapMode() {
+        return String(document.getElementById('map-example-mode').value || 'random');
+      }
+
+      function getSelectedMapPlayers() {
+        const parsed = Number.parseInt(
+          String(document.getElementById('map-example-players').value || '4'),
+          10,
+        );
+        if (!Number.isFinite(parsed)) {
+          return 4;
+        }
+        return Math.max(2, Math.min(16, parsed));
+      }
+
+      function initMapPlayerOptions() {
+        const select = document.getElementById('map-example-players');
+        let html = '';
+        for (let i = 2; i <= 16; i += 1) {
+          html += `<option value="${i}">${i}</option>`;
+        }
+        select.innerHTML = html;
+        select.value = '4';
+      }
+
+      async function loadMapExample() {
+        setMapExampleStatus('加载中…');
+        const params = new URLSearchParams({
+          map_mode: getSelectedMapMode(),
+          players: String(getSelectedMapPlayers()),
+        });
+        const res = await fetch(`/api/map-examples?${params.toString()}`, { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error('load map example failed');
+        }
+        const data = await res.json();
+        renderMapExample(data);
+        setMapExampleStatus('');
+      }
+
+      async function loadUser() {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+          location.href = '/login';
+          return false;
+        }
+        const data = await res.json();
+        document.getElementById('account-name').textContent = data.username;
+        return true;
+      }
+
+      document.getElementById('back-home-btn').addEventListener('click', function () {
+        location.href = '/';
+      });
+
+      document.getElementById('open-tutorial-btn').addEventListener('click', function () {
+        location.href = '/tutorial/interactive';
+      });
+
+      document.getElementById('generate-map-example-btn').addEventListener('click', async function () {
+        try {
+          await loadMapExample();
+        } catch {
+          setMapExampleStatus('加载失败，请稍后重试。');
+        }
+      });
+
+      window.addEventListener('resize', function () {
+        window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(rerenderMapExamplesForResize, 120);
+      });
+
+      async function main() {
+        const authed = await loadUser();
+        if (!authed) return;
+        initMapPlayerOptions();
+        try {
+          await loadMapExample();
+        } catch {
+          setMapExampleStatus('加载失败，请稍后重试。');
+        }
+      }
+
+      main();
+    </script>
+  </body>
+</html>
