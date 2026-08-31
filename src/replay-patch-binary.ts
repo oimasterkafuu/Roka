@@ -1,6 +1,6 @@
 import { LeaderboardEntry, ReplayData, ReplayPatchPayload, UpdatePayload } from './types';
 
-const MAGIC_BYTES = [0x52, 0x50, 0x42, 0x32] as const; // RPB2（含 isolated 字段）
+const MAGIC_BYTES = [0x52, 0x50, 0x42, 0x33] as const; // RPB3（移除 surrender_progress 字段）
 
 const classToCode = (value: string): number => {
   if (value === 'dead') {
@@ -75,21 +75,6 @@ const writeLeaderboard = (writer: ByteWriter, leaderboard: LeaderboardEntry[]): 
   }
 };
 
-const writeSurrenderProgress = (writer: ByteWriter, progress: Record<number, number>): void => {
-  const entries = Object.entries(progress)
-    .map(([id, ratio]) => ({
-      id: normalizeU32(Number(id)),
-      ratio: Math.max(0, Math.min(1, Number(ratio) || 0)),
-    }))
-    .filter((item) => item.id > 0)
-    .sort((a, b) => a.id - b.id);
-  writer.writeU16(entries.length);
-  for (const item of entries) {
-    writer.writeU8(item.id);
-    writer.writeU8(Math.round(item.ratio * 255));
-  }
-};
-
 const writeDiffU8 = (writer: ByteWriter, diff: number[]): void => {
   if (diff.length % 2 !== 0) {
     throw new Error('回放 patch grid diff 长度非法。');
@@ -140,7 +125,6 @@ const writeInitialPayload = (writer: ByteWriter, initial: UpdatePayload): void =
   writer.writeU32(normalizeU32(initial.turn));
   writer.writeU8(initial.game_end ? 1 : 0);
   writeLeaderboard(writer, initial.leaderboard);
-  writeSurrenderProgress(writer, initial.surrender_progress);
   writeFullGrid(writer, initial.grid_type);
   writeFullArmy(writer, initial.army_cnt);
   writeFullGrid(writer, initial.isolated);
@@ -150,7 +134,6 @@ const writePatchPayload = (writer: ByteWriter, payload: ReplayPatchPayload): voi
   writer.writeU32(normalizeU32(payload.turn));
   writer.writeU8(payload.game_end ? 1 : 0);
   writeLeaderboard(writer, payload.leaderboard);
-  writeSurrenderProgress(writer, payload.surrender_progress);
   writeDiffU8(writer, payload.grid_type);
   writeDiffU32(writer, payload.army_cnt);
   writeDiffU8(writer, payload.isolated);

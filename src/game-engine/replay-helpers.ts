@@ -51,7 +51,6 @@ const buildReplayPatchPayload = (
   leaderboard: cloneLeaderboard(frame.leaderboard),
   turn: frame.turn,
   kills: { ...frame.kills },
-  surrender_progress: { ...frame.surrender_progress },
   game_end: frame.game_end,
 });
 

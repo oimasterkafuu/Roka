@@ -77,16 +77,12 @@ function decodeReplayBinary(buffer) {
   }
 
   function readSurrenderProgress() {
+    // RPB1/RPB2 遗留字段：读出后直接丢弃，RPB3 起不再存在。
     var count = readU16();
-    var progress = {};
     for (var i = 0; i < count; i++) {
-      var ownerId = readU8();
-      var ratio = readU8() / 255;
-      if (ratio > 0) {
-        progress[ownerId] = ratio;
-      }
+      readU8();
+      readU8();
     }
-    return progress;
   }
 
   function readFullGrid() {
@@ -131,7 +127,7 @@ function decodeReplayBinary(buffer) {
     var turn = readU32();
     var gameEnd = readU8() == 1;
     var leaderboard = readLeaderboard();
-    var surrenderProgress = readSurrenderProgress();
+    if (version <= 2) readSurrenderProgress();
     var grid = readFullGrid();
     var army = readFullArmy();
     var isolated = version >= 2 ? readFullGrid() : new Array(grid.length).fill(0);
@@ -143,7 +139,6 @@ function decodeReplayBinary(buffer) {
       leaderboard: leaderboard,
       turn: turn,
       kills: {},
-      surrender_progress: surrenderProgress,
       game_end: gameEnd,
       is_diff: false,
     };
@@ -153,7 +148,7 @@ function decodeReplayBinary(buffer) {
     var turn = readU32();
     var gameEnd = readU8() == 1;
     var leaderboard = readLeaderboard();
-    var surrenderProgress = readSurrenderProgress();
+    if (version <= 2) readSurrenderProgress();
     var gridDiff = readGridDiff();
     var armyDiff = readArmyDiff();
     var isolatedDiff = version >= 2 ? readGridDiff() : [];
@@ -165,7 +160,6 @@ function decodeReplayBinary(buffer) {
       leaderboard: leaderboard,
       turn: turn,
       kills: {},
-      surrender_progress: surrenderProgress,
       game_end: gameEnd,
       is_diff: true,
     };
@@ -203,6 +197,8 @@ function decodeReplayBinary(buffer) {
   ) {
     var versionByte = readU8();
     if (versionByte == replay_binary_magic[3]) {
+      version = 3;
+    } else if (versionByte == replay_binary_magic_v2[3]) {
       version = 2;
     } else if (versionByte == replay_binary_magic_v1[3]) {
       version = 1;
