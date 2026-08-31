@@ -797,7 +797,7 @@ const boot = async (): Promise<void> => {
   app.get('/api/getreplay/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!isReplayIdValid(id)) {
-      return reply.type('text/plain').send('');
+      return reply.code(404).send({ error: '回放不存在。' });
     }
     try {
       const replay = await replayStore.loadReplay(id);
@@ -814,7 +814,7 @@ const boot = async (): Promise<void> => {
   app.get('/api/downloadreplay/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!isReplayIdValid(id)) {
-      return reply.type('text/plain').send('');
+      return reply.code(404).send({ error: '回放不存在。' });
     }
     try {
       const raw = await replayStore.readRawReplay(id);
