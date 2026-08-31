@@ -861,7 +861,9 @@ export class GameEngine {
 
   /**
    * 拆除一名玩家的全部锚点（主城/指挥所降级为普通格），并将其所有领土
-   * 直接打入孤军状态（标记 isolated、isolatedAge=1，但不执行断链减半），
+   * 打入孤军状态（标记 isolated、isolatedAge=1）。尚未 isolated 的格子
+   * 施加与断链相同的减半惩罚（1 兵特例保持为 1），减半后兵力归零的格子
+   * 变为中立；此前断链时已 isolated（已减半过）的格子不再重复减半。
    * 之后按既有孤军规则自然衰减至中立。
    */
   private teardownEmpire(victim: number): void {
@@ -871,6 +873,16 @@ export class GameEngine {
           if (this.gridType[i][j] === -1 || this.gridType[i][j] === -2) {
             this.gridType[i][j] = 0;
           }
+          if (!this.isolated[i][j]) {
+            this.armyCnt[i][j] = this.armyCnt[i][j] === 1 ? 1 : Math.floor(this.armyCnt[i][j] / 2);
+            if (this.armyCnt[i][j] <= 0) {
+              this.owner[i][j] = 0;
+              this.armyCnt[i][j] = 0;
+              this.isolated[i][j] = false;
+              this.isolatedAge[i][j] = 0;
+              continue;
+            }
+          }
           this.isolated[i][j] = true;
           this.isolatedAge[i][j] = 1;
         }
@@ -879,7 +891,7 @@ export class GameEngine {
   }
 
   /**
-   * 败者出局：领土【不】转移给攻击方，全部保持原归属并直接进入孤军衰减。
+   * 败者出局：领土【不】转移给攻击方，全部保持原归属并减半后进入孤军衰减。
    * attacker = 0（系统接管 AFK/掉线）走同一代码路径，不再特殊处理。
    */
   private kill(attacker: number, victim: number): void {
@@ -1308,7 +1320,7 @@ export class GameEngine {
    * - 若队伍内还有其他存活成员，全部领土（含兵力）转移给编号最小的存活队友，
    *   主城降级为指挥所（哨所）；
    * - 否则（FFA 或队伍已无其他存活成员），主城与所有指挥所被拆除为普通空地，
-   *   领土直接打入孤军，进入自然衰减流程。
+   *   领土减半后打入孤军，进入自然衰减流程。
    */
   private applySurrenderByIndex(playerIndex: number, reason: '投降' | '挂机'): boolean {
     if (this.pstat[playerIndex] === LEFT_GAME) {
