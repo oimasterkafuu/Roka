@@ -212,8 +212,6 @@ function renderRatingChart(history) {
   var ns = 'http://www.w3.org/2000/svg';
   var svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-  svg.setAttribute('width', '100%');
-  svg.setAttribute('height', 'auto');
   svg.setAttribute('class', 'rating-chart-svg');
 
   function el(name, attrs, text) {
