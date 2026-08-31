@@ -27,6 +27,16 @@
   - 单次提交聚焦一个主题，避免混入无关改动。
   - 修改行为时，需同步更新 `README.md`（如运行方式、接口、配置变化）。
 
+## 提交身份与签名
+
+- 提交作者必须配置为：
+  - `user.name`: `oimasterkafuu`
+  - `user.email`: `oimasterkafuu@users.noreply.github.com`
+- 所有提交必须使用 GPG 签名（`commit.gpgsign=true`）：
+  - `user.signingkey`: `BEF250058DD26AF6FA0BA5834BFA82BF714AA7FE`（uid 为 `oimasterkafuu <hi@oim.moe>`）
+  - 密钥备份由维护者保管，导入后可用 `git log --show-signature` 验证。
+- 提交前若不确定身份配置，先运行 `git config user.name && git config user.email` 确认；禁止以自动生成的身份（如 `root@localhost`）提交。
+
 ## 提交格式规范（Conventional Commits）
 
 - 提交信息格式：
