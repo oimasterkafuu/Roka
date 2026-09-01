@@ -581,6 +581,10 @@ socket.on('init_map', function (data) {
       player = i + 1;
     }
   }
+  // 开局默认选中己方主城，无需先按空格即可直接操作。
+  if (player > 0 && data.general && data.general[0] >= 0) {
+    ((selx = data.general[0]), (sely = data.general[1]), (selt = 1));
+  }
 });
 
 $(document).ready(function () {
