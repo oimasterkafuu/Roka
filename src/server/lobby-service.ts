@@ -43,6 +43,9 @@ class LobbyService {
   readonly lobbyConfig = new Map<string, LobbyConfig>();
   readonly lobbyPlayers = new Map<string, LobbyPlayer[]>();
 
+  /** 对局全部结束时触发（例如让推迟中的自动更新继续执行）。 */
+  onGameEnded?: () => void;
+
   constructor(
     private readonly replayStore: ReplayStore,
     private readonly userStore: UserStore,
@@ -76,6 +79,10 @@ class LobbyService {
 
   isLobbyGameRunning(gid: string): boolean {
     return this.gameInstances.has(this.getLobbyVal(gid));
+  }
+
+  hasActiveGames(): boolean {
+    return this.gameInstances.size > 0;
   }
 
   getLobbyVal(gid: string): string {
@@ -377,6 +384,7 @@ class LobbyService {
         this.gamePlayers.delete(gid);
         this.gameLobbyId.delete(gid);
         this.gameInstances.delete(gid);
+        this.onGameEnded?.();
 
         if (lobby) {
           const lobbyConf = this.lobbyConfig.get(lobby);

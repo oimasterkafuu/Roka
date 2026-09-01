@@ -16,6 +16,7 @@ class WebhookUpdater {
   constructor(
     private readonly logger: FastifyBaseLogger,
     private readonly webhookSecret: string,
+    private readonly hasActiveGames: () => boolean,
   ) {}
 
   isAuthorized(rawBody: Buffer, headers: Record<string, unknown>): boolean {
@@ -39,9 +40,24 @@ class WebhookUpdater {
       return true;
     }
 
+    if (this.hasActiveGames()) {
+      this.hasQueuedUpdate = true;
+      this.logger.info('有对局正在进行，自动更新推迟到所有对局结束后执行。');
+      return true;
+    }
+
     this.isUpdating = true;
     void this.runUpdatePipeline();
     return false;
+  }
+
+  /** 一局对局结束时调用；若已无进行中的对局且有排队中的更新，则立即开始更新。 */
+  notifyGameEnded(): void {
+    if (!this.hasQueuedUpdate || this.isUpdating || this.hasActiveGames()) {
+      return;
+    }
+    this.hasQueuedUpdate = false;
+    this.requestUpdate();
   }
 
   private async runUpdatePipeline(): Promise<void> {

@@ -45,7 +45,10 @@ const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const captchaService = new CaptchaService();
 const lobbyService = new LobbyService(replayStore, userStore);
-const webhookUpdater = new WebhookUpdater(app.log, runtimeEnv.webhookSecret);
+const webhookUpdater = new WebhookUpdater(app.log, runtimeEnv.webhookSecret, () =>
+  lobbyService.hasActiveGames(),
+);
+lobbyService.onGameEnded = () => webhookUpdater.notifyGameEnded();
 
 type PushWebhookPayload = { ref?: unknown };
 const GENERAL_RATE_LIMIT = { max: 1000, timeWindow: '1 minute' };
