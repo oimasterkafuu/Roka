@@ -283,12 +283,14 @@ body.home .panel-pager .pager-info {
   color: #9aa4b2;
 }
 
-/* 公告 */
+/* 公告（富文本由服务端渲染消毒，与动态同一条管线） */
 body.home .announcement-text {
   font-size: 14px;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+body.home .announcement-text p {
+  margin: 0 0 8px;
 }
 body.home .announcement-meta {
   font-size: 11px;

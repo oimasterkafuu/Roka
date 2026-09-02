@@ -5,7 +5,7 @@ import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
 import { Server as SocketIOServer } from 'socket.io';
-import { AnnouncementStore, ANNOUNCEMENT_TEXT_MAX } from './announcement-store';
+import { Announcement, AnnouncementStore, ANNOUNCEMENT_TEXT_MAX } from './announcement-store';
 import { UserStore } from './auth-store';
 import { FeedCooldownException, FeedStore } from './feed-store';
 import { GameEngine } from './game-engine';
@@ -126,6 +126,10 @@ const buildMapExample = async (
 
 const isMapExampleMode = (value: string): value is LobbyConfig['map_mode'] =>
   MAP_EXAMPLE_MAP_MODES.includes(value as LobbyConfig['map_mode']);
+
+interface DecoratedAnnouncement extends Announcement {
+  html: string;
+}
 
 interface DecoratedFeedComment {
   id: string;
@@ -668,8 +672,14 @@ const boot = async (): Promise<void> => {
     }
   });
 
+  // 公告与动态共用同一条服务端渲染管线（Markdown + LaTeX + sanitize-html 白名单过滤 XSS）。
+  const decorateAnnouncement = (announcement: Announcement): DecoratedAnnouncement => ({
+    ...announcement,
+    html: renderRichText(announcement.text),
+  });
+
   app.get('/api/announcement', async (_request, reply) => {
-    return reply.send(announcementStore.get());
+    return reply.send(decorateAnnouncement(announcementStore.get()));
   });
 
   app.post('/api/announcement', { preHandler: feedActionRateLimitPreHandler }, async (request, reply) => {
@@ -684,7 +694,7 @@ const boot = async (): Promise<void> => {
     try {
       const announcement = await announcementStore.set(String(body?.text ?? ''), authUser.username);
       io.emit('home_announcement');
-      return reply.send(announcement);
+      return reply.send(decorateAnnouncement(announcement));
     } catch (error) {
       return reply.code(400).send({
         error: error instanceof Error ? error.message : `公告内容不能超过 ${ANNOUNCEMENT_TEXT_MAX} 字。`,
