@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Server as SocketIOServer } from 'socket.io';
 import { UserStore } from '../auth-store';
 import { GameEngine } from '../game-engine';
+import { DISCONNECT_GRACE_MS } from '../game-engine/constants';
 import { resolveMapSizeRatioByPlayers } from '../map/map-size';
 import { ReplayStore } from '../replay-store';
 import {
@@ -32,6 +33,17 @@ const confStr: Record<EditableLobbyKey, string> = {
   map_token: '地图随机种子',
 };
 
+/**
+ * 掉线宽限期中的待重连记录，键为 `${gameId}:${username}`。
+ * timer 到期仍未重连则以「挂机」投降并执行完整离开清理。
+ */
+interface PendingRejoin {
+  gameId: string;
+  lobbyId: string;
+  oldSid: string;
+  timer: NodeJS.Timeout;
+}
+
 class LobbyService {
   readonly gameUid = new Map<string, string>();
   readonly gameInstances = new Map<string, GameEngine>();
@@ -42,6 +54,8 @@ class LobbyService {
   readonly lobbyOfSid = new Map<string, string>();
   readonly lobbyConfig = new Map<string, LobbyConfig>();
   readonly lobbyPlayers = new Map<string, LobbyPlayer[]>();
+
+  private readonly pendingRejoins = new Map<string, PendingRejoin>();
 
   /** 对局全部结束时触发（例如让推迟中的自动更新继续执行）。 */
   onGameEnded?: () => void;
@@ -386,6 +400,19 @@ class LobbyService {
         this.gameInstances.delete(gid);
         this.onGameEnded?.();
 
+        // 对局结束：清理该局所有宽限期 timer；仍处宽限期的玩家按离开处理。
+        for (const [key, pending] of this.pendingRejoins) {
+          if (pending.gameId !== gid) {
+            continue;
+          }
+          clearTimeout(pending.timer);
+          this.pendingRejoins.delete(key);
+          const uid = this.leaveLobby(pending.oldSid, pending.lobbyId);
+          if (uid) {
+            this.sendLobbySystemMessage(io, gid, `${uid} 离开了自定义房间。`);
+          }
+        }
+
         if (lobby) {
           const lobbyConf = this.lobbyConfig.get(lobby);
           if (lobbyConf) {
@@ -443,14 +470,35 @@ class LobbyService {
     this.emitRoomUpdate(io, gid);
   }
 
-  checkLeave(io: SocketIOServer, sid: string, leaveRoom: (room: string) => void): void {
+  checkLeave(io: SocketIOServer, sid: string, leaveRoom: (room: string) => void, username: string): void {
     const lobbyId = this.lobbyOfSid.get(sid);
     const gameId = this.gameUid.get(sid);
 
     if (gameId) {
+      const game = this.gameInstances.get(gameId);
+      if (game && game.markDisconnected(sid)) {
+        // 掉线宽限期：截断旧指令路由，但保留房间席位与对局状态，
+        // 10 秒内重连（tryRejoin）可恢复对局；超时由 expireGracePeriod 清理。
+        this.gameUid.delete(sid);
+        if (lobbyId) {
+          this.lobbyOfSid.delete(sid);
+          leaveRoom(`game_${this.getLobbyVal(lobbyId)}`);
+        }
+        const key = `${gameId}:${username}`;
+        const existing = this.pendingRejoins.get(key);
+        if (existing) {
+          clearTimeout(existing.timer);
+        }
+        const timer = setTimeout(() => {
+          this.pendingRejoins.delete(key);
+          this.expireGracePeriod(io, gameId, sid);
+        }, DISCONNECT_GRACE_MS);
+        this.pendingRejoins.set(key, { gameId, lobbyId: lobbyId ?? '', oldSid: sid, timer });
+        return;
+      }
       this.gameUid.delete(sid);
       this.gamePlayers.get(gameId)?.delete(sid);
-      this.gameInstances.get(gameId)?.leaveGame(sid);
+      game?.leaveGame(sid);
     }
     if (lobbyId) {
       this.gameInstances.get(this.getLobbyVal(lobbyId))?.removeSpectator(sid);
@@ -468,6 +516,73 @@ class LobbyService {
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
       this.sendLobbySystemMessage(io, roomVal, `${uid} 离开了自定义房间。`);
+    }
+    this.emitHomeRooms(io);
+    this.checkReady(io, lobbyId);
+  }
+
+  /**
+   * 断线重连：对局进行中且存在同名参赛玩家（无论是否已标记断线，
+   * 以覆盖顶号时新连接的 join_game_room 先于旧 socket disconnect 到达的竞态）
+   * 时，把该玩家的指令路由/房间席位全部换绑到新 socket 并补发全量状态。
+   */
+  tryRejoin(io: SocketIOServer, sid: string, username: string, room: string): boolean {
+    const gameId = this.getLobbyVal(room);
+    const game = this.gameInstances.get(gameId);
+    if (!game) {
+      return false;
+    }
+    const oldSid = game.findPlayerSidByName(username);
+    if (!oldSid || oldSid === sid) {
+      return false;
+    }
+
+    const key = `${gameId}:${username}`;
+    const pending = this.pendingRejoins.get(key);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pendingRejoins.delete(key);
+    }
+
+    this.gameUid.delete(oldSid);
+    this.gameUid.set(sid, gameId);
+    const participants = this.gamePlayers.get(gameId);
+    if (participants) {
+      participants.delete(oldSid);
+      participants.add(sid);
+    }
+    const member = this.lobbyPlayers.get(room)?.find((player) => player.uid === username);
+    if (member) {
+      member.sid = sid;
+    }
+    this.lobbyOfSid.delete(oldSid);
+    this.lobbyOfSid.set(sid, room);
+
+    if (!game.rebindPlayer(oldSid, sid)) {
+      return false;
+    }
+    this.sendLobbySystemMessage(io, gameId, `${username} 重新连接。`);
+    return true;
+  }
+
+  /**
+   * 宽限期到期：engine 侧以「挂机」投降（已重连/已出局时幂等返回 false），
+   * 然后走原有完整离开清理（移出房间并广播）。
+   */
+  private expireGracePeriod(io: SocketIOServer, gameId: string, sid: string): void {
+    const game = this.gameInstances.get(gameId);
+    if (!game || !game.expireDisconnect(sid)) {
+      return;
+    }
+    this.gamePlayers.get(gameId)?.delete(sid);
+    const lobbyId = this.gameLobbyId.get(gameId);
+    if (!lobbyId) {
+      return;
+    }
+    const uid = this.leaveLobby(sid, lobbyId);
+    this.emitRoomUpdate(io, lobbyId);
+    if (uid) {
+      this.sendLobbySystemMessage(io, gameId, `${uid} 离开了自定义房间。`);
     }
     this.emitHomeRooms(io);
     this.checkReady(io, lobbyId);

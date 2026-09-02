@@ -226,7 +226,15 @@ BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=your-room BOT_TOKEN=your-auth-token p
           </tr>
           <tr>
             <th>单会话限制</th>
-            <td>同一用户名同时只允许一个 socket：新连接成功后，该账号的旧连接会被服务端直接断开（顶号）。</td>
+            <td>
+              同一用户名同时只允许一个
+              socket：新连接成功后，该账号的旧连接会被服务端直接断开（顶号）。对局中掉线（含被顶号）有 10
+              秒宽限期：期间不判挂机、不投降；10 秒内重新连接并对同一房间发送
+              <code>join_game_room</code> 即可恢复对局（服务端把该玩家的 socket 换绑到新连接，并补发
+              <code>init_map</code> 与一帧全量 <code>update</code>，注意此时
+              <code>init_map.player_ids</code> 与 <code>update.kills</code> 中的自己 ID 已变为新
+              <code>set_id</code>）；超过宽限期以「挂机」原因自动投降并转为观战。
+            </td>
           </tr>
         </table>
         <pre class="code-snippet"><code>// JS 连接示例（socket.io-client）

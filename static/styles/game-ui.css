@@ -49,6 +49,19 @@
   z-index: 25;
 }
 
+#disconnect-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 8px 0;
+  background: #b3261e;
+  color: #ffffff;
+  font-size: 16px;
+  text-align: center;
+}
+
 #replay-top-left {
   position: fixed;
   top: 40px;

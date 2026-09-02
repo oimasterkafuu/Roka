@@ -648,6 +648,7 @@ $(document).ready(function () {
 });
 
 socket.on('connect', function () {
+  $('#disconnect-banner').css('display', 'none');
   joinGameRoom();
 });
 
@@ -657,6 +658,11 @@ socket.on('connect_error', function () {
 socket.on('disconnect', function (reason) {
   if (reason == 'io server disconnect') {
     location.href = '/';
+    return;
+  }
+  // 普通断网：socket.io 自动重连，10 秒宽限期内重连可恢复对局。
+  if (!is_replay) {
+    $('#disconnect-banner').css('display', '');
   }
 });
 
