@@ -502,6 +502,8 @@
 
       /* ---------- 公告 ---------- */
 
+      var announcementRawText = '';
+
       async function loadAnnouncement() {
         try {
           var res = await fetch('/api/announcement');
@@ -509,7 +511,13 @@
             return;
           }
           var data = await res.json();
-          $('#announcement-text').text(data.text || '暂无公告。');
+          announcementRawText = data.text || '';
+          if (typeof data.html === 'string') {
+            // html 字段由服务端渲染并消毒（与动态同一条管线），可直接注入。
+            $('#announcement-text').html(data.html || '暂无公告。');
+          } else {
+            $('#announcement-text').text(announcementRawText || '暂无公告。');
+          }
           var meta = '';
           if (data.updatedBy) {
             meta = data.updatedBy + ' 更新于 ' + relativeTime(data.updatedAt);
@@ -524,7 +532,7 @@
       }
 
       $('#announcement-edit-btn').on('click', function () {
-        $('#announcement-input').val($('#announcement-text').text());
+        $('#announcement-input').val(announcementRawText);
         $('#announcement-view').hide();
         $('#announcement-edit').show();
       });
