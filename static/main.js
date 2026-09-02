@@ -800,8 +800,8 @@ $(document).ready(function () {
     ready_state ^= 1;
     socket.emit('change_ready', { ready: ready_state });
   });
+  // 种子仅在失焦（change）时上传：删空后由服务端补随机种子并回填，避免输入中途被覆盖。
   $('#map-token').on('change', delayUpdateMapToken);
-  $('#map-token').on('input', delayUpdateMapToken);
   $('#room-link-display').on('click', copyRoomLink);
   $('#room-home-btn').on('click', _exit);
 });
