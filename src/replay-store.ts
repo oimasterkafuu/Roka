@@ -3,14 +3,17 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
-import { brotliCompress, brotliDecompress, constants as zlibConstants } from 'node:zlib';
+import { brotliCompress, brotliDecompress, constants as zlibConstants, gzip } from 'node:zlib';
+import { encodeReplayPatchBinary } from './replay-patch-binary';
 import { ReplayActionData, ReplayData, ReplayListItem } from './types';
 
 const brotliCompressAsync = promisify(brotliCompress);
 const brotliDecompressAsync = promisify(brotliDecompress);
+const gzipAsync = promisify(gzip);
 
 const REPLAY_FILENAME_REGEX = /^[0-9A-Za-z+-]+$/;
 const REPLAY_EXT = '.rpl';
+const REPLAY_VIEW_EXT = '.rpb.gz';
 const REPLAY_INDEX_BIN = 'index.bin';
 
 interface ReplayStoreOptions {
@@ -127,15 +130,47 @@ export class ReplayStore {
    * 读取回放的原始存储文件（ops-v1 操作流，几百字节），用于“下载回放”。
    */
   async readRawReplay(id: string): Promise<Buffer> {
+    return readFile(this.resolveReplayPath(id, REPLAY_EXT));
+  }
+
+  private resolveReplayPath(id: string, ext: string): string {
     if (!isReplayIdValid(id)) {
       throw new Error('Invalid replay id.');
     }
-    const replayPath = path.resolve(this.replayDir, `${id}${REPLAY_EXT}`);
+    const replayPath = path.resolve(this.replayDir, `${id}${ext}`);
     const replayRoot = `${path.resolve(this.replayDir)}${path.sep}`;
     if (!replayPath.startsWith(replayRoot)) {
       throw new Error('Invalid replay path.');
     }
-    return readFile(replayPath);
+    return replayPath;
+  }
+
+  /**
+   * 读取回放的可观看二进制（RPB）gzip 压缩缓存。
+   * 回放内容不可变：首次请求时重建整场对局、转码、压缩后落盘缓存，
+   * 之后直接读缓存文件，避免每次观看都重复重建。
+   * 返回的 size 为解压后大小（缓存命中时取自 gzip 尾部 ISIZE），供客户端显示加载进度。
+   */
+  async readReplayViewGzip(id: string): Promise<{ gzip: Buffer; size: number }> {
+    const cachePath = this.resolveReplayPath(id, REPLAY_VIEW_EXT);
+    try {
+      const cached = await readFile(cachePath);
+      if (cached.length >= 4) {
+        return { gzip: cached, size: cached.readUInt32LE(cached.length - 4) };
+      }
+    } catch {
+      // 缓存不存在或损坏，走下方重建。
+    }
+
+    const replay = await this.loadReplay(id);
+    const binary = encodeReplayPatchBinary(replay);
+    const compressed = (await gzipAsync(binary)) as Buffer;
+    await this.enqueue(async () => {
+      const tmpPath = `${cachePath}.${process.pid}.tmp`;
+      await writeFile(tmpPath, compressed);
+      await rename(tmpPath, cachePath);
+    });
+    return { gzip: compressed, size: binary.length };
   }
 
   /**
@@ -159,6 +194,7 @@ export class ReplayStore {
     }
     await this.enqueue(async () => {
       await rm(path.join(this.replayDir, `${id}${REPLAY_EXT}`), { force: true });
+      await rm(path.join(this.replayDir, `${id}${REPLAY_VIEW_EXT}`), { force: true });
       const items = await this.loadIndex();
       const next = items.filter((item) => item.id !== id);
       if (next.length !== items.length) {
