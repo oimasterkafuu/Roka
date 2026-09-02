@@ -809,9 +809,14 @@ const boot = async (): Promise<void> => {
       return reply.code(404).send({ error: '回放不存在。' });
     }
     try {
-      const replay = await replayStore.loadReplay(id);
-      const binary = encodeReplayPatchBinary(replay);
-      return reply.type('application/octet-stream').send(binary);
+      // 直接下发 gzip 压缩后的转码二进制（按回放 id 落盘缓存，不再每次重建整场对局）；
+      // X-Replay-Size 告知解压后大小，客户端据此显示下载进度。
+      const view = await replayStore.readReplayViewGzip(id);
+      return reply
+        .header('Content-Encoding', 'gzip')
+        .header('X-Replay-Size', String(view.size))
+        .type('application/octet-stream')
+        .send(view.gzip);
     } catch {
       // 加载/重建失败说明该回放已与当前版本不兼容，直接从库中删除。
       await replayStore.deleteReplay(id);

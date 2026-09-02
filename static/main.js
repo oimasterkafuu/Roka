@@ -186,7 +186,62 @@ window.addEventListener('beforeunload', function (e) {
 });
 
 function showReplayError() {
+  $('#replay-loading').css('display', 'none');
   $('#replay-error-alert').css('display', '');
+}
+
+function formatReplaySize(bytes) {
+  if (bytes >= 1024 * 1024) {
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  }
+  if (bytes >= 1024) {
+    return (bytes / 1024).toFixed(1) + ' KB';
+  }
+  return bytes + ' B';
+}
+
+function updateReplayLoading(loaded, total) {
+  var text;
+  if (total > 0) {
+    var percent = Math.min(100, Math.floor((loaded / total) * 100));
+    text =
+      '回放加载中… ' + percent + '%（' + formatReplaySize(loaded) + ' / ' + formatReplaySize(total) + '）';
+  } else {
+    text = '回放加载中… 已下载 ' + formatReplaySize(loaded);
+  }
+  $('#replay-loading-text').text(text);
+}
+
+// 流式下载回放二进制并按 X-Replay-Size（解压后大小）更新加载进度。
+function fetchReplayWithProgress(url) {
+  return fetch(url).then(function (res) {
+    if (!res.ok) {
+      throw new Error('load failed');
+    }
+    var total = Number(res.headers.get('X-Replay-Size')) || 0;
+    if (!res.body || !res.body.getReader) {
+      return res.arrayBuffer();
+    }
+    var reader = res.body.getReader();
+    var chunks = [];
+    var loaded = 0;
+    updateReplayLoading(loaded, total);
+    return reader.read().then(function pump(result) {
+      if (result.done) {
+        var buf = new Uint8Array(loaded);
+        var offset = 0;
+        for (var i = 0; i < chunks.length; i++) {
+          buf.set(chunks[i], offset);
+          offset += chunks[i].byteLength;
+        }
+        return buf.buffer;
+      }
+      chunks.push(result.value);
+      loaded += result.value.byteLength;
+      updateReplayLoading(loaded, total);
+      return reader.read().then(pump);
+    });
+  });
 }
 
 function base64ToArrayBuffer(b64) {
@@ -215,12 +270,8 @@ if (location.pathname.substr(0, 8) == '/replays') {
       resolve(base64ToArrayBuffer(b64));
     });
   } else {
-    replayFetch = fetch('/api/getreplay/' + encodeURIComponent(replay_id)).then(function (res) {
-      if (!res.ok) {
-        throw new Error('load failed');
-      }
-      return res.arrayBuffer();
-    });
+    $('#replay-loading').css('display', '');
+    replayFetch = fetchReplayWithProgress('/api/getreplay/' + encodeURIComponent(replay_id));
   }
   replayFetch
     .then(function (buf) {
@@ -235,6 +286,7 @@ if (location.pathname.substr(0, 8) == '/replays') {
 function replayStart() {
   rcnt++;
   if (rcnt == 2) {
+    $('#replay-loading').css('display', 'none');
     init_map(replay_data.n, replay_data.m);
     in_game = true;
     cur_turn = 0;
