@@ -171,6 +171,12 @@ export class GameEngine {
 
   private readonly afkLastMoveAt: number[];
 
+  /**
+   * 每名玩家 socket 断开的时间戳（null = 在线）。宽限期内不投降，
+   * 重连时由 rebindPlayer 清回 null，超时由 expireDisconnect 投降。
+   */
+  private readonly disconnectedAt: Array<number | null>;
+
   private readonly enableAfkSurrender: boolean;
 
   private readonly startAt: number;
@@ -273,6 +279,7 @@ export class GameEngine {
     this.externalSpectatorSids = new Set<string>();
     this.afkLastMoveTurn = Array.from({ length: pcnt }, () => 0);
     this.afkLastMoveAt = Array.from({ length: pcnt }, () => this.startAt);
+    this.disconnectedAt = Array.from({ length: pcnt }, () => null);
     this.enableAfkSurrender = gid !== '__replay_build__';
 
     this.gid = gid;
@@ -824,6 +831,89 @@ export class GameEngine {
     this.externalSpectatorSids.delete(sid);
   }
 
+  /**
+   * 标记玩家掉线：只记录时间戳，不投降、不清队列、不移除 watching；
+   * 已排队操作在宽限期内继续正常执行。
+   */
+  markDisconnected(sid: string): boolean {
+    if (!this.enableAfkSurrender) {
+      return false;
+    }
+    const id = this.playerSidToIndex.get(sid);
+    if (typeof id === 'undefined') {
+      return false;
+    }
+    if (this.team[id] === 0 || this.pstat[id] === LEFT_GAME) {
+      return false;
+    }
+    this.disconnectedAt[id] = Date.now();
+    return true;
+  }
+
+  /**
+   * 按用户名查找仍在参赛（team!==0 且未出局）的玩家，返回其当前 sid。
+   * 不要求已标记断线，以覆盖顶号时新连接的 join_game_room 先于
+   * 旧 socket 的 disconnect 事件到达的竞态。
+   */
+  findPlayerSidByName(username: string): string | null {
+    for (let i = 0; i < this.playerSids.length; i += 1) {
+      if (this.names[i] === username && this.team[i] !== 0 && this.pstat[i] !== LEFT_GAME) {
+        return this.playerSids[i];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 断线重连换绑：把玩家的 sid/client_id（md5(sid)）换到新 socket，
+   * 清空操作队列（客户端 route 已丢，避免幽灵操作）、重置 AFK 计时，
+   * 并补发 init_map + 全量视野帧让客户端恢复画面。
+   */
+  rebindPlayer(oldSid: string, newSid: string): boolean {
+    const id = this.playerSidToIndex.get(oldSid);
+    if (typeof id === 'undefined') {
+      return false;
+    }
+    this.playerSidToIndex.delete(oldSid);
+    this.playerSidToIndex.set(newSid, id);
+    this.playerSids[id] = newSid;
+    this.playerIds[id] = this.md5(newSid);
+    this.disconnectedAt[id] = null;
+    this.watching[id] = true;
+    this.afkLastMoveTurn[id] = this.turn;
+    this.afkLastMoveAt[id] = Date.now();
+    this.pmove[id] = [];
+    this.emitInitMap(newSid, {
+      n: this.n,
+      m: this.m,
+      player_ids: [...this.playerIds],
+      general: this.generals[id],
+    });
+    this.update(newSid, this.buildFullVisionPayload(false));
+    return true;
+  }
+
+  /**
+   * 宽限期到期：仍以旧 sid 登记断线的玩家以「挂机」原因投降（复用挂机投降路径）。
+   * 已重连（sid 已换绑或时间戳已清除）时返回 false，天然幂等；
+   * 宽限期内已被对手击杀（LEFT_GAME）时不再重复投降，但仍返回 true 以便调用方完成离开清理。
+   */
+  expireDisconnect(sid: string): boolean {
+    if (!this.enableAfkSurrender) {
+      return false;
+    }
+    const id = this.playerSidToIndex.get(sid);
+    if (typeof id === 'undefined' || this.disconnectedAt[id] === null) {
+      return false;
+    }
+    this.disconnectedAt[id] = null;
+    if (this.applySurrenderByIndex(id, '挂机')) {
+      this.sendSystemMessage(`${this.names[id]} 掉线超过宽限期，自动投降并转为观战。`);
+      this.scheduleImmediateTick();
+    }
+    return true;
+  }
+
   sendMessage(sid: string, data: { text: string; team: boolean }): void {
     const id = this.playerSidToIndex.get(sid);
     if (typeof id === 'undefined') {
@@ -1300,7 +1390,8 @@ export class GameEngine {
       return;
     }
     for (let p = 0; p < this.playerSids.length; p += 1) {
-      if (this.team[p] === 0 || this.pstat[p] === LEFT_GAME) {
+      // 掉线宽限期内的玩家不参与 AFK 判定（由 expireDisconnect 单独处理超时）。
+      if (this.team[p] === 0 || this.pstat[p] === LEFT_GAME || this.disconnectedAt[p] !== null) {
         continue;
       }
       const idleTurns = this.turn - this.afkLastMoveTurn[p];

@@ -1024,6 +1024,14 @@ const boot = async (): Promise<void> => {
       }
       const roomVal = lobbyService.getLobbyVal(room);
 
+      // 对局进行中的同名参赛玩家视为断线重连：换绑到新 socket 并恢复对局。
+      if (lobbyService.tryRejoin(io, socket.id, username, room)) {
+        socket.join(`game_${roomVal}`);
+        lobbyService.emitRoomUpdate(io, room);
+        lobbyService.emitHomeRooms(io);
+        return;
+      }
+
       if (!lobbyService.lobbyOfSid.has(socket.id)) {
         lobbyService.joinLobby(socket.id, username, room);
         socket.join(`game_${roomVal}`);
@@ -1294,9 +1302,14 @@ const boot = async (): Promise<void> => {
     socket.on('disconnect', () => {
       authService.untrackSocket(username, socket.id);
       socket.leave(`sid_${socket.id}`);
-      lobbyService.checkLeave(io, socket.id, (room) => {
-        socket.leave(room);
-      });
+      lobbyService.checkLeave(
+        io,
+        socket.id,
+        (room) => {
+          socket.leave(room);
+        },
+        username,
+      );
     });
   });
 
