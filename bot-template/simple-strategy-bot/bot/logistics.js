@@ -10,6 +10,8 @@
  * 稳定性细节：
  *   - 推出量用与引擎一致的 previewPush 预演，推不出兵的 op 根本不下发
  *     （服务端会跳过无效队首，但会白耗本 tick 的执行名额）；
+ *   - 升级链保护：兵力低于升级线且不贴活敌的指挥所不作输送/扩张源
+ *     （兵是升皇冠的本金，抽走就永远升不了；军事操作不受此限）；
  *   - 边境暴露格（邻接活敌）用 mode 0 智能分兵，自动保留防御兵力；
  *   - 防往返抖动：与上一 tick 输送方向恰好互逆的候选直接丢弃。
  *
@@ -23,6 +25,15 @@ const BURST_START_TURN = 26;
 const BURST_END_TURN = 50;
 // 无焦点输送只动腹地格（距前线 >= 2），边界格留给扩张/切断决策。
 const FRONTIER_FLOW_MIN_DIST = 2;
+// 升级链保护：兵力低于升级线（52）且不贴活敌的指挥所是「正在攒升级」
+// 的格子——它的兵是升皇冠的本金，不能被输送/扩张顺手抽走（抽走就永远
+// 升不了）。军事操作（打击/切断/防御）不受此限。
+const UPGRADE_CHAIN_LINE = 52;
+
+/** 升级链保护判定：低于升级线且安全的指挥所。 */
+function inUpgradeChain(ctx, idx) {
+  return ctx.tileKind(idx) === 'city' && ctx.army(idx) < UPGRADE_CHAIN_LINE && ctx.keepAt(idx) <= 1;
+}
 
 function attackOp(ctx, fromIdx, toIdx, mode) {
   const from = ctx.xy(fromIdx);
@@ -35,6 +46,9 @@ function expansionCandidates(ctx, state) {
   const candidates = [];
   const burst = state.turn >= BURST_START_TURN && state.turn <= BURST_END_TURN;
   for (const sIdx of ctx.myOperable()) {
+    if (inUpgradeChain(ctx, sIdx)) {
+      continue; // 攒升级中的指挥所不外抽
+    }
     for (const tIdx of ctx.neighbors(sIdx)) {
       if (!ctx.passable(tIdx) || ctx.isMineIdx(tIdx)) {
         continue;
@@ -89,6 +103,9 @@ function flowCandidates(ctx, state, focus) {
   const minDist = focus ? 1 : FRONTIER_FLOW_MIN_DIST;
   const candidates = [];
   for (const sIdx of ctx.myOperable()) {
+    if (inUpgradeChain(ctx, sIdx)) {
+      continue; // 攒升级中的指挥所不外抽
+    }
     if (focus && sIdx === focus.idx) {
       continue;
     }

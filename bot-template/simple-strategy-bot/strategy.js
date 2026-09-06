@@ -10,16 +10,19 @@
  *   1. defense.evaluateThreats：对每个成规模的活敌 blob 用 Dijkstra 推演
  *      进攻我方锚点代价最低的路径并按战斗规则逐格模拟，得到威胁清单
  *      （推算对方攻击路径）；
- *   2. defense.planDefense：锚点贴脸应急（歼灭/削弱）、直接反击兵源、
- *      在威胁路径上选集结点提前布防；守不住时撤空或将死主城全军出击；
+ *   2. defense.planDefense：威胁分「活跃（正在逼近）/静止（龟缩兵堆）」
+ *      两层——只对活跃威胁集结布防、冻结经济与暂缓新进攻，静止威胁只做
+ *      贴脸应急与可吃即切；守不住时撤空或将死主城全军出击；
  *   3. offense.planOffense：评估敌方主城/指挥所目标（端掉最后一座主城
  *      = 直接淘汰），用带「邻近敌军风险」代价的 Dijkstra 选更难被破解
  *      的进军路径；入口兵力不足则以入口为焦点集结（沿路己方格自动合流，
- *      多源汇集而非单点取兵）；能吃掉突入我境的活敌格就立即切断；
- *   4. economy.planEconomy：铺皇冠策略——皇冠每 tick +1 产兵是普通格的
- *      50 倍，不设数量上限：指挥所兵力够就升皇冠（不占冷却），普通格
- *      越过门槛就按「二线甜区 + 锚点覆盖」评分建指挥所（有冷却），
- *      威胁逼近时冻结建设，差十几兵的待建格由输送流顺路喂养；
+ *      多源汇集而非单点取兵），入口推兵量到路径需求 85% 即全冲；
+ *      能吃掉突入我境的活敌格就立即切断；
+ *   4. economy.planEconomy：铺皇冠策略——皇冠每 tick +1 产兵，指挥所
+ *      与普通格同速（不增产），故指挥所只是升皇冠的短暂中间态：
+ *      攒到 88 兵才按「皇冠簇优先 + 二线甜区」评分建指挥所并立即走
+ *      升级链（直建皇冠），升级不设冷却且优先于新建；活跃威胁逼近时
+ *      冻结建设，差兵的待建格由输送流顺路喂养；
  *   5. logistics.expansionCandidates：mode 0 智能分兵吃中立/孤军领土
  *      （爆发期加权）；logistics.flowCandidates：向集结焦点/前线输送兵力；
  *   6. 全部候选按评分排序，每 tick 最多下发 MAX_OPS_PER_TURN 条（同格
@@ -92,6 +95,9 @@ function attachStrategy(socket, options) {
     // 争夺的格子上连续重建指挥所白扔 50 兵）。
     contested: new Map(),
     prevCodes: null,
+    // 威胁逼近记忆：(敌 owner:我锚点) → 历史最小 hops；只有 hops 在缩小
+    // 的威胁才算「活跃」（触发集结与冻结经济），静止的龟缩兵堆不算。
+    threatMinHops: new Map(),
     allowTeam: false,
     teamByClient: new Map(),
     teams: new Map(),
@@ -114,6 +120,7 @@ function attachStrategy(socket, options) {
     state.rallyIdx = -1;
     state.contested = new Map();
     state.prevCodes = null;
+    state.threatMinHops = new Map();
     state.deadPlayers = new Set();
     state.planSig = '';
   }
@@ -241,8 +248,10 @@ function attachStrategy(socket, options) {
     const threats = evaluateThreats(ctx);
     const defense = planDefense(ctx, threats);
     state.rallyIdx = defense.rally ?? -1;
-    const offense = planOffense(ctx, state, threats);
-    const economy = planEconomy(ctx, state, threats);
+    // 进攻/经济只看「活跃威胁」（正在逼近的）：静止的龟缩兵堆既不
+    // 冻结建设，也不阻止新打击计划。
+    const offense = planOffense(ctx, state, defense.activeThreats);
+    const economy = planEconomy(ctx, state, defense.activeThreats);
     // 输送焦点优先级：防御集结点 > 打击入口 > 喂养待建格。
     const focus = defense.rally
       ? { idx: defense.rally, baseScore: defense.rallyScore }

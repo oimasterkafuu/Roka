@@ -4,7 +4,13 @@
  * 核心思路：对每一个成规模的活敌兵力点（blob），用 Dijkstra 推演其进攻
  * 我方最近锚点（主城/指挥所）代价最低的路径，并按引擎战斗规则逐格模拟
  * 兵力损耗。凡能带着剩余兵力在若干 tick 后抵达锚点的，记为威胁；再按
- * 「到达 tick 数」排序。应对手段按优先级：
+ * 「到达 tick 数」排序。威胁分两层：
+ *   - 静止威胁（龟缩的大兵堆）：只做贴脸应急与「可吃即切」，不集结、
+ *     不冻结经济——不为一个不动的东西拖垮自己的皇冠生产线；
+ *   - 活跃威胁（hops 在缩小的，即正在逼近的）：才触发集结布防（C）、
+ *     紧急抢占与撤离/决战（D），并向上层输出 activeThreats 用于冻结
+ *     经济与暂缓新进攻计划。
+ * 应对手段按优先级：
  *   A. 锚点贴脸应急：能歼灭（推兵严格大于）就歼灭，危急时先削弱；
  *   B. 直接反击兵源：贴住 blob 的己方格能吃掉它就立刻打；
  *   C. 集结拦截：在威胁路径上挑一个能及时集结足够兵力的己方格作为
@@ -20,6 +26,37 @@ const THREAT_MAX_HOPS = 12;
 const URGENT_HOPS = 2;
 // 开始为威胁集结的步数窗口。
 const RALLY_WINDOW_HOPS = 10;
+
+/**
+ * 威胁激活判定：只有「正在逼近」的威胁才触发集结/冻结经济。
+ *
+ * 威胁模型假设敌格立即向我方锚点开拔。对龟缩对手（大兵堆蹲在原地不动），
+ * 这个假设永远不成立——若因一个静止的兵堆永久冻结建设，皇冠数量永远起
+ * 不来，收入永远追不上，正是「越守越穷」的死局。因此对每个
+ * （敌方 owner, 我方锚点）组合记录历史最小 hops：
+ *   - 本 tick 的 hops 严格小于历史最小值 = 正在逼近 → 激活；
+ *   - 静止或变远的威胁不激活（不集结、不冻结经济），但它的贴脸应急（A）
+ *     与可吃即切（B）仍然生效——敌格真进我境时由这两层兜底。
+ * 状态存在 state.threatMinHops（Map），随 resetMap 清空。
+ */
+function activateThreats(ctx, threats) {
+  const { state } = ctx;
+  if (!state.threatMinHops) {
+    state.threatMinHops = new Map();
+  }
+  const active = [];
+  for (const t of threats) {
+    const key = `${t.blobOwner}:${t.anchorIdx}`;
+    const prevMin = state.threatMinHops.get(key);
+    if (typeof prevMin === 'number' && t.hops < prevMin) {
+      active.push(t);
+    }
+    if (typeof prevMin !== 'number' || t.hops < prevMin) {
+      state.threatMinHops.set(key, t.hops);
+    }
+  }
+  return active;
+}
 
 /**
  * 推演所有针对我方锚点的威胁，按紧急程度排序。
@@ -227,16 +264,20 @@ function planDefense(ctx, threats) {
     }
   }
 
-  /* ---------- B/C/D. 纵深威胁应对 ---------- */
+  /* ---------- B/C/D. 纵深威胁应对 ----------
+   * B（可吃即切）对全部威胁生效——静止的敌兵堆能吃掉也该吃；
+   * C/D（集结布防、撤离/决战）只对「正在逼近」的活跃威胁生效，
+   * 不为静止的龟缩兵堆冻结经济与集结。 */
+  const activeThreats = activateThreats(ctx, threats);
   let rally = null;
   let rallyScore = 0;
   let urgent = false;
   const threat = threats[0];
+  const activeThreat = activeThreats[0] || null;
   if (threat) {
-    urgent = threat.hops <= URGENT_HOPS;
-
     // B. 直接反击兵源：贴住 blob 的己方格能吃掉它就打；紧急时削弱到
     // 「剩余强度 <= 锚点到达时守军」也算解围。
+    const urgentB = threat.hops <= URGENT_HOPS;
     for (const sIdx of ctx.neighbors(threat.blobIdx)) {
       if (!ctx.operable(sIdx)) {
         continue;
@@ -245,7 +286,7 @@ function planDefense(ctx, threats) {
       if (push > threat.blobArmy) {
         candidates.push({
           score: 880,
-          preempt: urgent,
+          preempt: urgentB,
           op: attackOp(ctx, sIdx, threat.blobIdx, 2),
           srcKey: sIdx,
           tag: 'intercept-kill',
@@ -253,20 +294,24 @@ function planDefense(ctx, threats) {
       } else if (push >= 2 && threat.strengthAtAnchor - push <= threat.anchorDefenseAtArrival) {
         candidates.push({
           score: 840,
-          preempt: urgent,
+          preempt: urgentB,
           op: attackOp(ctx, sIdx, threat.blobIdx, 2),
           srcKey: sIdx,
           tag: 'intercept-weaken',
         });
       }
     }
+  }
+
+  if (activeThreat) {
+    urgent = activeThreat.hops <= URGENT_HOPS;
 
     // C. 集结拦截/坚守：把 rally 交给 logistics 的输送流。
     // rally 滞后保持：评估前 3 个威胁的集结点，若上 tick 的 rally 仍在
     // 其中就沿用，避免多路受敌时集结焦点来回跳变导致输送往返。
-    if (threat.hops <= RALLY_WINDOW_HOPS) {
+    if (activeThreat.hops <= RALLY_WINDOW_HOPS) {
       const choices = [];
-      for (const t of threats.slice(0, 3)) {
+      for (const t of activeThreats.slice(0, 3)) {
         if (t.hops > RALLY_WINDOW_HOPS) {
           continue;
         }
@@ -338,7 +383,7 @@ function planDefense(ctx, threats) {
     }
   }
 
-  return { candidates, rally, rallyScore, urgent };
+  return { candidates, rally, rallyScore, urgent, activeThreats };
 }
 
 module.exports = { evaluateThreats, planDefense, THREAT_MIN_ARMY, THREAT_MAX_HOPS };
