@@ -347,6 +347,19 @@ body.home .lb-rating {
   color: #6b7686;
 }
 
+/* 顶栏在线人数 */
+body.home .online-count {
+  font-size: 13px;
+  color: #6b7686;
+}
+
+/* 「刚刚在线」列表的下线时间 */
+body.home .lb-time {
+  font-size: 12px;
+  color: #9aa4b2;
+  flex-shrink: 0;
+}
+
 /* 新手期未定型 rating 的「?」上标提示 */
 body.home .rating-provisional {
   font-size: 0.7em;

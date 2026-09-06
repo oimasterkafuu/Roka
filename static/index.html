@@ -32,6 +32,7 @@
           <span class="brand-sub">实时方格领土战争</span>
         </div>
         <div class="account">
+          <span id="online-count" class="online-count" title="当前在线用户数（不含 bot）"></span>
           <a id="account-name" href="#"></a>
           <button id="logout-btn" type="button" class="btn btn-ghost btn-sm">退出登录</button>
         </div>
@@ -175,6 +176,12 @@
             <h2 class="card-title">Rating 排行榜</h2>
             <ol class="leaderboard-list" id="leaderboard-list"></ol>
             <p id="leaderboard-empty" class="panel-empty" style="display: none">暂无 rated 玩家。</p>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">刚刚在线</h2>
+            <ol class="leaderboard-list" id="recently-online-list"></ol>
+            <p id="recently-online-empty" class="panel-empty" style="display: none">暂无最近下线记录。</p>
           </section>
 
           <footer class="home-footer">
@@ -581,6 +588,36 @@
         }
       }
 
+      /* ---------- 在线人数与「刚刚在线」 ---------- */
+
+      async function loadOnline() {
+        try {
+          var res = await fetch('/api/online');
+          if (!res.ok) {
+            return;
+          }
+          var data = await res.json();
+          var count = data.count || 0;
+          $('#online-count').text('在线 ' + count + ' 人');
+          var items = Array.isArray(data.items) ? data.items : [];
+          var $list = $('#recently-online-list');
+          $list.empty();
+          $('#recently-online-empty').toggle(items.length === 0);
+          items.forEach(function (item) {
+            var $li = $('<li></li>');
+            var $name = $('<span class="lb-name"></span>').appendTo($li);
+            userLink(item.username, item.colorClass, item.title).appendTo($name);
+            $('<span class="lb-time"></span>')
+              .text(relativeTime(item.lastSeenAt))
+              .attr('title', fullTime(item.lastSeenAt))
+              .appendTo($li);
+            $list.append($li);
+          });
+        } catch (e) {
+          // 忽略加载失败
+        }
+      }
+
       /* ---------- 动态 ---------- */
 
       var FEED_LIMIT = 10;
@@ -972,6 +1009,7 @@
           loadReplays(0);
           loadAnnouncement();
           loadLeaderboard();
+          loadOnline();
           var page = parseInt(new URLSearchParams(location.search).get('page'), 10) || 1;
           loadFeeds(page);
 
@@ -986,6 +1024,9 @@
           });
           socket.on('home_leaderboard', function () {
             loadLeaderboard();
+          });
+          socket.on('home_online', function () {
+            loadOnline();
           });
           socket.on('home_announcement', function () {
             loadAnnouncement();

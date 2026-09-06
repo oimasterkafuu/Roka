@@ -68,6 +68,13 @@ const RATE_LIMIT_REAL_IP_HEADERS = [
   'forwarded',
 ] as const;
 const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
+// 「刚刚在线」列表展示条数（参考排行榜前 10，取 8）。
+const RECENTLY_ONLINE_LIMIT = 8;
+// 连接/断开频繁，home_online 失效通知做简单节流合并。
+const HOME_ONLINE_NOTIFY_DELAY_MS = 2000;
+// 在线状态追踪表：覆盖所有页面的已登录连接（含 ?home=1 首页监听连接），
+// 同一用户多个标签页按用户名去重只计一次；bot 令牌连接（合成用户）不计入。
+const onlineSocketIds = new Map<string, Set<string>>();
 
 /**
  * Bot 令牌表：ROKA_BOT_TOKENS 格式 "token1:username1,token2:username2"。
@@ -710,6 +717,17 @@ const boot = async (): Promise<void> => {
     return reply.send({ items });
   });
 
+  app.get('/api/online', async (_request, reply) => {
+    const items = userStore
+      .listRecentlySeen(RECENTLY_ONLINE_LIMIT, (username) => onlineSocketIds.has(username))
+      .map((entry) => {
+        const { rating, ratingGames } = userStore.getDisplayRating(entry.username);
+        const tier = ratingTier(rating, ratingGames);
+        return { ...entry, colorClass: tier.className, title: tier.title };
+      });
+    return reply.send({ count: onlineSocketIds.size, items });
+  });
+
   app.get('/api/profile/:username', async (request, reply) => {
     const { username } = request.params as { username: string };
     const profile = userStore.getPublicProfile(username);
@@ -930,6 +948,45 @@ const boot = async (): Promise<void> => {
   authService.attachSocketServer(io);
   lobbyService.startLobbyHeartbeatSweep(io);
 
+  // home_online 失效通知做简单节流合并：连接/断开频繁时最多每 2 秒广播一次。
+  let homeOnlineTimer: NodeJS.Timeout | null = null;
+  const notifyHomeOnline = (): void => {
+    if (homeOnlineTimer) {
+      return;
+    }
+    homeOnlineTimer = setTimeout(() => {
+      homeOnlineTimer = null;
+      io.emit('home_online');
+    }, HOME_ONLINE_NOTIFY_DELAY_MS);
+  };
+
+  const trackOnline = (username: string, socketId: string): void => {
+    let set = onlineSocketIds.get(username);
+    if (!set) {
+      set = new Set();
+      onlineSocketIds.set(username, set);
+    }
+    set.add(socketId);
+    // 任一页面建立连接即刷新「最后上线」时间。
+    void userStore.markLastSeen(username).catch(() => undefined);
+    notifyHomeOnline();
+  };
+
+  const untrackOnline = (username: string, socketId: string): void => {
+    const set = onlineSocketIds.get(username);
+    if (!set) {
+      return;
+    }
+    set.delete(socketId);
+    if (set.size > 0) {
+      return;
+    }
+    onlineSocketIds.delete(username);
+    // 最后一个连接断开即记录「下线时间」。
+    void userStore.markLastSeen(username).catch(() => undefined);
+    notifyHomeOnline();
+  };
+
   io.use((socket, next) => {
     const fromHandshake =
       typeof socket.handshake.auth?.token === 'string' ? String(socket.handshake.auth.token) : null;
@@ -964,9 +1021,19 @@ const boot = async (): Promise<void> => {
       return;
     }
 
+    const isBot = socket.data.isBot === true;
+    if (!isBot) {
+      trackOnline(username, socket.id);
+    }
+
     // 首页只接收全局失效通知：不参与「同一用户单连接」互斥，
     // 否则打开首页会踢掉该用户在游戏页/其他标签页的连接（反之亦然）。
     if (socket.handshake.query?.home === '1') {
+      if (!isBot) {
+        socket.on('disconnect', () => {
+          untrackOnline(username, socket.id);
+        });
+      }
       return;
     }
 
@@ -1327,7 +1394,10 @@ const boot = async (): Promise<void> => {
     socket.on('leave', doReturnRoom);
 
     socket.on('disconnect', () => {
-      authService.untrackSocket(username, socket.id);
+      if (!isBot) {
+        untrackOnline(username, socket.id);
+        authService.untrackSocket(username, socket.id);
+      }
       lobbyService.heartbeatExempt.delete(socket.id);
       socket.leave(`sid_${socket.id}`);
       lobbyService.checkLeave(
