@@ -391,7 +391,8 @@
               .text((item.playing || 0) + (item.spectators || 0))
               .appendTo($tr);
             $('<td></td>')
-              .text((item.ready || 0) + '/' + (item.need || 0) + ' 准备')
+              // 参赛不足 2 人时服务端 need 为 0，此时展示「人数不足」而非 0/0。
+              .text(item.need < 2 ? '人数不足' : (item.ready || 0) + '/' + item.need + ' 准备')
               .appendTo($tr);
             $body.append($tr);
           });

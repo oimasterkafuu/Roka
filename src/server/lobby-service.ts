@@ -650,8 +650,8 @@ class LobbyService {
   }
 
   private getReqReady(x: number): number {
-    // 非观战用户中「我准备好了」超过向上取整的 1/2 即自动开始。
-    return Math.ceil(x / 2) + 1;
+    // 非观战用户中「我准备好了」超过向下取整的 1/2 即自动开始。
+    return Math.floor(x / 2) + 1;
   }
 
   private getPlayingCount(players: LobbyPlayer[]): number {
