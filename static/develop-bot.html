@@ -278,6 +278,16 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               仅房主可改。
             </td>
           </tr>
+          <tr>
+            <th><code>room_heartbeat</code></th>
+            <td>
+              <code>{}</code>（网页端附带 <code>{ visible, focused }</code>，服务端不解析）。 房间页每 30
+              秒上报一次，证明标签页仍然开启；房间准备阶段超过 600
+              秒未收到心跳的成员会被服务端自动移出房间。对局进行中不检查心跳 （对局断线走 10
+              秒宽限期机制）。使用 <code>ROKA_BOT_TOKENS</code> 鉴权的 bot 连接与服务端托管
+              bot（管理后台启动）豁免此检查；使用普通用户 JWT 的 bot 需自行周期发送心跳。
+            </td>
+          </tr>
         </table>
 
         <h3>3.2 Server → Client</h3>
@@ -310,6 +320,14 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>chat_message</code></th>
             <td>
               聊天消息：<code>{ sender, color, text, team }</code>。<code>color=0</code> 时通常是系统消息。
+            </td>
+          </tr>
+          <tr>
+            <th><code>room_kick</code></th>
+            <td>
+              <code>{}</code>。因心跳超时（准备阶段 600 秒无
+              <code>room_heartbeat</code>）被服务端移出房间；网页端收到后跳转回首页。
+              被移出后连接仍然保留，可重新 <code>join_game_room</code>。
             </td>
           </tr>
         </table>

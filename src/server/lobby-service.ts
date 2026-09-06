@@ -25,6 +25,10 @@ const FIXED_MOUNTAIN_RATIO = 0.5;
 const FIXED_SWAMP_RATIO = 0.5;
 const MAP_TOKEN_MAX_LENGTH = 32;
 const RATING_K = 24;
+/** 房间准备阶段的心跳超时：超过 600 秒无心跳的成员被自动移出房间。 */
+const LOBBY_HEARTBEAT_TIMEOUT_MS = 600_000;
+/** 心跳扫描周期：每分钟检查一次全部房间成员的最后心跳时间。 */
+const LOBBY_HEARTBEAT_SWEEP_MS = 60_000;
 
 const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
@@ -56,6 +60,12 @@ class LobbyService {
   readonly lobbyPlayers = new Map<string, LobbyPlayer[]>();
 
   private readonly pendingRejoins = new Map<string, PendingRejoin>();
+
+  /** 房间成员的最后心跳时间（sid → ms 时间戳）；仅用于准备阶段的掉线检测。 */
+  private readonly lobbyHeartbeats = new Map<string, number>();
+  /** 豁免心跳踢出的 sid（ROKA_BOT_TOKENS 鉴权的 bot 连接，由 server.ts 维护）。 */
+  readonly heartbeatExempt = new Set<string>();
+  private heartbeatSweepTimer?: NodeJS.Timeout;
 
   /** 对局全部结束时触发（例如让推迟中的自动更新继续执行）。 */
   onGameEnded?: () => void;
@@ -110,6 +120,8 @@ class LobbyService {
 
   joinLobby(sid: string, uid: string, gid: string): void {
     this.lobbyOfSid.set(sid, gid);
+    // 进房本身即是「标签页开启」的证明，作为心跳基线。
+    this.lobbyHeartbeats.set(sid, Date.now());
     const existingPlayers = this.lobbyPlayers.get(gid);
     const isNewRoom = !existingPlayers || existingPlayers.length === 0;
 
@@ -163,6 +175,69 @@ class LobbyService {
     }
     const [removed] = players.splice(index, 1);
     return removed.uid;
+  }
+
+  /**
+   * 房间页心跳：sid 位于某房间时刷新最后心跳时间。对局进行中也照常记录
+   * （扫描时会跳过对局中的房间），保证对局结束回到准备阶段后时间戳仍然新鲜。
+   */
+  recordLobbyHeartbeat(sid: string): void {
+    if (this.lobbyOfSid.has(sid)) {
+      this.lobbyHeartbeats.set(sid, Date.now());
+    }
+  }
+
+  /**
+   * 启动房间心跳扫描（全局单一定时器）：每分钟检查一次，准备阶段超过
+   * LOBBY_HEARTBEAT_TIMEOUT_MS 无心跳的成员被自动移出房间并收到 room_kick
+   * 事件（前端据此跳转首页）；heartbeatExempt 中的 bot 连接不受影响。
+   */
+  startLobbyHeartbeatSweep(io: SocketIOServer): void {
+    if (this.heartbeatSweepTimer) {
+      return;
+    }
+    this.heartbeatSweepTimer = setInterval(() => {
+      this.sweepInactiveLobbyMembers(io);
+    }, LOBBY_HEARTBEAT_SWEEP_MS);
+    this.heartbeatSweepTimer.unref();
+  }
+
+  private sweepInactiveLobbyMembers(io: SocketIOServer): void {
+    const now = Date.now();
+    for (const [sid, lastHeartbeat] of this.lobbyHeartbeats) {
+      const lobbyId = this.lobbyOfSid.get(sid);
+      if (!lobbyId) {
+        this.lobbyHeartbeats.delete(sid);
+        continue;
+      }
+      // 仅针对房间准备阶段：对局进行中的断线由 pendingRejoins 宽限期机制处理。
+      if (this.heartbeatExempt.has(sid) || this.isLobbyGameRunning(lobbyId)) {
+        continue;
+      }
+      if (now - lastHeartbeat <= LOBBY_HEARTBEAT_TIMEOUT_MS) {
+        continue;
+      }
+      this.kickFromLobby(io, sid, lobbyId);
+    }
+  }
+
+  /**
+   * 心跳超时踢出：复用离开房间的清理逻辑（移出成员、广播房间/首页失效、
+   * 重新检查开局条件），并向该 socket 发送 room_kick 让前端重定向到首页。
+   */
+  private kickFromLobby(io: SocketIOServer, sid: string, lobbyId: string): void {
+    this.lobbyHeartbeats.delete(sid);
+    this.lobbyOfSid.delete(sid);
+    const roomVal = this.getLobbyVal(lobbyId);
+    io.sockets.sockets.get(sid)?.leave(`game_${roomVal}`);
+    const uid = this.leaveLobby(sid, lobbyId);
+    io.to(`sid_${sid}`).emit('room_kick', {});
+    this.emitRoomUpdate(io, lobbyId);
+    if (uid) {
+      this.sendLobbySystemMessage(io, roomVal, `${uid} 因长时间未活跃被移出了自定义房间。`);
+    }
+    this.emitHomeRooms(io);
+    this.checkReady(io, lobbyId);
   }
 
   generateRoomConfig(gid: string): RoomUpdatePayload {
@@ -471,6 +546,7 @@ class LobbyService {
   }
 
   checkLeave(io: SocketIOServer, sid: string, leaveRoom: (room: string) => void, username: string): void {
+    this.lobbyHeartbeats.delete(sid);
     const lobbyId = this.lobbyOfSid.get(sid);
     const gameId = this.gameUid.get(sid);
 
@@ -557,6 +633,11 @@ class LobbyService {
     }
     this.lobbyOfSid.delete(oldSid);
     this.lobbyOfSid.set(sid, room);
+    const lastHeartbeat = this.lobbyHeartbeats.get(oldSid);
+    if (lastHeartbeat !== undefined) {
+      this.lobbyHeartbeats.delete(oldSid);
+      this.lobbyHeartbeats.set(sid, lastHeartbeat);
+    }
 
     if (!game.rebindPlayer(oldSid, sid)) {
       return false;

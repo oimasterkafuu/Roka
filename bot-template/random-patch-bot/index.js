@@ -137,6 +137,13 @@ const socket = io(BOT_SERVER, {
   reconnection: true,
 });
 
+// 房间心跳：证明客户端仍然在线。使用 ROKA_BOT_TOKENS 鉴权时服务端本就豁免踢出，
+// 但普通用户 JWT 鉴权的连接需要心跳才能长时间停留在准备阶段的房间里。
+const HEARTBEAT_INTERVAL_MS = 30000;
+setInterval(() => {
+  socket.emit('room_heartbeat');
+}, HEARTBEAT_INTERVAL_MS);
+
 socket.on('connect', () => {
   console.log(`[bot] connected: ${socket.id}`);
   socket.emit('join_game_room', { room: BOT_ROOM });
@@ -258,6 +265,11 @@ socket.on('update', (payload) => {
 socket.on('left', () => {
   state.inGame = false;
   console.log('[bot] left current game');
+});
+
+socket.on('room_kick', () => {
+  state.inGame = false;
+  console.log('[bot] kicked from room: heartbeat timeout');
 });
 
 socket.on('room_update', (data) => {
