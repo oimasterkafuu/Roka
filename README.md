@@ -16,7 +16,7 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，校验房长保留、自动准备、实际走子与停止 API）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，校验房长保留、自动准备、实际走子与停止 API）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复）。
 
 启动后访问 `http://localhost:23333/` 并注册账号。
 
@@ -44,7 +44,7 @@ pnpm run start
 - 后台管理页 `/admin`（仅管理员可见入口）：用户列表（rating、注册/最后在线时间、角色、封禁状态），支持按时长封禁（1 小时/1 天/7 天/自定义/永久）与解封；被封禁用户无法登录且已登录的连接会被立即踢下线，封禁到期自动解除；管理员之间不能互相封禁，超级管理员不受限制。超级管理员另有「策略 Bot」分区：指定已注册用户名与房间号即可在服务器进程内启动 `bot-template/simple-strategy-bot`（内存临时令牌鉴权，跳过验证码），Bot 自动进房/准备、对局结束后自动重新准备、可随时手动停止；托管 Bot 进房不当房主（房主保留给后续进房的人类用户或第三方 Bot）、豁免房间心跳踢出、不参与单会话顶号互斥。
 - 策略 Bot 模板 `bot-template/simple-strategy-bot`：具备扩张/主城防卫/腹地运兵/择机建设的中等强度策略，可独立运行（与 random-patch-bot 相同的 CLI 用法），其 `strategy.js` 同时被服务端托管运行复用。
 - FFA 与组队模式，统一 Rating（不区分 1v1 / FFA）；Codeforces 风格段位名字颜色。新手显示分仿 Codeforces 从 0 起步（按 1200 / 2^对局数 的 delta 逼近真实分），内部结算仍按 1200 初始分。
-- 首页三栏布局：左侧个人信息、房间列表与回放列表（自己参与的对局浅黄高亮）；中间「动态」feed；右侧公告（仅管理员可编辑，与动态同一条管线，支持 Markdown 与服务端渲染的 LaTeX）、Rating 排行榜（前 10，Unrated 不参与）与「刚刚在线」列表（最近下线的前 8 位用户及下线相对时间）。
+- 首页三栏布局：左侧个人信息、房间列表（状态列区分「游戏中 / 人数不足 / 准备进度」）与回放列表（自己参与的对局浅黄高亮）；中间「动态」feed；右侧公告（仅管理员可编辑，与动态同一条管线，支持 Markdown 与服务端渲染的 LaTeX）、Rating 排行榜（前 10，Unrated 不参与）与「刚刚在线」列表（最近下线的前 8 位用户及下线相对时间）。
 - 顶栏实时展示当前在线人数：覆盖网站所有页面的 socket 连接，同一用户多个标签页只计一次，bot 令牌连接不计入；通过 `home_online` socket 失效通知（2 秒节流）驱动首页刷新，数据来自 `GET /api/online`。
 - 回放可下载为原始 `.rpl` 操作流文件（仅几百字节，只有服务端能解码）；观看页直接下发 gzip 压缩后的转码二进制（服务端按回放 id 落盘缓存，首次观看后无需再重建整场对局），加载期间显示下载进度；首页回放面板支持「上传并查看回放」——POST 给服务器转码后播放，版本过旧或损坏会弹出「不兼容」提示，服务端库存的不兼容回放会被自动删除。
 - 「动态」：类似推特的 feed，支持点赞、评论、编辑与删除（管理员可管理全部），支持 Markdown 与服务端渲染的 LaTeX；发布有 30 秒冷却；URL 带页码可分享翻页位置。

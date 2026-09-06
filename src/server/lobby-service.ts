@@ -314,6 +314,7 @@ class LobbyService {
         spectators: players.length - playing,
         ready,
         need: this.getReq(players),
+        running: this.isLobbyGameRunning(room),
       });
     }
 
