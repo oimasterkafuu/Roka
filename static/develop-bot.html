@@ -147,7 +147,22 @@
             rel="noopener noreferrer"
             ><code>bot-template/random-patch-bot</code></a
           >：它加入房间、自动准备、维护本地全图缓存，每回合随机挑一个合法动作发送
-          <code>attack</code>。建议先把它跑通，再在其状态机之上替换决策逻辑。
+          <code>attack</code>。建议先把它跑通，再在其状态机之上替换决策逻辑。 另有具备实际策略的
+          <a
+            class="dev-link"
+            href="https://github.com/oimasterkafuu/Roka/tree/main/bot-template/simple-strategy-bot"
+            target="_blank"
+            rel="noopener noreferrer"
+            ><code>bot-template/simple-strategy-bot</code></a
+          >（扩张/防卫/运兵/建设），可作为策略起点。
+        </p>
+        <h3>由管理员在服务端托管运行</h3>
+        <p>
+          超级管理员可以在后台管理页 <code>/admin</code> 的「策略 Bot」分区直接启动
+          <code>simple-strategy-bot</code>：只需提供已注册用户名与房间号，服务端在本进程内用内存临时令牌 （与
+          <code>ROKA_BOT_TOKENS</code> 同一鉴权路径）连接自身 socket 完成登录，无需验证码与 token。托管 bot
+          进房时不会成为房主（房主保留给后续进房的人类用户或第三方
+          bot）、豁免房间心跳踢出、不参与单会话顶号互斥；对局结束后自动重新准备， 可在管理页手动停止。
         </p>
         <h3>获取 token</h3>
         <p>
@@ -228,7 +243,11 @@ BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=your-room BOT_TOKEN=your-auth-token p
             <th>单会话限制</th>
             <td>
               同一用户名同时只允许一个
-              socket：新连接成功后，该账号的旧连接会被服务端直接断开（顶号）。对局中掉线（含被顶号）有 10
+              socket：新连接成功后，该账号的旧连接会被服务端直接断开（顶号）。<b>例外</b>：bot 令牌连接（<code
+                >ROKA_BOT_TOKENS</code
+              >
+              合成账号与服务端托管 bot）不参与顶号互斥，
+              不会顶掉同名的浏览器连接，也不会被顶掉。对局中掉线（含被顶号）有 10
               秒宽限期：期间不判挂机、不投降；10 秒内重新连接并对同一房间发送
               <code>join_game_room</code> 即可恢复对局（服务端把该玩家的 socket 换绑到新连接，并补发
               <code>init_map</code> 与一帧全量 <code>update</code>，注意此时
@@ -255,7 +274,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>join_game_room</code></th>
             <td>
               <code>{ room: string }</code>。房间号服务端限制长度 <code>1..15</code>；建议只使用
-              <code>[0-9A-Za-z_-]</code>。
+              <code>[0-9A-Za-z_-]</code>。房主为房间成员列表首位：服务端托管 bot
+              进房时固定排在普通成员之后，房主位置保留给第一个人类用户或第三方 bot。
             </td>
           </tr>
           <tr>

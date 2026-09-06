@@ -147,6 +147,33 @@ body.admin .panel-empty {
   text-align: center;
 }
 
+/* 策略 Bot 分区 */
+body.admin .bot-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #6b7686;
+  line-height: 1.7;
+}
+body.admin .bot-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+body.admin .bot-form input {
+  flex: 1 1 160px;
+}
+body.admin .bot-conn {
+  font-size: 12px;
+  font-weight: 700;
+}
+body.admin .bot-conn.on {
+  color: teal;
+}
+body.admin .bot-conn.off {
+  color: #d63535;
+}
+
 /* 角色徽标 */
 body.admin .role-badge {
   display: inline-block;

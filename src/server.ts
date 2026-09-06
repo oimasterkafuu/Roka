@@ -19,6 +19,7 @@ import { FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { CaptchaService } from './server/captcha-service';
 import { EditableLobbyKey, LobbyService } from './server/lobby-service';
+import { ServerBotManager } from './server/server-bot-manager';
 import { WebhookUpdater } from './server/webhook-updater';
 
 const runtimeEnv = ensureRuntimeEnv();
@@ -45,6 +46,9 @@ const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const captchaService = new CaptchaService();
 const lobbyService = new LobbyService(replayStore, userStore);
+// 服务器实际监听端口：listen 前赋值；托管 bot 自连回环地址时读取（API 调用必发生在 listen 后）。
+let listenPort = Number(process.env.PORT) || 23333;
+const serverBotManager = new ServerBotManager({ getPort: () => listenPort });
 const webhookUpdater = new WebhookUpdater(app.log, runtimeEnv.webhookSecret, () =>
   lobbyService.hasActiveGames(),
 );
@@ -698,6 +702,73 @@ const boot = async (): Promise<void> => {
     return reply.send({ ok: true });
   });
 
+  // ---------- 策略 Bot（仅超级管理员）：服务端进程内运行 simple-strategy-bot ----------
+
+  // Bot 管理统一的权限闸：在 requireAdmin 之上再校验超级管理员（与 set-admin 相同）。
+  const requireSuperAdmin = (request: FastifyRequest, reply: FastifyReply): AuthUser | null => {
+    const admin = requireAdmin(request, reply);
+    if (!admin) {
+      return null;
+    }
+    if (!userStore.isSuperAdminUser(admin.username)) {
+      void reply.code(403).send({ error: '仅超级管理员可以管理策略 Bot。' });
+      return null;
+    }
+    return admin;
+  };
+
+  app.get('/api/admin/bots', async (request, reply) => {
+    const admin = requireSuperAdmin(request, reply);
+    if (!admin) {
+      return;
+    }
+    return reply.send({ items: serverBotManager.list() });
+  });
+
+  // 启动：{ username, room }。Bot 在服务器进程内以该用户身份连接本服务器并加入房间。
+  app.post(
+    '/api/admin/bots/start',
+    { preHandler: adminActionRateLimitPreHandler },
+    async (request, reply) => {
+      const admin = requireSuperAdmin(request, reply);
+      if (!admin) {
+        return;
+      }
+      const body = request.body as { username?: unknown; room?: unknown };
+      const username = String(body?.username ?? '').trim();
+      const room = String(body?.room ?? '').trim();
+      if (!USERNAME_REGEX.test(username) || !userStore.getPublicProfile(username)) {
+        return reply.code(404).send({ error: '用户不存在。' });
+      }
+      if (userStore.getBanStatus(username).banned) {
+        return reply.code(400).send({ error: '该用户已被封禁，不能用于运行 Bot。' });
+      }
+      if (room.length === 0 || room.length > 15) {
+        return reply.code(400).send({ error: '房间号无效（长度 1~15）。' });
+      }
+      try {
+        const bot = serverBotManager.start(username, room);
+        return reply.send({ ok: true, bot });
+      } catch (error) {
+        return reply.code(409).send({ error: error instanceof Error ? error.message : '启动失败。' });
+      }
+    },
+  );
+
+  // 停止：{ id }。断开 bot 连接并清理其内存令牌。
+  app.post('/api/admin/bots/stop', { preHandler: adminActionRateLimitPreHandler }, async (request, reply) => {
+    const admin = requireSuperAdmin(request, reply);
+    if (!admin) {
+      return;
+    }
+    const body = request.body as { id?: unknown };
+    const id = String(body?.id ?? '').trim();
+    if (!serverBotManager.stop(id)) {
+      return reply.code(404).send({ error: 'Bot 不存在或已停止。' });
+    }
+    return reply.send({ ok: true });
+  });
+
   const feedActionRateLimitPreHandler = app.rateLimit({ max: 60, timeWindow: '1 minute' });
 
   app.get('/api/feeds', async (request, reply) => {
@@ -1132,6 +1203,17 @@ const boot = async (): Promise<void> => {
         next();
         return;
       }
+
+      // 服务端托管策略 Bot：命中管理器生成的内存临时令牌时以指定用户放行，
+      // 额外标记 isServerBot（进房不当房主，见 lobby-service.joinLobby）。
+      const serverBotUsername = serverBotManager.resolveToken(fromHandshake);
+      if (serverBotUsername) {
+        socket.data.username = serverBotUsername;
+        socket.data.isBot = true;
+        socket.data.isServerBot = true;
+        next();
+        return;
+      }
     }
 
     const fromCookie = authService.getTokenFromCookie(socket.handshake.headers.cookie);
@@ -1169,8 +1251,12 @@ const boot = async (): Promise<void> => {
       return;
     }
 
-    authService.disconnectOtherUserSockets(username, socket.id);
-    authService.trackSocket(username, socket.id);
+    // bot 连接（ROKA_BOT_TOKENS 合成用户 / 服务端托管 bot）不参与单连接互斥：
+    // 托管 bot 复用真实用户名，走互斥会把该用户的浏览器连接顶下线。
+    if (!isBot) {
+      authService.disconnectOtherUserSockets(username, socket.id);
+      authService.trackSocket(username, socket.id);
+    }
     socket.join(`sid_${socket.id}`);
     socket.emit('set_id', lobbyService.md5(socket.id));
 
@@ -1259,7 +1345,9 @@ const boot = async (): Promise<void> => {
       }
 
       if (!lobbyService.lobbyOfSid.has(socket.id)) {
-        lobbyService.joinLobby(socket.id, username, room);
+        lobbyService.joinLobby(socket.id, username, room, {
+          serverBot: socket.data.isServerBot === true,
+        });
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         lobbyService.sendLobbySystemMessage(io, roomVal, `${username} 加入了自定义房间。`);
@@ -1546,6 +1634,7 @@ const boot = async (): Promise<void> => {
   const cliPortIndex = process.argv.indexOf('--port');
   const cliPort = cliPortIndex >= 0 ? Number(process.argv[cliPortIndex + 1]) : Number.NaN;
   const port = Number.isFinite(cliPort) && cliPort > 0 ? cliPort : Number(process.env.PORT) || 23333;
+  listenPort = port;
   await app.listen({ host: '0.0.0.0', port });
 };
 

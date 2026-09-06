@@ -44,6 +44,35 @@
         <p id="users-empty" class="panel-empty" style="display: none">暂无用户。</p>
       </section>
 
+      <!-- 策略 Bot（仅超级管理员） -->
+      <section class="card" id="bots-card" style="display: none">
+        <h2 class="card-title">策略 Bot</h2>
+        <p class="bot-hint">
+          在服务器进程内运行
+          simple-strategy-bot：以指定用户身份自动登录（跳过验证码）进入房间并自动准备，对局结束后自动重新准备。
+          Bot 进房不会成为房主，房主保留给后续进房的人类用户或第三方 Bot。
+        </p>
+        <div class="bot-form">
+          <input type="text" id="bot-username" placeholder="Bot 使用的用户名" maxlength="20" />
+          <input type="text" id="bot-room" placeholder="房间号" maxlength="15" />
+          <button id="bot-start-btn" type="button" class="btn btn-secondary btn-sm">启动</button>
+          <button id="bots-refresh-btn" type="button" class="btn btn-ghost btn-sm">刷新</button>
+        </div>
+        <p id="bot-error" class="dialog-error" style="display: none"></p>
+        <table class="mini-table" id="bots-table">
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>房间</th>
+              <th>启动时间</th>
+              <th>连接状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="bots-body"></tbody>
+        </table>
+        <p id="bots-empty" class="panel-empty" style="display: none">暂无运行中的 Bot。</p>
+      </section>
     </div>
 
     <!-- 封禁对话框 -->

@@ -13,7 +13,8 @@
 src/server.ts ── Fastify 路由 + socket.io 事件（唯一入口）
    ├── src/server/auth-service.ts     JWT / 单连接互斥
    ├── src/server/captcha-service.ts  图形验证码
-   ├── src/server/lobby-service.ts    房间/对局状态机、断线宽限期、ELO 结算
+   ├── src/server/lobby-service.ts    房间/对局状态机、断线宽限期、ELO 结算、托管 bot 房长保留
+   ├── src/server/server-bot-manager.ts  托管策略 Bot 管理器（进程内自连、内存令牌鉴权）
    └── src/server/webhook-updater.ts  GitHub push 自动部署
    ▼
 src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降、回放记录）
@@ -58,7 +59,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── vendor/katex/       # 本地化 KaTeX（公式渲染）
 │   └── *.png / *.mp3 / 字体 # 地块贴图、音效、Quicksand/HYMaQiDuo 字体
 ├── scripts/                # 维护脚本（数据迁移、bot 冒烟测试）
-├── bot-template/           # random-patch-bot：socket 协议最小参考实现
+├── bot-template/           # random-patch-bot（协议最小参考）与 simple-strategy-bot（策略 bot）
 ├── data/                   # 运行时数据（gitignored）：users.bin / feeds.bin /
 │                           #   announcement.json / replays/*.rpl(+缓存)
 ├── dist/                   # tsc 构建产物（勿手改）
@@ -72,10 +73,13 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 ### 入口与服务层
 
 **src/server.ts** — HTTP+WebSocket 总装入口，全部路由与 socket 事件在此。
-`boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（非公开路径校验 cookie JWT）→ REST 路由（认证/动态/公告/排行榜/在线状态/后台管理/回放/房间/地图示例）→ `SocketIOServer`。后台管理：`GET /admin` 页面与 `GET /api/admin/users`、`POST /api/admin/ban|unban|set-admin` 接口经 `requireAdmin` 统一校验管理员身份（非管理员 403/重定向），`set-admin` 再校验超管；登录路由在密码校验后检查封禁状态（403 拒绝），封禁成功即 `clearSession` + `disconnectUserSockets` 踢下线。socket 中间件支持 cookie JWT 或 `ROKA_BOT_TOKENS` bot 令牌（命中时置 `socket.data.isBot` 并加入心跳豁免集）；`?home=1` 连接只做全局通知、不参与单连接互斥。在线状态追踪表 `onlineSocketIds`（覆盖含 `?home=1` 的所有非 bot 连接、按用户名去重）：连接时刷新用户 `lastSeenAt`（上线），最后一个连接断开时再刷新一次（下线），变化经 2 秒节流广播 `home_online`；`GET /api/online` 返回在线人数与最近下线列表（前 8，排除当前在线者）。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**，否则正常进房/观战；`room_heartbeat` 记录房间心跳（准备阶段 600 秒无心跳被踢并收到 `room_kick`）；`disconnect` 调 `checkLeave(..., username)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；`/api/replay-upload` 转码上传文件。
+`boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（非公开路径校验 cookie JWT）→ REST 路由（认证/动态/公告/排行榜/在线状态/后台管理/回放/房间/地图示例）→ `SocketIOServer`。后台管理：`GET /admin` 页面与 `GET /api/admin/users`、`POST /api/admin/ban|unban|set-admin` 接口经 `requireAdmin` 统一校验管理员身份（非管理员 403/重定向），`set-admin` 再校验超管；策略 Bot 接口 `GET /api/admin/bots`、`POST /api/admin/bots/start|stop` 经 `requireSuperAdmin`（requireAdmin + 超管），`start` 校验用户存在且未封禁、房间号长度 1~15，由 `serverBotManager` 在进程内启动 simple-strategy-bot；登录路由在密码校验后检查封禁状态（403 拒绝），封禁成功即 `clearSession` + `disconnectUserSockets` 踢下线。socket 中间件支持 cookie JWT、`ROKA_BOT_TOKENS` bot 令牌（命中时置 `socket.data.isBot` 并加入心跳豁免集）与托管 bot 内存临时令牌（`serverBotManager.resolveToken` 命中时置 `isBot` + `isServerBot`）；所有 bot 连接（isBot）不参与单连接互斥（不顶号、不被顶号、不计入 userSocketIds）；`?home=1` 连接只做全局通知、不参与单连接互斥。在线状态追踪表 `onlineSocketIds`（覆盖含 `?home=1` 的所有非 bot 连接、按用户名去重）：连接时刷新用户 `lastSeenAt`（上线），最后一个连接断开时再刷新一次（下线），变化经 2 秒节流广播 `home_online`；`GET /api/online` 返回在线人数与最近下线列表（前 8，排除当前在线者）。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**，否则正常进房/观战；`room_heartbeat` 记录房间心跳（准备阶段 600 秒无心跳被踢并收到 `room_kick`）；`disconnect` 调 `checkLeave(..., username)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；`/api/replay-upload` 转码上传文件。
 
-**src/server/lobby-service.ts** — 房间/对局状态机 + 断线宽限期 + 房间心跳踢出 + rating 结算。
-核心 Map：`gameUid`(sid→gameId)、`gameInstances`、`gamePlayers`、`gameLobbyId`、`lobbyOfSid`、`lobbyPlayers`、`lobbyConfig`；宽限期登记表 `pendingRejoins`（键 `${gameId}:${username}`，含旧 sid 与 10s 定时器）；心跳登记表 `lobbyHeartbeats`（sid→最后心跳时间）+ bot 豁免集 `heartbeatExempt`（由 server.ts 维护）。`checkLeave`：对局中断线 → `game.markDisconnected`，截断旧路由但保留席位，挂 `expireGracePeriod` 定时器，超时以「挂机」投降并完整清理；`tryRejoin`：按用户名找旧 sid（`findPlayerSidByName`），清定时器、全部 Map 换绑、`game.rebindPlayer` 补发全量状态。心跳掉线检测（仅房间准备阶段）：`recordLobbyHeartbeat` 刷新时间戳（进房即为基线），`startLobbyHeartbeatSweep` 全局单一定时器每分钟扫描，超过 600 秒无心跳且房间未开局的成员由 `kickFromLobby` 复用离开清理逻辑移出房间并下发 `room_kick`（前端跳首页）；对局中的房间与豁免 bot 跳过。`startGame` 组装 `GameConfig`（动态地图尺寸、自动分队）并注入 io 回调；`endGame` 里 `applyGameResult` 结算 ELO（K=24，队伍名次取队内最好、rating 取队内平均），清理宽限定时器并重置房间。`onGameEnded` 回调通知 webhook-updater 解除部署推迟。
+**src/server/lobby-service.ts** — 房间/对局状态机 + 断线宽限期 + 房间心跳踢出 + rating 结算 + 托管 bot 房长保留。
+核心 Map：`gameUid`(sid→gameId)、`gameInstances`、`gamePlayers`、`gameLobbyId`、`lobbyOfSid`、`lobbyPlayers`、`lobbyConfig`；宽限期登记表 `pendingRejoins`（键 `${gameId}:${username}`，含旧 sid 与 10s 定时器）；心跳登记表 `lobbyHeartbeats`（sid→最后心跳时间）+ bot 豁免集 `heartbeatExempt`（由 server.ts 维护）。`joinLobby` 第四参数 `serverBot`：托管策略 bot 永远排在普通成员之后（`LobbyPlayer.serverBot` 标记），房主（`players[0]`）保留给人类/第三方 bot——普通成员进房时插入到首个托管 bot 之前，无 bot 时等价末尾追加。`checkLeave`：对局中断线 → `game.markDisconnected`，截断旧路由但保留席位，挂 `expireGracePeriod` 定时器，超时以「挂机」投降并完整清理；`tryRejoin`：按用户名找旧 sid（`findPlayerSidByName`），清定时器、全部 Map 换绑、`game.rebindPlayer` 补发全量状态。心跳掉线检测（仅房间准备阶段）：`recordLobbyHeartbeat` 刷新时间戳（进房即为基线），`startLobbyHeartbeatSweep` 全局单一定时器每分钟扫描，超过 600 秒无心跳且房间未开局的成员由 `kickFromLobby` 复用离开清理逻辑移出房间并下发 `room_kick`（前端跳首页）；对局中的房间与豁免 bot 跳过。`startGame` 组装 `GameConfig`（动态地图尺寸、自动分队）并注入 io 回调；`endGame` 里 `applyGameResult` 结算 ELO（K=24，队伍名次取队内最好、rating 取队内平均），清理宽限定时器并重置房间。`onGameEnded` 回调通知 webhook-updater 解除部署推迟。
+
+**src/server/server-bot-manager.ts** — 服务端托管策略 Bot 管理器（issue #18，仅超管经 `/api/admin/bots*` 操作）。
+不另起进程：每次启动生成随机内存令牌（`tokens` Map：token→username，server.ts socket 中间件查询 `resolveToken`，命中置 `isBot` + `isServerBot`），在服务器进程内用 socket.io-client 连本机回环地址（端口经 `getPort` 回调读取 listen 端口）完成正常握手；策略复用 `bot-template/simple-strategy-bot/strategy.js`（`createRequire` 按 `process.cwd()` 动态加载 plain JS，CLI 与服务端同一份代码）。`start(username, room)` 拒绝同用户重复启动；`stop(id)` 拆监听、断连、删令牌；`list()` 出运行中 bot（含连接状态）。日志走 `console.log` `[server-bot]` 前缀（冒烟脚本据此判定对局行为）。
 
 **src/server/auth-service.ts** — JWT 签发校验 + 用户 socket 单连接互斥。
 JWT 载荷 `{sub, sid}`，`sid` 经 `userStore.isSessionValid` 校验（重登录轮换 session 使旧令牌失效）；cookie 名 `auth_token`，7 天。`userSocketIds` 配合 `disconnectOtherUserSockets`（新连接踢旧连接=顶号）/ `disconnectUserSockets`（登录/登出全踢）；`isPublicPath` 定义免登录白名单。
@@ -222,8 +226,8 @@ _一句话：#map 容器级闪烁相位时钟，三种周期。_
 **static/profile.html / profile.js** — 个人主页 `/u/:username`：资料卡、最近 rating 变更、手写 SVG rating 历史折线图（峰值金色高亮）、TA 的动态与回放。动态部分与首页代码平行（数据源换 `/api/profile/:u/feeds`）。
 _一句话：个人主页逻辑：SVG rating 图 + 动态/回放。_
 
-**static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态），封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框），便于扩展新管理模块。
-_一句话：后台管理页：用户封禁与管理员权限分配。_
+**static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态），封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框 / 策略 Bot），便于扩展新管理模块。「策略 Bot」分区仅超管可见（`viewerIsSuperAdmin` 门控 + 服务端 403 兜底）：输入用户名 + 房间号启动托管 simple-strategy-bot，表格展示运行中 bot（用户名/房间/启动时间/连接状态）并可手动停止。
+_一句话：后台管理页：用户封禁、管理员权限分配与策略 Bot 托管。_
 
 **static/login.html** — 登录/注册表单 + 图形验证码 + 离屏蜜罐字段。
 _一句话：登录/注册表单 + 验证码 + 蜜罐。_
@@ -258,7 +262,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 - **chat-and-alert.css** — 左下聊天框（含收起态、媒体查询）与 `.alert` 居中弹窗、通知权限引导弹窗（`.notify-permission-*`）。_聊天框与弹窗样式。_
 - **home.css** — 首页（`body.home` 作用域隔离）三栏卡片布局 + 动态/公告/排行榜/回放上传弹窗全套。_首页三栏布局与 feed 全套样式。_
 - **profile.css** — 个人主页，与 home.css 平行的卡片语言 + rating 变更/历史图。**改 feed/评论样式需与 home.css 双改。\***个人主页样式（与首页平行）。\*
-- **admin.css** — 后台管理页：用户表格、角色徽标、封禁行高亮、封禁对话框。_后台管理页样式。_
+- **admin.css** — 后台管理页：用户表格、角色徽标、封禁行高亮、封禁对话框、策略 Bot 分区表单。_后台管理页样式。_
 - **lobby.css** — 房间页：邀请链接卡、队伍分组色块、房主滑条设置。_大厅链接/队伍/滑条设置样式。_
 - **rating.css** — `.rt-*` 八档 rating 用户名颜色（后端 `rating-color.ts` 注入类名）。_Codeforces 八档 rating 颜色类。_
 - **tables-and-inputs.css** — 通用表格、`.mobile` 移动端紧凑模式、跨浏览器 range 滑条。_通用表格/移动端/滑条样式。_
@@ -274,7 +278,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 
 ## 配置 / CI / 脚本 / bot 模板
 
-- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 - **tsconfig.json** — src→dist，CommonJS+ES2022+sourceMap；**刻意关闭严格模式**，改严格度会影响整个 src/ 编译面。
 - **eslint.config.cjs** — flat config，只查 `src/**/*.ts`，推荐规则集 + 关闭 `no-explicit-any`；不查 static/。
 - **.prettierrc / .prettierignore** — 单引号/分号/尾逗号/110 列；排除 dist、node_modules、static/vendor。
@@ -283,7 +287,9 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 - **.github/workflows/bump-version-and-merge.yml** — 唯一 CI：owner 在 PR 评论 `OK. <major|minor|patch> [merge|squash|rebase]` 触发升版本、冲突检测、自动合并（`dev/` 分支合并后删除）。
 - **scripts/migrate-rating-display.mjs** — 一次性迁移：users.bin 历史 rating 换算显示分，原地覆盖写回（运行前先备份）。
 - **scripts/test-bot.mjs** — `pnpm run test:bot`：临时数据目录起服务 + 两个 bot 自动对局，双方收到 `init_map` 且累计 ≥10 回合即通过。
+- **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，校验 403 权限闸、房长保留（host 落在第三方 bot）、`init_map` + ≥5 条实际 attack、停止 API 清空列表。
 - **bot-template/random-patch-bot/** — socket 协议最小参考实现（独立 pnpm 包，仅依赖 socket.io-client）：进房、自动准备、周期发送 `room_heartbeat`、维护 diff 地图、每回合随机走子；协议细节另见 `static/develop-bot.html`。
+- **bot-template/simple-strategy-bot/** — 中等强度策略 bot（独立 pnpm 包）：`strategy.js` 为纯逻辑核心（扩张/主城防卫/腹地运兵/择机建设/队列水位控制），CLI `index.js` 与服务端托管（`src/server/server-bot-manager.ts`）共用这一份实现；用法见包内 `USAGE.md`。
 - **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）。
 
 ---

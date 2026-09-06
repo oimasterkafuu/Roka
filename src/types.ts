@@ -29,6 +29,8 @@ export interface LobbyPlayer {
   uid: string;
   team: number;
   ready: boolean;
+  /** 服务端托管策略 Bot（管理后台启动）：进房时排在普通成员之后，不当房主。 */
+  serverBot?: boolean;
 }
 
 export interface RoomPlayerView {
