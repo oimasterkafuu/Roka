@@ -9,17 +9,20 @@
  *   越过门槛就建指挥所、指挥所兵力一回血就升皇冠，让产能复利滚动。
  *
  * 唯一的限制是安全与节奏：
- *   - 选址：frontierDist 2–4 的「二线甜区」优先；贴前线（fd ≤ 1）默认
- *     不建，除非周边 5 格内没有活敌（死区），或进入铺皇冠阶段后该格
- *     兵力足够厚实（建完还有 50 兵镇守）；远离现有锚点的格子加分
- *     （前置锚点兼作连通保险与兵力中转）。
+ *   - 选址：皇冠簇优先——贴着现有锚点（皇冠/指挥所）的格子大幅加分，
+ *     快速连成集群（获胜者的共同特征是皇冠地毯；远离锚点的飞地一被
+ *     截断就整片失效，反而扣分）；frontierDist 2–4 的「二线甜区」其次；
+ *     贴前线（fd ≤ 1）默认不建，除非周边 5 格内没有活敌（死区），或
+ *     进入铺皇冠阶段后该格兵力足够厚实（前线突击指挥所）。
+ *   - 升级优先于新建：指挥所兵力一够就升皇冠（不设冷却、评分显著高于
+ *     新建），新指挥所主要为皇冠簇扩张与前线突击服务。
  *   - 节奏：新建指挥所有 BUILD_GAP_TICKS 冷却（一次 50 兵不能连续放），
  *     升级皇冠不设冷却（各格自负盈亏）；威胁逼近（hops ≤ 4）时建设
  *     冻结，除非该格兵力富余到建完还很厚实。
- *   - 喂养：对「差十几兵就能建」的内陆普通格、以及兵力回血不足升级线
- *     的内陆指挥所输出 feedTarget，无集结任务时 logistics 的输送流会
- *     顺路把它们喂过门槛——指挥所自身每 50 tick 才 +1，靠汇集供粮才能
- *     让「建城 → 升皇冠」的链条持续滚动。
+ *   - 喂养：对「差十几兵就能建」的内陆普通格、贴锚点的簇内格（更低
+ *     门槛）、以及兵力回血不足升级线的内陆指挥所输出 feedTarget，
+ *     无集结任务时 logistics 的输送流会顺路把它们喂过门槛——指挥所
+ *     自身每 50 tick 才 +1，靠汇集供粮才能让「建城 → 升皇冠」持续滚动。
  *   - 争夺记忆：最近 10 tick 内发生过归属翻转的格子默认不建（拉锯格
  *     上重建只会反复白扔 50 兵），除非兵力特别厚实或开局 bootstrap。
  */
@@ -40,6 +43,9 @@ const CARPET_TURN = 120;
 const CARPET_FRONTLINE_MIN_ARMY = 100;
 // 喂养输送只覆盖「差这么多兵以内就能建」的内陆格。
 const FEED_BAND = 15;
+// 贴锚点的簇内格从 2 兵起就喂：皇冠邻格是集群的种子，皇冠每 tick +1
+// 持续喂过去，喂过建设门槛即建城、回血即升冠。
+const CLUSTER_FEED_MIN_ARMY = 2;
 
 function buildOp(ctx, idx, op) {
   const { x, y } = ctx.xy(idx);
@@ -81,7 +87,8 @@ function planEconomy(ctx, state, threats) {
       continue;
     }
     candidates.push({
-      score: 360 + Math.min(army, 120) / 4 + (fd >= 3 ? 15 : 0),
+      // 升级优先于新建：评分显著高于 build-city，有条件就先升皇冠。
+      score: 420 + Math.min(army, 120) / 4 + (fd >= 3 ? 15 : 0),
       preempt: false,
       op: buildOp(ctx, idx, 'c'),
       srcKey: idx,
@@ -149,14 +156,17 @@ function planEconomy(ctx, state, threats) {
       if (defenseFreeze && army < RICH_OVERRIDE_ARMY) {
         continue;
       }
+      const ad = anchorDistMine[idx];
       if (army < threshold) {
-        // 喂养候选：内陆安全格差十几兵就能建，交给输送流顺路喂过门槛。
+        // 喂养候选：内陆安全格差十几兵就能建、或贴锚点的簇内格（门槛更
+        // 低，集群优先喂起来），交给输送流顺路喂过门槛。
+        const inBand = fd >= 3 && army >= threshold - FEED_BAND;
+        const clusterFeed = ad === 1 && fd >= 2 && army >= CLUSTER_FEED_MIN_ARMY;
         if (
           !defenseFreeze &&
           !feedTarget &&
           !carpetFrontline &&
-          fd >= 3 &&
-          army >= threshold - FEED_BAND &&
+          (inBand || clusterFeed) &&
           (!bestFeed || army > bestFeed.army)
         ) {
           bestFeed = { idx, army };
@@ -164,12 +174,15 @@ function planEconomy(ctx, state, threats) {
         continue;
       }
 
-      const ad = anchorDistMine[idx];
-      let score = 250 + Math.min(army, 150) / 5;
-      if (ad < 0 || ad >= 5) {
-        score += 35; // 前置锚点：覆盖远离现有锚点的领土
-      } else if (ad <= 2) {
-        score -= 15; // 与现有锚点扎堆，覆盖价值略低
+      // 皇冠簇优先：贴着现有锚点建（快速连成集群）；远离锚点的飞地脆弱、
+      // 一被截断整片失效，扣分不鼓励。
+      let score = 230 + Math.min(army, 150) / 5;
+      if (ad === 1) {
+        score += 55;
+      } else if (ad === 2) {
+        score += 25;
+      } else if (ad < 0 || ad >= 4) {
+        score -= 40;
       }
       if (fd >= 2 && fd <= 4) {
         score += 20; // 二线甜区
