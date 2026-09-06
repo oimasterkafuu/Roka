@@ -928,6 +928,7 @@ const boot = async (): Promise<void> => {
     transports: ['websocket', 'polling'],
   });
   authService.attachSocketServer(io);
+  lobbyService.startLobbyHeartbeatSweep(io);
 
   io.use((socket, next) => {
     const fromHandshake =
@@ -938,6 +939,7 @@ const boot = async (): Promise<void> => {
       const botUsername = botTokens.get(fromHandshake);
       if (botUsername) {
         socket.data.username = botUsername;
+        socket.data.isBot = true;
         next();
         return;
       }
@@ -972,6 +974,16 @@ const boot = async (): Promise<void> => {
     authService.trackSocket(username, socket.id);
     socket.join(`sid_${socket.id}`);
     socket.emit('set_id', lobbyService.md5(socket.id));
+
+    // ROKA_BOT_TOKENS 鉴权的 bot 无浏览器标签页，豁免房间心跳踢出。
+    if (socket.data.isBot) {
+      lobbyService.heartbeatExempt.add(socket.id);
+    }
+
+    // 房间页心跳：证明标签页仍然开启；准备阶段超时未上报会被移出房间。
+    socket.on('room_heartbeat', () => {
+      lobbyService.recordLobbyHeartbeat(socket.id);
+    });
 
     socket.on(
       'attack',
@@ -1316,6 +1328,7 @@ const boot = async (): Promise<void> => {
 
     socket.on('disconnect', () => {
       authService.untrackSocket(username, socket.id);
+      lobbyService.heartbeatExempt.delete(socket.id);
       socket.leave(`sid_${socket.id}`);
       lobbyService.checkLeave(
         io,

@@ -70,10 +70,10 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 ### 入口与服务层
 
 **src/server.ts** — HTTP+WebSocket 总装入口，全部路由与 socket 事件在此。
-`boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（非公开路径校验 cookie JWT）→ REST 路由（认证/动态/公告/排行榜/回放/房间/地图示例）→ `SocketIOServer`。socket 中间件支持 cookie JWT 或 `ROKA_BOT_TOKENS` bot 令牌；`?home=1` 连接只做全局通知、不参与单连接互斥。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**，否则正常进房/观战；`disconnect` 调 `checkLeave(..., username)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；`/api/replay-upload` 转码上传文件。
+`boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（非公开路径校验 cookie JWT）→ REST 路由（认证/动态/公告/排行榜/回放/房间/地图示例）→ `SocketIOServer`。socket 中间件支持 cookie JWT 或 `ROKA_BOT_TOKENS` bot 令牌（命中时置 `socket.data.isBot` 并加入心跳豁免集）；`?home=1` 连接只做全局通知、不参与单连接互斥。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**，否则正常进房/观战；`room_heartbeat` 记录房间心跳（准备阶段 600 秒无心跳被踢并收到 `room_kick`）；`disconnect` 调 `checkLeave(..., username)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；`/api/replay-upload` 转码上传文件。
 
-**src/server/lobby-service.ts** — 房间/对局状态机 + 断线宽限期 + rating 结算。
-核心 Map：`gameUid`(sid→gameId)、`gameInstances`、`gamePlayers`、`gameLobbyId`、`lobbyOfSid`、`lobbyPlayers`、`lobbyConfig`；宽限期登记表 `pendingRejoins`（键 `${gameId}:${username}`，含旧 sid 与 10s 定时器）。`checkLeave`：对局中断线 → `game.markDisconnected`，截断旧路由但保留席位，挂 `expireGracePeriod` 定时器，超时以「挂机」投降并完整清理；`tryRejoin`：按用户名找旧 sid（`findPlayerSidByName`），清定时器、全部 Map 换绑、`game.rebindPlayer` 补发全量状态。`startGame` 组装 `GameConfig`（动态地图尺寸、自动分队）并注入 io 回调；`endGame` 里 `applyGameResult` 结算 ELO（K=24，队伍名次取队内最好、rating 取队内平均），清理宽限定时器并重置房间。`onGameEnded` 回调通知 webhook-updater 解除部署推迟。
+**src/server/lobby-service.ts** — 房间/对局状态机 + 断线宽限期 + 房间心跳踢出 + rating 结算。
+核心 Map：`gameUid`(sid→gameId)、`gameInstances`、`gamePlayers`、`gameLobbyId`、`lobbyOfSid`、`lobbyPlayers`、`lobbyConfig`；宽限期登记表 `pendingRejoins`（键 `${gameId}:${username}`，含旧 sid 与 10s 定时器）；心跳登记表 `lobbyHeartbeats`（sid→最后心跳时间）+ bot 豁免集 `heartbeatExempt`（由 server.ts 维护）。`checkLeave`：对局中断线 → `game.markDisconnected`，截断旧路由但保留席位，挂 `expireGracePeriod` 定时器，超时以「挂机」投降并完整清理；`tryRejoin`：按用户名找旧 sid（`findPlayerSidByName`），清定时器、全部 Map 换绑、`game.rebindPlayer` 补发全量状态。心跳掉线检测（仅房间准备阶段）：`recordLobbyHeartbeat` 刷新时间戳（进房即为基线），`startLobbyHeartbeatSweep` 全局单一定时器每分钟扫描，超过 600 秒无心跳且房间未开局的成员由 `kickFromLobby` 复用离开清理逻辑移出房间并下发 `room_kick`（前端跳首页）；对局中的房间与豁免 bot 跳过。`startGame` 组装 `GameConfig`（动态地图尺寸、自动分队）并注入 io 回调；`endGame` 里 `applyGameResult` 结算 ELO（K=24，队伍名次取队内最好、rating 取队内平均），清理宽限定时器并重置房间。`onGameEnded` 回调通知 webhook-updater 解除部署推迟。
 
 **src/server/auth-service.ts** — JWT 签发校验 + 用户 socket 单连接互斥。
 JWT 载荷 `{sub, sid}`，`sid` 经 `userStore.isSessionValid` 校验（重登录轮换 session 使旧令牌失效）；cookie 名 `auth_token`，7 天。`userSocketIds` 配合 `disconnectOtherUserSockets`（新连接踢旧连接=顶号）/ `disconnectUserSockets`（登录/登出全踢）；`isPublicPath` 定义免登录白名单。
@@ -196,7 +196,7 @@ _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本
 _一句话：对局/回放页骨架与脚本加载顺序。_
 
 **static/main.js** — 对局/回放主控制器：socket 生命周期、键鼠触屏输入、本地操作队列、房间渲染、回放加载。
-回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复），`disconnect` 区分顶号（跳首页）与断网（显示横幅）；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/T/Enter/Esc/空格。
+回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）并启动房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/T/Enter/Esc/空格。
 _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 
 **static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`。
@@ -273,7 +273,7 @@ _一句话：皇冠 SVG 字符串常量（crown_html）。_
 - **.github/workflows/bump-version-and-merge.yml** — 唯一 CI：owner 在 PR 评论 `OK. <major|minor|patch> [merge|squash|rebase]` 触发升版本、冲突检测、自动合并（`dev/` 分支合并后删除）。
 - **scripts/migrate-rating-display.mjs** — 一次性迁移：users.bin 历史 rating 换算显示分，原地覆盖写回（运行前先备份）。
 - **scripts/test-bot.mjs** — `pnpm run test:bot`：临时数据目录起服务 + 两个 bot 自动对局，双方收到 `init_map` 且累计 ≥10 回合即通过。
-- **bot-template/random-patch-bot/** — socket 协议最小参考实现（独立 pnpm 包，仅依赖 socket.io-client）：进房、自动准备、维护 diff 地图、每回合随机走子；协议细节另见 `static/develop-bot.html`。
+- **bot-template/random-patch-bot/** — socket 协议最小参考实现（独立 pnpm 包，仅依赖 socket.io-client）：进房、自动准备、周期发送 `room_heartbeat`、维护 diff 地图、每回合随机走子；协议细节另见 `static/develop-bot.html`。
 - **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）。
 
 ---

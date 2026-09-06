@@ -563,6 +563,20 @@ if (!is_replay) {
   socket.on = function () {};
 }
 
+// 房间心跳：每 30 秒上报一次，证明标签页仍然开启；后台标签页定时器会被浏览器节流，
+// 但节流后的频率仍远高于服务端 600 秒的超时阈值。对局中也照常上报，无副作用。
+var room_heartbeat_timer = null;
+function sendRoomHeartbeat() {
+  socket.emit('room_heartbeat', {
+    visible: document.visibilityState != 'hidden',
+    focused: document.hasFocus(),
+  });
+}
+function startRoomHeartbeat() {
+  if (is_replay || room_heartbeat_timer !== null) return;
+  room_heartbeat_timer = setInterval(sendRoomHeartbeat, 30000);
+}
+
 async function loadAccountProfile() {
   try {
     const res = await fetch('/api/auth/me');
@@ -702,10 +716,16 @@ $(document).ready(function () {
 socket.on('connect', function () {
   $('#disconnect-banner').css('display', 'none');
   joinGameRoom();
+  sendRoomHeartbeat();
+  startRoomHeartbeat();
 });
 
 socket.on('connect_error', function () {
   location.href = '/login';
+});
+// 房间准备阶段超过 600 秒无心跳，被服务器移出房间：重定向回首页。
+socket.on('room_kick', function () {
+  location.href = '/';
 });
 socket.on('disconnect', function (reason) {
   if (reason == 'io server disconnect') {
