@@ -21,6 +21,9 @@ interface StoredUser {
   ratingGames?: number;
   isAdmin?: boolean;
   ratingHistory?: RatingHistoryPoint[];
+  // 最后在线时间：建立 socket 连接时刷新为「上线」，最后一个连接断开时为「下线」。
+  // 旧数据无此字段，读取时按 undefined 处理（向后兼容）。
+  lastSeenAt?: number;
 }
 
 export interface PublicProfile {
@@ -38,6 +41,11 @@ export interface TopRatedEntry {
   rating: number;
   ratingGames: number;
   provisional: boolean;
+}
+
+export interface RecentlySeenEntry {
+  username: string;
+  lastSeenAt: number;
 }
 
 interface UserFile {
@@ -113,6 +121,7 @@ const toStoredUser = (value: unknown): StoredUser | null => {
   const normalizedSessionId: string | null = sessionId === null ? null : (sessionId as string);
   const rating = value.rating;
   const ratingGames = value.ratingGames;
+  const lastSeenAt = value.lastSeenAt;
   const ratingHistoryRaw = Array.isArray(value.ratingHistory) ? value.ratingHistory : [];
   const ratingHistory: RatingHistoryPoint[] = [];
   for (const point of ratingHistoryRaw) {
@@ -137,6 +146,7 @@ const toStoredUser = (value: unknown): StoredUser | null => {
     ratingGames: typeof ratingGames === 'number' && Number.isFinite(ratingGames) ? ratingGames : undefined,
     isAdmin: value.isAdmin === true ? true : undefined,
     ratingHistory,
+    lastSeenAt: typeof lastSeenAt === 'number' && Number.isFinite(lastSeenAt) ? lastSeenAt : undefined,
   };
 };
 
@@ -378,6 +388,38 @@ export class UserStore {
       });
     }
     entries.sort((a, b) => b.rating - a.rating);
+    return entries.slice(0, capped);
+  }
+
+  /**
+   * 刷新用户最后在线时间（上线/下线时机由调用方判断）。
+   * 不写 updatedAt：它只是账号字段变更时间，与在线状态无关。
+   */
+  async markLastSeen(usernameInput: string): Promise<void> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) {
+      return;
+    }
+    user.lastSeenAt = Date.now();
+    await this.persist();
+  }
+
+  /**
+   * 最近在线（下线时间）倒序列表；isOnline 传入时跳过当前仍在线的用户。
+   */
+  listRecentlySeen(limit: number, isOnline?: (username: string) => boolean): RecentlySeenEntry[] {
+    const capped = Math.max(1, Math.min(100, Math.floor(limit) || 10));
+    const entries: RecentlySeenEntry[] = [];
+    for (const user of this.usersByKey.values()) {
+      if (typeof user.lastSeenAt !== 'number' || !Number.isFinite(user.lastSeenAt)) {
+        continue;
+      }
+      if (isOnline && isOnline(user.username)) {
+        continue;
+      }
+      entries.push({ username: user.username, lastSeenAt: user.lastSeenAt });
+    }
+    entries.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
     return entries.slice(0, capped);
   }
 

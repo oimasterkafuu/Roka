@@ -70,7 +70,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 ### 入口与服务层
 
 **src/server.ts** — HTTP+WebSocket 总装入口，全部路由与 socket 事件在此。
-`boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（非公开路径校验 cookie JWT）→ REST 路由（认证/动态/公告/排行榜/回放/房间/地图示例）→ `SocketIOServer`。socket 中间件支持 cookie JWT 或 `ROKA_BOT_TOKENS` bot 令牌（命中时置 `socket.data.isBot` 并加入心跳豁免集）；`?home=1` 连接只做全局通知、不参与单连接互斥。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**，否则正常进房/观战；`room_heartbeat` 记录房间心跳（准备阶段 600 秒无心跳被踢并收到 `room_kick`）；`disconnect` 调 `checkLeave(..., username)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；`/api/replay-upload` 转码上传文件。
+`boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（非公开路径校验 cookie JWT）→ REST 路由（认证/动态/公告/排行榜/在线状态/回放/房间/地图示例）→ `SocketIOServer`。socket 中间件支持 cookie JWT 或 `ROKA_BOT_TOKENS` bot 令牌（命中时置 `socket.data.isBot` 并加入心跳豁免集）；`?home=1` 连接只做全局通知、不参与单连接互斥。在线状态追踪表 `onlineSocketIds`（覆盖含 `?home=1` 的所有非 bot 连接、按用户名去重）：连接时刷新用户 `lastSeenAt`（上线），最后一个连接断开时再刷新一次（下线），变化经 2 秒节流广播 `home_online`；`GET /api/online` 返回在线人数与最近下线列表（前 8，排除当前在线者）。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**，否则正常进房/观战；`room_heartbeat` 记录房间心跳（准备阶段 600 秒无心跳被踢并收到 `room_kick`）；`disconnect` 调 `checkLeave(..., username)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；`/api/replay-upload` 转码上传文件。
 
 **src/server/lobby-service.ts** — 房间/对局状态机 + 断线宽限期 + 房间心跳踢出 + rating 结算。
 核心 Map：`gameUid`(sid→gameId)、`gameInstances`、`gamePlayers`、`gameLobbyId`、`lobbyOfSid`、`lobbyPlayers`、`lobbyConfig`；宽限期登记表 `pendingRejoins`（键 `${gameId}:${username}`，含旧 sid 与 10s 定时器）；心跳登记表 `lobbyHeartbeats`（sid→最后心跳时间）+ bot 豁免集 `heartbeatExempt`（由 server.ts 维护）。`checkLeave`：对局中断线 → `game.markDisconnected`，截断旧路由但保留席位，挂 `expireGracePeriod` 定时器，超时以「挂机」投降并完整清理；`tryRejoin`：按用户名找旧 sid（`findPlayerSidByName`），清定时器、全部 Map 换绑、`game.rebindPlayer` 补发全量状态。心跳掉线检测（仅房间准备阶段）：`recordLobbyHeartbeat` 刷新时间戳（进房即为基线），`startLobbyHeartbeatSweep` 全局单一定时器每分钟扫描，超过 600 秒无心跳且房间未开局的成员由 `kickFromLobby` 复用离开清理逻辑移出房间并下发 `room_kick`（前端跳首页）；对局中的房间与豁免 bot 跳过。`startGame` 组装 `GameConfig`（动态地图尺寸、自动分队）并注入 io 回调；`endGame` 里 `applyGameResult` 结算 ELO（K=24，队伍名次取队内最好、rating 取队内平均），清理宽限定时器并重置房间。`onGameEnded` 回调通知 webhook-updater 解除部署推迟。
@@ -144,7 +144,7 @@ _一句话：中央海椭圆 + 环陆出生点分散选址。_
 ### 存储与工具
 
 **src/auth-store.ts** — 用户/会话/Rating 存储（`data/users.bin`，v8 serialize + brotli）。
-密码 scrypt 加盐 + `timingSafeEqual`；首名注册用户自动成为 admin；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点）。
+密码 scrypt 加盐 + `timingSafeEqual`；首名注册用户自动成为 admin；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点）。可选字段 `lastSeenAt` 记录最后在线时间（连接建立=上线、最后连接断开=下线，由 server.ts 在线追踪维护；旧数据无此字段按 undefined 兼容），`markLastSeen` 刷新、`listRecentlySeen` 出最近下线倒序列表。
 _一句话：用户/会话/Rating 存储，brotli 压缩 users.bin。_
 
 **src/feed-store.ts** — 动态存储（`data/feeds.bin`，同 v8+brotli）。
@@ -187,8 +187,8 @@ _一句话：共享类型/协议定义汇总。_
 
 ### 功能页
 
-**static/index.html**（~1000 行，脚本全内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜。
-数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds` 失效通知（事件无 payload）。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态原文存 `$item.data('raw-text')`；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
+**static/index.html**（~1000 行，脚本全内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「刚刚在线」。
+数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds/home_online` 失效通知（事件无 payload）。顶栏在线人数与右栏「刚刚在线」（排行榜下方，前 8 位最近下线用户的相对下线时间）由 `/api/online` 驱动。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态原文存 `$item.data('raw-text')`；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
 **static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。
