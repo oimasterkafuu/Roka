@@ -161,6 +161,8 @@ var room_id = '',
   client_id,
   ready_state = 0,
   lost;
+// 上一份房间成员 uid 列表快照，用于 room_update 里检测新玩家进房（null = 尚未收到首帧）。
+var prev_room_uids = null;
 var allow_page_leave = false,
   game_ended = false;
 var max_teams = 16;
@@ -598,6 +600,8 @@ socket.on('starting', function () {
   $('#menu').css('display', 'none');
   $('#game-starting').css('display', '');
   starting_audio.play();
+  // 页面在后台时弹浏览器通知提醒游戏开始（tag 按房间去重，多标签页只弹一次）。
+  notifyEvent('room-start-' + room_id, 'Roka', '你所在的房间「' + room_id + '」游戏开始了！');
 });
 
 function addroute(x, y, d, mode) {
@@ -708,6 +712,8 @@ $(document).ready(function () {
   room_id = tmp.substr(tmp.indexOf('games/') + 6);
   refreshRoomLinkDisplay();
   starting_audio = new Audio('/gong.mp3');
+  // 已登录才能进入本页（未登录会在 loadAccountProfile 跳走），此处引导通知权限。
+  maybePromptNotificationPermission();
   loadAccountProfile().then(function () {
     joinGameRoom();
   });
@@ -844,6 +850,25 @@ socket.on('room_update', function (data) {
   } else {
     $('#force-start').attr('class', '');
   }
+
+  // 检测新玩家进房：对比上一份 uid 快照（含观战席），页面在后台时弹浏览器通知。
+  // 首帧只建立快照不通知；自己进房不通知。
+  var curUids = [];
+  for (var i = 0; i < data.players.length; i++) {
+    curUids.push(data.players[i].uid);
+  }
+  if (prev_room_uids !== null) {
+    var joined = [];
+    for (var i = 0; i < curUids.length; i++) {
+      if (prev_room_uids.indexOf(curUids[i]) === -1 && curUids[i] !== account_name) {
+        joined.push(curUids[i]);
+      }
+    }
+    if (joined.length > 0) {
+      notifyEvent('room-join-' + room_id, 'Roka', joined.join('、') + ' 进入了房间「' + room_id + '」');
+    }
+  }
+  prev_room_uids = curUids;
 });
 
 $(document).ready(function () {

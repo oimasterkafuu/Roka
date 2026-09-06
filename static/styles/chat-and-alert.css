@@ -77,3 +77,34 @@
 .alert p * {
   color: #253042;
 }
+
+.notify-permission-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  z-index: 90;
+}
+.notify-permission-card {
+  max-width: 360px;
+}
+.notify-permission-card h1 {
+  margin: 5px 0 10px;
+  font-size: 22px;
+  text-align: center;
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+}
+.notify-permission-card p {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.notify-permission-card ul {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  font-size: 14px;
+  color: #253042;
+}
+.notify-permission-card button {
+  margin: 4px 6px 0 0;
+  font-size: 14px;
+  padding: 8px 16px;
+}
