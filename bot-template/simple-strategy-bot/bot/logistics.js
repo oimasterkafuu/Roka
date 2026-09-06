@@ -15,24 +15,40 @@
  *   - 边境暴露格（邻接活敌）用 mode 0 智能分兵，自动保留防御兵力；
  *   - 防往返抖动：与上一 tick 输送方向恰好互逆的候选直接丢弃。
  *
- * 中立扩张：边界格用 mode 0 智能分兵占领中立/孤军格，优先 0 兵空地；
- * 爆发期（26–50 tick）普通格扩张加权（每块地都在爆兵）；活敌格不在
+ * 中立扩张：边界格用 mode 0 智能分兵占领中立/孤军格，优先 0 兵空地
+ * （多向可及时空地永远优先于永不产兵的沼泽）；12–25 tick 为爆发期前的
+ * 抢地冲刺窗口（爆发期每块普通领土每 tick +1，圈地 = 产兵），扩张
+ * 大幅加分；爆发期（26–50 tick）普通格扩张同样加权；活敌格不在
  * 这里处理（交给 offense 的 cut / strike）。
  */
 
 // 爆发期区间（与 src/game-engine/tick-growth.ts 一致）。
 const BURST_START_TURN = 26;
 const BURST_END_TURN = 50;
+// 抢地冲刺窗口（12–25 tick）：爆发期每块普通领土每 tick +1，因此爆发
+// 前把地圈到最大 = 爆发期兵力最大化。窗口内扩张大幅加分，优先级压过
+// 一般建设与输送（仅次于军事打击/防御与高分建设）。
+const RUSH_START_TURN = 12;
+const RUSH_END_TURN = 25;
+const RUSH_BONUS = 100;
 // 无焦点输送只动腹地格（距前线 >= 2），边界格留给扩张/切断决策。
 const FRONTIER_FLOW_MIN_DIST = 2;
-// 升级链保护：兵力低于升级线（52）且不贴活敌的指挥所是「正在攒升级」
+// 升级链保护：兵力未稳过升级线（<52）且不贴活敌的指挥所是「正在攒升级」
 // 的格子——它的兵是升皇冠的本金，不能被输送/扩张顺手抽走（抽走就永远
 // 升不了）。军事操作（打击/切断/防御）不受此限。
 const UPGRADE_CHAIN_LINE = 52;
+// 建设 earmark：普通格兵力达到建设门槛（101）后不再作输送/扩张源——
+// 兵是「直建皇冠」的本金，抽走会让队列中的建造令执行时失效。
+const BUILD_EARMARK_ARMY = 101;
 
 /** 升级链保护判定：低于升级线且安全的指挥所。 */
 function inUpgradeChain(ctx, idx) {
   return ctx.tileKind(idx) === 'city' && ctx.army(idx) < UPGRADE_CHAIN_LINE && ctx.keepAt(idx) <= 1;
+}
+
+/** 建设 earmark 判定：兵力达到建设门槛的普通格（军事操作不受此限）。 */
+function buildEarmarked(ctx, idx) {
+  return ctx.tileKind(idx) === 'plain' && ctx.army(idx) >= BUILD_EARMARK_ARMY;
 }
 
 function attackOp(ctx, fromIdx, toIdx, mode) {
@@ -45,9 +61,15 @@ function attackOp(ctx, fromIdx, toIdx, mode) {
 function expansionCandidates(ctx, state) {
   const candidates = [];
   const burst = state.turn >= BURST_START_TURN && state.turn <= BURST_END_TURN;
+  const rush = state.turn >= RUSH_START_TURN && state.turn <= RUSH_END_TURN;
+  // 非冲刺期只扩张有产出的地皮（普通格/指挥所），沼泽永不产兵不抢；
+  // 冲刺期（12–25 tick，为爆发期囤地）才连沼泽一起圈。
+  const allowSwamp = rush;
+  // 兵不是无限的：冲刺期每步给以后留 1 兵，非冲刺期留 2 兵。
+  const keepReserve = rush ? 1 : 2;
   for (const sIdx of ctx.myOperable()) {
-    if (inUpgradeChain(ctx, sIdx)) {
-      continue; // 攒升级中的指挥所不外抽
+    if (inUpgradeChain(ctx, sIdx) || buildEarmarked(ctx, sIdx)) {
+      continue; // 攒升级中的指挥所 / 攒直建皇冠的高兵普通格不外抽
     }
     for (const tIdx of ctx.neighbors(sIdx)) {
       if (!ctx.passable(tIdx) || ctx.isMineIdx(tIdx)) {
@@ -61,16 +83,20 @@ function expansionCandidates(ctx, state) {
       if (ctx.isAliveEnemyIdx(tIdx)) {
         continue;
       }
-      const tArmy = ctx.army(tIdx);
-      const push = ctx.previewPush(sIdx, tIdx, 0);
-      // 引擎语义：推兵严格大于守军才占领；推不动或占不下的 op 不下发。
-      if (push <= tArmy) {
+      const kind = ctx.tileKind(tIdx);
+      if (kind === 'swamp' && !allowSwamp) {
         continue;
       }
-      const kind = ctx.tileKind(tIdx);
+      const tArmy = ctx.army(tIdx);
+      // 引擎 mode 0 的「保留量」怪癖（中立空格也计 -1）靠 previewPush
+      // 预演消化；这里只在结果上留余量：推完源格至少还剩 keepReserve。
+      const push = ctx.previewPush(sIdx, tIdx, 0);
+      if (push <= tArmy || ctx.army(sIdx) - push < keepReserve) {
+        continue;
+      }
       let base;
       if (kind === 'swamp') {
-        base = 45; // 沼泽永不产兵，优先级最低
+        base = 45; // 沼泽永不产兵：多向可及时空地永远优先，沼泽垫底
       } else if (owner === 0) {
         base = tArmy === 0 ? 130 : 122 - Math.min(tArmy, 50);
       } else {
@@ -79,6 +105,9 @@ function expansionCandidates(ctx, state) {
       }
       if (burst && kind === 'plain') {
         base += 35;
+      }
+      if (rush) {
+        base += RUSH_BONUS; // 爆发期前的抢地冲刺：圈地 = 爆发期产兵
       }
       candidates.push({
         score: base + Math.min(ctx.army(sIdx), 60) / 6,
@@ -103,8 +132,8 @@ function flowCandidates(ctx, state, focus) {
   const minDist = focus ? 1 : FRONTIER_FLOW_MIN_DIST;
   const candidates = [];
   for (const sIdx of ctx.myOperable()) {
-    if (inUpgradeChain(ctx, sIdx)) {
-      continue; // 攒升级中的指挥所不外抽
+    if (inUpgradeChain(ctx, sIdx) || buildEarmarked(ctx, sIdx)) {
+      continue; // 攒升级中的指挥所 / 攒直建皇冠的高兵普通格不外抽
     }
     if (focus && sIdx === focus.idx) {
       continue;
