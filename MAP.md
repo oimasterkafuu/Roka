@@ -251,7 +251,7 @@ _一句话：关于与来源致谢静态页。_
 _一句话：皇冠 SVG 字符串常量（crown_html）。_
 
 **static/notify.js** — 浏览器通知共享模块（首页与对局页共用，无构建全局函数）。
-`notifyEvent(tag, title, body)`：仅在标签页后台（不可见或无焦点）且权限已授予时弹 Notification；去重两道保险——localStorage 时间戳互斥（5 秒窗口内同 tag 只有一个标签页弹）+ Notification `tag` 参数浏览器自动替换。`maybePromptNotificationPermission()`：`permission === 'default'` 时弹解释窗（复用 `.alert` 样式，说明进房/开局/上线/建房四类触发时机），由「开启通知」按钮手势调 `requestPermission()`；`denied` 永不打扰，「暂不开启」后同一会话不再弹（sessionStorage）。
+`notifyEvent(tag, title, body)`：仅在标签页后台（不可见或无焦点）且权限已授予时弹 Notification；去重两道保险——localStorage 时间戳互斥（5 秒窗口内同 tag 只有一个标签页弹）+ Notification `tag` 参数浏览器自动替换。`maybePromptNotificationPermission()`：`permission === 'default'` 时弹解释窗（复用 `.alert` 样式，说明进房/开局/上线/建房四类触发时机），由「开启通知」按钮手势调 `requestPermission()`；`denied` 永不打扰，解释窗每个浏览器最多弹一次（localStorage 持久化）。
 _一句话：Notification 权限引导 + 后台去重弹通知。_
 
 ### 样式表（static/styles/，main.css 只做 @import 聚合）
