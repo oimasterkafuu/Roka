@@ -133,6 +133,7 @@ body.home .btn-ghost {
   background-color: transparent;
   color: #6b7686;
   border: 1px solid #d5dce6 !important;
+  text-decoration: none;
 }
 body.home .btn-ghost:hover {
   background-color: #f3f5f9;
