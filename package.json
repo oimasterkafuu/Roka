@@ -10,7 +10,8 @@
     "lint": "eslint \"src/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" --fix",
     "format": "prettier --write --ignore-unknown \"src/**/*.ts\" \"static/**\" \"README.md\" \"AGENTS.md\"",
-    "test:bot": "node scripts/test-bot.mjs"
+    "test:bot": "node scripts/test-bot.mjs",
+    "test:server-bot": "node scripts/test-server-bot.mjs"
   },
   "repository": {
     "type": "git",

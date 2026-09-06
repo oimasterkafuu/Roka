@@ -118,7 +118,7 @@ class LobbyService {
     return value;
   }
 
-  joinLobby(sid: string, uid: string, gid: string): void {
+  joinLobby(sid: string, uid: string, gid: string, options?: { serverBot?: boolean }): void {
     this.lobbyOfSid.set(sid, gid);
     // 进房本身即是「标签页开启」的证明，作为心跳基线。
     this.lobbyHeartbeats.set(sid, Date.now());
@@ -161,7 +161,20 @@ class LobbyService {
       }
     }
 
-    players.push({ sid, uid, team: targetTeam, ready: false });
+    const player: LobbyPlayer = { sid, uid, team: targetTeam, ready: false };
+    if (options?.serverBot) {
+      // 服务端托管 bot 永远排在普通成员之后：房主（players[0]）保留给
+      // 人类用户或第三方 bot。bot 单独在房时暂居首位，任何普通成员进房即接任。
+      player.serverBot = true;
+      players.push(player);
+      return;
+    }
+    // 普通成员插入到首个服务端托管 bot 之前（无 bot 时等价于末尾追加，保持 FIFO）。
+    let insertIndex = 0;
+    while (insertIndex < players.length && players[insertIndex].serverBot !== true) {
+      insertIndex += 1;
+    }
+    players.splice(insertIndex, 0, player);
   }
 
   leaveLobby(sid: string, gid: string): string {

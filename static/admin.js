@@ -289,10 +289,96 @@ $('#ban-confirm').on('click', async function () {
   }
 });
 
+/* ---------- 策略 Bot（仅超级管理员） ---------- */
+
+var botsCache = [];
+
+function showBotError(message) {
+  $('#bot-error').text(message).toggle(Boolean(message));
+}
+
+function renderBots() {
+  var $body = $('#bots-body').empty();
+  $('#bots-empty').toggle(botsCache.length === 0);
+  botsCache.forEach(function (bot) {
+    var $tr = $('<tr></tr>');
+    $('<td></td>').text(bot.username).appendTo($tr);
+    $('<td></td>').text(bot.room).appendTo($tr);
+    $('<td></td>').text(fullTime(bot.startedAt)).appendTo($tr);
+    $('<td></td>')
+      .append(
+        $('<span class="bot-conn"></span>')
+          .addClass(bot.connected ? 'on' : 'off')
+          .text(bot.connected ? '已连接' : '未连接'),
+      )
+      .appendTo($tr);
+    var $ops = $('<td class="op-cell"></td>');
+    $('<button type="button" class="btn btn-danger btn-sm">停止</button>')
+      .on('click', function () {
+        stopBot(bot);
+      })
+      .appendTo($ops);
+    $tr.append($ops);
+    $body.append($tr);
+  });
+}
+
+async function loadBots() {
+  try {
+    var res = await fetch('/api/admin/bots');
+    if (!res.ok) {
+      return;
+    }
+    var data = await res.json();
+    botsCache = Array.isArray(data.items) ? data.items : [];
+    renderBots();
+  } catch (e) {
+    // 加载失败不阻塞页面
+  }
+}
+
+async function startBot() {
+  var username = $('#bot-username').val().trim();
+  var room = $('#bot-room').val().trim();
+  if (!username || !room) {
+    showBotError('请填写用户名与房间号。');
+    return;
+  }
+  try {
+    await apiPost('/api/admin/bots/start', { username: username, room: room });
+    showBotError('');
+    $('#bot-room').val('');
+    loadBots();
+  } catch (err) {
+    showBotError(err.message);
+  }
+}
+
+async function stopBot(bot) {
+  if (!confirm('确定停止 ' + bot.username + '（房间 ' + bot.room + '）的策略 Bot 吗？')) {
+    return;
+  }
+  try {
+    await apiPost('/api/admin/bots/stop', { id: bot.id });
+    loadBots();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+$('#bot-start-btn').on('click', startBot);
+$('#bots-refresh-btn').on('click', loadBots);
+
 /* ---------- 初始化 ---------- */
 
 loadViewer().then(function (ok) {
   if (ok) {
-    loadUsers();
+    loadUsers().then(function () {
+      // viewerIsSuperAdmin 由 loadUsers 填充；超管才展示策略 Bot 分区。
+      if (viewerIsSuperAdmin) {
+        $('#bots-card').show();
+        loadBots();
+      }
+    });
   }
 });

@@ -1,0 +1,12 @@
+{
+  "name": "simple-strategy-bot-template",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Roka strategy bot with territory expansion, defense and troop movement",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}
