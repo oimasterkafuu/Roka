@@ -38,15 +38,16 @@ function notifyEvent(tag, title, body) {
 
 // 登录后引导申请通知权限：permission === 'default' 时先弹解释窗说明通知用途，
 // 由「开启通知」按钮的点击手势触发 requestPermission（浏览器要求用户手势）。
-// 用户已拒绝（'denied'）时永不打扰；点过「暂不开启」后同一会话内不再重复弹窗。
+// 用户已拒绝（'denied'）时永不打扰；解释窗每个浏览器最多弹一次（localStorage 持久化），
+// 不会因新开标签页反复出现（sessionStorage 按标签页隔离，换新标签页就会重复弹）。
 function maybePromptNotificationPermission() {
   if (!notifySupported()) return;
   if (Notification.permission !== 'default') return;
   try {
-    if (sessionStorage.getItem('roka_notify_prompt_shown')) return;
-    sessionStorage.setItem('roka_notify_prompt_shown', '1');
+    if (localStorage.getItem('roka_notify_prompt_shown')) return;
+    localStorage.setItem('roka_notify_prompt_shown', '1');
   } catch (e) {
-    // sessionStorage 不可用时照常弹窗，最多同页重复一次。
+    // localStorage 不可用（隐私模式等）时照常弹窗，最多同页重复一次。
   }
 
   var $backdrop = $('<div class="notify-permission-backdrop"></div>');
