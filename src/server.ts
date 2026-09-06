@@ -16,7 +16,7 @@ import { isReplayIdValid, ReplayStore } from './replay-store';
 import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText } from './text-render';
 import { FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
-import { AuthRequest, AuthService } from './server/auth-service';
+import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { CaptchaService } from './server/captcha-service';
 import { EditableLobbyKey, LobbyService } from './server/lobby-service';
 import { WebhookUpdater } from './server/webhook-updater';
@@ -72,6 +72,17 @@ const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
 const RECENTLY_ONLINE_LIMIT = 8;
 // 连接/断开频繁，home_online 失效通知做简单节流合并。
 const HOME_ONLINE_NOTIFY_DELAY_MS = 2000;
+// 封禁时长入参下限/上限（毫秒）：最短 1 分钟，最长约 100 年（相当于永久之外的极大值）。
+const BAN_DURATION_MIN_MS = 60_000;
+const BAN_DURATION_MAX_MS = 100 * 365 * 24 * 3600_000;
+
+// 封禁解封时间的本地格式化（YYYY-MM-DD HH:mm）。
+const formatBanDeadline = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 // 在线状态追踪表：覆盖所有页面的已登录连接（含 ?home=1 首页监听连接），
 // 同一用户多个标签页按用户名去重只计一次；bot 令牌连接（合成用户）不计入。
 const onlineSocketIds = new Map<string, Set<string>>();
@@ -536,6 +547,15 @@ const boot = async (): Promise<void> => {
       return reply.code(401).send({ error: '用户名或密码错误。' });
     }
 
+    const banStatus = userStore.getBanStatus(username);
+    if (banStatus.banned) {
+      const message =
+        banStatus.bannedUntil === -1
+          ? '该账号已被永久封禁。'
+          : `该账号已被封禁，将于 ${formatBanDeadline(banStatus.bannedUntil ?? 0)} 解除。`;
+      return reply.code(403).send({ error: message });
+    }
+
     const sessionId = await userStore.rotateSession(username);
     authService.disconnectUserSockets(username);
 
@@ -563,7 +583,119 @@ const boot = async (): Promise<void> => {
       username: authUser.username,
       rating: userStore.getDisplayRating(authUser.username),
       isAdmin: userStore.isAdminUser(authUser.username),
+      isSuperAdmin: userStore.isSuperAdminUser(authUser.username),
     });
+  });
+
+  // ---------- 后台管理（仅管理员；授予/撤销管理员仅超级管理员） ----------
+
+  const adminActionRateLimitPreHandler = app.rateLimit({ max: 60, timeWindow: '1 minute' });
+
+  // 管理接口统一的权限闸：未登录由全局钩子拦截（401），已登录但非管理员在此 403。
+  const requireAdmin = (request: FastifyRequest, reply: FastifyReply): AuthUser | null => {
+    const authUser = (request as AuthRequest).authUser;
+    if (!authUser || !userStore.isAdminUser(authUser.username)) {
+      void reply.code(403).send({ error: '仅管理员可以执行该操作。' });
+      return null;
+    }
+    return authUser;
+  };
+
+  app.get('/admin', async (request, reply) => {
+    const authUser = (request as AuthRequest).authUser;
+    if (!authUser || !userStore.isAdminUser(authUser.username)) {
+      return reply.redirect('/');
+    }
+    return reply.sendFile('admin.html');
+  });
+
+  app.get('/api/admin/users', async (request, reply) => {
+    const admin = requireAdmin(request, reply);
+    if (!admin) {
+      return;
+    }
+    return reply.send({
+      items: userStore.listUsersForAdmin().map((entry) => {
+        const tier = ratingTier(entry.rating, entry.ratingGames);
+        return { ...entry, colorClass: tier.className, title: tier.title };
+      }),
+      viewer: admin.username,
+      viewerIsSuperAdmin: userStore.isSuperAdminUser(admin.username),
+    });
+  });
+
+  // 封禁：{ username, permanent?: boolean, durationMs?: number }；permanent 优先。
+  app.post('/api/admin/ban', { preHandler: adminActionRateLimitPreHandler }, async (request, reply) => {
+    const admin = requireAdmin(request, reply);
+    if (!admin) {
+      return;
+    }
+    const body = request.body as { username?: unknown; permanent?: unknown; durationMs?: unknown };
+    const target = String(body?.username ?? '').trim();
+    if (!USERNAME_REGEX.test(target) || !userStore.getPublicProfile(target)) {
+      return reply.code(404).send({ error: '用户不存在。' });
+    }
+    if (target.toLowerCase() === admin.username.toLowerCase()) {
+      return reply.code(400).send({ error: '不能封禁自己。' });
+    }
+    if (userStore.isSuperAdminUser(target)) {
+      return reply.code(403).send({ error: '不能封禁超级管理员。' });
+    }
+    // admin 之间不能互相封禁，只有超级管理员可以封禁 admin。
+    if (userStore.isAdminUser(target) && !userStore.isSuperAdminUser(admin.username)) {
+      return reply.code(403).send({ error: '只有超级管理员可以封禁管理员。' });
+    }
+
+    const permanent = body?.permanent === true;
+    const durationRaw = Number(body?.durationMs);
+    if (!permanent && (!Number.isFinite(durationRaw) || durationRaw <= 0)) {
+      return reply.code(400).send({ error: '封禁时长无效。' });
+    }
+    const bannedUntil = permanent
+      ? -1
+      : Date.now() + Math.min(BAN_DURATION_MAX_MS, Math.max(BAN_DURATION_MIN_MS, Math.floor(durationRaw)));
+
+    await userStore.banUser(target, bannedUntil);
+    // 踢下线：清空会话使旧 JWT 立即失效，并断开该用户全部 socket 连接。
+    await userStore.clearSession(target);
+    authService.disconnectUserSockets(target);
+    return reply.send({ ok: true, bannedUntil });
+  });
+
+  app.post('/api/admin/unban', { preHandler: adminActionRateLimitPreHandler }, async (request, reply) => {
+    const admin = requireAdmin(request, reply);
+    if (!admin) {
+      return;
+    }
+    const body = request.body as { username?: unknown };
+    const target = String(body?.username ?? '').trim();
+    if (!USERNAME_REGEX.test(target) || !userStore.getPublicProfile(target)) {
+      return reply.code(404).send({ error: '用户不存在。' });
+    }
+    await userStore.unbanUser(target);
+    return reply.send({ ok: true });
+  });
+
+  // 授予/撤销管理员：仅超级管理员；不能修改超级管理员自身。
+  app.post('/api/admin/set-admin', { preHandler: adminActionRateLimitPreHandler }, async (request, reply) => {
+    const admin = requireAdmin(request, reply);
+    if (!admin) {
+      return;
+    }
+    if (!userStore.isSuperAdminUser(admin.username)) {
+      return reply.code(403).send({ error: '仅超级管理员可以调整管理员权限。' });
+    }
+    const body = request.body as { username?: unknown; admin?: unknown };
+    const target = String(body?.username ?? '').trim();
+    if (!USERNAME_REGEX.test(target) || !userStore.getPublicProfile(target)) {
+      return reply.code(404).send({ error: '用户不存在。' });
+    }
+    try {
+      await userStore.setAdmin(target, body?.admin === true);
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : '操作失败。' });
+    }
+    return reply.send({ ok: true });
   });
 
   const feedActionRateLimitPreHandler = app.rateLimit({ max: 60, timeWindow: '1 minute' });

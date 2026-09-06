@@ -50,6 +50,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── main.js + main/     # 对局/回放主控与模块（加载顺序敏感）
 │   ├── notify.js           # 浏览器通知共享模块（首页与对局页共用）
 │   ├── profile.html|.js    # 个人主页
+│   ├── admin.html|.js      # 后台管理页（用户列表/封禁/权限分配）
 │   ├── tutorial*           # 文字教程 + 互动教程（本地迷你引擎）
 │   ├── develop*.html       # 开发指南 + bot 协议权威文档
 │   ├── login.html / about.html
@@ -71,7 +72,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 ### 入口与服务层
 
 **src/server.ts** — HTTP+WebSocket 总装入口，全部路由与 socket 事件在此。
-`boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（非公开路径校验 cookie JWT）→ REST 路由（认证/动态/公告/排行榜/在线状态/回放/房间/地图示例）→ `SocketIOServer`。socket 中间件支持 cookie JWT 或 `ROKA_BOT_TOKENS` bot 令牌（命中时置 `socket.data.isBot` 并加入心跳豁免集）；`?home=1` 连接只做全局通知、不参与单连接互斥。在线状态追踪表 `onlineSocketIds`（覆盖含 `?home=1` 的所有非 bot 连接、按用户名去重）：连接时刷新用户 `lastSeenAt`（上线），最后一个连接断开时再刷新一次（下线），变化经 2 秒节流广播 `home_online`；`GET /api/online` 返回在线人数与最近下线列表（前 8，排除当前在线者）。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**，否则正常进房/观战；`room_heartbeat` 记录房间心跳（准备阶段 600 秒无心跳被踢并收到 `room_kick`）；`disconnect` 调 `checkLeave(..., username)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；`/api/replay-upload` 转码上传文件。
+`boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（非公开路径校验 cookie JWT）→ REST 路由（认证/动态/公告/排行榜/在线状态/后台管理/回放/房间/地图示例）→ `SocketIOServer`。后台管理：`GET /admin` 页面与 `GET /api/admin/users`、`POST /api/admin/ban|unban|set-admin` 接口经 `requireAdmin` 统一校验管理员身份（非管理员 403/重定向），`set-admin` 再校验超管；登录路由在密码校验后检查封禁状态（403 拒绝），封禁成功即 `clearSession` + `disconnectUserSockets` 踢下线。socket 中间件支持 cookie JWT 或 `ROKA_BOT_TOKENS` bot 令牌（命中时置 `socket.data.isBot` 并加入心跳豁免集）；`?home=1` 连接只做全局通知、不参与单连接互斥。在线状态追踪表 `onlineSocketIds`（覆盖含 `?home=1` 的所有非 bot 连接、按用户名去重）：连接时刷新用户 `lastSeenAt`（上线），最后一个连接断开时再刷新一次（下线），变化经 2 秒节流广播 `home_online`；`GET /api/online` 返回在线人数与最近下线列表（前 8，排除当前在线者）。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**，否则正常进房/观战；`room_heartbeat` 记录房间心跳（准备阶段 600 秒无心跳被踢并收到 `room_kick`）；`disconnect` 调 `checkLeave(..., username)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；`/api/replay-upload` 转码上传文件。
 
 **src/server/lobby-service.ts** — 房间/对局状态机 + 断线宽限期 + 房间心跳踢出 + rating 结算。
 核心 Map：`gameUid`(sid→gameId)、`gameInstances`、`gamePlayers`、`gameLobbyId`、`lobbyOfSid`、`lobbyPlayers`、`lobbyConfig`；宽限期登记表 `pendingRejoins`（键 `${gameId}:${username}`，含旧 sid 与 10s 定时器）；心跳登记表 `lobbyHeartbeats`（sid→最后心跳时间）+ bot 豁免集 `heartbeatExempt`（由 server.ts 维护）。`checkLeave`：对局中断线 → `game.markDisconnected`，截断旧路由但保留席位，挂 `expireGracePeriod` 定时器，超时以「挂机」投降并完整清理；`tryRejoin`：按用户名找旧 sid（`findPlayerSidByName`），清定时器、全部 Map 换绑、`game.rebindPlayer` 补发全量状态。心跳掉线检测（仅房间准备阶段）：`recordLobbyHeartbeat` 刷新时间戳（进房即为基线），`startLobbyHeartbeatSweep` 全局单一定时器每分钟扫描，超过 600 秒无心跳且房间未开局的成员由 `kickFromLobby` 复用离开清理逻辑移出房间并下发 `room_kick`（前端跳首页）；对局中的房间与豁免 bot 跳过。`startGame` 组装 `GameConfig`（动态地图尺寸、自动分队）并注入 io 回调；`endGame` 里 `applyGameResult` 结算 ELO（K=24，队伍名次取队内最好、rating 取队内平均），清理宽限定时器并重置房间。`onGameEnded` 回调通知 webhook-updater 解除部署推迟。
@@ -145,7 +146,7 @@ _一句话：中央海椭圆 + 环陆出生点分散选址。_
 ### 存储与工具
 
 **src/auth-store.ts** — 用户/会话/Rating 存储（`data/users.bin`，v8 serialize + brotli）。
-密码 scrypt 加盐 + `timingSafeEqual`；首名注册用户自动成为 admin；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点）。可选字段 `lastSeenAt` 记录最后在线时间（连接建立=上线、最后连接断开=下线，由 server.ts 在线追踪维护；旧数据无此字段按 undefined 兼容），`markLastSeen` 刷新、`listRecentlySeen` 出最近下线倒序列表。
+密码 scrypt 加盐 + `timingSafeEqual`；角色模型：首个注册用户 = 超级管理员（`isSuperAdmin`，唯一、不可剥夺、不可封禁，同时拥有 admin），普通 admin（`isAdmin`）由超管授予/撤销（`setAdmin`），旧数据启动时由 `migrateRoles` 把首个用户升级为超管（向后兼容）；封禁字段 `bannedUntil`（毫秒时间戳，-1=永久，缺省=未封禁），到期由 `getBanStatus` 惰性判定自动解除，`banUser`/`unbanUser` 操作，`listUsersForAdmin` 出后台用户列表；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点）。可选字段 `lastSeenAt` 记录最后在线时间（连接建立=上线、最后连接断开=下线，由 server.ts 在线追踪维护；旧数据无此字段按 undefined 兼容），`markLastSeen` 刷新、`listRecentlySeen` 出最近下线倒序列表。
 _一句话：用户/会话/Rating 存储，brotli 压缩 users.bin。_
 
 **src/feed-store.ts** — 动态存储（`data/feeds.bin`，同 v8+brotli）。
@@ -221,6 +222,9 @@ _一句话：#map 容器级闪烁相位时钟，三种周期。_
 **static/profile.html / profile.js** — 个人主页 `/u/:username`：资料卡、最近 rating 变更、手写 SVG rating 历史折线图（峰值金色高亮）、TA 的动态与回放。动态部分与首页代码平行（数据源换 `/api/profile/:u/feeds`）。
 _一句话：个人主页逻辑：SVG rating 图 + 动态/回放。_
 
+**static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态），封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框），便于扩展新管理模块。
+_一句话：后台管理页：用户封禁与管理员权限分配。_
+
 **static/login.html** — 登录/注册表单 + 图形验证码 + 离屏蜜罐字段。
 _一句话：登录/注册表单 + 验证码 + 蜜罐。_
 
@@ -254,6 +258,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 - **chat-and-alert.css** — 左下聊天框（含收起态、媒体查询）与 `.alert` 居中弹窗、通知权限引导弹窗（`.notify-permission-*`）。_聊天框与弹窗样式。_
 - **home.css** — 首页（`body.home` 作用域隔离）三栏卡片布局 + 动态/公告/排行榜/回放上传弹窗全套。_首页三栏布局与 feed 全套样式。_
 - **profile.css** — 个人主页，与 home.css 平行的卡片语言 + rating 变更/历史图。**改 feed/评论样式需与 home.css 双改。\***个人主页样式（与首页平行）。\*
+- **admin.css** — 后台管理页：用户表格、角色徽标、封禁行高亮、封禁对话框。_后台管理页样式。_
 - **lobby.css** — 房间页：邀请链接卡、队伍分组色块、房主滑条设置。_大厅链接/队伍/滑条设置样式。_
 - **rating.css** — `.rt-*` 八档 rating 用户名颜色（后端 `rating-color.ts` 注入类名）。_Codeforces 八档 rating 颜色类。_
 - **tables-and-inputs.css** — 通用表格、`.mobile` 移动端紧凑模式、跨浏览器 range 滑条。_通用表格/移动端/滑条样式。_

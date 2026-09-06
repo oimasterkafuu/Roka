@@ -20,6 +20,12 @@ interface StoredUser {
   rating?: number;
   ratingGames?: number;
   isAdmin?: boolean;
+  // 超级管理员：仅首个注册用户一人，不可被剥夺、不可被封禁。
+  // 旧数据无此字段，启动时由 migrateRoles 把首个用户（原有 admin）升级为超管（向后兼容）。
+  isSuperAdmin?: boolean;
+  // 封禁截止时间的 Unix 毫秒时间戳；-1 表示永久封禁；缺省表示未封禁。
+  // 到期不解数据，读取时惰性判定为已解除（见 getBanStatus）。
+  bannedUntil?: number;
   ratingHistory?: RatingHistoryPoint[];
   // 最后在线时间：建立 socket 连接时刷新为「上线」，最后一个连接断开时为「下线」。
   // 旧数据无此字段，读取时按 undefined 处理（向后兼容）。
@@ -46,6 +52,25 @@ export interface TopRatedEntry {
 export interface RecentlySeenEntry {
   username: string;
   lastSeenAt: number;
+}
+
+export interface AdminUserEntry {
+  username: string;
+  rating: number;
+  ratingGames: number;
+  provisional: boolean;
+  createdAt: number;
+  lastSeenAt: number | null;
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+  /** -1 表示永久封禁；null 表示未封禁。 */
+  bannedUntil: number | null;
+}
+
+export interface BanStatus {
+  banned: boolean;
+  /** -1 表示永久封禁；banned=false 时为 null。 */
+  bannedUntil: number | null;
 }
 
 interface UserFile {
@@ -122,6 +147,7 @@ const toStoredUser = (value: unknown): StoredUser | null => {
   const rating = value.rating;
   const ratingGames = value.ratingGames;
   const lastSeenAt = value.lastSeenAt;
+  const bannedUntil = value.bannedUntil;
   const ratingHistoryRaw = Array.isArray(value.ratingHistory) ? value.ratingHistory : [];
   const ratingHistory: RatingHistoryPoint[] = [];
   for (const point of ratingHistoryRaw) {
@@ -145,6 +171,8 @@ const toStoredUser = (value: unknown): StoredUser | null => {
     rating: typeof rating === 'number' && Number.isFinite(rating) ? rating : undefined,
     ratingGames: typeof ratingGames === 'number' && Number.isFinite(ratingGames) ? ratingGames : undefined,
     isAdmin: value.isAdmin === true ? true : undefined,
+    isSuperAdmin: value.isSuperAdmin === true ? true : undefined,
+    bannedUntil: typeof bannedUntil === 'number' && Number.isFinite(bannedUntil) ? bannedUntil : undefined,
     ratingHistory,
     lastSeenAt: typeof lastSeenAt === 'number' && Number.isFinite(lastSeenAt) ? lastSeenAt : undefined,
   };
@@ -197,7 +225,7 @@ export class UserStore {
     try {
       const users = await this.loadFromBinary();
       this.replaceUsers(users);
-      if (await this.migrateFirstAdmin()) {
+      if (await this.migrateRoles()) {
         return;
       }
       return;
@@ -247,7 +275,9 @@ export class UserStore {
       updatedAt: Date.now(),
       rating: DEFAULT_RATING,
       ratingGames: 0,
+      // 首个注册用户 = 超级管理员（同时拥有管理员权限）。
       isAdmin: this.usersByKey.size === 0 ? true : undefined,
+      isSuperAdmin: this.usersByKey.size === 0 ? true : undefined,
       ratingHistory: [],
     };
 
@@ -354,6 +384,101 @@ export class UserStore {
     return user?.isAdmin === true;
   }
 
+  isSuperAdminUser(usernameInput: string): boolean {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    return user?.isSuperAdmin === true;
+  }
+
+  /**
+   * 封禁状态惰性判定：到期即视为自动解除（顺手清字段并落盘，无后台定时器）。
+   */
+  getBanStatus(usernameInput: string): BanStatus {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user || typeof user.bannedUntil !== 'number') {
+      return { banned: false, bannedUntil: null };
+    }
+    if (user.bannedUntil < 0 || user.bannedUntil > Date.now()) {
+      return { banned: true, bannedUntil: user.bannedUntil };
+    }
+    user.bannedUntil = undefined;
+    void this.persist().catch(() => undefined);
+    return { banned: false, bannedUntil: null };
+  }
+
+  isBanned(usernameInput: string): boolean {
+    return this.getBanStatus(usernameInput).banned;
+  }
+
+  /**
+   * 封禁用户。bannedUntil 为截止毫秒时间戳，-1 表示永久封禁。
+   * 超级管理员不可封禁（在存储层兜底，路由层另有提示）。
+   */
+  async banUser(usernameInput: string, bannedUntil: number): Promise<void> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) {
+      throw new Error('用户不存在。');
+    }
+    if (user.isSuperAdmin === true) {
+      throw new Error('不能封禁超级管理员。');
+    }
+    user.bannedUntil = bannedUntil;
+    user.updatedAt = Date.now();
+    await this.persist();
+  }
+
+  async unbanUser(usernameInput: string): Promise<void> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) {
+      throw new Error('用户不存在。');
+    }
+    user.bannedUntil = undefined;
+    user.updatedAt = Date.now();
+    await this.persist();
+  }
+
+  /**
+   * 授予/撤销管理员权限（调用方需已校验操作者是超级管理员）。
+   * 超级管理员自身的权限不可修改。
+   */
+  async setAdmin(usernameInput: string, isAdmin: boolean): Promise<void> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) {
+      throw new Error('用户不存在。');
+    }
+    if (user.isSuperAdmin === true) {
+      throw new Error('不能修改超级管理员的权限。');
+    }
+    user.isAdmin = isAdmin ? true : undefined;
+    user.updatedAt = Date.now();
+    await this.persist();
+  }
+
+  /**
+   * 后台管理页用户列表：按注册时间升序，rating 为对外显示分。
+   */
+  listUsersForAdmin(): AdminUserEntry[] {
+    const entries: AdminUserEntry[] = [];
+    for (const user of this.usersByKey.values()) {
+      const rating = user.rating ?? DEFAULT_RATING;
+      const ratingGames = user.ratingGames ?? 0;
+      const ban = this.getBanStatus(user.username);
+      entries.push({
+        username: user.username,
+        rating: toDisplayRating(rating, ratingGames),
+        ratingGames,
+        provisional: isProvisionalRating(rating, ratingGames),
+        createdAt: user.createdAt,
+        lastSeenAt:
+          typeof user.lastSeenAt === 'number' && Number.isFinite(user.lastSeenAt) ? user.lastSeenAt : null,
+        isAdmin: user.isAdmin === true,
+        isSuperAdmin: user.isSuperAdmin === true,
+        bannedUntil: ban.banned ? ban.bannedUntil : null,
+      });
+    }
+    entries.sort((a, b) => a.createdAt - b.createdAt);
+    return entries;
+  }
+
   getPublicProfile(usernameInput: string): PublicProfile | null {
     const user = this.usersByKey.get(this.normalize(usernameInput));
     if (!user) {
@@ -423,20 +548,37 @@ export class UserStore {
     return entries.slice(0, capped);
   }
 
-  private async migrateFirstAdmin(): Promise<boolean> {
+  /**
+   * 角色迁移：首个注册用户固定为超级管理员（同时拥有 admin），其余用户摘除误挂的超管标记。
+   * 旧数据里首个用户只有 isAdmin（无 isSuperAdmin），启动时自动升级；返回 true 表示已写盘。
+   */
+  private async migrateRoles(): Promise<boolean> {
     if (this.usersByKey.size === 0) {
       return false;
     }
-    for (const user of this.usersByKey.values()) {
-      if (user.isAdmin === true) {
-        return false;
-      }
-    }
+    // Map 按文件顺序插入，即注册顺序；第一个即最早注册用户。
     const first = this.usersByKey.values().next().value;
     if (!first) {
       return false;
     }
-    first.isAdmin = true;
+    let changed = false;
+    if (first.isAdmin !== true) {
+      first.isAdmin = true;
+      changed = true;
+    }
+    if (first.isSuperAdmin !== true) {
+      first.isSuperAdmin = true;
+      changed = true;
+    }
+    for (const user of this.usersByKey.values()) {
+      if (user !== first && user.isSuperAdmin === true) {
+        user.isSuperAdmin = undefined;
+        changed = true;
+      }
+    }
+    if (!changed) {
+      return false;
+    }
     await this.persist();
     return true;
   }
