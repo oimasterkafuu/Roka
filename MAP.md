@@ -290,7 +290,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 - **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，校验 403 权限闸、房长保留（host 落在第三方 bot）、`init_map` + ≥5 条实际 attack、停止 API 清空列表。
 - **scripts/test-lobby-guards.mjs** — `pnpm run test:lobby-guards`：开局/换绑守卫回归——组队模式全员同队拒绝开局（换队后可开）、对局中同名人类连接不得接管 bot 席位（以观战进房且 bot 持续收 update）、bot 与人类各自断线重连仍可恢复席位。
 - **bot-template/random-patch-bot/** — socket 协议最小参考实现（独立 pnpm 包，仅依赖 socket.io-client）：进房、自动准备、周期发送 `room_heartbeat`、维护 diff 地图、每回合随机走子；协议细节另见 `static/develop-bot.html`。
-- **bot-template/simple-strategy-bot/** — 中等强度策略 bot（独立 pnpm 包）：`strategy.js` 为纯逻辑核心（扩张/主城防卫/腹地运兵/择机建设/队列水位控制），CLI `index.js` 与服务端托管（`src/server/server-bot-manager.ts`）共用这一份实现；用法见包内 `USAGE.md`。
+- **bot-template/simple-strategy-bot/** — 综合策略 bot（独立 pnpm 包）：`strategy.js` 为入口与管线编排（socket/房间循环/队列镜像/逐 tick 决策），`bot/` 为纯函数决策模块——`board.js`（棋盘视图/距离场/Dijkstra/推兵预演）、`defense.js`（威胁推演与集结布防）、`offense.js`（目标评估/风险路径/集结打击/切断入侵）、`economy.js`（皇冠/指挥所建设选址）、`logistics.js`（汇集输送/中立扩张）；CLI `index.js` 与服务端托管（`src/server/server-bot-manager.ts`）共用这一份实现；用法见包内 `USAGE.md`。
 - **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）。
 
 ---
