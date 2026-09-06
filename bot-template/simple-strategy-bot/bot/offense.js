@@ -12,8 +12,9 @@
  *      己方格的兵力会随进军自动并入（穿过己方格即合流），多源汇集而非
  *      只从单一大点取兵。
  *   4. 每 tick 用最新棋盘重算路径与需求（hysteresis：除非明显更优否则
- *      不更换目标），入口推兵量足够即全冲（mode 2）打下一格；行进中
- *      敌方增援导致不再占优时自然停下转为继续集结。
+ *      不更换目标），入口推兵量达到需求的 85% 即全冲（mode 2）打下一格
+ *      ——对龟缩对手，沿途吃下的格子是净收益，不等 100% 稳赢才动；
+ *      行进中敌方增援导致不再占优时自然停下转为继续集结。
  *
  * 切断入侵：对突入己方领土的活敌格，凡相邻己方格能全冲吃掉的立即打，
  * 深度越深（被己方格包围程度）、越靠近我锚点、目标是指挥所/主城者越优先。
@@ -21,6 +22,12 @@
 
 // 集结窗口：最多花多少 op 把一个打击入口喂饱。
 const GATHER_OPS = 10;
+// 集结启动门槛：可交付兵力达到需求的比例即开始集结（越早集越快到线）。
+const RALLY_GATE_RATIO = 0.4;
+// 开打门槛：入口推兵量达到路径需求的比例即全冲。打龟缩对手时，即使
+// 最后差一口气，沿途吃下的格子也是净收益（残链停在半路，已占领格
+// 仍归我方），不必等到 100% 稳赢才动。
+const STRIKE_COMMIT_RATIO = 0.85;
 // 路径代价中「邻近敌军兵力」的权重（反击暴露风险）。
 const RISK_WEIGHT = 0.35;
 // 路径代价中「经过队友格」的固定惩罚（避免行军顺手吞并盟友领土）。
@@ -141,7 +148,7 @@ function evaluateTarget(ctx, state, target) {
   // 集结期间皇冠目标还在增兵，集结耗时计入需求。
   const effectiveRequired = pathEval.required + (target.isCrown ? gather.ticks : 0);
   const deliverable = entryPush + gather.amount;
-  const ready = entryPush >= pathEval.required;
+  const ready = entryPush >= Math.ceil(pathEval.required * STRIKE_COMMIT_RATIO);
 
   const victimArmy = ctx.armyOf(target.owner);
   const payoff = target.isCrown
@@ -281,8 +288,8 @@ function planOffense(ctx, state, threats) {
     return { candidates, focus: null };
   }
 
-  // 目标明显打不动（可交付兵力不到需求一半）时不浪费集结。
-  if (best.deliverable < best.effectiveRequired * 0.5 && !best.ready) {
+  // 目标明显打不动（可交付兵力不到需求的集结门槛）时不浪费集结。
+  if (best.deliverable < best.effectiveRequired * RALLY_GATE_RATIO && !best.ready) {
     state.plan = null;
     return { candidates, focus: null };
   }
