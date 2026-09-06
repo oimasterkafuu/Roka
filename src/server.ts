@@ -1337,7 +1337,8 @@ const boot = async (): Promise<void> => {
       const roomVal = lobbyService.getLobbyVal(room);
 
       // 对局进行中的同名参赛玩家视为断线重连：换绑到新 socket 并恢复对局。
-      if (lobbyService.tryRejoin(io, socket.id, username, room)) {
+      // 传入 isBot 做身份匹配：同名的人类连接不得接管 bot 的席位（反之亦然）。
+      if (lobbyService.tryRejoin(io, socket.id, username, room, isBot)) {
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         lobbyService.emitHomeRooms(io);
@@ -1627,6 +1628,7 @@ const boot = async (): Promise<void> => {
           socket.leave(room);
         },
         username,
+        isBot,
       );
     });
   });
