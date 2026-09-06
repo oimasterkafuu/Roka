@@ -52,12 +52,6 @@ function fullTime(time) {
   );
 }
 
-// 回放时间为 Unix 秒，按 UTC+8 展示（沿用旧回放页习惯）。
-function replayTime(timeSec) {
-  var d = new Date((timeSec + 8 * 3600) * 1000);
-  return d.toJSON().substr(0, 19).replace('T', ' ');
-}
-
 // 带 rating 颜色的用户名链接；用户名一律走文本插入防 XSS。
 function userLink(username, colorClass, title) {
   var $a = $('<a></a>')
@@ -692,7 +686,10 @@ async function loadReplays(offset) {
       var $tr = $('<tr></tr>').on('click', function () {
         location.href = '/replays/' + encodeURIComponent(item.id);
       });
-      $('<td></td>').text(replayTime(item.time)).appendTo($tr);
+      $('<td></td>')
+        .text(relativeTime(item.time * 1000))
+        .attr('title', fullTime(item.time * 1000))
+        .appendTo($tr);
       $('<td></td>').text(item.turn).appendTo($tr);
       $('<td></td>')
         .text((item.rank || []).join(' › '))
