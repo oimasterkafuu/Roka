@@ -1,0 +1,77 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
+    />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"
+      integrity="sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK"
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <link rel="stylesheet" href="/main.css" />
+    <link rel="stylesheet" href="/styles/rating.css" />
+    <link rel="stylesheet" href="/styles/admin.css" />
+    <title>Roka - 后台管理</title>
+  </head>
+
+  <body class="admin">
+    <div class="admin-wrap">
+      <header class="admin-topbar">
+        <button id="back-home-btn" type="button" class="btn btn-ghost btn-sm">← 返回首页</button>
+        <a id="account-name" href="#"></a>
+      </header>
+
+      <!-- 用户管理 -->
+      <section class="card">
+        <h2 class="card-title">用户管理</h2>
+        <table class="mini-table">
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>Rating</th>
+              <th>注册时间</th>
+              <th>最后在线</th>
+              <th>角色</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="users-body"></tbody>
+        </table>
+        <p id="users-empty" class="panel-empty" style="display: none">暂无用户。</p>
+      </section>
+
+    </div>
+
+    <!-- 封禁对话框 -->
+    <div id="ban-dialog-mask" class="dialog-mask" style="display: none">
+      <div class="dialog">
+        <h3 class="dialog-title">封禁用户 <span id="ban-target"></span></h3>
+        <div class="dialog-field">
+          <label for="ban-duration">封禁时长</label>
+          <select id="ban-duration">
+            <option value="3600000">1 小时</option>
+            <option value="86400000">1 天</option>
+            <option value="604800000">7 天</option>
+            <option value="custom">自定义</option>
+            <option value="permanent">永久</option>
+          </select>
+        </div>
+        <div class="dialog-field" id="ban-custom-field" style="display: none">
+          <label for="ban-custom-hours">自定义时长（小时）</label>
+          <input type="number" id="ban-custom-hours" min="1" step="1" value="24" />
+        </div>
+        <p id="ban-error" class="dialog-error" style="display: none"></p>
+        <div class="dialog-actions">
+          <button id="ban-cancel" type="button" class="btn btn-ghost btn-sm">取消</button>
+          <button id="ban-confirm" type="button" class="btn btn-danger btn-sm">确认封禁</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/admin.js"></script>
+  </body>
+</html>

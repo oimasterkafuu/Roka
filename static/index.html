@@ -35,6 +35,7 @@
         <div class="account">
           <span id="online-count" class="online-count" title="当前在线用户数（不含 bot）"></span>
           <a id="account-name" href="#"></a>
+          <a id="admin-entry" href="/admin" class="btn btn-ghost btn-sm" style="display: none"> 后台管理 </a>
           <button id="logout-btn" type="button" class="btn btn-ghost btn-sm">退出登录</button>
         </div>
       </header>
@@ -311,6 +312,7 @@
         currentUsername = data.username;
         currentIsAdmin = data.isAdmin === true;
         $('#account-name').text(data.username);
+        $('#admin-entry').toggle(currentIsAdmin);
         return true;
       }
 

@@ -1,0 +1,225 @@
+/* 后台管理页 /admin 样式：与首页/个人主页同一套明亮卡片语言。 */
+
+html:has(> body.admin) {
+  background-color: #eef1f6;
+}
+
+body.admin {
+  background-color: #eef1f6;
+  position: static;
+  height: auto;
+  min-height: 100vh;
+  overflow: auto;
+}
+
+body.admin * {
+  color: #253042;
+}
+
+body.admin .admin-wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+  box-sizing: border-box;
+}
+
+/* 顶部 chrome */
+body.admin .admin-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+body.admin #account-name {
+  font-size: 15px;
+  text-decoration: none;
+}
+
+/* 卡片 */
+body.admin .card {
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 3px rgba(37, 48, 66, 0.08),
+    0 8px 24px rgba(37, 48, 66, 0.05);
+  padding: 20px;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+body.admin .card-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #253042;
+}
+
+/* 按钮 */
+body.admin .btn {
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 14px;
+  padding: 9px 20px;
+  margin: 0;
+  transition: background-color 0.15s ease-in-out;
+}
+body.admin .btn-secondary {
+  background-color: #e6f3f3;
+  color: teal;
+}
+body.admin .btn-secondary:hover {
+  background-color: #d3eaea;
+  color: #006e6e;
+  box-shadow: none;
+}
+body.admin .btn-danger {
+  background-color: #fde8e8;
+  color: #d63535;
+}
+body.admin .btn-danger:hover {
+  background-color: #f9d5d5;
+  color: #b72b2b;
+  box-shadow: none;
+}
+body.admin .btn-ghost {
+  background-color: transparent;
+  color: #6b7686;
+  border: 1px solid #d5dce6 !important;
+}
+body.admin .btn-ghost:hover {
+  background-color: #f3f5f9;
+  color: #253042;
+  box-shadow: none;
+}
+body.admin .btn-sm {
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+/* 输入框与下拉框 */
+body.admin input[type='number'],
+body.admin input[type='text'],
+body.admin select {
+  background-color: #ffffff;
+  border: 1px solid #d5dce6 !important;
+  border-radius: 8px;
+  color: #253042;
+  font-size: 15px;
+  padding: 9px 12px;
+  min-height: 0;
+  box-sizing: border-box;
+}
+body.admin input:focus,
+body.admin select:focus {
+  border-color: teal !important;
+}
+
+/* 用户表格 */
+body.admin .mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+body.admin .mini-table th {
+  text-align: left;
+  font-size: 12px;
+  color: #9aa4b2;
+  font-weight: 400;
+  padding: 4px 6px;
+  border-bottom: 1px solid #eef1f6;
+  white-space: nowrap;
+}
+body.admin .mini-table td {
+  padding: 7px 6px;
+  border-bottom: 1px solid #f3f5f9;
+  word-break: break-all;
+}
+body.admin .mini-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+body.admin .mini-table tr.row-banned td {
+  background-color: #fdf3f3;
+}
+body.admin .panel-empty {
+  color: #9aa4b2;
+  font-size: 13px;
+  padding: 16px 0;
+  text-align: center;
+}
+
+/* 角色徽标 */
+body.admin .role-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+body.admin .role-badge.role-superadmin {
+  background-color: #fde8e8;
+  color: #d63535;
+}
+body.admin .role-badge.role-admin {
+  background-color: #e6f3f3;
+  color: teal;
+}
+body.admin .role-badge.role-user {
+  background-color: #f0f3f7;
+  color: #6b7686;
+}
+
+/* 操作列 */
+body.admin .op-cell {
+  white-space: nowrap;
+}
+body.admin .op-cell .btn + .btn {
+  margin-left: 6px;
+}
+
+/* 对话框（封禁） */
+body.admin .dialog-mask {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(37, 48, 66, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+body.admin .dialog {
+  background-color: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(37, 48, 66, 0.18);
+  padding: 20px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+}
+body.admin .dialog-title {
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 700;
+}
+body.admin .dialog-field {
+  margin-bottom: 12px;
+}
+body.admin .dialog-field label {
+  display: block;
+  font-size: 13px;
+  color: #6b7686;
+  margin-bottom: 4px;
+}
+body.admin .dialog-field select,
+body.admin .dialog-field input {
+  width: 100%;
+}
+body.admin .dialog-error {
+  color: #d63535;
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+body.admin .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
