@@ -3,34 +3,40 @@
  *
  * 本文件是纯逻辑模块，不自己创建连接：调用方（CLI 的 index.js 或服务端
  * src/server/server-bot-manager.ts）传入一个已配置鉴权的 socket.io-client
- * 实例，本模块负责房间循环（进房/自动准备/对局结束后再准备）与每回合决策。
+ * 实例，本模块负责房间循环（进房/自动准备/对局结束后再准备）、状态维护
+ * （diff 合并、队列镜像、队伍与出局者跟踪）与每 tick 的决策管线编排。
  *
- * 策略概览（中等强度，非随机）：
- *  1. 主城防卫：敌军贴脸主城时，优先用相邻最强兵力全冲（mode 2）歼灭或削弱；
- *  2. 扩张：边界格用智能分兵（mode 0）占领中立空地，优先免费（0 兵）地块；
- *  3. 歼敌：兵力严格占优（己方兵力-1 > 守军）时全冲攻击敌军，优先敌方主城；
- *  4. 运兵：腹地格兵力沿 BFS 距离场向最近前线/敌人方向全冲输送；
- *  5. 建设：腹地高兵力普通格建指挥所（b），指挥所兵力充足再升级主城（c）。
- * 每回合最多下发 2 条操作，并用 lst_move 同步本地队列镜像，避免队列堆积过期指令。
+ * 决策管线（每个 tick 重算，bot/ 下各模块为纯函数层）：
+ *   1. defense.evaluateThreats：对每个成规模的活敌 blob 用 Dijkstra 推演
+ *      进攻我方锚点代价最低的路径并按战斗规则逐格模拟，得到威胁清单
+ *      （推算对方攻击路径）；
+ *   2. defense.planDefense：锚点贴脸应急（歼灭/削弱）、直接反击兵源、
+ *      在威胁路径上选集结点提前布防；守不住时撤空或将死主城全军出击；
+ *   3. offense.planOffense：评估敌方主城/指挥所目标（端掉最后一座主城
+ *      = 直接淘汰），用带「邻近敌军风险」代价的 Dijkstra 选更难被破解
+ *      的进军路径；入口兵力不足则以入口为焦点集结（沿路己方格自动合流，
+ *      多源汇集而非单点取兵）；能吃掉突入我境的活敌格就立即切断；
+ *   4. economy.planEconomy：铺皇冠策略——皇冠每 tick +1 产兵是普通格的
+ *      50 倍，不设数量上限：指挥所兵力够就升皇冠（不占冷却），普通格
+ *      越过门槛就按「二线甜区 + 锚点覆盖」评分建指挥所（有冷却），
+ *      威胁逼近时冻结建设，差十几兵的待建格由输送流顺路喂养；
+ *   5. logistics.expansionCandidates：mode 0 智能分兵吃中立/孤军领土
+ *      （爆发期加权）；logistics.flowCandidates：向集结焦点/前线输送兵力；
+ *   6. 全部候选按评分排序，每 tick 最多下发 MAX_OPS_PER_TURN 条（同格
+ *      不重复取源），紧急防御抢占队列；本地队列镜像上限 MAX_LOCAL_QUEUE，
+ *      用 lst_move 同步，避免过期指令堆积。
  */
 
-const DIRECTIONS = [
-  { x: -1, y: 0 },
-  { x: 1, y: 0 },
-  { x: 0, y: -1 },
-  { x: 0, y: 1 },
-];
+const { buildContext } = require('./bot/board');
+const { evaluateThreats, planDefense } = require('./bot/defense');
+const { planOffense } = require('./bot/offense');
+const { planEconomy } = require('./bot/economy');
+const { expansionCandidates, flowCandidates } = require('./bot/logistics');
 
 // 本地队列镜像上限：每 Tick 服务端只执行一条队首操作，排队过多会产生大量过期指令。
 const MAX_LOCAL_QUEUE = 3;
 // 每回合最多下发的操作数。
 const MAX_OPS_PER_TURN = 2;
-// 建设行为的回合间隔，避免连续建造拖垮前线兵力。
-const BUILD_INTERVAL_TURNS = 12;
-// 触发「建指挥所」的腹地格兵力门槛（执行时服务端还会校验 >= 50）。
-const BUILD_CITY_MIN_ARMY = 110;
-// 触发「升级主城」的指挥所兵力门槛。
-const UPGRADE_CROWN_MIN_ARMY = 60;
 
 function toBoolean(value) {
   return value === true || value === 1 || value === '1' || value === 'true';
@@ -69,59 +75,29 @@ function attachStrategy(socket, options) {
     isolated: [],
     clientId: '',
     playerId: 0,
+    playerIds: [],
     generals: [],
+    turn: 0,
     lastTurn: -1,
     inGame: false,
     dead: false,
     queue: [],
     lastLobbyActionAt: 0,
-    lastBuildTurn: -BUILD_INTERVAL_TURNS,
+    lastCityTurn: -1000,
+    // 跨 tick 决策状态：打击计划 / 上 tick 输送（防往返）/ 集结点（防跳变）。
+    plan: null,
+    lastFlow: null,
+    rallyIdx: -1,
+    // 争夺记忆：涉及己方的归属翻转格 → 最近翻转 tick（防止在被反复
+    // 争夺的格子上连续重建指挥所白扔 50 兵）。
+    contested: new Map(),
+    prevCodes: null,
+    allowTeam: false,
+    teamByClient: new Map(),
+    teams: new Map(),
+    deadPlayers: new Set(),
+    planSig: '',
   };
-
-  function indexOfCell(x, y) {
-    return x * state.m + y;
-  }
-
-  function inBounds(x, y) {
-    return x >= 0 && y >= 0 && x < state.n && y < state.m;
-  }
-
-  // owner id：200/201/204 中立；其余 code % 50 归属玩家（普通/指挥所/主城/己方沼泽同余）。
-  function ownerOf(code) {
-    if (typeof code !== 'number' || code >= 200) {
-      return 0;
-    }
-    return code % 50;
-  }
-
-  function isMine(code) {
-    return state.playerId > 0 && ownerOf(code) === state.playerId;
-  }
-
-  function isMountain(code) {
-    return code === 201;
-  }
-
-  function isMyCapital(code) {
-    return code === state.playerId + 100;
-  }
-
-  function isEnemyCapital(code) {
-    const owner = ownerOf(code);
-    return owner > 0 && owner !== state.playerId && code >= 100 && code < 150;
-  }
-
-  function passable(code) {
-    return code !== 201;
-  }
-
-  // 可操作格：己方、非孤军、兵力 > 1。
-  function canOperateFrom(x, y) {
-    const idx = indexOfCell(x, y);
-    return (
-      isMine(state.gridType[idx]) && state.armyCnt[idx] > 1 && (state.isolated[idx] || 0) === 0
-    );
-  }
 
   function resetMap(n, m) {
     state.n = n;
@@ -132,7 +108,14 @@ function attachStrategy(socket, options) {
     state.lastTurn = -1;
     state.queue = [];
     state.dead = false;
-    state.lastBuildTurn = -BUILD_INTERVAL_TURNS;
+    state.lastCityTurn = -1000;
+    state.plan = null;
+    state.lastFlow = null;
+    state.rallyIdx = -1;
+    state.contested = new Map();
+    state.prevCodes = null;
+    state.deadPlayers = new Set();
+    state.planSig = '';
   }
 
   function applyDiff(diffArray, targetArray) {
@@ -196,313 +179,162 @@ function attachStrategy(socket, options) {
     socket.emit(op.kind === 'build' ? 'build' : 'attack', op.payload);
   }
 
-  /* ---------- 决策：各候选生成器 ---------- */
-
-  // 1. 主城防卫：敌军与我方主城相邻时，找能歼灭（严格大于）或削弱的反击。
-  function findCapitalDefense() {
-    let bestUrgent = null;
-    for (const general of state.generals) {
-      for (const dir of DIRECTIONS) {
-        const ex = general.x + dir.x;
-        const ey = general.y + dir.y;
-        if (!inBounds(ex, ey)) {
-          continue;
-        }
-        const eIdx = indexOfCell(ex, ey);
-        const eCode = state.gridType[eIdx];
-        const eOwner = ownerOf(eCode);
-        // 只回应真实敌军（中立格不会主动进攻主城）。
-        if (eOwner <= 0 || eOwner === state.playerId) {
-          continue;
-        }
-        const eArmy = state.armyCnt[eIdx];
-        // 反击来源：主城自身或其他相邻己方格，取兵力最强者。
-        let source = null;
-        const sources = [{ x: general.x, y: general.y }];
-        for (const dir2 of DIRECTIONS) {
-          const sx = ex + dir2.x;
-          const sy = ey + dir2.y;
-          if (inBounds(sx, sy) && !(sx === general.x && sy === general.y)) {
-            sources.push({ x: sx, y: sy });
-          }
-        }
-        for (const s of sources) {
-          if (!canOperateFrom(s.x, s.y)) {
-            continue;
-          }
-          const sIdx = indexOfCell(s.x, s.y);
-          if (!source || state.armyCnt[sIdx] > state.armyCnt[indexOfCell(source.x, source.y)]) {
-            source = s;
-          }
-        }
-        if (!source) {
-          continue;
-        }
-        const sArmy = state.armyCnt[indexOfCell(source.x, source.y)];
-        const canCapture = sArmy - 1 > eArmy;
-        const capitalArmy = state.armyCnt[indexOfCell(general.x, general.y)];
-        const imminentThreat = eArmy >= capitalArmy;
-        if (!canCapture && !imminentThreat) {
-          continue;
-        }
-        const candidate = {
-          priority: canCapture ? 100 : 60,
-          op: {
-            kind: 'attack',
-            payload: { x: source.x, y: source.y, dx: ex, dy: ey, mode: 2 },
-          },
-        };
-        if (!bestUrgent || candidate.priority > bestUrgent.priority) {
-          bestUrgent = candidate;
-        }
-      }
-    }
-    return bestUrgent ? bestUrgent.op : null;
-  }
-
-  // 2/3. 扩张与歼敌：边界格向外打。返回 { op, priority }。
-  function findBestAttack(excludedSources) {
-    let best = null;
-    for (let x = 0; x < state.n; x += 1) {
-      for (let y = 0; y < state.m; y += 1) {
-        if (!canOperateFrom(x, y)) {
-          continue;
-        }
-        const srcKey = `${x},${y}`;
-        if (excludedSources.has(srcKey)) {
-          continue;
-        }
-        const idx = indexOfCell(x, y);
-        const army = state.armyCnt[idx];
-        for (const dir of DIRECTIONS) {
-          const dx = x + dir.x;
-          const dy = y + dir.y;
-          if (!inBounds(dx, dy)) {
-            continue;
-          }
-          const tIdx = indexOfCell(dx, dy);
-          const tCode = state.gridType[tIdx];
-          if (isMountain(tCode) || isMine(tCode)) {
-            continue;
-          }
-          const tOwner = ownerOf(tCode);
-          const tArmy = state.armyCnt[tIdx];
-          let score = 0;
-          let mode = 0;
-          if (tOwner === 0) {
-            // 中立格：空地优先，中立沼泽不产兵、优先级最低。
-            score = tCode === 204 ? 5 : tArmy === 0 ? 30 : 25 - Math.min(tArmy, 20);
-          } else {
-            // 敌军：只有严格占优才出手；敌方主城优先。
-            if (army - 1 <= tArmy) {
-              continue;
-            }
-            score = isEnemyCapital(tCode) ? 90 : 45 - Math.min(tArmy, 30);
-            mode = 2;
-          }
-          // 兵力越充足的出发点越优先（同分时）。
-          const priority = score * 1000 + Math.min(army, 999);
-          if (!best || priority > best.priority) {
-            best = {
-              priority,
-              op: { kind: 'attack', payload: { x, y, dx, dy, mode } },
-            };
-          }
-        }
-      }
-    }
-    return best;
-  }
-
-  // 4. 运兵：腹地兵力沿「到最近非己方格」的 BFS 距离场向前线输送。
-  function findTroopMove(excludedSources) {
-    const dist = computeFrontierDistance();
-    if (!dist) {
-      return null;
-    }
-    let best = null;
-    for (let x = 0; x < state.n; x += 1) {
-      for (let y = 0; y < state.m; y += 1) {
-        if (!canOperateFrom(x, y)) {
-          continue;
-        }
-        const idx = indexOfCell(x, y);
-        const d = dist[idx];
-        // 只移动腹地格（距前线 >= 2；边界格留给扩张/歼敌决策）。
-        if (d < 2) {
-          continue;
-        }
-        const srcKey = `${x},${y}`;
-        if (excludedSources.has(srcKey)) {
-          continue;
-        }
-        for (const dir of DIRECTIONS) {
-          const dx = x + dir.x;
-          const dy = y + dir.y;
-          if (!inBounds(dx, dy)) {
-            continue;
-          }
-          const tIdx = indexOfCell(dx, dy);
-          if (!isMine(state.gridType[tIdx]) || dist[tIdx] !== d - 1) {
-            continue;
-          }
-          const army = state.armyCnt[idx];
-          if (!best || army > best.army) {
-            best = {
-              army,
-              op: { kind: 'attack', payload: { x, y, dx, dy, mode: 2 } },
-            };
-          }
-          break;
-        }
-      }
-    }
-    return best ? best.op : null;
-  }
-
-  // 多源 BFS：所有非己方可通行格为源，输出每格到前线的距离（不可达为 -1）。
-  function computeFrontierDistance() {
-    if (state.n === 0 || state.m === 0) {
-      return null;
-    }
-    const total = state.n * state.m;
-    const dist = new Array(total).fill(-1);
-    const queue = [];
-    for (let idx = 0; idx < total; idx += 1) {
-      const code = state.gridType[idx];
-      if (passable(code) && !isMine(code)) {
-        dist[idx] = 0;
-        queue.push(idx);
-      }
-    }
-    let head = 0;
-    while (head < queue.length) {
-      const idx = queue[head];
-      head += 1;
-      const x = Math.floor(idx / state.m);
-      const y = idx % state.m;
-      for (const dir of DIRECTIONS) {
-        const nx = x + dir.x;
-        const ny = y + dir.y;
-        if (!inBounds(nx, ny)) {
-          continue;
-        }
-        const nIdx = indexOfCell(nx, ny);
-        if (dist[nIdx] !== -1 || !passable(state.gridType[nIdx])) {
-          continue;
-        }
-        dist[nIdx] = dist[idx] + 1;
-        queue.push(nIdx);
-      }
-    }
-    return dist;
-  }
-
-  // 5. 建设：指挥所兵力充足升主城；腹地高兵力普通格建指挥所。
-  function findBuildOp(turn) {
-    if (turn - state.lastBuildTurn < BUILD_INTERVAL_TURNS) {
-      return null;
-    }
-    let upgrade = null;
-    let buildCity = null;
-    const dist = computeFrontierDistance();
-    for (let x = 0; x < state.n; x += 1) {
-      for (let y = 0; y < state.m; y += 1) {
-        const idx = indexOfCell(x, y);
-        const code = state.gridType[idx];
-        const army = state.armyCnt[idx];
-        if (!isMine(code) || (state.isolated[idx] || 0) !== 0) {
-          continue;
-        }
-        if (code === state.playerId + 50 && army >= UPGRADE_CROWN_MIN_ARMY) {
-          if (!upgrade || army > upgrade.army) {
-            upgrade = { army, op: { kind: 'build', payload: { x, y, op: 'c' } } };
-          }
-          continue;
-        }
-        // 建指挥所：只选腹地（距前线 >= 3）且兵力充裕的普通格，避免拖垮前线。
-        if (
-          code === state.playerId &&
-          army >= BUILD_CITY_MIN_ARMY &&
-          dist &&
-          dist[idx] >= 3
-        ) {
-          if (!buildCity || army > buildCity.army) {
-            buildCity = { army, op: { kind: 'build', payload: { x, y, op: 'b' } } };
-          }
-        }
-      }
-    }
-    const chosen = upgrade || buildCity;
-    if (chosen) {
-      state.lastBuildTurn = turn;
-      return chosen.op;
-    }
-    return null;
-  }
-
-  function describeOp(op) {
+  function describeOp(op, tag) {
+    const suffix = tag ? ` [${tag}]` : '';
     if (op.kind === 'build') {
-      return `build ${op.payload.op} @(${op.payload.x},${op.payload.y})`;
+      return `build ${op.payload.op} @(${op.payload.x},${op.payload.y})${suffix}`;
     }
-    return `attack (${op.payload.x},${op.payload.y})->(${op.payload.dx},${op.payload.dy}) mode=${op.payload.mode}`;
+    return `attack (${op.payload.x},${op.payload.y})->(${op.payload.dx},${op.payload.dy}) mode=${op.payload.mode}${suffix}`;
   }
+
+  // 两条 op 是否等价（去重队列用）：build 看格子与类型，attack 看起止格。
+  function sameOp(a, b) {
+    if (a.kind !== b.kind) {
+      return false;
+    }
+    if (a.kind === 'build') {
+      return a.payload.x === b.payload.x && a.payload.y === b.payload.y && a.payload.op === b.payload.op;
+    }
+    return (
+      a.payload.x === b.payload.x &&
+      a.payload.y === b.payload.y &&
+      a.payload.dx === b.payload.dx &&
+      a.payload.dy === b.payload.dy
+    );
+  }
+
+  // 归属翻转跟踪：逐格对比上 tick 编码，凡「我丢格/我抢格」都记入
+  // contested（economy 据此避开仍在拉锯的格子），顺手清理过期条目。
+  function trackContested(turn) {
+    if (state.prevCodes) {
+      for (let idx = 0; idx < state.n * state.m; idx += 1) {
+        const prev = state.prevCodes[idx];
+        const cur = state.gridType[idx];
+        if (prev === cur) {
+          continue;
+        }
+        const prevOwner = prev >= 200 ? 0 : prev % 50;
+        const curOwner = cur >= 200 ? 0 : cur % 50;
+        if (prevOwner !== curOwner && (prevOwner === state.playerId || curOwner === state.playerId)) {
+          state.contested.set(idx, turn);
+        }
+      }
+      for (const [idx, at] of state.contested) {
+        if (turn - at > 10) {
+          state.contested.delete(idx);
+        }
+      }
+    }
+    state.prevCodes = state.gridType.slice();
+  }
+
+  /* ---------- 决策管线 ---------- */
 
   function decideTurn(turn) {
     if (state.playerId <= 0 || state.dead) {
       return;
     }
+    state.turn = turn;
+    trackContested(turn);
 
-    const ops = [];
+    const ctx = buildContext(state);
+    const threats = evaluateThreats(ctx);
+    const defense = planDefense(ctx, threats);
+    state.rallyIdx = defense.rally ?? -1;
+    const offense = planOffense(ctx, state, threats);
+    const economy = planEconomy(ctx, state, threats);
+    // 输送焦点优先级：防御集结点 > 打击入口 > 喂养待建格。
+    const focus = defense.rally
+      ? { idx: defense.rally, baseScore: defense.rallyScore }
+      : offense.focus || economy.feedTarget;
+
+    // 计划/集结焦点变化时打一条可观测日志（变化才打，不刷屏）。
+    const planSig = state.plan
+      ? `strike ${ctx.tileKind(state.plan.targetIdx)} @${state.plan.targetIdx} owner=${state.plan.owner}`
+      : defense.rally
+        ? `rally @${defense.rally}`
+        : '';
+    if (planSig !== state.planSig) {
+      state.planSig = planSig;
+      if (planSig) {
+        log(`turn ${turn}: ${planSig}`);
+      }
+    }
+
+    const candidates = [
+      ...defense.candidates,
+      ...offense.candidates,
+      ...economy.candidates,
+      ...expansionCandidates(ctx, state),
+      ...flowCandidates(ctx, state, focus),
+    ];
+    if (candidates.length === 0) {
+      return;
+    }
+    candidates.sort((a, b) => b.score - a.score);
+
+    const picked = [];
     const usedSources = new Set();
-
-    const defense = findCapitalDefense();
-    if (defense) {
-      // 防卫优先：清掉过期队列，立即反击。
-      if (state.queue.length > 0) {
-        socket.emit('clear_queue');
-        state.queue = [];
+    let preempt = false;
+    for (const cand of candidates) {
+      if (picked.length >= MAX_OPS_PER_TURN) {
+        break;
       }
-      ops.push(defense);
-      usedSources.add(`${defense.payload.x},${defense.payload.y}`);
-    }
-
-    const attack = findBestAttack(usedSources);
-    if (attack) {
-      ops.push(attack.op);
-      usedSources.add(`${attack.op.payload.x},${attack.op.payload.y}`);
-    }
-
-    if (ops.length < MAX_OPS_PER_TURN) {
-      const build = findBuildOp(turn);
-      if (build && ops.length < MAX_OPS_PER_TURN) {
-        ops.push(build);
+      if (typeof cand.srcKey === 'number' && usedSources.has(cand.srcKey)) {
+        continue;
+      }
+      // 与本地队列镜像中尚未执行的 op 完全相同的不再重复入队
+      // （否则同一行军步/建造会连下两三次，白白占掉后续 tick 的执行名额）。
+      if (state.queue.some((queued) => sameOp(queued, cand.op))) {
+        continue;
+      }
+      picked.push(cand);
+      if (typeof cand.srcKey === 'number') {
+        usedSources.add(cand.srcKey);
+      }
+      if (cand.preempt) {
+        preempt = true;
       }
     }
-
-    if (ops.length === 0) {
-      const move = findTroopMove(usedSources);
-      if (move) {
-        ops.push(move);
-      }
+    if (picked.length === 0) {
+      return;
     }
 
-    // 队列水位控制：本地镜像已满时本回合只保留防卫操作。
+    // 紧急操作（贴脸防卫/斩杀/撤离）或紧急威胁窗口（hops ≤ 2）抢占队列：
+    // 先清掉过期指令，让防御/集结 op 下个 tick 立即执行。
+    if ((preempt || defense.urgent) && state.queue.length > 0) {
+      socket.emit('clear_queue');
+      state.queue = [];
+    }
+
+    // 队列水位控制：本地镜像已满时本回合只下发到剩余容量。
     const accepted = [];
-    for (const op of ops) {
+    for (const cand of picked) {
       if (state.queue.length + accepted.length >= MAX_LOCAL_QUEUE) {
         break;
       }
-      accepted.push(op);
+      accepted.push(cand);
     }
     if (accepted.length === 0) {
       return;
     }
 
+    for (const cand of accepted) {
+      if (cand.op.kind === 'build' && cand.op.payload.op === 'b') {
+        // 只有新建指挥所占建设冷却；升级皇冠各格自负盈亏，不占冷却。
+        state.lastCityTurn = turn;
+      } else if (cand.tag === 'flow') {
+        state.lastFlow = {
+          from: cand.op.payload.x * state.m + cand.op.payload.y,
+          to: cand.op.payload.dx * state.m + cand.op.payload.dy,
+        };
+      }
+    }
+
     setTimeout(() => {
-      for (const op of accepted) {
-        enqueueOp(op);
-        log(`turn ${turn}: ${describeOp(op)}`);
+      for (const cand of accepted) {
+        enqueueOp(cand.op);
+        log(`turn ${turn}: ${describeOp(cand.op, cand.tag)}`);
       }
     }, actionDelayMs);
   }
@@ -550,6 +382,24 @@ function attachStrategy(socket, options) {
     }
   }
 
+  // 组队信息跟踪：room_update 里 players[].sid 即 md5 后的 client_id，
+  // 与 init_map 的 player_ids 一一对应，据此建立 playerId → 队伍映射。
+  function trackTeamsFromRoomUpdate(data) {
+    if (data && typeof data === 'object' && 'allow_team' in data) {
+      state.allowTeam = toBoolean(data.allow_team);
+    }
+    if (!Array.isArray(data?.players)) {
+      return;
+    }
+    for (const player of data.players) {
+      const sid = String(player?.sid || '');
+      if (!sid) {
+        continue;
+      }
+      state.teamByClient.set(sid, Number.parseInt(String(player?.team ?? '0'), 10) || 0);
+    }
+  }
+
   /* ---------- socket 事件 ---------- */
 
   const onConnect = () => {
@@ -582,14 +432,23 @@ function attachStrategy(socket, options) {
     state.inGame = true;
 
     const playerIds = Array.isArray(data?.player_ids) ? data.player_ids.map((item) => String(item)) : [];
+    state.playerIds = playerIds;
     const foundIndex = playerIds.indexOf(state.clientId);
     state.playerId = foundIndex >= 0 ? foundIndex + 1 : 0;
+
+    // playerId → 队伍：房间阶段收集的 teamByClient 按 player_ids 对齐；
+    // 未知（如中途观战进房）时退化为自己一队（即无队友，与旧行为一致）。
+    state.teams = new Map();
+    for (let i = 0; i < playerIds.length; i += 1) {
+      const team = state.teamByClient.get(playerIds[i]) || 0;
+      state.teams.set(i + 1, team > 0 ? team : i + 1);
+    }
 
     state.generals = [];
     if (Array.isArray(data?.general) && data.general.length === 2) {
       const gx = Number.parseInt(String(data.general[0]), 10);
       const gy = Number.parseInt(String(data.general[1]), 10);
-      if (inBounds(gx, gy)) {
+      if (gx >= 0 && gy >= 0 && gx < n && gy < m) {
         state.generals = [{ x: gx, y: gy }];
       }
     }
@@ -601,8 +460,18 @@ function attachStrategy(socket, options) {
       return;
     }
 
-    if (payload?.kills && state.clientId && payload.kills[state.clientId]) {
-      state.dead = true;
+    // kills：victim client_id → killer 名字。顺手维护出局者集合
+    // （出局者领土已孤军化，进攻/防御/扩张都按无主之地理性处理）。
+    if (payload?.kills && typeof payload.kills === 'object') {
+      for (const victimClientId of Object.keys(payload.kills)) {
+        const idx = state.playerIds.indexOf(victimClientId);
+        if (idx >= 0) {
+          state.deadPlayers.add(idx + 1);
+        }
+      }
+      if (state.clientId && payload.kills[state.clientId]) {
+        state.dead = true;
+      }
     }
 
     const ok = applyUpdatePayload(payload);
@@ -619,6 +488,7 @@ function attachStrategy(socket, options) {
 
     if (payload?.game_end) {
       state.inGame = false;
+      state.plan = null;
       log(`game ended at turn ${turn}`);
       return;
     }
@@ -628,11 +498,13 @@ function attachStrategy(socket, options) {
 
   const onLeft = () => {
     state.inGame = false;
+    state.plan = null;
     log('left current game');
   };
 
   const onRoomKick = () => {
     state.inGame = false;
+    state.plan = null;
     log('kicked from room: heartbeat timeout, rejoining');
     // 被心跳踢出后延迟重新进房，保持对局循环。
     setTimeout(() => {
@@ -641,6 +513,7 @@ function attachStrategy(socket, options) {
   };
 
   const onRoomUpdate = (data) => {
+    trackTeamsFromRoomUpdate(data);
     autoReadyFromRoomUpdate(data);
   };
 
