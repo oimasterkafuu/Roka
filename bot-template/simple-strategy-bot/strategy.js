@@ -19,15 +19,18 @@
  *      多源汇集而非单点取兵），入口推兵量到路径需求 85% 即全冲；
  *      能吃掉突入我境的活敌格就立即切断；
  *   4. economy.planEconomy：铺皇冠策略——皇冠每 tick +1 产兵，指挥所
- *      与普通格同速（不增产），故指挥所只是升皇冠的短暂中间态：
- *      攒到 88 兵才按「皇冠簇优先 + 二线甜区」评分建指挥所并立即走
- *      升级链（直建皇冠），升级不设冷却且优先于新建；活跃威胁逼近时
- *      冻结建设，差兵的待建格由输送流顺路喂养；
+ *      与普通格同速（不增产），故指挥所只是升皇冠的中间态：攒到 101
+ *      兵才按「皇冠簇优先 + 二线甜区」评分建指挥所，下回合即过升级线
+ *      直接升冠（b/c 连续两回合完成直建皇冠），升级不设冷却且优先于
+ *      新建；活跃威胁逼近时冻结建设，差兵的待建格由输送流顺路喂养；
  *   5. logistics.expansionCandidates：mode 0 智能分兵吃中立/孤军领土
- *      （爆发期加权）；logistics.flowCandidates：向集结焦点/前线输送兵力；
+ *      （12–25 tick 抢地冲刺加权：爆发期每块普通领土每 tick +1，圈地
+ *      = 产兵；爆发期同样加权；空地优先于沼泽）；logistics.flowCandidates：
+ *      向集结焦点/前线输送兵力；
  *   6. 全部候选按评分排序，每 tick 最多下发 MAX_OPS_PER_TURN 条（同格
  *      不重复取源），紧急防御抢占队列；本地队列镜像上限 MAX_LOCAL_QUEUE，
- *      用 lst_move 同步，避免过期指令堆积。
+ *      用 lst_move 同步，避免过期指令堆积。下发建造令前会先清掉镜像中
+ *      从同格出兵的旧 op（否则旧 op 先执行会把建设资金抽空）。
  */
 
 const { buildContext } = require('./bot/board');
@@ -342,6 +345,22 @@ function attachStrategy(socket, options) {
 
     setTimeout(() => {
       for (const cand of accepted) {
+        if (cand.op.kind === 'build') {
+          // 出队占位冲突：镜像队列里若还有从该格出兵的旧 op（生成时该格
+          // 还是高兵普通格），它会先执行、把建设资金抽空导致建造被引擎
+          // 跳过——先把这些旧 op 从服务端队列与镜像中清掉再下建造令。
+          const { x, y } = cand.op.payload;
+          const kept = state.queue.filter(
+            (queued) => !(queued.kind === 'attack' && queued.payload.x === x && queued.payload.y === y),
+          );
+          if (kept.length !== state.queue.length) {
+            socket.emit('clear_queue');
+            state.queue = [];
+            for (const op of kept) {
+              enqueueOp(op);
+            }
+          }
+        }
         enqueueOp(cand.op);
         log(`turn ${turn}: ${describeOp(cand.op, cand.tag)}`);
       }
