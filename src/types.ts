@@ -196,6 +196,7 @@ export interface RoomListItem {
   spectators: number;
   ready: number;
   need: number;
+  running: boolean;
 }
 
 export interface GameResultEntry {
