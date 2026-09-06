@@ -45,6 +45,8 @@ interface PendingRejoin {
   gameId: string;
   lobbyId: string;
   oldSid: string;
+  /** 旧连接是否为 bot 连接（socket.data.isBot），供 tryRejoin 做身份匹配。 */
+  isBot: boolean;
   timer: NodeJS.Timeout;
 }
 
@@ -552,6 +554,21 @@ class LobbyService {
     }
 
     if (required > 0 && ready >= required) {
+      // 组队模式下所有参赛者处于同一队伍时开局即终局（首 Tick 存活队伍数即为 1），
+      // 拒绝开局并提示调整队伍，避免空转对局。
+      const conf = this.lobbyConfig.get(gid);
+      if (conf?.allow_team) {
+        const teamSet = new Set(players.filter((player) => player.team !== 0).map((player) => player.team));
+        if (teamSet.size < 2) {
+          this.sendLobbySystemMessage(
+            io,
+            this.getLobbyVal(gid),
+            '所有参赛者都在同一队伍，无法开始对战，请先调整队伍分配。',
+          );
+          this.emitRoomUpdate(io, gid);
+          return;
+        }
+      }
       void this.startGame(io, gid);
       return;
     }
@@ -559,7 +576,13 @@ class LobbyService {
     this.emitRoomUpdate(io, gid);
   }
 
-  checkLeave(io: SocketIOServer, sid: string, leaveRoom: (room: string) => void, username: string): void {
+  checkLeave(
+    io: SocketIOServer,
+    sid: string,
+    leaveRoom: (room: string) => void,
+    username: string,
+    isBot = false,
+  ): void {
     this.lobbyHeartbeats.delete(sid);
     const lobbyId = this.lobbyOfSid.get(sid);
     const gameId = this.gameUid.get(sid);
@@ -583,7 +606,7 @@ class LobbyService {
           this.pendingRejoins.delete(key);
           this.expireGracePeriod(io, gameId, sid);
         }, DISCONNECT_GRACE_MS);
-        this.pendingRejoins.set(key, { gameId, lobbyId: lobbyId ?? '', oldSid: sid, timer });
+        this.pendingRejoins.set(key, { gameId, lobbyId: lobbyId ?? '', oldSid: sid, isBot, timer });
         return;
       }
       this.gameUid.delete(sid);
@@ -615,8 +638,12 @@ class LobbyService {
    * 断线重连：对局进行中且存在同名参赛玩家（无论是否已标记断线，
    * 以覆盖顶号时新连接的 join_game_room 先于旧 socket disconnect 到达的竞态）
    * 时，把该玩家的指令路由/房间席位全部换绑到新 socket 并补发全量状态。
+   *
+   * 身份匹配：换绑只允许发生在同类连接之间（bot ↔ bot、人类 ↔ 人类）。
+   * 服务端托管 bot 复用真实用户名，若不做此校验，同名人类打开房间页会把
+   * bot 的席位换绑走（bot 从此收不到 update 而卡死），反之亦然。
    */
-  tryRejoin(io: SocketIOServer, sid: string, username: string, room: string): boolean {
+  tryRejoin(io: SocketIOServer, sid: string, username: string, room: string, isBot = false): boolean {
     const gameId = this.getLobbyVal(room);
     const game = this.gameInstances.get(gameId);
     if (!game) {
@@ -629,6 +656,15 @@ class LobbyService {
 
     const key = `${gameId}:${username}`;
     const pending = this.pendingRejoins.get(key);
+
+    // 旧连接仍在线时以其 socket.data.isBot 为准；已断开（宽限期中）时用
+    // checkLeave 登记的身份。都不可考时按人类连接处理（保持历史行为）。
+    const oldSocket = io.sockets.sockets.get(oldSid);
+    const oldIsBot = oldSocket ? oldSocket.data.isBot === true : (pending?.isBot ?? false);
+    if (oldIsBot !== isBot) {
+      return false;
+    }
+
     if (pending) {
       clearTimeout(pending.timer);
       this.pendingRejoins.delete(key);
