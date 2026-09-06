@@ -17,6 +17,7 @@
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     ></script>
+    <script src="/notify.js"></script>
     <link rel="stylesheet" href="/main.css" />
     <link rel="stylesheet" href="/styles/rating.css" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css" />
@@ -372,6 +373,9 @@
 
       /* ---------- 房间列表（socket 失效通知刷新） ---------- */
 
+      // 上一份房间号快照（null = 尚未完成首次加载），用于检测「新建房间」并在后台弹通知。
+      var prevRoomIds = null;
+
       async function loadRooms() {
         try {
           var res = await fetch('/api/rooms');
@@ -379,6 +383,20 @@
             return;
           }
           var rooms = await res.json();
+          if (Array.isArray(rooms)) {
+            var ids = rooms.map(function (item) {
+              return item.room;
+            });
+            if (prevRoomIds !== null) {
+              var added = ids.filter(function (id) {
+                return prevRoomIds.indexOf(id) === -1;
+              });
+              if (added.length > 0) {
+                notifyEvent('home-rooms', 'Roka', '有新的房间：' + added.join('、'));
+              }
+            }
+            prevRoomIds = ids;
+          }
           var $body = $('#rooms-body');
           $body.empty();
           if (!Array.isArray(rooms) || rooms.length === 0) {
@@ -590,6 +608,9 @@
 
       /* ---------- 在线人数与「刚刚在线」 ---------- */
 
+      // 上一次在线人数快照（null = 尚未完成首次加载），用于检测「有人上线」并在后台弹通知。
+      var prevOnlineCount = null;
+
       async function loadOnline() {
         try {
           var res = await fetch('/api/online');
@@ -598,6 +619,10 @@
           }
           var data = await res.json();
           var count = data.count || 0;
+          if (prevOnlineCount !== null && count > prevOnlineCount) {
+            notifyEvent('home-online', 'Roka', '有玩家上线了，当前在线 ' + count + ' 人');
+          }
+          prevOnlineCount = count;
           $('#online-count').text('在线 ' + count + ' 人');
           var items = Array.isArray(data.items) ? data.items : [];
           var $list = $('#recently-online-list');
@@ -1004,6 +1029,8 @@
           if (!loggedIn) {
             return;
           }
+          // 登录后引导浏览器通知权限（仅 permission 为 default 时弹解释窗）。
+          maybePromptNotificationPermission();
           loadMyProfile();
           loadRooms();
           loadReplays(0);

@@ -45,9 +45,10 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── rating-color.ts     # Codeforces 风格段位配色
 │   └── runtime-env.ts      # .env 引导与密钥自动生成
 ├── static/                 # 前端（原生 JS，无构建，原样下发）
-│   ├── index.html          # 首页/大厅（脚本全内联）
+│   ├── index.html          # 首页/大厅（脚本基本内联，另加载 /notify.js）
 │   ├── game.html           # 对局/回放共用骨架
 │   ├── main.js + main/     # 对局/回放主控与模块（加载顺序敏感）
+│   ├── notify.js           # 浏览器通知共享模块（首页与对局页共用）
 │   ├── profile.html|.js    # 个人主页
 │   ├── tutorial*           # 文字教程 + 互动教程（本地迷你引擎）
 │   ├── develop*.html       # 开发指南 + bot 协议权威文档
@@ -187,16 +188,16 @@ _一句话：共享类型/协议定义汇总。_
 
 ### 功能页
 
-**static/index.html**（~1000 行，脚本全内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「刚刚在线」。
-数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds/home_online` 失效通知（事件无 payload）。顶栏在线人数与右栏「刚刚在线」（排行榜下方，前 8 位最近下线用户的相对下线时间）由 `/api/online` 驱动。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态原文存 `$item.data('raw-text')`；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
+**static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「刚刚在线」。
+数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds/home_online` 失效通知（事件无 payload）。顶栏在线人数与右栏「刚刚在线」（排行榜下方，前 8 位最近下线用户的相对下线时间）由 `/api/online` 驱动。`home_online` 收到后对比在线人数快照，增加时经 `notify.js` 弹「有玩家上线」后台通知；`home_rooms` 收到后对比房间号快照，出现新房间时弹「有新的房间」后台通知。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态原文存 `$item.data('raw-text')`；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
 **static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。
-按序加载 crown.js → core-globals → replay-binary → room-controls → replay-controls → render-update → blink-clock → main.js（顺序敏感）。关键 DOM：`#disconnect-banner`（断线横幅）、`#map`、`#menu`、`#status-alert`（按钮按下标访问，改结构需同步 main.js）、`#replay-loading(-text)`、`#replay-error-alert`。
+按序加载 crown.js → core-globals → notify.js → replay-binary → room-controls → replay-controls → render-update → blink-clock → main.js（顺序敏感）。关键 DOM：`#disconnect-banner`（断线横幅）、`#map`、`#menu`、`#status-alert`（按钮按下标访问，改结构需同步 main.js）、`#replay-loading(-text)`、`#replay-error-alert`。
 _一句话：对局/回放页骨架与脚本加载顺序。_
 
 **static/main.js** — 对局/回放主控制器：socket 生命周期、键鼠触屏输入、本地操作队列、房间渲染、回放加载。
-回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）并启动房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/T/Enter/Esc/空格。
+回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）并启动房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；`room_update` 对比成员 uid 快照检测新玩家进房、`starting` 表示开局，两者在页面后台时经 `notify.js` 弹浏览器通知；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/T/Enter/Esc/空格。
 _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 
 **static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`。
@@ -241,12 +242,16 @@ _一句话：关于与来源致谢静态页。_
 **static/crown.js** — 全局 `crown_html`：主城皇冠内联 SVG（颜色跟随玩家配色）。
 _一句话：皇冠 SVG 字符串常量（crown_html）。_
 
+**static/notify.js** — 浏览器通知共享模块（首页与对局页共用，无构建全局函数）。
+`notifyEvent(tag, title, body)`：仅在标签页后台（不可见或无焦点）且权限已授予时弹 Notification；去重两道保险——localStorage 时间戳互斥（5 秒窗口内同 tag 只有一个标签页弹）+ Notification `tag` 参数浏览器自动替换。`maybePromptNotificationPermission()`：`permission === 'default'` 时弹解释窗（复用 `.alert` 样式，说明进房/开局/上线/建房四类触发时机），由「开启通知」按钮手势调 `requestPermission()`；`denied` 永不打扰，「暂不开启」后同一会话不再弹（sessionStorage）。
+_一句话：Notification 权限引导 + 后台去重弹通知。_
+
 ### 样式表（static/styles/，main.css 只做 @import 聚合）
 
 - **base.css** — 全局 CSS 变量、字体（CDN 镜像 + 本地子集兜底）、通用组件基座；全局字体排除 KaTeX。_全局设计令牌与组件基座。_
 - **map.css** — 地图格子全部视觉：尺寸档 `.s1–.s6`、颜色 `.c0–.c17`（`code%50==playerId`）、地形背景图、选中/可攻击态、孤军闪烁、建造角标、移动箭头。_地图格子视觉规则全集。_
 - **game-ui.css** — 对局 HUD：排行榜（`tr.dead`/`tr.afk`）、回合计数、`#disconnect-banner` 断线横幅、回放控制条。_对局 HUD 与回放控制条样式。_
-- **chat-and-alert.css** — 左下聊天框（含收起态、媒体查询）与 `.alert` 居中弹窗。_聊天框与弹窗样式。_
+- **chat-and-alert.css** — 左下聊天框（含收起态、媒体查询）与 `.alert` 居中弹窗、通知权限引导弹窗（`.notify-permission-*`）。_聊天框与弹窗样式。_
 - **home.css** — 首页（`body.home` 作用域隔离）三栏卡片布局 + 动态/公告/排行榜/回放上传弹窗全套。_首页三栏布局与 feed 全套样式。_
 - **profile.css** — 个人主页，与 home.css 平行的卡片语言 + rating 变更/历史图。**改 feed/评论样式需与 home.css 双改。\***个人主页样式（与首页平行）。\*
 - **lobby.css** — 房间页：邀请链接卡、队伍分组色块、房主滑条设置。_大厅链接/队伍/滑条设置样式。_
