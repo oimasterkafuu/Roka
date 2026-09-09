@@ -37,6 +37,23 @@
   - 功能完成并通过提交前最小检查后合并回 `main`（`--no-ff` 保留功能边界），随后立即 push。
 - **并行开发**：较复杂的功能可由主 Agent 派发子 Agent 在各自的功能分支上开发；子 Agent 完成后汇报结果，由主 Agent 统一合并回 `main` 并推送。
 - 不要在服务器工作区保留未提交、未推送的改动（包括文档与配置）。
+- **每次修改必须立即推送到远端**（GitHub `main`），不得只停留在本地，防止与他人/自动化流程产生冲突。
+
+## 依赖更新与版本号（Dependabot）
+
+- **Dependabot 配置**：npm 生态，检查频率为每天（`daily`），`open-pull-requests-limit: 0`（不限数量），配置见 `.github/dependabot.yml`。
+- **Dependabot PR 必须第一时间处理**，不积压。
+- **版本号自动更新**：任何更新（含依赖更新）合并时都要同步更新版本号。统一使用 `.github/workflows/bump-version-and-merge.yml`：
+  - 在 PR 下评论 `OK. <major|minor|patch> [merge|squash|rebase]`（仅限 oimasterkafuu），或通过 `workflow_dispatch` 手动触发；
+  - 工作流会在 PR 分支上自动 `pnpm version` 提升版本号并提交，然后按指定策略合并；
+  - 依赖更新一律使用 `patch`。
+- 多个 Dependabot PR 按顺序逐个处理：合并一个后再处理下一个，避免锁文件/版本号并发冲突；出现冲突时合并 `main` 后用 `pnpm install --lockfile-only` 重新生成锁文件。
+- 已合并的 Dependabot 分支及时删除。
+
+## 代码安全扫描（CodeQL）
+
+- 仓库已启用 CodeQL 扫描（`.github/workflows/codeql.yml`）：`push`/`pull_request` 到 `main`、每周一定时触发，语言为 javascript-typescript（build-mode: none）。
+- 合并前关注 CodeQL 检查结果，新引入的告警需评估处理。
 
 ## 提交身份与签名
 
