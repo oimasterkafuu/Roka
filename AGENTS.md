@@ -53,7 +53,7 @@
 ## 代码安全扫描（CodeQL）
 
 - 仓库已启用 CodeQL 扫描（`.github/workflows/codeql.yml`）：`push`/`pull_request` 到 `main`、每周一定时触发，语言为 javascript-typescript（build-mode: none）。
-- 合并前关注 CodeQL 检查结果，新引入的告警需评估处理。
+- **CodeQL 扫描出的告警必须第一时间修复**（含日常维护巡检时发现的），修复后推送并确认告警闭环，不留 open 状态积压。
 
 ## 提交身份与签名
 
