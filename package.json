@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.16.1",
+  "version": "1.16.2",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -43,7 +43,7 @@
     "@types/node": "^26.4.1",
     "@types/sanitize-html": "^2.16.1",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
-    "@typescript-eslint/parser": "^8.56.1",
+    "@typescript-eslint/parser": "^8.69.0",
     "eslint": "^10.9.1",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
