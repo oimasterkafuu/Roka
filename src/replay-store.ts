@@ -193,8 +193,8 @@ export class ReplayStore {
       return;
     }
     await this.enqueue(async () => {
-      await rm(path.join(this.replayDir, `${id}${REPLAY_EXT}`), { force: true });
-      await rm(path.join(this.replayDir, `${id}${REPLAY_VIEW_EXT}`), { force: true });
+      await rm(this.resolveReplayPath(id, REPLAY_EXT), { force: true });
+      await rm(this.resolveReplayPath(id, REPLAY_VIEW_EXT), { force: true });
       const items = await this.loadIndex();
       const next = items.filter((item) => item.id !== id);
       if (next.length !== items.length) {
