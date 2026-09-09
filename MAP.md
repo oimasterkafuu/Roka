@@ -100,7 +100,7 @@ JWT 载荷 `{sub, sid}`，`sid` 经 `userStore.isSessionValid` 校验（重登�
 _一句话：AFK/掉线/孤军等数值常量。_
 
 **src/game-engine/general-selection.ts** — 开局主城位置选择。
-`selectRandomGenerals`：500 组候选按间距评分加权轮盘抽取；`selectMazeGenerals`：保留迷宫预设位 + BFS 最短路贪心选点。选不出的玩家直接出局。
+`selectRandomGenerals`：500 组最大-最小贪心候选按间距评分加权轮盘抽取，含按面积/人数折算的硬性最小间距约束（不可达时放宽到最优可达值）；`selectMazeGenerals`：保留迷宫预设位 + BFS 最短路贪心选点。选不出的玩家直接出局。
 _一句话：开局主城位置选择（随机/迷宫两套）。_
 
 **src/game-engine/leaderboard.ts** — 每 tick 排行榜与终局名次。
