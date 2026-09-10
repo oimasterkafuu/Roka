@@ -5,7 +5,9 @@
 // 4) 校验：普通用户访问 bot API 被 403；bot 进房后 host 不是 bot（第三方 bot 进房后接任房主）；
 // 5) 启动 random-patch-bot 作为对手触发开局，解析服务器 stdout 中 [server-bot] 日志，
 //    要求收到 init_map 且发出 >=5 条实际 attack 操作；
-// 6) 调 POST /api/admin/bots/stop 停止并确认列表清空。
+// 6) 重启恢复（issue #28）：不停止 bot 直接杀掉服务器，校验状态文件已记录运行中 bot；
+//    同数据目录重启后 bot 应以相同用户名/房间号自动恢复并连上；
+// 7) 调 POST /api/admin/bots/stop 停止并确认列表清空、状态文件已清除。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 120 秒。
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -23,7 +25,7 @@ const jwt = require('jsonwebtoken');
 const serverEntry = path.join(rootDir, 'dist', 'server.js');
 const randomBotDir = path.join(rootDir, 'bot-template', 'random-patch-bot');
 
-const HARD_TIMEOUT_MS = 120_000;
+const HARD_TIMEOUT_MS = 180_000;
 const SERVER_READY_TIMEOUT_MS = 20_000;
 const GAME_TIMEOUT_MS = 60_000;
 const REQUIRED_ATTACKS = 5;
@@ -207,15 +209,20 @@ async function main() {
   const { adminToken, userToken } = await prepareUsers(dataDir);
   log('已造用户：smoke_admin（超管）/ smoke_bot（bot 账号）/ smoke_user（普通用户）');
 
-  const server = spawnLogged('服务器', process.execPath, [serverEntry, '--port', String(port)], {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      ROKA_DATA_DIR: dataDir,
-      ROKA_BOT_TOKENS: `smoke-token:${RANDOM_BOT_USER}`,
-    },
-  });
-  server.stderr.on('data', (chunk) => log(`服务器 stderr: ${String(chunk).trim()}`));
+  const serverEnv = {
+    ...process.env,
+    ROKA_DATA_DIR: dataDir,
+    ROKA_BOT_TOKENS: `smoke-token:${RANDOM_BOT_USER}`,
+  };
+  const spawnServer = (name) => {
+    const child = spawnLogged(name, process.execPath, [serverEntry, '--port', String(port)], {
+      cwd: rootDir,
+      env: serverEnv,
+    });
+    child.stderr.on('data', (chunk) => log(`服务器 stderr: ${String(chunk).trim()}`));
+    return child;
+  };
+  const server = spawnServer('服务器');
 
   let sawInitMap = false;
   let attackCount = 0;
@@ -296,8 +303,54 @@ async function main() {
   }
   log(`对局校验通过：收到 init_map，累计 ${attackCount} 条实际 attack 操作`);
 
-  // 停止 bot 并确认列表清空。
-  const stopped = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/stop', { id: botId });
+  // 重启恢复校验：运行中 bot 应已持久化到状态文件。
+  const stateFile = path.join(dataDir, 'server-bots.json');
+  let savedState = null;
+  try {
+    savedState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  } catch (error) {
+    return finish(1, `状态文件校验失败：读取/解析 ${stateFile} 出错（${error.message}）`);
+  }
+  if (
+    !Array.isArray(savedState) ||
+    savedState.length !== 1 ||
+    savedState[0]?.username !== BOT_USER ||
+    savedState[0]?.room !== ROOM
+  ) {
+    return finish(1, `状态文件校验失败：内容 ${JSON.stringify(savedState)}`);
+  }
+  log('状态文件校验通过：运行中 bot 已持久化（username + room）');
+
+  // 不停止 bot 直接杀掉服务器，同数据目录重启后应自动以原配置恢复。
+  const serverExited = new Promise((resolve) => server.once('exit', resolve));
+  killChild(server);
+  await serverExited;
+  log('旧服务器已停止（bot 未手动停止），开始重启……');
+
+  spawnServer('服务器(重启)');
+  await waitTcpReady(port, SERVER_READY_TIMEOUT_MS);
+  log('服务器已重启');
+
+  const restoreDeadline = Date.now() + 20_000;
+  let restoredBot = null;
+  while (Date.now() < restoreDeadline) {
+    const { status, data } = await api(baseUrl, adminToken, 'GET', '/api/admin/bots');
+    if (status === 200 && Array.isArray(data?.items)) {
+      const found = data.items.find((item) => item.username === BOT_USER && item.room === ROOM);
+      if (found?.connected) {
+        restoredBot = found;
+        break;
+      }
+    }
+    await sleep(500);
+  }
+  if (!restoredBot) {
+    return finish(1, '重启恢复校验失败：重启后 bot 未按原配置自动恢复或未连上服务器');
+  }
+  log(`重启恢复校验通过：bot 已自动恢复（id=${restoredBot.id}，房间 ${restoredBot.room}）`);
+
+  // 停止 bot 并确认列表清空、状态文件已清除。
+  const stopped = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/stop', { id: restoredBot.id });
   if (stopped.status !== 200) {
     return finish(1, `停止 bot 失败：HTTP ${stopped.status} ${JSON.stringify(stopped.data)}`);
   }
@@ -306,7 +359,11 @@ async function main() {
   if (remaining !== 0) {
     return finish(1, `停止校验失败：bot 列表剩余 ${remaining} 个`);
   }
-  log('停止 API 校验通过：bot 已停止且列表清空');
+  const clearedState = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  if (!Array.isArray(clearedState) || clearedState.length !== 0) {
+    return finish(1, `停止校验失败：状态文件未清除（${JSON.stringify(clearedState)}）`);
+  }
+  log('停止 API 校验通过：bot 已停止、列表清空且状态文件已清除');
 
   finish(0, '冒烟测试全部通过');
 }

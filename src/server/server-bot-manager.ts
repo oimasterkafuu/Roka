@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
@@ -14,6 +15,12 @@ import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
  *
  * 策略实现复用 bot-template/simple-strategy-bot/strategy.js（与 CLI 运行
  * 同一份代码），按项目约定以 process.cwd() 为根解析。
+ *
+ * 重启自动恢复（issue #28）：start/stop 时把运行中 bot 的 {username, room}
+ * 列表同步写入 stateFilePath（JSON，临时文件 + rename 原子替换）；服务器
+ * 重启后由 restore() 读回，逐条重做与手动启动相同的校验（用户存在且未封禁、
+ * 房间号长度 1~15、策略文件可加载），全部通过才以原配置自动启动；失效记录
+ * 只记警告并随成功启动的写盘清除，不影响服务器启动。
  */
 
 interface StrategyOptions {
@@ -46,6 +53,14 @@ interface RunningServerBot extends ServerBotInfo {
 interface ServerBotManagerOptions {
   /** 服务器实际监听端口（start 时读取，API 调用必然发生在 listen 之后）。 */
   getPort: () => number;
+  /** 自动恢复状态文件（JSON）：运行中 bot 的 {username, room} 列表。 */
+  stateFilePath: string;
+}
+
+/** 状态文件中单条 bot 记录：恢复所需的全部配置。 */
+interface SavedServerBot {
+  username: string;
+  room: string;
 }
 
 const STRATEGY_RELATIVE_PATH = path.join('bot-template', 'simple-strategy-bot', 'strategy.js');
@@ -108,6 +123,7 @@ class ServerBotManager {
     };
     this.bots.set(id, bot);
     this.tokens.set(token, username);
+    this.persistState();
     console.log(`[server-bot] ${username}: started in room ${room} (id=${id})`);
     return this.list().find((item) => item.id === id) as ServerBotInfo;
   }
@@ -121,8 +137,77 @@ class ServerBotManager {
     this.tokens.delete(bot.token);
     bot.handle.stop();
     bot.socket.disconnect();
+    this.persistState();
     console.log(`[server-bot] ${bot.username}: stopped (id=${id})`);
     return true;
+  }
+
+  /**
+   * 重启后自动恢复（listen 完成后调用）：逐条读取状态文件，重做与手动启动
+   * 相同的校验（validateUsername 判断用户存在且未封禁；房间号长度 1~15；
+   * 策略文件经 loadStrategy 试加载），全部通过才以原配置启动。任何一条失效
+   * 只记警告跳过——成功启动的 bot 会触发 persistState，自动清掉失效记录。
+   */
+  restore(validateUsername: (username: string) => boolean): void {
+    for (const saved of this.readState()) {
+      try {
+        if (!validateUsername(saved.username)) {
+          throw new Error(`用户 ${saved.username} 不存在或已被封禁。`);
+        }
+        if (saved.room.length === 0 || saved.room.length > 15) {
+          throw new Error(`房间号无效（长度 1~15）。`);
+        }
+        this.loadStrategy();
+        this.start(saved.username, saved.room);
+        console.log(`[server-bot] ${saved.username}: 已按重启前配置自动恢复（房间 ${saved.room}）`);
+      } catch (error) {
+        console.warn(
+          `[server-bot] ${saved.username}: 自动恢复失败，已跳过：${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
+  }
+
+  /** 读取状态文件；文件缺失/损坏/结构不符均按无状态处理（返回空数组）。 */
+  private readState(): SavedServerBot[] {
+    let raw: string;
+    try {
+      raw = readFileSync(this.options.stateFilePath, 'utf8');
+    } catch {
+      return [];
+    }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed.filter(
+        (item): item is SavedServerBot =>
+          typeof item === 'object' &&
+          item !== null &&
+          typeof (item as SavedServerBot).username === 'string' &&
+          typeof (item as SavedServerBot).room === 'string',
+      );
+    } catch {
+      console.warn(`[server-bot] 状态文件解析失败，按无状态处理：${this.options.stateFilePath}`);
+      return [];
+    }
+  }
+
+  /** 把运行中 bot 列表写入状态文件（临时文件 + rename 原子替换）；写盘失败只记警告。 */
+  private persistState(): void {
+    try {
+      const snapshot: SavedServerBot[] = [...this.bots.values()].map((bot) => ({
+        username: bot.username,
+        room: bot.room,
+      }));
+      mkdirSync(path.dirname(this.options.stateFilePath), { recursive: true });
+      const tmpPath = `${this.options.stateFilePath}.${process.pid}.tmp`;
+      writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2));
+      renameSync(tmpPath, this.options.stateFilePath);
+    } catch (error) {
+      console.warn(`[server-bot] 状态文件写入失败：${error instanceof Error ? error.message : error}`);
+    }
   }
 
   private loadStrategy(): StrategyModule {

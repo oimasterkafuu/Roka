@@ -14,14 +14,14 @@ src/server.ts ── Fastify 路由 + socket.io 事件（唯一入口）
    ├── src/server/auth-service.ts     JWT / 单连接互斥
    ├── src/server/captcha-service.ts  图形验证码
    ├── src/server/lobby-service.ts    房间/对局状态机、断线宽限期、ELO 结算、托管 bot 房长保留
-   ├── src/server/server-bot-manager.ts  托管策略 Bot 管理器（进程内自连、内存令牌鉴权）
+   ├── src/server/server-bot-manager.ts  托管策略 Bot 管理器（进程内自连、内存令牌鉴权、重启自动恢复）
    └── src/server/webhook-updater.ts  GitHub push 自动部署
    ▼
 src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降、回放记录）
    ├── src/game-engine/*              常量/主城选择/排行榜/编码/回放工具/增兵
    └── src/map/*                      四种 map_mode 地图生成器（纯函数）
    ▼
-持久化（data/，均被 gitignore）：announcement-store / auth-store / feed-store / replay-store
+持久化（data/，均被 gitignore）：announcement-store / auth-store / feed-store / replay-store；server-bots.json（托管 bot 重启恢复状态）
 ```
 
 关键事实：
@@ -61,7 +61,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 ├── scripts/                # 维护脚本（数据迁移、bot 冒烟测试）
 ├── bot-template/           # random-patch-bot（协议最小参考）与 simple-strategy-bot（策略 bot）
 ├── data/                   # 运行时数据（gitignored）：users.bin / feeds.bin /
-│                           #   announcement.json / replays/*.rpl(+缓存)
+│                           #   announcement.json / server-bots.json / replays/*.rpl(+缓存)
 ├── dist/                   # tsc 构建产物（勿手改）
 └── .github/                # dependabot + 唯一的 CI（评论触发升版合并 PR）
 ```
@@ -79,7 +79,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 核心 Map：`gameUid`(sid→gameId)、`gameInstances`、`gamePlayers`、`gameLobbyId`、`lobbyOfSid`、`lobbyPlayers`、`lobbyConfig`；宽限期登记表 `pendingRejoins`（键 `${gameId}:${username}`，含旧 sid、旧连接是否 bot 与 10s 定时器）；心跳登记表 `lobbyHeartbeats`（sid→最后心跳时间）+ bot 豁免集 `heartbeatExempt`（由 server.ts 维护）。`joinLobby` 第四参数 `serverBot`：托管策略 bot 永远排在普通成员之后（`LobbyPlayer.serverBot` 标记），房主（`players[0]`）保留给人类/第三方 bot——普通成员进房时插入到首个托管 bot 之前，无 bot 时等价末尾追加。`checkLeave`：对局中断线 → `game.markDisconnected`，截断旧路由但保留席位，挂 `expireGracePeriod` 定时器，超时以「挂机」投降并完整清理；`tryRejoin`：按用户名找旧 sid（`findPlayerSidByName`）并校验身份匹配（bot 连接只能接管 bot 的旧席位、人类只能接管人类的，以旧 socket 的 `data.isBot` 或宽限期登记为准，防止托管 bot 与同名真人互相抢席位），清定时器、全部 Map 换绑、`game.rebindPlayer` 补发全量状态。`checkReady` 开局条件：非观战成员中 ready 超过半数；组队模式下若所有参赛者处于同一队伍则拒绝开局并提示调整队伍（否则首 Tick 存活队伍数即为 1，开局即终局）。心跳掉线检测（仅房间准备阶段）：`recordLobbyHeartbeat` 刷新时间戳（进房即为基线），`startLobbyHeartbeatSweep` 全局单一定时器每分钟扫描，超过 600 秒无心跳且房间未开局的成员由 `kickFromLobby` 复用离开清理逻辑移出房间并下发 `room_kick`（前端跳首页）；对局中的房间与豁免 bot 跳过。`startGame` 组装 `GameConfig`（动态地图尺寸、自动分队）并注入 io 回调；`endGame` 里 `applyGameResult` 结算 ELO（K=24，队伍名次取队内最好、rating 取队内平均），清理宽限定时器并重置房间。`onGameEnded` 回调通知 webhook-updater 解除部署推迟。
 
 **src/server/server-bot-manager.ts** — 服务端托管策略 Bot 管理器（issue #18，仅超管经 `/api/admin/bots*` 操作）。
-不另起进程：每次启动生成随机内存令牌（`tokens` Map：token→username，server.ts socket 中间件查询 `resolveToken`，命中置 `isBot` + `isServerBot`），在服务器进程内用 socket.io-client 连本机回环地址（端口经 `getPort` 回调读取 listen 端口）完成正常握手；策略复用 `bot-template/simple-strategy-bot/strategy.js`（`createRequire` 按 `process.cwd()` 动态加载 plain JS，CLI 与服务端同一份代码）。`start(username, room)` 拒绝同用户重复启动；`stop(id)` 拆监听、断连、删令牌；`list()` 出运行中 bot（含连接状态）。日志走 `console.log` `[server-bot]` 前缀（冒烟脚本据此判定对局行为）。
+不另起进程：每次启动生成随机内存令牌（`tokens` Map：token→username，server.ts socket 中间件查询 `resolveToken`，命中置 `isBot` + `isServerBot`），在服务器进程内用 socket.io-client 连本机回环地址（端口经 `getPort` 回调读取 listen 端口）完成正常握手；策略复用 `bot-template/simple-strategy-bot/strategy.js`（`createRequire` 按 `process.cwd()` 动态加载 plain JS，CLI 与服务端同一份代码）。`start(username, room)` 拒绝同用户重复启动；`stop(id)` 拆监听、断连、删令牌；`list()` 出运行中 bot（含连接状态）。日志走 `console.log` `[server-bot]` 前缀（冒烟脚本据此判定对局行为）。重启自动恢复（issue #28）：start/stop 把运行中 bot 的 `{username, room}` 列表原子写入 `data/server-bots.json`；`restore(validateUsername)` 在 listen 后由 server.ts 调用，逐条重做与手动启动相同的校验（用户存在且未封禁、房间号长度 1~15、策略文件可加载），全部通过才以原配置自动启动，失效记录记警告跳过并随写盘清除。
 
 **src/server/auth-service.ts** — JWT 签发校验 + 用户 socket 单连接互斥。
 JWT 载荷 `{sub, sid}`，`sid` 经 `userStore.isSessionValid` 校验（重登录轮换 session 使旧令牌失效）；cookie 名 `auth_token`，7 天。`userSocketIds` 配合 `disconnectOtherUserSockets`（新连接踢旧连接=顶号）/ `disconnectUserSockets`（登录/登出全踢）；`isPublicPath` 定义免登录白名单。
@@ -282,16 +282,16 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 - **tsconfig.json** — src→dist，CommonJS+ES2022+sourceMap；**刻意关闭严格模式**，改严格度会影响整个 src/ 编译面。
 - **eslint.config.cjs** — flat config，只查 `src/**/*.ts`，推荐规则集 + 关闭 `no-explicit-any`；不查 static/。
 - **.prettierrc / .prettierignore** — 单引号/分号/尾逗号/110 列；排除 dist、node_modules、static/vendor。
-- **.gitignore** — 忽略依赖/产物/运行时数据（data/users.bin、feeds.bin、announcement.json、replays/）/`.env.*`。
+- **.gitignore** — 忽略依赖/产物/运行时数据（data/users.bin、feeds.bin、announcement.json、server-bots.json、replays/）/`.env.*`。
 - **.github/dependabot.yml** — npm 依赖每周更新。
 - **.github/workflows/bump-version-and-merge.yml** — 唯一 CI：owner 在 PR 评论 `OK. <major|minor|patch> [merge|squash|rebase]` 触发升版本、冲突检测、自动合并（`dev/` 分支合并后删除）。
 - **scripts/migrate-rating-display.mjs** — 一次性迁移：users.bin 历史 rating 换算显示分，原地覆盖写回（运行前先备份）。
 - **scripts/test-bot.mjs** — `pnpm run test:bot`：临时数据目录起服务 + 两个 bot 自动对局，双方收到 `init_map` 且累计 ≥10 回合即通过。
-- **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，校验 403 权限闸、房长保留（host 落在第三方 bot）、`init_map` + ≥5 条实际 attack、停止 API 清空列表。
+- **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，校验 403 权限闸、房长保留（host 落在第三方 bot）、`init_map` + ≥5 条实际 attack、杀服重启后按状态文件自动恢复原配置、停止 API 清空列表与状态文件。
 - **scripts/test-lobby-guards.mjs** — `pnpm run test:lobby-guards`：开局/换绑守卫回归——组队模式全员同队拒绝开局（换队后可开）、对局中同名人类连接不得接管 bot 席位（以观战进房且 bot 持续收 update）、bot 与人类各自断线重连仍可恢复席位。
 - **bot-template/random-patch-bot/** — socket 协议最小参考实现（独立 pnpm 包，仅依赖 socket.io-client）：进房、自动准备、周期发送 `room_heartbeat`、维护 diff 地图、每回合随机走子；协议细节另见 `static/develop-bot.html`。
 - **bot-template/simple-strategy-bot/** — 综合策略 bot（独立 pnpm 包）：`strategy.js` 为入口与管线编排（socket/房间循环/队列镜像/逐 tick 决策），`bot/` 为纯函数决策模块——`board.js`（棋盘视图/距离场/Dijkstra/推兵预演）、`defense.js`（威胁推演与集结布防）、`offense.js`（目标评估/风险路径/集结打击/切断入侵）、`economy.js`（皇冠/指挥所建设选址）、`logistics.js`（汇集输送/中立扩张）；CLI `index.js` 与服务端托管（`src/server/server-bot-manager.ts`）共用这一份实现；用法见包内 `USAGE.md`。
-- **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）。
+- **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`server-bots.json`（托管策略 bot 重启自动恢复状态）、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）。
 
 ---
 
