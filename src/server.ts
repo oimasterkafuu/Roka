@@ -48,7 +48,10 @@ const captchaService = new CaptchaService();
 const lobbyService = new LobbyService(replayStore, userStore);
 // 服务器实际监听端口：listen 前赋值；托管 bot 自连回环地址时读取（API 调用必发生在 listen 后）。
 let listenPort = Number(process.env.PORT) || 23333;
-const serverBotManager = new ServerBotManager({ getPort: () => listenPort });
+const serverBotManager = new ServerBotManager({
+  getPort: () => listenPort,
+  stateFilePath: path.join(dataDir, 'server-bots.json'),
+});
 const webhookUpdater = new WebhookUpdater(app.log, runtimeEnv.webhookSecret, () =>
   lobbyService.hasActiveGames(),
 );
@@ -1638,6 +1641,15 @@ const boot = async (): Promise<void> => {
   const port = Number.isFinite(cliPort) && cliPort > 0 ? cliPort : Number(process.env.PORT) || 23333;
   listenPort = port;
   await app.listen({ host: '0.0.0.0', port });
+
+  // 重启后自动恢复此前运行中的托管策略 bot；校验与手动启动一致
+  // （用户存在且未封禁、房间号合法、策略文件可加载），失效记录只记警告跳过。
+  serverBotManager.restore(
+    (username) =>
+      USERNAME_REGEX.test(username) &&
+      Boolean(userStore.getPublicProfile(username)) &&
+      !userStore.getBanStatus(username).banned,
+  );
 };
 
 void boot();
