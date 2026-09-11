@@ -15,6 +15,8 @@
  *   B. 直接反击兵源：贴住 blob 的己方格能吃掉它就立刻打；
  *   C. 集结拦截：在威胁路径上挑一个能及时集结足够兵力的己方格作为
  *      集结点（rally），由 logistics 的输送流把兵力调过去——提前防御；
+ *      集结点带滞后保持（且路径上已有守得住的格时不再集结），防止
+ *      焦点逐 tick 振荡导致输送流往返倒兵；
  *   D. 守不住时：多主城则提前撤空将死主城兵力，单主城则全军出击换伤害。
  */
 
@@ -197,16 +199,27 @@ function evaluateThreats(ctx) {
 
 /**
  * 在威胁路径上选择集结点（rally）。
- * 候选为路径上的全部己方格（含锚点）。某格在 blob 到达前还有 k tick，
+ * 沿威胁路径从 blob 侧向锚点扫描己方格：某格在 blob 到达前还有 k tick，
  * 需要守住 = 到达时兵力 >= 到达时强度（引擎：推兵 <= 守军则进攻失败）。
  * 缺口 = 到达强度 - 现有兵力 - 等待期增兵；用 gatherable 估算 k-1 个 op
  * 窗口内能集结多少。优先选「可行且缺口最小」的点（最早最省地解除威胁）；
- * 都不可行时选缺口最小的点做最后的抵抗。
+ * 都不可行时选缺口最小的点做最后的抵抗。遇到第一个「天然守得住」
+ * （缺口 ≤ 0）的格即停止扫描：它前方没有可集结点就直接不集结
+ * （blob 会死在它前面），避免前线/锚点间集结振荡。
+ * preferIdx（上 tick 的集结点）仍在候选中且不比最优差太多（缺口差 < 12、
+ * 可行性不更差）时沿用——集结点逐 tick 在相邻格间跳变会让输送流来回
+ * 倒兵（兵力在集结点与锚点间往返 shuttle），反而抽干锚点、贻误战机。
  */
-function chooseRally(ctx, threat) {
+function chooseRally(ctx, threat, preferIdx = -1) {
   const { path, prefixStrength } = threat;
-  let best = null;
-  for (let i = path.length - 1; i >= 1; i -= 1) {
+  const candidates = [];
+  // 从 blob 侧向锚点扫描：第一个「到达时天然守得住」的己方格意味着
+  // blob 会死在它前面——此时若再去集结锚点侧缺口更大的格，就会把刚
+  // 集结到前线的兵力抽回去，下一 tick 前线又失守、再集结……如此逐
+  // tick 往返 shuttle（集结点在相邻格间振荡），反而抽干锚点贻误战机。
+  // 因此存在已守得住的格时：其前方（靠 blob 侧）还有可集结点则向前
+  // 集结（更早拦截、减少领土损失），否则不再集结、按兵不动。
+  for (let i = 1; i < path.length; i += 1) {
     const idx = path[i];
     if (!ctx.isMineIdx(idx)) {
       continue;
@@ -217,18 +230,34 @@ function chooseRally(ctx, threat) {
     const defenseAtArrival = ctx.army(idx) + (isCrown ? k : 0);
     const need = strengthAt - defenseAtArrival;
     if (need <= 0) {
-      // 该点天然守得住（上游守军已把 blob 磨到无害），无需集结。
-      continue;
+      // 该点天然守得住（上游守军已把 blob 磨到无害）：前方没有可集结
+      // 点时才直接收兵；有则继续向前集结争取更早拦截。
+      if (candidates.length === 0) {
+        return null;
+      }
+      break;
     }
     const gather = ctx.gatherable(idx, Math.max(0, k - 1), -1, true);
-    const feasible = gather.amount >= need;
-    const candidate = { idx, k, need, feasible };
+    candidates.push({ idx, k, need, feasible: gather.amount >= need });
+  }
+  let best = null;
+  for (const candidate of candidates) {
     if (
       !best ||
       (candidate.feasible && !best.feasible) ||
       (candidate.feasible === best.feasible && candidate.need < best.need)
     ) {
       best = candidate;
+    }
+  }
+  if (best && preferIdx >= 0) {
+    const preferred = candidates.find((c) => c.idx === preferIdx);
+    if (
+      preferred &&
+      (preferred.feasible || !best.feasible) &&
+      preferred.need <= best.need + 12
+    ) {
+      return preferred;
     }
   }
   return best;
@@ -349,7 +378,7 @@ function planDefense(ctx, threats) {
         if (t.hops > RALLY_WINDOW_HOPS) {
           continue;
         }
-        const c = chooseRally(ctx, t);
+        const c = chooseRally(ctx, t, state.rallyIdx ?? -1);
         if (c) {
           choices.push({ threat: t, choice: c });
         }
