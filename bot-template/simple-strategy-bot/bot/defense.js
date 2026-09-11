@@ -35,24 +35,58 @@ const RALLY_WINDOW_HOPS = 10;
  * 不来，收入永远追不上，正是「越守越穷」的死局。因此对每个
  * （敌方 owner, 我方锚点）组合记录历史最小 hops：
  *   - 本 tick 的 hops 严格小于历史最小值 = 正在逼近 → 激活；
- *   - 静止或变远的威胁不激活（不集结、不冻结经济），但它的贴脸应急（A）
- *     与可吃即切（B）仍然生效——敌格真进我境时由这两层兜底。
- * 状态存在 state.threatMinHops（Map），随 resetMap 清空。
+ *   - 防御闩锁（defenseLatch）：一旦激活且 hops ≤ 8，闩锁 6 tick——
+ *     在「守得住 ↔ 守不住」的平衡点上威胁会随我方集结/皇冠增兵反复进出
+ *     清单，闩锁保证集结焦点不在平衡点上高频抖动；威胁真的消失
+ *     （被歼灭/撤退）6 tick 后闩锁自动松开，正常恢复经济与进攻；
+ *   - 滞留宽限：刚活跃过（4 tick 内）且没有明显撤退（hops 不超过历史
+ *     最小值 +1）时保持激活；
+ *   - 其余静止或变远的威胁不激活（不集结、不冻结经济），但它的贴脸应急
+ *     与可吃即切仍然生效——敌格真进我境时由这两层兜底。
+ * 状态存在 state.threatMinHops / state.threatLastActive / state.defenseLatch，
+ * 随 resetMap 清空。
  */
 function activateThreats(ctx, threats) {
   const { state } = ctx;
   if (!state.threatMinHops) {
     state.threatMinHops = new Map();
   }
+  if (!state.threatLastActive) {
+    state.threatLastActive = new Map();
+  }
+  if (!state.defenseLatch) {
+    state.defenseLatch = new Map();
+  }
   const active = [];
+  const seenKeys = new Set();
   for (const t of threats) {
     const key = `${t.blobOwner}:${t.anchorIdx}`;
+    seenKeys.add(key);
     const prevMin = state.threatMinHops.get(key);
-    if (typeof prevMin === 'number' && t.hops < prevMin) {
-      active.push(t);
+    const lastActive = state.threatLastActive.get(key);
+    const approaching = typeof prevMin !== 'number' || t.hops < prevMin;
+    const latched = (state.defenseLatch.get(key) ?? -1) >= state.turn;
+    const lingering =
+      typeof prevMin === 'number' &&
+      typeof lastActive === 'number' &&
+      state.turn - lastActive <= 4 &&
+      t.hops <= prevMin + 1;
+    if (approaching && t.hops <= 8) {
+      // 逼近到危险距离：上闩锁，至少坚守 6 tick。
+      state.defenseLatch.set(key, state.turn + 6);
     }
-    if (typeof prevMin !== 'number' || t.hops < prevMin) {
+    if (approaching || lingering || latched) {
+      active.push(t);
+      state.threatLastActive.set(key, state.turn);
+    }
+    if (approaching) {
       state.threatMinHops.set(key, t.hops);
+    }
+  }
+  // 威胁从清单消失（被歼灭/撤退/守军已足够）后不续闩，6 tick 内自然松开。
+  for (const key of [...state.defenseLatch.keys()]) {
+    if (!seenKeys.has(key) && (state.defenseLatch.get(key) ?? -1) < state.turn) {
+      state.defenseLatch.delete(key);
     }
   }
   return active;
@@ -186,7 +220,7 @@ function chooseRally(ctx, threat) {
       // 该点天然守得住（上游守军已把 blob 磨到无害），无需集结。
       continue;
     }
-    const gather = ctx.gatherable(idx, Math.max(0, k - 1), -1);
+    const gather = ctx.gatherable(idx, Math.max(0, k - 1), -1, true);
     const feasible = gather.amount >= need;
     const candidate = { idx, k, need, feasible };
     if (

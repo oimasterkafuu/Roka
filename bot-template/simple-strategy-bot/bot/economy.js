@@ -181,6 +181,10 @@ function planEconomy(ctx, state, threats) {
       } else if (ad < 0 || ad >= 4) {
         score -= 40;
       }
+      if (ctx.myChokes().has(idx)) {
+        // 咽喉格上建指挥所 = 给可能被截断的区域永久上锚，防御价值极高。
+        score += 45;
+      }
       if (fd >= 2 && fd <= 4) {
         score += 20; // 二线甜区
       } else if (fd <= 6) {
