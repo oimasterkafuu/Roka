@@ -12,7 +12,8 @@
     "format": "prettier --write --ignore-unknown \"src/**/*.ts\" \"static/**\" \"README.md\" \"AGENTS.md\"",
     "test:bot": "node scripts/test-bot.mjs",
     "test:server-bot": "node scripts/test-server-bot.mjs",
-    "test:lobby-guards": "node scripts/test-lobby-guards.mjs"
+    "test:lobby-guards": "node scripts/test-lobby-guards.mjs",
+    "observe:bot": "node scripts/observe-bot-match.mjs"
   },
   "repository": {
     "type": "git",
