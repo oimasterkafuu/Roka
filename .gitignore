@@ -19,6 +19,7 @@ data/feeds.bin
 data/announcement.json
 data/server-bots.json
 data/replays/
+data/observe-*/
 
 # Environment files
 .env

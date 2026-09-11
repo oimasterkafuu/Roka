@@ -1,19 +1,22 @@
 /**
  * logistics.js — 后勤：兵力汇集输送（flow）与中立扩张（expansion）。
  *
- * 汇集输送：给定焦点格（防御集结点 rally 或打击入口 entry），对所有
- * 己方格求「到焦点的 BFS 距离场」，每 tick 挑选性价比最高的一个己方格
- * 向焦点方向推进一步。效果上是多源、多链路的传送带：沿路各格兵力
- * 逐 tick 向焦点合流，而不是每次都从兵力最大的单点出发取兵。
- * 无焦点时退化为通用前线输送（沿 frontierDist 向最近前线送兵）。
+ * 汇集输送：给定焦点格（防御集结点 rally / 救援走廊入口 / 打击入口 /
+ * 突破集结点 / 喂养目标），对所有己方格求「到焦点的 BFS 距离场」，每 tick
+ * 挑选性价比最高的己方格向焦点方向推进一步。效果上是多源、多链路的
+ * 传送带：沿路各格兵力逐 tick 向焦点合流，而不是每次都从兵力最大的单点
+ * 出发取兵。无焦点时退化为通用前线输送（沿 frontierDist 向最近前线送兵）。
  *
  * 稳定性细节：
- *   - 推出量用与引擎一致的 previewPush 预演，推不出兵的 op 根本不下发
- *     （服务端会跳过无效队首，但会白耗本 tick 的执行名额）；
+ *   - 推出量用与引擎一致的 previewPush 预演，推不出兵的 op 根本不下发；
+ *   - 驻军保留线（garrisonAt）：任何输送/扩张都不得把源格抽到保留线以下
+ *     ——边境格保留邻敌推兵量，咽喉格保留分离区域守军（防截断偷家）。
+ *     全冲会破线时退半兵，半兵也破线才跳过；有紧急焦点的集结（集结/救援）
+ *     不受咽喉保留限制（生死关头全军可动）；
  *   - 升级链保护：兵力低于升级线且不贴活敌的指挥所不作输送/扩张源
  *     （兵是升皇冠的本金，抽走就永远升不了；军事操作不受此限）；
- *   - 边境暴露格（邻接活敌）用 mode 0 智能分兵，自动保留防御兵力；
- *   - 防往返抖动：与上一 tick 输送方向恰好互逆的候选直接丢弃。
+ *   - 防往返抖动：state.recentMoves 记录最近数 tick 的移动方向，与其中
+ *     任一恰好互逆的候选直接丢弃（覆盖整个队列深度，而非只记上一 tick）。
  *
  * 中立扩张：边界格用 mode 0 智能分兵占领中立/孤军格，优先 0 兵空地
  * （多向可及时空地永远优先于永不产兵的沼泽）；12–25 tick 为爆发期前的
@@ -25,13 +28,11 @@
 // 爆发期区间（与 src/game-engine/tick-growth.ts 一致）。
 const BURST_START_TURN = 26;
 const BURST_END_TURN = 50;
-// 抢地冲刺窗口（12–25 tick）：爆发期每块普通领土每 tick +1，因此爆发
-// 前把地圈到最大 = 爆发期兵力最大化。窗口内扩张大幅加分，优先级压过
-// 一般建设与输送（仅次于军事打击/防御与高分建设）。
+// 抢地冲刺窗口（12–25 tick），见头注释。
 const RUSH_START_TURN = 12;
 const RUSH_END_TURN = 25;
 const RUSH_BONUS = 100;
-// 无焦点输送只动腹地格（距前线 >= 2），边界格留给扩张/切断决策。
+// 无焦点输送只动腹地格（距前线 >= 2），边界格留给扩张/切断/突破决策。
 const FRONTIER_FLOW_MIN_DIST = 2;
 // 升级链保护：兵力未稳过升级线（<52）且不贴活敌的指挥所是「正在攒升级」
 // 的格子——它的兵是升皇冠的本金，不能被输送/扩张顺手抽走（抽走就永远
@@ -40,6 +41,8 @@ const UPGRADE_CHAIN_LINE = 52;
 // 建设 earmark：普通格兵力达到建设门槛（101）后不再作输送/扩张源——
 // 兵是「直建皇冠」的本金，抽走会让队列中的建造令执行时失效。
 const BUILD_EARMARK_ARMY = 101;
+// 防往返窗口：与最近 4 tick 内任一移动恰好互逆的候选丢弃。
+const ANTI_OSCILLATION_WINDOW = 4;
 
 /** 升级链保护判定：低于升级线且安全的指挥所。 */
 function inUpgradeChain(ctx, idx) {
@@ -55,6 +58,16 @@ function attackOp(ctx, fromIdx, toIdx, mode) {
   const from = ctx.xy(fromIdx);
   const to = ctx.xy(toIdx);
   return { kind: 'attack', payload: { x: from.x, y: from.y, dx: to.x, dy: to.y, mode } };
+}
+
+/** 最近 reverseKey（to>from）方向上有过移动则视为往返抖动。 */
+function isOscillation(state, fromIdx, toIdx) {
+  const recent = state.recentMoves;
+  if (!recent) {
+    return false;
+  }
+  const at = recent.get(`${toIdx}>${fromIdx}`);
+  return typeof at === 'number' && state.turn - at <= ANTI_OSCILLATION_WINDOW;
 }
 
 /** 中立/失主领土扩张候选（mode 0 智能分兵）。 */
@@ -89,9 +102,9 @@ function expansionCandidates(ctx, state) {
       }
       const tArmy = ctx.army(tIdx);
       // 引擎 mode 0 的「保留量」怪癖（中立空格也计 -1）靠 previewPush
-      // 预演消化；这里只在结果上留余量：推完源格至少还剩 keepReserve。
+      // 预演消化；结果上源格至少要留住 keepReserve 与驻军保留线。
       const push = ctx.previewPush(sIdx, tIdx, 0);
-      if (push <= tArmy || ctx.army(sIdx) - push < keepReserve) {
+      if (push <= tArmy || ctx.army(sIdx) - push < Math.max(keepReserve, ctx.garrisonAt(sIdx))) {
         continue;
       }
       let base;
@@ -122,14 +135,16 @@ function expansionCandidates(ctx, state) {
 }
 
 /**
- * 汇集输送候选。focus = {idx, baseScore} 时向焦点输送；否则向最近前线输送。
+ * 汇集输送候选。focus = {idx, baseScore, overrideGarrison} 时向焦点输送；
+ * 否则向最近前线输送。
  * @returns 候选数组（pipeline 取最高分的一条或两条）
  */
 function flowCandidates(ctx, state, focus) {
   const field = focus
-    ? ctx.bfsField([focus.idx], (idx) => ctx.isMineIdx(idx))
+    ? ctx.bfsField([focus.idx], (idx) => ctx.isMineIdx(idx) && !ctx.isolatedAt(idx))
     : ctx.frontierDist();
   const minDist = focus ? 1 : FRONTIER_FLOW_MIN_DIST;
+  const overrideGarrison = Boolean(focus && focus.overrideGarrison);
   const candidates = [];
   for (const sIdx of ctx.myOperable()) {
     if (inUpgradeChain(ctx, sIdx) || buildEarmarked(ctx, sIdx)) {
@@ -143,23 +158,32 @@ function flowCandidates(ctx, state, focus) {
       continue;
     }
     for (const tIdx of ctx.neighbors(sIdx)) {
-      if (!ctx.isMineIdx(tIdx) || field[tIdx] !== d - 1) {
+      if (!ctx.isMineIdx(tIdx) || ctx.isolatedAt(tIdx) || field[tIdx] !== d - 1) {
         continue;
       }
-      // 防往返：上一 tick 刚把 tIdx 的兵推进 sIdx，就别再推回去。
-      if (state.lastFlow && state.lastFlow.from === tIdx && state.lastFlow.to === sIdx) {
+      // 防往返：最近几 tick 刚把 tIdx 的兵推进 sIdx，就别再推回去。
+      // 紧急集结（防御 rally）不受此限——敌军到家门口时该回头必须回头。
+      if (!focus?.urgent && isOscillation(state, sIdx, tIdx)) {
         continue;
       }
       const borderExposed = ctx.keepAt(sIdx) > 1;
-      const mode = borderExposed ? 0 : 2;
-      const push = ctx.previewPush(sIdx, tIdx, mode);
-      if (push < 1) {
+      const garrison = overrideGarrison ? ctx.keepAt(sIdx) : ctx.garrisonAt(sIdx);
+      // 全冲（边境格智能分兵）优先；推完跌破驻军保留线则退半兵；
+      // 半兵也守不住线就不动——要害格的守军不为常规输送所动。
+      let mode = borderExposed ? 0 : 2;
+      let push = ctx.previewPush(sIdx, tIdx, mode);
+      if (push >= 1 && ctx.army(sIdx) - push < garrison && mode === 2) {
+        mode = 1;
+        push = ctx.previewPush(sIdx, tIdx, 1);
+      }
+      if (push < 1 || ctx.army(sIdx) - push < garrison) {
         continue;
       }
       const base = focus ? focus.baseScore : 50;
       candidates.push({
         score: base + Math.min(push, 80) / 4 - 2 * d,
         preempt: false,
+        urgentFlow: Boolean(focus && focus.urgent),
         op: attackOp(ctx, sIdx, tIdx, mode),
         srcKey: sIdx,
         tag: 'flow',
