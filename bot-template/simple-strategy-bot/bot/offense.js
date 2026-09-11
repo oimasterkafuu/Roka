@@ -3,14 +3,19 @@
  * 前线突破集结。
  *
  * 打击计划（state.plan 跨 tick 存续）：
- *   1. 目标 = 活敌的主城/指挥所。收益：端掉对方最后一座主城 = 直接淘汰
- *      （其全部领土减半沦为孤军），收益最高；普通主城/指挥所次之。
+ *   1. 目标 = 活敌的主城/指挥所，或高价值敌方咽喉格（切断即让其后方
+ *      整片无锚区域孤军化：兵力当场减半并逐拍衰减——走廊地图上仅次于
+ *      斩首的打击）。收益：端掉对方最后一座主城 = 直接淘汰（其全部
+ *      领土减半沦为孤军），收益最高；切断咽喉次之；普通主城/指挥所再次之。
  *   2. 路径 = 多源 Dijkstra 求「己方可操作格 → 目标」的最优进军路线，
  *      代价 = 途经守军 + 风险权重 × 邻近敌军兵力（enemyPressure）+ 步数。
  *      风险项让路径主动绕开敌军重兵区；步数项让对方反应时间最短。
  *      入口优先选非锚点格（成本相近时）——从主城倾巢而出等于开门揖盗。
  *   3. 集结 = 入口兵力不足时以入口为输送焦点，沿路己方格自动合流；
- *      入口推兵量到路径需求 85% 即开打。
+ *      入口推兵量到路径需求 85% 即开打。集结可行性分两层：窗口集结
+ *      （24 op 窗口可交付 + 集结期净产能 ≥ 需求 40%）与纵深集结
+ *      （机动兵力 ≥ 需求 80% 且入口已有 15% 根基）——后者让
+ *      「终结龟缩对手」的长集结不会被误判为打不动而放弃。
  *   4. 行军模式：从锚点（主城/指挥所）起步用 mode 1 半兵——主力出征的同时
  *      家里始终留一半守军，根治「换家被一波端」；踏上普通格后恢复
  *      mode 2 全冲。plan.headIdx 跟踪行军栈头部，减少路径抖动。
@@ -18,6 +23,10 @@
  *      除非打击能在威胁到达前端掉威胁来源的最后一座主城（斩首更快）。
  *   6. 机动兵力闸：不开需求超过当前机动兵力（全军 − 各格驻军保留）80%
  *      的新打击——进攻不得倾巢而出。
+ *   7. 进行中打击的体检：目标被大幅增援（超出立计划时已计入的自然增长）
+ *      即弃打止损；集结缺口连续两个观察窗（各 ≥25 tick）扩大 = 产能跟
+ *      不上目标增长的无望集结，弃打转发育。弃打目标进入冷却，防止反复
+ *      立计划把机动兵力永远耗在输送上。
  *
  * 前线突破集结：没有打击计划时，挑一个「集结后可突破」的前线对峙点作为
  * 输送焦点——周边兵力朝同一方向汇集成股，推兵量一旦足够就由扩张/切断
@@ -28,12 +37,21 @@
  * 深度越深、越靠近我锚点、目标是指挥所/主城者越优先。
  */
 
-// 集结窗口：最多花多少 op 把一个打击入口喂饱。
-const GATHER_OPS = 10;
+// 集结窗口：最多花多少 op 把一个打击入口喂饱。窗口要覆盖走廊地图里
+// 远端大兵栈的输送链（10 步以内的来源 × 多路），太小会把「能打赢的仗」
+// 误判成集结不起，从而永远不终结龟缩对手。
+const GATHER_OPS = 24;
 // 集结启动门槛：可交付兵力达到需求的比例即开始集结（越早集越快到线）。
-const RALLY_GATE_RATIO = 0.4;
 // 开打门槛：入口推兵量达到路径需求的比例即开打。
 const STRIKE_COMMIT_RATIO = 0.85;
+// 集结起步线：可交付（含集结窗口产能）低于需求的此比例且纵深也不支持
+// 长集结时，判定打不动，不浪费集结。
+const RALLY_GATE_RATIO = 0.4;
+// 纵深长集结线：机动兵力足以覆盖需求、且入口已有 15% 根基时允许长集结——
+// 兵在图上、输送流迟早送到；产能差会把缺口越拉越小。没有这条线，打
+// 龟缩大主城（需求随时间 +1/tick 增长）的仗永远集不起来。
+const DEEP_RALLY_BASE_RATIO = 0.15;
+const DEEP_RALLY_MOBILE_RATIO = 0.8;
 // 路径代价中「邻近敌军兵力」的权重（反击暴露风险）。
 const RISK_WEIGHT = 0.35;
 // 路径代价中「经过队友格」的固定惩罚（避免行军顺手吞并盟友领土）。
@@ -104,7 +122,7 @@ function evaluatePath(ctx, path, targetIsCrown) {
   return { totalDefense, gains, hops, required };
 }
 
-/** 列出打击目标：活敌的主城与指挥所。 */
+/** 列出打击目标：活敌的主城与指挥所 + 高价值敌方咽喉格（切断打击）。 */
 function listTargets(ctx) {
   const targets = [];
   for (const [owner, entry] of ctx.stats().perOwner) {
@@ -125,6 +143,22 @@ function listTargets(ctx) {
     const owner = ctx.ownerAt(idx);
     if (targets.includes(owner)) {
       cells.push({ idx, owner, isCrown: kind === 'crown' });
+    }
+  }
+  // 敌方咽喉格：切断即让其后方整片无锚区域孤军化（兵力当场减半并衰减）。
+  // 这是走廊地图上性价比仅次于斩首的打击——城墙型对手（皇冠蹲坑）被切断
+  // 一次就伤筋动骨。分离规模太小不值得专门跑一趟。
+  for (const [owner, chokes] of ctx.enemyChokes()) {
+    for (const [idx, sep] of chokes) {
+      if (sep.cells < 5) {
+        continue;
+      }
+      cells.push({
+        idx,
+        owner,
+        isCrown: false,
+        payoff: Math.min(600, sep.cells * 6 + Math.floor(sep.army * 0.5)),
+      });
     }
   }
   return cells;
@@ -189,11 +223,13 @@ function evaluateTarget(ctx, state, target) {
   const ready = entryPush >= Math.ceil(pathEval.required * commitRatio);
 
   const victimArmy = ctx.armyOf(target.owner);
-  const payoff = target.isCrown
-    ? ctx.crownsOf(target.owner) === 1
-      ? 1000 + Math.floor(victimArmy / 4)
-      : 380
-    : 170;
+  const payoff =
+    target.payoff ??
+    (target.isCrown
+      ? ctx.crownsOf(target.owner) === 1
+        ? 1000 + Math.floor(victimArmy / 4)
+        : 380
+      : 170);
   const feasRatio = Math.min(1, deliverable / (effectiveRequired + 1));
   const timeCost = 1 + 0.1 * pathEval.hops + 0.06 * gather.ticks;
   // 入口暴露惩罚：入口邻接的重兵敌格会在集结期打断计划。
@@ -365,6 +401,10 @@ function planOffense(ctx, state, threats) {
   const targets = listTargets(ctx);
   let best = null;
   for (const target of targets) {
+    // 冷却中的目标跳过（无望集结 / 被大幅增援后弃打的），防止反复立计划。
+    if ((state.planCooldown?.get(target.idx) ?? 0) > state.turn) {
+      continue;
+    }
     const evaluated = evaluateTarget(ctx, state, target);
     if (evaluated && (!best || evaluated.score > best.score)) {
       best = evaluated;
@@ -381,6 +421,46 @@ function planOffense(ctx, state, threats) {
     });
     if (current && (!best || current.score * REPLAN_MARGIN >= best.score)) {
       best = current;
+    }
+  }
+
+  // 进行中打击的体检（仅当 best 仍是原计划目标时）：
+  if (state.plan && best && best.targetIdx === state.plan.targetIdx) {
+    const meta = state.plan; // 元数据挂在 plan 对象上，下方重写时携带
+    if (typeof meta.startRequired !== 'number') {
+      meta.startRequired = best.effectiveRequired;
+    }
+    // 目标被大幅增援（超出立计划时已计入的行进/集结期自然增长）：继续
+    // 行军等于把兵栈送进增援后的虎口——弃打，已推进的兵栈转作前哨，
+    // 该目标进入短冷却。
+    if (
+      best.effectiveRequired >
+      meta.startRequired + Math.max(15, Math.ceil(meta.startRequired * 0.35))
+    ) {
+      state.planCooldown.set(best.targetIdx, state.turn + 60);
+      state.plan = null;
+      return { candidates, focus: breakthroughFocus(ctx) };
+    }
+    // 无望集结：缺口（需求 − 可交付）连续两个观察窗在扩大 = 产能跟不上
+    // 目标增长（典型：对方皇冠更多，需求 +1/tick 比我输送快）。拖着只会
+    // 把全部机动兵力永远耗在集结上——弃打转发育，产能反超后冷却结束
+    // 自然重开。
+    if (!best.ready) {
+      const gap = best.effectiveRequired - best.deliverable;
+      if (typeof meta.gapAt === 'number' && state.turn - meta.gapAt >= 25) {
+        meta.gapGrew = gap > meta.lastGap + 2 ? (meta.gapGrew || 0) + 1 : 0;
+        meta.lastGap = gap;
+        meta.gapAt = state.turn;
+        if (meta.gapGrew >= 2) {
+          state.planCooldown.set(best.targetIdx, state.turn + 150);
+          state.plan = null;
+          return { candidates, focus: breakthroughFocus(ctx) };
+        }
+      } else if (typeof meta.gapAt !== 'number') {
+        meta.lastGap = gap;
+        meta.gapAt = state.turn;
+        meta.gapGrew = 0;
+      }
     }
   }
 
@@ -424,17 +504,40 @@ function planOffense(ctx, state, threats) {
     return { candidates, focus: breakthroughFocus(ctx) };
   }
 
-  // 目标明显打不动（可交付兵力不到需求的集结门槛）时不浪费集结。
-  if (best.deliverable < best.effectiveRequired * RALLY_GATE_RATIO && !best.ready) {
-    state.plan = null;
-    return { candidates, focus: breakthroughFocus(ctx) };
+  // 目标明显打不动时不浪费集结。两层判定：
+  //   1) 窗口集结：24 op 窗口内可交付 + 集结期净产能 ≥ 需求 40%——常规标准；
+  //   2) 纵深集结：机动兵力 ≥ 需求 80%（兵在图上，只是还没走到）且入口已
+  //      有 15% 根基——龟缩对手的皇冠需求虽在增长，但我方产能更高时，
+  //      长集结一定收敛；这条线让「终结龟缩」的仗能集起来。
+  if (!best.ready) {
+    const burst = ctx.state.turn >= 26 && ctx.state.turn <= 50;
+    const myProd = ctx.myCrowns().length + (burst ? ctx.stats().myLand : 0);
+    const targetProd = best.isCrown ? 1 : 0;
+    const windowTicks = Math.ceil(GATHER_OPS / 2);
+    const projected = best.deliverable + Math.max(0, myProd - targetProd) * windowTicks;
+    const windowViable = projected >= best.effectiveRequired * RALLY_GATE_RATIO;
+    const deepViable =
+      ctx.mobileArmy() * DEEP_RALLY_MOBILE_RATIO >= best.effectiveRequired &&
+      best.deliverable >= best.effectiveRequired * DEEP_RALLY_BASE_RATIO;
+    if (!windowViable && !deepViable) {
+      state.plan = null;
+      return { candidates, focus: breakthroughFocus(ctx) };
+    }
   }
 
+  const prevPlan = state.plan;
   state.plan = {
     targetIdx: best.targetIdx,
     owner: best.owner,
     headIdx: best.entry,
   };
+  // 携带同目标旧计划的体检元数据（立计划需求基线、缺口趋势）。
+  if (prevPlan && prevPlan.targetIdx === best.targetIdx) {
+    state.plan.startRequired = prevPlan.startRequired;
+    state.plan.lastGap = prevPlan.lastGap;
+    state.plan.gapAt = prevPlan.gapAt;
+    state.plan.gapGrew = prevPlan.gapGrew;
+  }
 
   if (best.ready) {
     const next = best.path[1];
