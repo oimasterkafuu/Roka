@@ -47,7 +47,7 @@
     "@typescript-eslint/parser": "^8.69.0",
     "eslint": "^10.9.1",
     "prettier": "^3.9.6",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3"
   },
   "packageManager": "pnpm@10.29.2+sha512.bef43fa759d91fd2da4b319a5a0d13ef7a45bb985a3d7342058470f9d2051a3ba8674e629672654686ef9443ad13a82da2beb9eeb3e0221c87b8154fff9d74b8"
