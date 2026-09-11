@@ -179,6 +179,42 @@ function buildContext(state) {
   }
 
   /**
+   * 驻军保留线：keepAt（邻接敌军推兵量）+ 咽喉格守军。
+   * 咽喉格一旦被小股敌军切断，其后方整片无锚领土会断链减半并孤军化，
+   * 因此按「分离区域规模 × 敌军 proximity」额外留守：敌军贴脸时足额，
+   * 远处无敌时只留象征性守军防偷袭。进攻/输送以此线为余量上限，
+   * 保证「进攻不倾巢而出、要道不被偷家」。
+   */
+  ctx.garrisonAt = (idx) => {
+    let keep = ctx.keepAt(idx);
+    const choke = ctx.myChokes().get(idx);
+    if (choke) {
+      const ed = ctx.enemyDistAll()[idx];
+      let extra;
+      if (ed >= 0 && ed <= 4) {
+        extra = Math.min(50, 6 + choke.cells * 2 + Math.ceil(choke.army / 6));
+      } else if (ed >= 0 && ed <= 8) {
+        extra = Math.min(24, 4 + choke.cells);
+      } else {
+        extra = Math.min(12, 3 + Math.ceil(choke.cells / 3));
+      }
+      keep = Math.max(keep, extra);
+    }
+    return keep;
+  };
+
+  /** 机动兵力估算：全军 − 各格驻军保留之和（含边境与咽喉守军）。 */
+  ctx.mobileArmy = () =>
+    memo('mobileArmy', () => {
+      const stats = ctx.stats();
+      let reserved = 0;
+      for (const idx of ctx.myCells()) {
+        reserved += Math.min(ctx.army(idx), ctx.garrisonAt(idx));
+      }
+      return Math.max(0, stats.myArmy - reserved);
+    });
+
+  /**
    * 推兵量预演：与服务端 game-engine.computePush 完全一致。
    * mode 0 智能分兵（为其他方向的非队友格保留 Σ(兵力-1)+1，含中立空格
    * 每格 -1 的引擎怪癖）、mode 1 半兵、mode 2 全冲（兵力-1）。
@@ -308,6 +344,153 @@ function buildContext(state) {
       return list;
     });
 
+  /** 与锚点连通的己方格（引擎 isolated=0）。 */
+  ctx.isConnectedMine = (idx) => ctx.isMineIdx(idx) && !ctx.isolatedAt(idx);
+
+  /**
+   * 己方孤军连通块（isolated>0 的己方格按四方向聚块）。
+   * 返回 [{cells, army, anchors}]：army 为块内总兵力，anchors 为块内指挥所数
+   * （孤军块不含主城——主城永远不会孤军化；含指挥所的块重连价值更高）。
+   */
+  ctx.myIsolatedRegions = () =>
+    memo('myIsolatedRegions', () => {
+      const regions = [];
+      const seen = new Set();
+      for (let idx = 0; idx < total; idx += 1) {
+        if (!ctx.isMineIdx(idx) || !ctx.isolatedAt(idx) || seen.has(idx)) {
+          continue;
+        }
+        const cells = [];
+        let army = 0;
+        let anchors = 0;
+        const queue = [idx];
+        seen.add(idx);
+        while (queue.length > 0) {
+          const u = queue.pop();
+          cells.push(u);
+          army += ctx.army(u);
+          if (ctx.tileKind(u) === 'city') {
+            anchors += 1;
+          }
+          for (const v of ctx.neighbors(u)) {
+            if (!seen.has(v) && ctx.isMineIdx(v) && ctx.isolatedAt(v)) {
+              seen.add(v);
+              queue.push(v);
+            }
+          }
+        }
+        regions.push({ cells, army, anchors });
+      }
+      return regions;
+    });
+
+  /**
+   * 咽喉格（割点）分析：在「与锚点连通的己方领土图」上求割点——若该格被
+   * 敌方切断，哪些不含锚点的子区域会整片失去连通（断链减半+孤军衰减）。
+   * 返回 Map<idx, {cells, army}>：cells/army 为会被分离的规模最大一块的价值。
+   * 实现：虚拟超级根连接全部锚点，迭代 Tarjan 求 lowlink；锚点自身不作割点。
+   */
+  ctx.myChokes = () =>
+    memo('myChokes', () => {
+      const result = new Map();
+      const anchors = ctx.myAnchors().map((a) => a.idx);
+      if (anchors.length === 0) {
+        return result;
+      }
+      const anchorSet = new Set(anchors);
+      const connected = ctx.myCells().filter((idx) => ctx.isConnectedMine(idx));
+      const cellSet = new Set(connected);
+
+      const disc = new Map();
+      const low = new Map();
+      const subCells = new Map();
+      const subArmy = new Map();
+      const subHasAnchor = new Map();
+      let timer = 0;
+
+      // 迭代 DFS（显式栈），对每个连通分量分别跑。锚点优先作根：割点判定
+      // 的低链规则对「根」不适用，让根落在锚点（锚点本就不作割点标记）
+      // 可以规避根节点误判。
+      const starts = [...anchors, ...connected.filter((idx) => !anchorSet.has(idx))];
+      for (const start of starts) {
+        if (disc.has(start)) {
+          continue;
+        }
+        // stack 项：[idx, parentIdx, 邻居迭代游标]
+        const stack = [[start, -1, 0]];
+        disc.set(start, timer);
+        low.set(start, timer);
+        subCells.set(start, 1);
+        subArmy.set(start, ctx.army(start));
+        subHasAnchor.set(start, anchorSet.has(start));
+        timer += 1;
+        // childrenOf: u → DFS 树上的儿子列表（割点判定用）
+        const childrenOf = new Map();
+        while (stack.length > 0) {
+          const top = stack[stack.length - 1];
+          const u = top[0];
+          const nbrs = [...ctx.neighbors(u)].filter((v) => cellSet.has(v));
+          let advanced = false;
+          while (top[2] < nbrs.length) {
+            const v = nbrs[top[2]];
+            top[2] += 1;
+            if (!disc.has(v)) {
+              disc.set(v, timer);
+              low.set(v, timer);
+              subCells.set(v, 1);
+              subArmy.set(v, ctx.army(v));
+              subHasAnchor.set(v, anchorSet.has(v));
+              timer += 1;
+              if (!childrenOf.has(u)) {
+                childrenOf.set(u, []);
+              }
+              childrenOf.get(u).push(v);
+              stack.push([v, u, 0]);
+              advanced = true;
+              break;
+            } else if (v !== top[1]) {
+              low.set(u, Math.min(low.get(u), disc.get(v)));
+            }
+          }
+          if (advanced) {
+            continue;
+          }
+          // u 的子树处理完，回溯更新父亲
+          stack.pop();
+          const parent = top[1];
+          if (parent !== -1) {
+            low.set(parent, Math.min(low.get(parent), low.get(u)));
+            subCells.set(parent, subCells.get(parent) + subCells.get(u));
+            subArmy.set(parent, subArmy.get(parent) + subArmy.get(u));
+            subHasAnchor.set(parent, subHasAnchor.get(parent) || subHasAnchor.get(u));
+          }
+        }
+
+        // 割点判定：非锚点格 u 的某个 DFS 儿子 v 满足 low[v] >= disc[u]
+        // 且 v 的子树不含锚点 → 切断 u 会让 v 的子树整片失联。
+        for (const [u, children] of childrenOf) {
+          if (anchorSet.has(u)) {
+            continue;
+          }
+          let separatedCells = 0;
+          let separatedArmy = 0;
+          for (const v of children) {
+            if (low.get(v) >= disc.get(u) && !subHasAnchor.get(v)) {
+              separatedCells += subCells.get(v);
+              separatedArmy += subArmy.get(v);
+            }
+          }
+          if (separatedCells >= 3) {
+            const prev = result.get(u);
+            if (!prev || separatedCells > prev.cells) {
+              result.set(u, { cells: separatedCells, army: separatedArmy });
+            }
+          }
+        }
+      }
+      return result;
+    });
+
   /** 全部可操作己方格（兵力>1、非孤军）。 */
   ctx.myOperable = () => memo('myOperable', () => ctx.myCells().filter((idx) => ctx.operable(idx)));
 
@@ -419,21 +602,26 @@ function buildContext(state) {
   /**
    * 集结潜力估算：center 周围（仅经己方格、BFS 距离 ≤ opBudget 步内、
    * 累计 op 开销不超 opBudget）可向 center 输送的兵力上限。
-   * 每个贡献格按「兵力 - 边境保留」计余量，按距离贪心取近者优先。
+   * 每个贡献格按「兵力 - 驻军保留（边境 + 咽喉守军）」计余量——进攻/救援
+   * 集结不得抽空要害；防御集结（relaxed=true）生死关头只扣边境保留，
+   * 咽喉守军也算可动员。
    * 返回 { amount, ticks }（ticks 为估算的集结 op 数 = 各来源距离之和）。
    */
-  ctx.gatherable = (centerIdx, opBudget, excludeIdx) => {
-    const field = ctx.bfsField([centerIdx], (idx) => ctx.isMineIdx(idx));
+  ctx.gatherable = (centerIdx, opBudget, excludeIdx, relaxed = false) => {
+    // 孤军格不能移动（chkMove 要求 !isolated），既不能作贡献者也不能当
+    // 输送通道——把兵推进孤军格等于冻结在里面。
+    const field = ctx.bfsField([centerIdx], (idx) => ctx.isMineIdx(idx) && !ctx.isolatedAt(idx));
     const feeders = [];
     for (let idx = 0; idx < total; idx += 1) {
-      if (idx === centerIdx || idx === excludeIdx || !ctx.isMineIdx(idx)) {
+      if (idx === centerIdx || idx === excludeIdx || !ctx.isMineIdx(idx) || ctx.isolatedAt(idx)) {
         continue;
       }
       const d = field[idx];
       if (d < 1) {
         continue;
       }
-      const surplus = ctx.army(idx) - ctx.keepAt(idx);
+      const keep = relaxed ? ctx.keepAt(idx) : ctx.garrisonAt(idx);
+      const surplus = ctx.army(idx) - keep;
       if (surplus > 0) {
         feeders.push({ d, surplus });
       }

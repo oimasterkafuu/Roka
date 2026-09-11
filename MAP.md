@@ -58,7 +58,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── styles/             # 样式表（按页面切分，main.css 聚合入口）
 │   ├── vendor/katex/       # 本地化 KaTeX（公式渲染）
 │   └── *.png / *.mp3 / 字体 # 地块贴图、音效、Quicksand/HYMaQiDuo 字体
-├── scripts/                # 维护脚本（数据迁移、bot 冒烟测试）
+├── scripts/                # 维护脚本（数据迁移、bot 冒烟测试、对局观测分析）
 ├── bot-template/           # random-patch-bot（协议最小参考）与 simple-strategy-bot（策略 bot）
 ├── data/                   # 运行时数据（gitignored）：users.bin / feeds.bin /
 │                           #   announcement.json / server-bots.json / replays/*.rpl(+缓存)
@@ -278,19 +278,20 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 
 ## 配置 / CI / 脚本 / bot 模板
 
-- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot、test:lobby-guards、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 - **tsconfig.json** — src→dist，CommonJS+ES2022+sourceMap；**刻意关闭严格模式**，改严格度会影响整个 src/ 编译面。
 - **eslint.config.cjs** — flat config，只查 `src/**/*.ts`，推荐规则集 + 关闭 `no-explicit-any`；不查 static/。
 - **.prettierrc / .prettierignore** — 单引号/分号/尾逗号/110 列；排除 dist、node_modules、static/vendor。
-- **.gitignore** — 忽略依赖/产物/运行时数据（data/users.bin、feeds.bin、announcement.json、server-bots.json、replays/）/`.env.*`。
+- **.gitignore** — 忽略依赖/产物/运行时数据（data/users.bin、feeds.bin、announcement.json、server-bots.json、replays/、observe-*/）/`.env.*`。
 - **.github/dependabot.yml** — npm 依赖每周更新。
 - **.github/workflows/bump-version-and-merge.yml** — 唯一 CI：owner 在 PR 评论 `OK. <major|minor|patch> [merge|squash|rebase]` 触发升版本、冲突检测、自动合并（`dev/` 分支合并后删除）。
 - **scripts/migrate-rating-display.mjs** — 一次性迁移：users.bin 历史 rating 换算显示分，原地覆盖写回（运行前先备份）。
 - **scripts/test-bot.mjs** — `pnpm run test:bot`：临时数据目录起服务 + 两个 bot 自动对局，双方收到 `init_map` 且累计 ≥10 回合即通过。
 - **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，校验 403 权限闸、房长保留（host 落在第三方 bot）、`init_map` + ≥5 条实际 attack、杀服重启后按状态文件自动恢复原配置、停止 API 清空列表与状态文件。
 - **scripts/test-lobby-guards.mjs** — `pnpm run test:lobby-guards`：开局/换绑守卫回归——组队模式全员同队拒绝开局（换队后可开）、对局中同名人类连接不得接管 bot 席位（以观战进房且 bot 持续收 update）、bot 与人类各自断线重连仍可恢复席位。
+- **scripts/observe-bot-match.mjs** — `pnpm run observe:bot`：对局观测/病理分析——临时数据目录起 dist 服务 + 进程内观战 recorder 逐 turn 录完整盘面（`frames.jsonl`），按 `OBS_BOTS` 启动 bot 组合（`strategy:`/`random:`/`legacy:` 前缀，`legacy` 从 git main 导出旧版做 A/B 基准），赛后生成 `report.txt`（往返抖动/送兵/前线停滞/切断无救援/主城沦陷时闲散兵力）；环境变量 `OBS_SPEED`/`OBS_MAP_TOKEN`/`OBS_MAP_MODE`/`OBS_OUT`/`OBS_MAX_MS`，输出默认 `data/observe-*/`（gitignored）。
 - **bot-template/random-patch-bot/** — socket 协议最小参考实现（独立 pnpm 包，仅依赖 socket.io-client）：进房、自动准备、周期发送 `room_heartbeat`、维护 diff 地图、每回合随机走子；协议细节另见 `static/develop-bot.html`。
-- **bot-template/simple-strategy-bot/** — 综合策略 bot（独立 pnpm 包）：`strategy.js` 为入口与管线编排（socket/房间循环/队列镜像/逐 tick 决策），`bot/` 为纯函数决策模块——`board.js`（棋盘视图/距离场/Dijkstra/推兵预演）、`defense.js`（威胁推演与集结布防）、`offense.js`（目标评估/风险路径/集结打击/切断入侵）、`economy.js`（皇冠/指挥所建设选址）、`logistics.js`（汇集输送/中立扩张）；CLI `index.js` 与服务端托管（`src/server/server-bot-manager.ts`）共用这一份实现；用法见包内 `USAGE.md`。
+- **bot-template/simple-strategy-bot/** — 综合策略 bot（独立 pnpm 包）：`strategy.js` 为入口与管线编排（socket/房间循环/队列镜像/逐 tick 决策，recentMoves 窗口丢弃互逆操作防往返抖动），`bot/` 为纯函数决策模块——`board.js`（棋盘视图/距离场/Dijkstra/推兵预演/孤军聚块/咽喉割点识别与分档驻军）、`defense.js`（威胁推演与集结布防，活跃威胁逼近触发回防闩锁）、`offense.js`（目标评估/风险路径/集结打击/切断入侵/前线突破集结）、`rescue.js`（被切断孤军的走廊救援评估与止损）、`economy.js`（皇冠/指挥所建设选址）、`logistics.js`（汇集输送/中立扩张）；CLI `index.js` 与服务端托管（`src/server/server-bot-manager.ts`）共用这一份实现；用法见包内 `USAGE.md`。
 - **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`server-bots.json`（托管策略 bot 重启自动恢复状态）、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）。
 
 ---

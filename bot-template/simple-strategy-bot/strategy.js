@@ -13,36 +13,50 @@
  *   2. defense.planDefense：威胁分「活跃（正在逼近）/静止（龟缩兵堆）」
  *      两层——只对活跃威胁集结布防、冻结经济与暂缓新进攻，静止威胁只做
  *      贴脸应急与可吃即切；守不住时撤空或将死主城全军出击；
- *   3. offense.planOffense：评估敌方主城/指挥所目标（端掉最后一座主城
+ *   3. rescue.planRescue：对被敌方截断的孤军区域，推演最便宜的打通走廊
+ *      （重连孤军 = 领土救回 + 兵力翻倍 + 恢复产能，性价比极高）组织
+ *      救援打击；可交付兵力远低于需求的块判定救不了，止损不投入；
+ *   4. offense.planOffense：评估敌方主城/指挥所目标（端掉最后一座主城
  *      = 直接淘汰），用带「邻近敌军风险」代价的 Dijkstra 选更难被破解
  *      的进军路径；入口兵力不足则以入口为焦点集结（沿路己方格自动合流，
- *      多源汇集而非单点取兵），入口推兵量到路径需求 85% 即全冲；
- *      能吃掉突入我境的活敌格就立即切断；
- *   4. economy.planEconomy：铺皇冠策略——皇冠每 tick +1 产兵，指挥所
+ *      多源汇集而非单点取兵），入口推兵量到路径需求 85% 即开打；
+ *      行军纪律——锚点起步半兵（主力出征家里留半）、活跃威胁逼近即
+ *      回防（除非斩首更快）、新打击需求不得透支机动兵力（全军 − 驻军
+ *      保留）；无打击计划时转入前线突破集结：选一个集结后可突破的
+ *      对峙点做输送焦点，让前线兵力朝同一方向汇集成股；
+ *   5. economy.planEconomy：铺皇冠策略——皇冠每 tick +1 产兵，指挥所
  *      与普通格同速（不增产），故指挥所只是升皇冠的中间态：攒到 101
  *      兵才按「皇冠簇优先 + 二线甜区」评分建指挥所，下回合即过升级线
  *      直接升冠（b/c 连续两回合完成直建皇冠），升级不设冷却且优先于
  *      新建；活跃威胁逼近时冻结建设，差兵的待建格由输送流顺路喂养；
- *   5. logistics.expansionCandidates：mode 0 智能分兵吃中立/孤军领土
+ *   6. logistics.expansionCandidates：mode 0 智能分兵吃中立/孤军领土
  *      （12–25 tick 抢地冲刺加权：爆发期每块普通领土每 tick +1，圈地
  *      = 产兵；爆发期同样加权；空地优先于沼泽）；logistics.flowCandidates：
  *      向集结焦点/前线输送兵力；
- *   6. 全部候选按评分排序，每 tick 最多下发 MAX_OPS_PER_TURN 条（同格
+ *   7. 驻军保留线（board.garrisonAt）贯穿所有模块：边境格保留邻敌推兵量，
+ *      咽喉格（切断会导致大片领土失联的割点）按分离区域规模与敌军距离
+ *      留守——进攻/输送不得把要害抽空，只有紧急防御集结可破格；
+ *   8. 全部候选按评分排序，每 tick 最多下发 MAX_OPS_PER_TURN 条（同格
  *      不重复取源），紧急防御抢占队列；本地队列镜像上限 MAX_LOCAL_QUEUE，
- *      用 lst_move 同步，避免过期指令堆积。下发建造令前会先清掉镜像中
- *      从同格出兵的旧 op（否则旧 op 先执行会把建设资金抽空）。
+ *      用 lst_move 同步，避免过期指令堆积；recentMoves 记录最近数 tick
+ *      的移动方向，恰好互逆的移动直接丢弃（防往返抖动）。下发建造令前
+ *      会先清掉镜像中从同格出兵的旧 op（否则旧 op 先执行会把建设资金
+ *      抽空）。
  */
 
 const { buildContext } = require('./bot/board');
 const { evaluateThreats, planDefense } = require('./bot/defense');
+const { planRescue } = require('./bot/rescue');
 const { planOffense } = require('./bot/offense');
 const { planEconomy } = require('./bot/economy');
 const { expansionCandidates, flowCandidates } = require('./bot/logistics');
 
 // 本地队列镜像上限：每 Tick 服务端只执行一条队首操作，排队过多会产生大量过期指令。
-const MAX_LOCAL_QUEUE = 3;
+const MAX_LOCAL_QUEUE = 2;
 // 每回合最多下发的操作数。
 const MAX_OPS_PER_TURN = 2;
+// 防往返抖动窗口：与最近若干 tick 内移动互逆的非紧急 op 不下发。
+const RECENT_MOVE_WINDOW = 6;
 
 function toBoolean(value) {
   return value === true || value === 1 || value === '1' || value === 'true';
@@ -90,17 +104,22 @@ function attachStrategy(socket, options) {
     queue: [],
     lastLobbyActionAt: 0,
     lastCityTurn: -1000,
-    // 跨 tick 决策状态：打击计划 / 上 tick 输送（防往返）/ 集结点（防跳变）。
+    // 跨 tick 决策状态：打击计划 / 救援计划 / 集结点（防跳变）。
     plan: null,
-    lastFlow: null,
+    rescuePlan: null,
     rallyIdx: -1,
+    // 最近移动方向记忆（`${from}>${to}` → tick）：防往返抖动。
+    recentMoves: new Map(),
     // 争夺记忆：涉及己方的归属翻转格 → 最近翻转 tick（防止在被反复
     // 争夺的格子上连续重建指挥所白扔 50 兵）。
     contested: new Map(),
     prevCodes: null,
     // 威胁逼近记忆：(敌 owner:我锚点) → 历史最小 hops；只有 hops 在缩小
     // 的威胁才算「活跃」（触发集结与冻结经济），静止的龟缩兵堆不算。
+    // threatLastActive/defenseLatch：滞留宽限与防御闩锁（详见 defense.js）。
     threatMinHops: new Map(),
+    threatLastActive: new Map(),
+    defenseLatch: new Map(),
     allowTeam: false,
     teamByClient: new Map(),
     teams: new Map(),
@@ -119,11 +138,14 @@ function attachStrategy(socket, options) {
     state.dead = false;
     state.lastCityTurn = -1000;
     state.plan = null;
-    state.lastFlow = null;
+    state.rescuePlan = null;
     state.rallyIdx = -1;
+    state.recentMoves = new Map();
     state.contested = new Map();
     state.prevCodes = null;
     state.threatMinHops = new Map();
+    state.threatLastActive = new Map();
+    state.defenseLatch = new Map();
     state.deadPlayers = new Set();
     state.planSig = '';
   }
@@ -246,6 +268,12 @@ function attachStrategy(socket, options) {
     }
     state.turn = turn;
     trackContested(turn);
+    // 清理过期的移动方向记忆。
+    for (const [key, at] of state.recentMoves) {
+      if (turn - at > RECENT_MOVE_WINDOW) {
+        state.recentMoves.delete(key);
+      }
+    }
 
     const ctx = buildContext(state);
     const threats = evaluateThreats(ctx);
@@ -253,19 +281,23 @@ function attachStrategy(socket, options) {
     state.rallyIdx = defense.rally ?? -1;
     // 进攻/经济只看「活跃威胁」（正在逼近的）：静止的龟缩兵堆既不
     // 冻结建设，也不阻止新打击计划。
+    const rescue = planRescue(ctx, state);
     const offense = planOffense(ctx, state, defense.activeThreats);
     const economy = planEconomy(ctx, state, defense.activeThreats);
-    // 输送焦点优先级：防御集结点 > 打击入口 > 喂养待建格。
+    // 输送焦点优先级：防御集结点（紧急：可动用咽喉守军、不受防往返限制）
+    // > 救援走廊入口 > 打击入口/突破点 > 喂养待建格。
     const focus = defense.rally
-      ? { idx: defense.rally, baseScore: defense.rallyScore }
-      : offense.focus || economy.feedTarget;
+      ? { idx: defense.rally, baseScore: defense.rallyScore, overrideGarrison: true, urgent: true }
+      : rescue.focus || offense.focus || economy.feedTarget;
 
     // 计划/集结焦点变化时打一条可观测日志（变化才打，不刷屏）。
     const planSig = state.plan
       ? `strike ${ctx.tileKind(state.plan.targetIdx)} @${state.plan.targetIdx} owner=${state.plan.owner}`
-      : defense.rally
-        ? `rally @${defense.rally}`
-        : '';
+      : state.rescuePlan
+        ? `rescue @${state.rescuePlan.entry} need=${state.rescuePlan.required}`
+        : defense.rally
+          ? `rally @${defense.rally}`
+          : '';
     if (planSig !== state.planSig) {
       state.planSig = planSig;
       if (planSig) {
@@ -275,6 +307,7 @@ function attachStrategy(socket, options) {
 
     const candidates = [
       ...defense.candidates,
+      ...rescue.candidates,
       ...offense.candidates,
       ...economy.candidates,
       ...expansionCandidates(ctx, state),
@@ -299,6 +332,16 @@ function attachStrategy(socket, options) {
       // （否则同一行军步/建造会连下两三次，白白占掉后续 tick 的执行名额）。
       if (state.queue.some((queued) => sameOp(queued, cand.op))) {
         continue;
+      }
+      // 防往返抖动：与最近数 tick 的移动恰好互逆的非紧急 op 不下发
+      // （紧急防御/斩杀/紧急集结流不受此限——该回头时必须回头）。
+      if (!cand.preempt && !cand.urgentFlow && cand.op.kind === 'attack') {
+        const from = cand.op.payload.x * state.m + cand.op.payload.y;
+        const to = cand.op.payload.dx * state.m + cand.op.payload.dy;
+        const reverseAt = state.recentMoves.get(`${to}>${from}`);
+        if (typeof reverseAt === 'number' && turn - reverseAt <= RECENT_MOVE_WINDOW) {
+          continue;
+        }
       }
       picked.push(cand);
       if (typeof cand.srcKey === 'number') {
@@ -335,11 +378,11 @@ function attachStrategy(socket, options) {
       if (cand.op.kind === 'build' && cand.op.payload.op === 'b') {
         // 只有新建指挥所占建设冷却；升级皇冠各格自负盈亏，不占冷却。
         state.lastCityTurn = turn;
-      } else if (cand.tag === 'flow') {
-        state.lastFlow = {
-          from: cand.op.payload.x * state.m + cand.op.payload.y,
-          to: cand.op.payload.dx * state.m + cand.op.payload.dy,
-        };
+      } else if (cand.op.kind === 'attack') {
+        // 记录移动方向（防往返抖动）。
+        const from = cand.op.payload.x * state.m + cand.op.payload.y;
+        const to = cand.op.payload.dx * state.m + cand.op.payload.dy;
+        state.recentMoves.set(`${from}>${to}`, turn);
       }
     }
 
@@ -517,6 +560,7 @@ function attachStrategy(socket, options) {
     if (payload?.game_end) {
       state.inGame = false;
       state.plan = null;
+      state.rescuePlan = null;
       log(`game ended at turn ${turn}`);
       return;
     }
@@ -527,12 +571,14 @@ function attachStrategy(socket, options) {
   const onLeft = () => {
     state.inGame = false;
     state.plan = null;
+    state.rescuePlan = null;
     log('left current game');
   };
 
   const onRoomKick = () => {
     state.inGame = false;
     state.plan = null;
+    state.rescuePlan = null;
     log('kicked from room: heartbeat timeout, rejoining');
     // 被心跳踢出后延迟重新进房，保持对局循环。
     setTimeout(() => {
