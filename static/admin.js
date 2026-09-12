@@ -4,6 +4,9 @@
 var currentUsername = '';
 var viewerIsSuperAdmin = false;
 var usersCache = [];
+var USER_PAGE_SIZE = 20;
+var userSearchQuery = '';
+var userPage = 1;
 
 /* ---------- 基础工具 ---------- */
 
@@ -132,10 +135,41 @@ function canBan(user) {
   return true;
 }
 
+function filteredUsers() {
+  if (!userSearchQuery) {
+    return usersCache;
+  }
+  var query = userSearchQuery.toLowerCase();
+  return usersCache.filter(function (user) {
+    return user.username.toLowerCase().indexOf(query) !== -1;
+  });
+}
+
 function renderUsers() {
+  var filtered = filteredUsers();
+  var pageCount = Math.max(1, Math.ceil(filtered.length / USER_PAGE_SIZE));
+  if (userPage > pageCount) {
+    userPage = pageCount;
+  }
+  var pageItems = filtered.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
+
+  var totalText = '共 ' + usersCache.length + ' 个用户';
+  if (userSearchQuery) {
+    totalText += '，匹配 ' + filtered.length + ' 个';
+  }
+  $('#users-total').text(totalText);
+
+  $('#users-empty')
+    .text(userSearchQuery ? '没有匹配的用户。' : '暂无用户。')
+    .toggle(pageItems.length === 0);
+
+  $('#users-pagination').toggle(pageCount > 1);
+  $('#users-page-info').text('第 ' + userPage + ' / ' + pageCount + ' 页');
+  $('#users-prev').prop('disabled', userPage <= 1);
+  $('#users-next').prop('disabled', userPage >= pageCount);
+
   var $body = $('#users-body').empty();
-  $('#users-empty').toggle(usersCache.length === 0);
-  usersCache.forEach(function (user) {
+  pageItems.forEach(function (user) {
     var $tr = $('<tr></tr>');
     if (typeof user.bannedUntil === 'number') {
       $tr.addClass('row-banned');
@@ -218,6 +252,24 @@ async function loadUsers() {
     // 加载失败不阻塞页面
   }
 }
+
+$('#user-search').on('input', function () {
+  userSearchQuery = $(this).val().trim();
+  userPage = 1;
+  renderUsers();
+});
+
+$('#users-prev').on('click', function () {
+  if (userPage > 1) {
+    userPage--;
+    renderUsers();
+  }
+});
+
+$('#users-next').on('click', function () {
+  userPage++;
+  renderUsers();
+});
 
 async function unbanUser(username) {
   if (!confirm('确定解除对 ' + username + ' 的封禁吗？')) {
