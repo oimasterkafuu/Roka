@@ -286,6 +286,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 - **.github/dependabot.yml** — npm 依赖每周更新。
 - **.github/workflows/bump-version-and-merge.yml** — 唯一 CI：owner 在 PR 评论 `OK. <major|minor|patch> [merge|squash|rebase]` 触发升版本、冲突检测、自动合并（`dev/` 分支合并后删除）。
 - **scripts/migrate-rating-display.mjs** — 一次性迁移：users.bin 历史 rating 换算显示分，原地覆盖写回（运行前先备份）。
+- **scripts/recalc-rating-today.mjs** — Rating 重算：按回放索引全量重放，今天 00:00 前用旧公式（队伍分取平均）复现历史、今天起用新公式（队伍分 = 400·log10(Σ10^(r/400))，计入人数）；`--check` 先用旧公式全量复现并与 users.bin 逐用户比对（不一致即拒绝），`--apply` 写回 users.bin（须先停服并备份）。
 - **scripts/test-bot.mjs** — `pnpm run test:bot`：临时数据目录起服务 + 两个 bot 自动对局，双方收到 `init_map` 且累计 ≥10 回合即通过。
 - **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，校验 403 权限闸、房长保留（host 落在第三方 bot）、`init_map` + ≥5 条实际 attack、杀服重启后按状态文件自动恢复原配置、停止 API 清空列表与状态文件。
 - **scripts/test-lobby-guards.mjs** — `pnpm run test:lobby-guards`：开局/换绑守卫回归——组队模式全员同队拒绝开局（换队后可开）、对局中同名人类连接不得接管 bot 席位（以观战进房且 bot 持续收 update）、bot 与人类各自断线重连仍可恢复席位。
