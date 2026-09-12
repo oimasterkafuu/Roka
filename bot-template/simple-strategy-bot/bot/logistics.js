@@ -78,8 +78,6 @@ function expansionCandidates(ctx, state) {
   // 非冲刺期只扩张有产出的地皮（普通格/指挥所），沼泽永不产兵不抢；
   // 冲刺期（12–25 tick，为爆发期囤地）才连沼泽一起圈。
   const allowSwamp = rush;
-  // 兵不是无限的：冲刺期每步给以后留 1 兵，非冲刺期留 2 兵。
-  const keepReserve = rush ? 1 : 2;
   for (const sIdx of ctx.myOperable()) {
     if (inUpgradeChain(ctx, sIdx) || buildEarmarked(ctx, sIdx)) {
       continue; // 攒升级中的指挥所 / 攒直建皇冠的高兵普通格不外抽
@@ -103,6 +101,10 @@ function expansionCandidates(ctx, state) {
       const tArmy = ctx.army(tIdx);
       // 引擎 mode 0 的「保留量」怪癖（中立空格也计 -1）靠 previewPush
       // 预演消化；结果上源格至少要留住 keepReserve 与驻军保留线。
+      // 兵不是无限的：冲刺期每步给以后留 1 兵；目标是 0 兵中立格时也留 1
+      // 即可（占下这块地本身就值回票价，剩 1 兵不是死格——mode 0 预演本就
+      // 保证推出后至少留 1）；其余情况留 2 保持源格可操作。
+      const keepReserve = rush || tArmy === 0 ? 1 : 2;
       const push = ctx.previewPush(sIdx, tIdx, 0);
       if (push <= tArmy || ctx.army(sIdx) - push < Math.max(keepReserve, ctx.garrisonAt(sIdx))) {
         continue;
