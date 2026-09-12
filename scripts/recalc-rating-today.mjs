@@ -2,16 +2,18 @@
 /**
  * 重算「今天以来」的 Rating。
  *
- * 背景：组队结算的队伍分由「队内平均」改为「成员战力总和换算」
- * （400 * log10(Σ 10^(r/400))）。本脚本按回放索引重放全部对局：
- * 今天 00:00（本地时区）之前的对局沿用旧公式复现历史，今天起的对局用新公式重算。
+ * 背景：组队结算的队伍分由「队内平均」改为人数加权
+ * （400 * log10(n^(k-1) · Σ 10^(r/400))）。本脚本按回放索引重放全部对局：
+ * 今天 00:00（本地时区）之前的对局沿用旧公式（平均）复现历史，今天起的对局用新公式重算。
  *
  * 用法（需在仓库根目录，且服务已停止，避免运行中的进程覆盖 users.bin）：
  *   node scripts/recalc-rating-today.mjs --check   校验并预览，不写盘
  *   node scripts/recalc-rating-today.mjs --apply   校验通过后写入 data/users.bin
+ *   --from-k=<k|avg>  校验公式：users.bin 中今天的对局是按哪个公式结算的（默认 1）
+ *   --to-k=<k|avg>    重算公式：今天的对局改按哪个公式重算（默认 4）
  *
- * --check 会先用旧公式全量复现并与 users.bin 当前值逐用户比对；
- * 有任何不一致（回放缺失、逻辑不等价）都会拒绝 --apply。
+ * --check 会先按「今天前平均 + 今天起 --from-k」全量复现并与 users.bin
+ * 当前值逐用户比对；有任何不一致（回放缺失、公式构成判断错误）都会拒绝 --apply。
  */
 
 import { readFile, rename, writeFile } from 'node:fs/promises';
@@ -77,10 +79,26 @@ const buildResult = (meta, rankList) => {
 };
 
 /**
- * 复现 applyGameResult。useNewFormula=true 时队伍分按战力总和换算，否则取平均。
+ * 队伍分公式：
+ * - { kind: 'avg' }        旧公式：队内成员 rating 平均。
+ * - { kind: 'pow', k }     人数加权：队伍战力 = 人数^(k-1) · Σ 10^(r/400)，
+ *                          折算回 ELO 为 400 * log10(战力)。k=1 为线性加和，
+ *                          k=4 为当前线上公式（等分 1v2 期望胜率约 1/17、1v3 约 1/82）。
+ */
+const computeTeamRating = (ratings, formula) => {
+  if (formula.kind === 'avg') {
+    return ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
+  }
+  const strength =
+    ratings.length ** (formula.k - 1) * ratings.reduce((sum, r) => sum + 10 ** (r / 400), 0);
+  return 400 * Math.log10(strength);
+};
+
+/**
+ * 复现 applyGameResult。formula 决定队伍分算法。
  * 返回 [{ uid, delta }]，按 result 顺序（与 applyRatingUpdates 的逐个应用一致）。
  */
-const computeUpdates = (result, getRating, useNewFormula) => {
+const computeUpdates = (result, getRating, formula) => {
   if (result.length < 2) {
     return [];
   }
@@ -98,14 +116,10 @@ const computeUpdates = (result, getRating, useNewFormula) => {
 
   const teamRating = new Map();
   for (const team of teams) {
-    const members = result.filter((entry) => entry.team === team);
-    if (useNewFormula) {
-      const strength = members.reduce((sum, entry) => sum + 10 ** (getRating(entry.uid) / 400), 0);
-      teamRating.set(team, 400 * Math.log10(strength));
-    } else {
-      const avg = members.reduce((sum, entry) => sum + getRating(entry.uid), 0) / members.length;
-      teamRating.set(team, avg);
-    }
+    const ratings = result
+      .filter((entry) => entry.team === team)
+      .map((entry) => getRating(entry.uid));
+    teamRating.set(team, computeTeamRating(ratings, formula));
   }
 
   const updates = [];
@@ -130,8 +144,8 @@ const computeUpdates = (result, getRating, useNewFormula) => {
   return updates;
 };
 
-/** 全量重放，返回 Map<normalize(uid), { rating, games, history }>。 */
-const simulate = async (items, newFormulaFromSec) => {
+/** 全量重放：cutoffSec 之前用 preFormula，之后用 postFormula。返回 Map<normalize(uid), { rating, games, history }>。 */
+const simulate = async (items, cutoffSec, preFormula, postFormula) => {
   const states = new Map();
   const getState = (uid) => {
     const key = normalize(uid);
@@ -146,8 +160,8 @@ const simulate = async (items, newFormulaFromSec) => {
   for (const item of items) {
     const meta = await loadReplayMeta(item.id);
     const result = buildResult(meta, item.rank);
-    const useNewFormula = item.time >= newFormulaFromSec;
-    const updates = computeUpdates(result, (uid) => getState(uid).rating, useNewFormula);
+    const formula = item.time >= cutoffSec ? postFormula : preFormula;
+    const updates = computeUpdates(result, (uid) => getState(uid).rating, formula);
     for (const update of updates) {
       if (!Number.isFinite(update.delta)) {
         continue;
@@ -169,16 +183,40 @@ const loadUsers = async () => {
   return deserialize(raw);
 };
 
+const parseFormulaArg = (name, defaultValue) => {
+  const prefix = `--${name}=`;
+  const raw = process.argv.find((arg) => arg.startsWith(prefix));
+  if (!raw) {
+    return defaultValue;
+  }
+  const value = raw.slice(prefix.length);
+  if (value === 'avg') {
+    return { kind: 'avg' };
+  }
+  const k = Number(value);
+  if (!Number.isFinite(k) || k < 1) {
+    throw new Error(`--${name} 需要 'avg' 或 >= 1 的数字，收到: ${value}`);
+  }
+  return { kind: 'pow', k };
+};
+
+const formulaLabel = (formula) => (formula.kind === 'avg' ? '平均' : `人数^${formula.k - 1} 加权`);
+
 const main = async () => {
   const apply = process.argv.includes('--apply');
   const cutoff = todayStartSec();
+  // users.bin 当前值由「cutoff 前平均 + cutoff 后 --from-k 公式」构成，校验用它复现；
+  // 写盘用「cutoff 前平均 + cutoff 后 --to-k 公式」。
+  const fromFormula = parseFormulaArg('from-k', { kind: 'pow', k: 1 });
+  const toFormula = parseFormulaArg('to-k', { kind: 'pow', k: 4 });
   console.log(`新公式生效起点（本地今天 00:00）: ${new Date(cutoff * 1000).toISOString()} (${cutoff})`);
+  console.log(`校验公式: 今天起按 ${formulaLabel(fromFormula)}；重算公式: 今天起按 ${formulaLabel(toFormula)}`);
 
   const items = (await loadIndex()).sort((a, b) => a.time - b.time);
   console.log(`回放索引共 ${items.length} 场，其中今天以来 ${items.filter((i) => i.time >= cutoff).length} 场。`);
 
-  // 校验：旧公式全量复现，必须与 users.bin 当前值一致。
-  const oldStates = await simulate(items, Number.POSITIVE_INFINITY);
+  // 校验：按现有公式构成全量复现，必须与 users.bin 当前值一致。
+  const oldStates = await simulate(items, cutoff, { kind: 'avg' }, fromFormula);
   const userFile = await loadUsers();
   let mismatches = 0;
   for (const user of userFile.users) {
@@ -205,10 +243,10 @@ const main = async () => {
     process.exitCode = 1;
     return;
   }
-  console.log('旧公式全量复现与 users.bin 完全一致，历史回放完整。');
+  console.log('按现有公式构成全量复现与 users.bin 完全一致，历史回放完整。');
 
-  // 重算：今天起用新公式。
-  const newStates = await simulate(items, cutoff);
+  // 重算：今天起用 --to-k 公式。
+  const newStates = await simulate(items, cutoff, { kind: 'avg' }, toFormula);
   const changes = [];
   for (const user of userFile.users) {
     const sim = newStates.get(normalize(user.username));
