@@ -805,7 +805,10 @@ class LobbyService {
 
   /**
    * 统一 Rating：多人 ELO 推广。队伍名次取队内最好名次，
-   * 队伍 Rating 取队内平均；得分按名次线性分布，K = 24。
+   * 队伍 Rating 为队内成员战力的总和再换算回 ELO
+   * （400 * log10(Σ 10^(r/400))），人数越多队伍分越高，
+   * 避免「1 个高分打一堆中分」被视为均势局；
+   * 单人队退化为成员自身分。得分按名次线性分布，K = 24。
    */
   private async applyGameResult(result: GameResultEntry[]): Promise<void> {
     if (result.length < 2) {
@@ -827,9 +830,11 @@ class LobbyService {
     const teamRating = new Map<number, number>();
     for (const team of teams) {
       const members = result.filter((entry) => entry.team === team);
-      const avg =
-        members.reduce((sum, entry) => sum + this.userStore.getRating(entry.uid).rating, 0) / members.length;
-      teamRating.set(team, avg);
+      const strength = members.reduce(
+        (sum, entry) => sum + 10 ** (this.userStore.getRating(entry.uid).rating / 400),
+        0,
+      );
+      teamRating.set(team, 400 * Math.log10(strength));
     }
 
     const updates: Array<{ username: string; delta: number }> = [];
