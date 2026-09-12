@@ -24,7 +24,13 @@
  *      回防（除非斩首更快）、新打击需求不得透支机动兵力（全军 − 驻军
  *      保留）；无打击计划时转入前线突破集结：选一个集结后可突破的
  *      对峙点做输送焦点，让前线兵力朝同一方向汇集成股；
- *   5. economy.planEconomy：铺皇冠策略——皇冠每 tick +1 产兵，指挥所
+ *   5. opening.planOpening：开局发育规划（约 1–50 tick、无活敌逼近时接管）。
+ *      逐 tick 用真实规则模拟一组「等到第 w 拍再开工」的蛇形推进方案，
+ *      按 tick-51 时点的爆发期产兵 + 地皮 + 余兵评分选最优——最优解
+ *      往往不是从第一 tick 就动，而是先空几个回合憋大兵栈再连续推进；
+ *      爆发期（26–50）圈地产出远高于 50 兵一座的皇冠，故该阶段不建城、
+ *      不做常规输送，敌情出现立即交还常规管线；
+ *   6. economy.planEconomy：铺皇冠策略——皇冠每 tick +1 产兵，指挥所
  *      与普通格同速（不增产），故指挥所只是升皇冠的中间态：攒到 101
  *      兵才按「皇冠簇优先 + 二线甜区」评分建指挥所，下回合即过升级线
  *      直接升冠（b/c 连续两回合完成直建皇冠），升级不设冷却且优先于
@@ -33,9 +39,11 @@
  *      （12–25 tick 抢地冲刺加权：爆发期每块普通领土每 tick +1，圈地
  *      = 产兵；爆发期同样加权；空地优先于沼泽）；logistics.flowCandidates：
  *      向集结焦点/前线输送兵力；
- *   7. 驻军保留线（board.garrisonAt）贯穿所有模块：边境格保留邻敌推兵量，
- *      咽喉格（切断会导致大片领土失联的割点）按分离区域规模与敌军距离
- *      留守——进攻/输送不得把要害抽空，只有紧急防御集结可破格；
+ *   7. 驻军保留线（board.garrisonAt）贯穿所有模块：边境格保留邻敌推兵量；
+ *      咽喉格（切断会导致大片领土失联的割点）按「危险场」留守——只有
+ *      正在逼近的敌人（menace 跟踪）按其推到该格的剩余兵力定量留守，
+ *      龟缩不动的敌人只留象征性守军，不再冻结走廊机动兵力；
+ *      进攻/输送不得把要害抽空，只有紧急防御集结可破格；
  *   8. 全部候选按评分排序，每 tick 最多下发 MAX_OPS_PER_TURN 条（同格
  *      不重复取源），紧急防御抢占队列；本地队列镜像上限 MAX_LOCAL_QUEUE，
  *      用 lst_move 同步，避免过期指令堆积；recentMoves 记录最近数 tick
@@ -49,6 +57,7 @@ const { evaluateThreats, planDefense } = require('./bot/defense');
 const { planRescue } = require('./bot/rescue');
 const { planOffense } = require('./bot/offense');
 const { planEconomy } = require('./bot/economy');
+const { planOpening } = require('./bot/opening');
 const { expansionCandidates, flowCandidates } = require('./bot/logistics');
 
 // 本地队列镜像上限：每 Tick 服务端只执行一条队首操作，排队过多会产生大量过期指令。
@@ -117,9 +126,16 @@ function attachStrategy(socket, options) {
     // 威胁逼近记忆：(敌 owner:我锚点) → 历史最小 hops；只有 hops 在缩小
     // 的威胁才算「活跃」（触发集结与冻结经济），静止的龟缩兵堆不算。
     // threatLastActive/defenseLatch：滞留宽限与防御闩锁（详见 defense.js）。
+    // enemyMenace：owner → {minDist, lastApproach}——敌人离我锚点的历史
+    // 最近距离与最后逼近 tick（board.garrisonAt 的危险场据此定量驻军，
+    // 龟缩不动的敌人不冻结走廊兵力）。
     threatMinHops: new Map(),
     threatLastActive: new Map(),
     defenseLatch: new Map(),
+    enemyMenace: new Map(),
+    // planCooldown：打击目标格 → 冷却截止 tick。无望集结（缺口持续扩大）
+    // 或目标被大幅增援时弃打并冷却，防止同一目标反复立计划空耗输送。
+    planCooldown: new Map(),
     allowTeam: false,
     teamByClient: new Map(),
     teams: new Map(),
@@ -146,6 +162,8 @@ function attachStrategy(socket, options) {
     state.threatMinHops = new Map();
     state.threatLastActive = new Map();
     state.defenseLatch = new Map();
+    state.enemyMenace = new Map();
+    state.planCooldown = new Map();
     state.deadPlayers = new Set();
     state.planSig = '';
   }
@@ -283,7 +301,13 @@ function attachStrategy(socket, options) {
     // 冻结建设，也不阻止新打击计划。
     const rescue = planRescue(ctx, state);
     const offense = planOffense(ctx, state, defense.activeThreats);
-    const economy = planEconomy(ctx, state, defense.activeThreats);
+    // 开局阶段（约 1–50 tick 且无活敌逼近）由开局规划器接管：逐 tick 模拟
+    // 「憋几拍再开工」的发育方案选最优——该阶段不建城、不做常规输送，
+    // 蛇形兵栈的节奏不被打散；敌情出现即交还常规管线。
+    const opening = planOpening(ctx, state, defense.activeThreats);
+    const economy = opening.active
+      ? { candidates: [], feedTarget: null }
+      : planEconomy(ctx, state, defense.activeThreats);
     // 输送焦点优先级：防御集结点（紧急：可动用咽喉守军、不受防往返限制）
     // > 救援走廊入口 > 打击入口/突破点 > 喂养待建格。
     const focus = defense.rally
@@ -297,7 +321,11 @@ function attachStrategy(socket, options) {
         ? `rescue @${state.rescuePlan.entry} need=${state.rescuePlan.required}`
         : defense.rally
           ? `rally @${defense.rally}`
-          : '';
+          : opening.active
+            ? opening.candidates.length > 0
+              ? `opening move`
+              : `opening wait${opening.waitTurns > 0 ? ` ${opening.waitTurns}` : ''}`
+            : '';
     if (planSig !== state.planSig) {
       state.planSig = planSig;
       if (planSig) {
@@ -309,10 +337,16 @@ function attachStrategy(socket, options) {
       ...defense.candidates,
       ...rescue.candidates,
       ...offense.candidates,
+      ...opening.candidates,
       ...economy.candidates,
-      ...expansionCandidates(ctx, state),
-      ...flowCandidates(ctx, state, focus),
     ];
+    if (!opening.active) {
+      candidates.push(...expansionCandidates(ctx, state), ...flowCandidates(ctx, state, focus));
+    } else if (offense.focus) {
+      // 开局阶段自成一体的蛇形推进不掺常规输送；但若打击计划已形成
+      // （如敌方主城近且弱），其入口集结仍由输送流喂养。
+      candidates.push(...flowCandidates(ctx, state, offense.focus));
+    }
     if (candidates.length === 0) {
       return;
     }
@@ -321,9 +355,16 @@ function attachStrategy(socket, options) {
     const picked = [];
     const usedSources = new Set();
     let preempt = false;
+    let routineFlowPicked = false;
     for (const cand of candidates) {
       if (picked.length >= MAX_OPS_PER_TURN) {
         break;
+      }
+      // 常规输送每 tick 限 1 条：集结/输送若把两个 op 名额全吃掉，扩张、
+      // 建设与切断就会长期饿死（打击行军期圈地停滞的根因）。紧急集结
+      // （防御 rally / 救援）不受此限——生死关头输送拉满。
+      if (cand.tag === 'flow' && !cand.urgentFlow && routineFlowPicked) {
+        continue;
       }
       if (typeof cand.srcKey === 'number' && usedSources.has(cand.srcKey)) {
         continue;
@@ -346,6 +387,9 @@ function attachStrategy(socket, options) {
       picked.push(cand);
       if (typeof cand.srcKey === 'number') {
         usedSources.add(cand.srcKey);
+      }
+      if (cand.tag === 'flow') {
+        routineFlowPicked = true;
       }
       if (cand.preempt) {
         preempt = true;

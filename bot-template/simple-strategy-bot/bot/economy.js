@@ -203,8 +203,10 @@ function planEconomy(ctx, state, threats) {
     }
 
     if (!feedTarget && bestFeed) {
-      // 略优于无焦点的前线输送（50），不抢占扩张与集结。
-      feedTarget = { idx: bestFeed.idx, baseScore: 80 };
+      // bootstrap（还没补上第二锚点）时喂养优先级压过中立扩张（130）——
+      // 单皇冠是单点故障，被切断一次就伤筋动骨，先把锚点喂出来再圈地；
+      // 平时略优于无焦点的前线输送（50），不抢占扩张与集结。
+      feedTarget = { idx: bestFeed.idx, baseScore: bootstrap ? 170 : 80 };
     }
   }
 
