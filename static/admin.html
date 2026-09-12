@@ -27,6 +27,10 @@
       <!-- 用户管理 -->
       <section class="card">
         <h2 class="card-title">用户管理</h2>
+        <div class="user-toolbar">
+          <input type="text" id="user-search" placeholder="按用户名搜索" maxlength="20" />
+          <span id="users-total" class="users-total"></span>
+        </div>
         <table class="mini-table">
           <thead>
             <tr>
@@ -42,6 +46,11 @@
           <tbody id="users-body"></tbody>
         </table>
         <p id="users-empty" class="panel-empty" style="display: none">暂无用户。</p>
+        <div id="users-pagination" class="users-pagination" style="display: none">
+          <button id="users-prev" type="button" class="btn btn-ghost btn-sm">上一页</button>
+          <span id="users-page-info" class="users-page-info"></span>
+          <button id="users-next" type="button" class="btn btn-ghost btn-sm">下一页</button>
+        </div>
       </section>
 
       <!-- 策略 Bot（仅超级管理员） -->
