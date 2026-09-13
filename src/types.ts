@@ -38,6 +38,8 @@ export interface RoomPlayerView {
   uid: string;
   team: number;
   ready: boolean;
+  /** 服务端托管策略 Bot（管理后台启动）标记，仅在为 true 时下发。 */
+  server_bot?: boolean;
 }
 
 export interface RoomUpdatePayload {
