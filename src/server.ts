@@ -1349,12 +1349,21 @@ const boot = async (): Promise<void> => {
       }
 
       if (!lobbyService.lobbyOfSid.has(socket.id)) {
+        const hadAllowTeam = lobbyService.lobbyConfig.get(room)?.allow_team === true;
         lobbyService.joinLobby(socket.id, username, room, {
           serverBot: socket.data.isServerBot === true,
         });
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         lobbyService.sendLobbySystemMessage(io, roomVal, `${username} 加入了自定义房间。`);
+        // 托管策略 Bot 进房会强制关闭组队（见 lobby-service.joinLobby），补充提示。
+        if (
+          socket.data.isServerBot === true &&
+          hadAllowTeam &&
+          lobbyService.lobbyConfig.get(room)?.allow_team === false
+        ) {
+          lobbyService.sendLobbySystemMessage(io, roomVal, '官方策略 Bot 进入房间，组队模式已关闭。');
+        }
         lobbyService.emitHomeRooms(io);
         if (lobbyService.isLobbyGameRunning(room)) {
           lobbyService.gameInstances.get(roomVal)?.addSpectator(socket.id);
@@ -1494,8 +1503,15 @@ const boot = async (): Promise<void> => {
             allowTeamRaw === true || allowTeamRaw === 1 || allowTeamRaw === '1' || allowTeamRaw === 'true',
           );
           if (allowTeam !== oldConf.allow_team) {
-            nextConf.allow_team = allowTeam;
-            changed.push('allow_team');
+            if (allowTeam && players.some((player) => player.serverBot === true)) {
+              // 房间内有服务端托管策略 Bot 时禁止开启组队：拒绝改动并回发
+              // 房间状态复位前端开关。
+              lobbyService.sendLobbySystemMessage(io, roomVal, '房间内有官方策略 Bot，不允许开启组队模式。');
+              lobbyService.emitRoomUpdate(io, gid);
+            } else {
+              nextConf.allow_team = allowTeam;
+              changed.push('allow_team');
+            }
           }
         }
 

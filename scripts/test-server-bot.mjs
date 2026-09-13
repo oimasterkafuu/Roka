@@ -3,6 +3,7 @@
 // 2) 启动 dist/server.js（ROKA_BOT_TOKENS 注入一个第三方 bot 合成用户）；
 // 3) 以超管身份调 POST /api/admin/bots/start 在服务器进程内启动 simple-strategy-bot；
 // 4) 校验：普通用户访问 bot API 被 403；bot 进房后 host 不是 bot（第三方 bot 进房后接任房主）；
+//    托管 bot 房间禁止组队（独立房间：bot 进房强制关闭已开组队 + 房主开启请求被拒绝）；
 // 5) 启动 random-patch-bot 作为对手触发开局，解析服务器 stdout 中 [server-bot] 日志，
 //    要求收到 init_map 且发出 >=5 条实际 attack 操作；
 // 6) 重启恢复（issue #28）：不停止 bot 直接杀掉服务器，校验状态文件已记录运行中 bot；
@@ -30,8 +31,10 @@ const SERVER_READY_TIMEOUT_MS = 20_000;
 const GAME_TIMEOUT_MS = 60_000;
 const REQUIRED_ATTACKS = 5;
 const ROOM = 'smokeroom';
+const GUARD_ROOM = 'guardroom';
 const ADMIN_USER = 'smoke_admin';
 const BOT_USER = 'smoke_bot';
+const BOT_USER_2 = 'smoke_bot2';
 const NORMAL_USER = 'smoke_user';
 const RANDOM_BOT_USER = 'smoke_rand';
 
@@ -143,6 +146,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// 等待 socket 上满足条件的下一条 room_update；超时视为失败。
+function waitRoomUpdate(socket, predicate, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off('room_update', handler);
+      reject(new Error(`等待「${label}」超时（${timeoutMs / 1000}s）`));
+    }, timeoutMs);
+    const handler = (data) => {
+      if (predicate(data)) {
+        clearTimeout(timer);
+        socket.off('room_update', handler);
+        resolve(data);
+      }
+    };
+    socket.on('room_update', handler);
+  });
+}
+
 async function api(baseUrl, cookie, method, apiPath, body) {
   const res = await fetch(`${baseUrl}${apiPath}`, {
     method,
@@ -171,6 +192,7 @@ async function prepareUsers(dir) {
   await store.ensureReady();
   await store.register(ADMIN_USER, 'smoke-pass-1');
   await store.register(BOT_USER, 'smoke-pass-2');
+  await store.register(BOT_USER_2, 'smoke-pass-4');
   await store.register(NORMAL_USER, 'smoke-pass-3');
   const adminSid = await store.rotateSession(ADMIN_USER);
   const userSid = await store.rotateSession(NORMAL_USER);
@@ -286,6 +308,89 @@ async function main() {
     return finish(1, '房长保留校验失败：第三方 bot 进房后 host 未切换为 smoke_rand');
   }
   log(`房长保留校验通过：host=${roomAfterJoin.host}（服务端托管 bot 未当房主）`);
+
+  // 组队禁止校验（独立房间，避免干扰对局校验）：
+  // 1) 普通用户作房主开启组队（基线：无托管 bot 时可开）；
+  // 2) 超管再启动一个托管 bot 进该房间，bot 进房应强制关闭组队；
+  // 3) 房主再次尝试开启组队应被服务端拒绝（收到回发的 room_update 且始终为 false）；
+  // 4) 停止该 bot，避免污染后续重启恢复的状态文件校验（期望仅 1 条记录）。
+  const { io: ioClient } = require('socket.io-client');
+  const guardSocket = ioClient(baseUrl, {
+    auth: { token: userToken },
+    transports: ['websocket'],
+  });
+  await new Promise((resolve, reject) => {
+    guardSocket.once('connect', resolve);
+    guardSocket.once('connect_error', reject);
+  });
+  guardSocket.emit('join_game_room', { room: GUARD_ROOM });
+  const guardJoined = await waitRoomUpdate(
+    guardSocket,
+    (d) => Array.isArray(d.players) && d.players.length === 1,
+    10_000,
+    'guard 房间首次 room_update',
+  );
+  if (guardJoined.players[0].uid !== NORMAL_USER) {
+    return finish(1, `组队禁止校验失败：guard 房间房主应为 ${NORMAL_USER}，实际 ${guardJoined.players[0].uid}`);
+  }
+  const allowTeamOn = waitRoomUpdate(guardSocket, (d) => d.allow_team === true, 10_000, 'allow_team 开启');
+  guardSocket.emit('change_game_conf', { allow_team: true });
+  await allowTeamOn;
+  log('组队禁止基线校验通过：无托管 bot 时房主可正常开启组队');
+
+  const started2 = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/start', {
+    username: BOT_USER_2,
+    room: GUARD_ROOM,
+  });
+  if (started2.status !== 200 || !started2.data?.bot?.id) {
+    return finish(1, `组队禁止校验失败：启动第二个 bot 出错（HTTP ${started2.status}）`);
+  }
+  const bot2Id = started2.data.bot.id;
+  try {
+    await waitRoomUpdate(
+      guardSocket,
+      (d) =>
+        d.allow_team === false &&
+        d.players.some((p) => p.uid === BOT_USER_2 && p.server_bot === true),
+      15_000,
+      '托管 bot 进房强制关闭组队',
+    );
+    log('组队禁止校验通过：托管 bot 进房后已开启的组队被强制关闭');
+
+    const rejectProbe = new Promise((resolve, reject) => {
+      let sawUpdate = false;
+      const cleanupProbe = () => {
+        clearTimeout(timer);
+        guardSocket.off('room_update', handler);
+      };
+      const handler = (d) => {
+        if (d.allow_team === true) {
+          cleanupProbe();
+          reject(new Error('托管 bot 房间内房主的开启组队请求未被拒绝'));
+          return;
+        }
+        sawUpdate = true;
+      };
+      const timer = setTimeout(() => {
+        cleanupProbe();
+        if (sawUpdate) {
+          resolve();
+        } else {
+          reject(new Error('拒绝后未收到 room_update 回发'));
+        }
+      }, 3_000);
+      guardSocket.on('room_update', handler);
+    });
+    guardSocket.emit('change_game_conf', { allow_team: true });
+    await rejectProbe;
+    log('组队禁止校验通过：托管 bot 房间内房主的开启组队请求被服务端拒绝');
+  } finally {
+    guardSocket.disconnect();
+    const stopped2 = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/stop', { id: bot2Id });
+    if (stopped2.status !== 200) {
+      return finish(1, `组队禁止校验失败：停止第二个 bot 出错（HTTP ${stopped2.status}）`);
+    }
+  }
 
   // 等待对局开始并积累足够的实际操作日志。
   const gameDeadline = Date.now() + GAME_TIMEOUT_MS;
