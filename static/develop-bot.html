@@ -299,7 +299,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               可选字段 patch：<code>speed</code>（0.5~4）、<code>allow_team</code>（bool）、
               <code>map_mode</code
               >（<code>random|maze|archipelago|mediterranean</code>）、<code>map_token</code>（最长 32）。
-              仅房主可改。
+              仅房主可改。房间内有服务端托管策略 Bot 时不允许组队：
+              <code>allow_team</code> 开启请求会被拒绝（房间消息提示），且托管 Bot
+              进房时会强制关闭已开启的组队模式。
             </td>
           </tr>
           <tr>
@@ -326,10 +328,11 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           <tr>
             <th><code>room_update.players[]</code></th>
             <td>
-              每项为 <code>{ sid, uid, team, ready }</code>：<code>sid</code> 为该玩家 socket id 的 MD5；<code
-                >uid</code
-              >
-              为用户名；<code>team</code> 为 0（观战）或队伍号； <code>ready</code> 为准备状态。
+              每项为 <code>{ sid, uid, team, ready, server_bot? }</code>：<code>sid</code> 为该玩家 socket id
+              的 MD5；<code>uid</code> 为用户名；<code>team</code> 为 0（观战）或队伍号；
+              <code>ready</code> 为准备状态； <code>server_bot</code> 仅在服务端托管策略 Bot 成员上为
+              <code>true</code>
+              （其所在房间不允许组队）。
             </td>
           </tr>
           <tr>
