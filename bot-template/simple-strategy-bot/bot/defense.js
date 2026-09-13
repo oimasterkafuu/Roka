@@ -39,14 +39,18 @@ const RALLY_WINDOW_HOPS = 10;
  *   - 本 tick 的 hops 严格小于历史最小值 = 正在逼近 → 激活；
  *   - 防御闩锁（defenseLatch）：一旦激活且 hops ≤ 8，闩锁 6 tick——
  *     在「守得住 ↔ 守不住」的平衡点上威胁会随我方集结/皇冠增兵反复进出
- *     清单，闩锁保证集结焦点不在平衡点上高频抖动；威胁真的消失
- *     （被歼灭/撤退）6 tick 后闩锁自动松开，正常恢复经济与进攻；
+ *     清单，闩锁（含清单外保持：集结见效让威胁暂时打不到锚点时不撤防）
+ *     保证集结焦点不在平衡点上高频抖动；威胁真的消失（被歼灭/撤退）
+ *     6 tick 后闩锁自动松开，正常恢复经济与进攻；
  *   - 滞留宽限：刚活跃过（4 tick 内）且没有明显撤退（hops 不超过历史
  *     最小值 +1）时保持激活；
+ *   - 退出清单宽限：威胁本 tick 不在清单（我方集结见效/边界游走/只闪现
+ *     一拍）但闩锁未过期或最后活跃未满 8 tick 时，用快照继续按活跃处理，
+ *     防御姿态不随威胁闪烁撤除；宽限不自我续期；
  *   - 其余静止或变远的威胁不激活（不集结、不冻结经济），但它的贴脸应急
  *     与可吃即切仍然生效——敌格真进我境时由这两层兜底。
- * 状态存在 state.threatMinHops / state.threatLastActive / state.defenseLatch，
- * 随 resetMap 清空。
+ * 状态存在 state.threatMinHops / state.threatLastActive / state.defenseLatch /
+ * state.threatSnapshot，随 resetMap 清空。
  */
 function activateThreats(ctx, threats) {
   const { state } = ctx;
@@ -59,23 +63,29 @@ function activateThreats(ctx, threats) {
   if (!state.defenseLatch) {
     state.defenseLatch = new Map();
   }
+  if (!state.threatSnapshot) {
+    state.threatSnapshot = new Map();
+  }
   const active = [];
   const seenKeys = new Set();
   for (const t of threats) {
     const key = `${t.blobOwner}:${t.anchorIdx}`;
     seenKeys.add(key);
+    state.threatSnapshot.set(key, t);
     const prevMin = state.threatMinHops.get(key);
     const lastActive = state.threatLastActive.get(key);
     const approaching = typeof prevMin !== 'number' || t.hops < prevMin;
-    const latched = (state.defenseLatch.get(key) ?? -1) >= state.turn;
+    const latchEntry = state.defenseLatch.get(key);
+    const latched = (latchEntry?.until ?? -1) >= state.turn;
     const lingering =
       typeof prevMin === 'number' &&
       typeof lastActive === 'number' &&
       state.turn - lastActive <= 4 &&
       t.hops <= prevMin + 1;
     if (approaching && t.hops <= 8) {
-      // 逼近到危险距离：上闩锁，至少坚守 6 tick。
-      state.defenseLatch.set(key, state.turn + 6);
+      // 逼近到危险距离：上闩锁，至少坚守 6 tick。闩锁携带威胁快照——
+      // 威胁因我方集结而暂时打不到锚点（退出清单）时闩锁仍然有效。
+      state.defenseLatch.set(key, { until: state.turn + 6, threat: t });
     }
     if (approaching || lingering || latched) {
       active.push(t);
@@ -85,10 +95,38 @@ function activateThreats(ctx, threats) {
       state.threatMinHops.set(key, t.hops);
     }
   }
-  // 威胁从清单消失（被歼灭/撤退/守军已足够）后不续闩，6 tick 内自然松开。
-  for (const key of [...state.defenseLatch.keys()]) {
-    if (!seenKeys.has(key) && (state.defenseLatch.get(key) ?? -1) < state.turn) {
+  // 威胁退出清单（典型：我方集结已使其无法抵达锚点，或它在边界游走，又或
+  // 只闪现了一拍）时，闩锁期内 + 最后真实活跃后 8 tick 宽限内防御姿态不撤
+  // ——否则进攻/集结侧会随威胁闪烁来回倒兵（紧急集结流与打击集结流方向
+  // 相反，每闪一次前线就往返一次）。宽限不自我续期（再注入不刷新
+  // lastActive），避免兵堆蹲坑造成永久冻结；且只覆盖「退出清单」的威胁：
+  // 一直留在清单里的静止龟缩兵堆照旧按逼近/滞留/闩锁判定（上面循环），
+  // 不受此影响。兵源 owner 已出局/无兵时视为真消失，直接放行；
+  // 闩锁与宽限都过期后条目删除。
+  for (const [key, lastActive] of [...state.threatLastActive]) {
+    if (seenKeys.has(key)) {
+      continue;
+    }
+    const latched = (state.defenseLatch.get(key)?.until ?? -1) >= state.turn;
+    const recent = state.turn - lastActive <= 8;
+    if (!latched && !recent) {
+      state.threatLastActive.delete(key);
       state.defenseLatch.delete(key);
+      state.threatSnapshot.delete(key);
+      continue;
+    }
+    const t = state.threatSnapshot.get(key);
+    // 兵源 owner 仍然存活即注入。不要求兵源格本身仍是活敌：敌格会因「其自身
+    // 连通性振荡」在活敌/孤军间逐拍翻转，检查太严会让宽限跟着闪烁。
+    const blobAlive = t && !ctx.ownerDead(t.blobOwner) && ctx.armyOf(t.blobOwner) > 0;
+    if (process.env.BOT_TRACE === '2') {
+      console.log(
+        `[trace] turn ${state.turn}: 再注入判定 key=${key} latched=${latched} recent=${recent} ` +
+          `snap=${t ? `blob@${t.blobIdx} hops=${t.hops}` : 'none'} blobAlive=${blobAlive}`,
+      );
+    }
+    if (t && blobAlive) {
+      active.push(t);
     }
   }
   return active;
@@ -388,6 +426,31 @@ function planDefense(ctx, threats) {
         const preferred = choices.find((item) => item.choice.idx === state.rallyIdx);
         if (preferred) {
           selected = preferred;
+        } else if (selected.choice.idx !== state.rallyIdx) {
+          // 相邻滞回：旧集结点与新选择相邻且仍为连通己格时沿用旧点——
+          // 多路受敌/路径抖动时集结焦点在相邻格（含相邻锚点）间逐 tick
+          // 跳变，紧急输送流会在两点间往返倒兵（紧急流不受防往返限制），
+          // 墙永远垒不起来。唯一不能覆盖的是「锚点守不住」的选择——
+          // 那要走撤离/决战分支，必须保持锚点本格。
+          const oldStillValid = ctx.isMineIdx(state.rallyIdx) && !ctx.isolatedAt(state.rallyIdx);
+          let adjacent = false;
+          for (const nIdx of ctx.neighbors(selected.choice.idx)) {
+            if (nIdx === state.rallyIdx) {
+              adjacent = true;
+              break;
+            }
+          }
+          const anchorLastStand = !selected.choice.feasible && selected.choice.idx === selected.threat.anchorIdx;
+          if (oldStillValid && adjacent && !anchorLastStand) {
+            selected = { threat: selected.threat, choice: { ...selected.choice, idx: state.rallyIdx } };
+          }
+          if (process.env.BOT_TRACE === '2') {
+            console.log(
+              `[trace] turn ${state.turn}: rallySel old=${state.rallyIdx} new=${selected.choice.idx} ` +
+                `oldValid=${oldStillValid} adj=${adjacent} anchor=${selected.threat.anchorIdx} ` +
+                `choices=${choices.map((c) => `${c.choice.idx}@${c.threat.blobIdx}`).join(',')}`,
+            );
+          }
         }
       }
       if (selected) {

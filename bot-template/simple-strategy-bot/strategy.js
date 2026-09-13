@@ -22,8 +22,10 @@
  *      多源汇集而非单点取兵），入口推兵量到路径需求 85% 即开打；
  *      行军纪律——锚点起步半兵（主力出征家里留半）、活跃威胁逼近即
  *      回防（除非斩首更快）、新打击需求不得透支机动兵力（全军 − 驻军
- *      保留）；无打击计划时转入前线突破集结：选一个集结后可突破的
- *      对峙点做输送焦点，让前线兵力朝同一方向汇集成股；
+ *      保留）；对峙记忆——活跃威胁消停满 12 tick 才开新打击，不在
+ *      「守得住 ↔ 守不住」的平衡点上反复立/废计划；无打击计划时转入
+ *      前线突破集结：选一个集结后可突破的对峙点做输送焦点，让前线
+ *      兵力朝同一方向汇集成股；
  *   5. opening.planOpening：开局发育规划（约 1–50 tick、无活敌逼近时接管）。
  *      逐 tick 用真实规则模拟一组「等到第 w 拍再开工」的蛇形推进方案，
  *      按 tick-51 时点的爆发期产兵 + 地皮 + 余兵评分选最优——最优解
@@ -38,7 +40,9 @@
  *   6. logistics.expansionCandidates：mode 0 智能分兵吃中立/孤军领土
  *      （12–25 tick 抢地冲刺加权：爆发期每块普通领土每 tick +1，圈地
  *      = 产兵；爆发期同样加权；空地优先于沼泽）；logistics.flowCandidates：
- *      向集结焦点/前线输送兵力；
+ *      向集结焦点输送兵力——常规集结「大栈优先」（一支肥纵队全速送达，
+ *      不多路小股分食 op 预算），紧急集结「就近优先」（少量快送续命）；
+ *      无焦点时只向贴着活敌的暴露前线格补线，没有就赋闲；
  *   7. 驻军保留线（board.garrisonAt）贯穿所有模块：边境格保留邻敌推兵量；
  *      咽喉格（切断会导致大片领土失联的割点）按「危险场」留守——只有
  *      正在逼近的敌人（menace 跟踪）按其推到该格的剩余兵力定量留守，
@@ -132,10 +136,17 @@ function attachStrategy(socket, options) {
     threatMinHops: new Map(),
     threatLastActive: new Map(),
     defenseLatch: new Map(),
+    // threatSnapshot：owner:anchor → 最近一次在原始威胁清单里的完整记录
+    // （defense 的退出清单宽限再注入用）。
+    threatSnapshot: new Map(),
     enemyMenace: new Map(),
     // planCooldown：打击目标格 → 冷却截止 tick。无望集结（缺口持续扩大）
     // 或目标被大幅增援时弃打并冷却，防止同一目标反复立计划空耗输送。
     planCooldown: new Map(),
+    // 对峙记忆：最近一次有活跃威胁的 tick（offense 据此暂缓新打击计划）。
+    lastActiveThreatTurn: -1000,
+    // 突破集结焦点的跨 tick 记忆（滞回防跳变，offense.breakthrough 维护）。
+    breakthroughIdx: -1,
     allowTeam: false,
     teamByClient: new Map(),
     teams: new Map(),
@@ -162,8 +173,11 @@ function attachStrategy(socket, options) {
     state.threatMinHops = new Map();
     state.threatLastActive = new Map();
     state.defenseLatch = new Map();
+    state.threatSnapshot = new Map();
     state.enemyMenace = new Map();
     state.planCooldown = new Map();
+    state.lastActiveThreatTurn = -1000;
+    state.breakthroughIdx = -1;
     state.deadPlayers = new Set();
     state.planSig = '';
   }
@@ -297,6 +311,11 @@ function attachStrategy(socket, options) {
     const threats = evaluateThreats(ctx);
     const defense = planDefense(ctx, threats);
     state.rallyIdx = defense.rally ?? -1;
+    // 对峙记忆：最近一次有「近距离活跃威胁」（hops ≤ 10，含闩锁/宽限平滑）
+    // 的 tick。远处逼近中的威胁不记——offense 据此暂缓新打击计划。
+    if (defense.activeThreats.some((t) => t.hops <= 10)) {
+      state.lastActiveThreatTurn = turn;
+    }
     // 进攻/经济只看「活跃威胁」（正在逼近的）：静止的龟缩兵堆既不
     // 冻结建设，也不阻止新打击计划。
     const rescue = planRescue(ctx, state);
@@ -313,6 +332,20 @@ function attachStrategy(socket, options) {
     const focus = defense.rally
       ? { idx: defense.rally, baseScore: defense.rallyScore, overrideGarrison: true, urgent: true }
       : rescue.focus || offense.focus || economy.feedTarget;
+
+    // 决策追踪（BOT_TRACE=1/2 开启）：焦点与候选概况，离线复盘/调参用。
+    if (process.env.BOT_TRACE === '1' || process.env.BOT_TRACE === '2') {
+      const focusDesc = focus
+        ? `${focus.idx}${focus.urgent ? '(urgent)' : ''}@${Math.round(focus.baseScore)}`
+        : defense.rally === null && state.plan
+          ? 'march'
+          : 'none';
+      console.log(
+        `[trace] turn ${turn}: focus=${focusDesc} threats=${defense.activeThreats.length} ` +
+          `plan=${state.plan ? `${state.plan.targetIdx}#${state.plan.owner}` : '-'} ` +
+          `queue=${state.queue.length}`,
+      );
+    }
 
     // 计划/集结焦点变化时打一条可观测日志（变化才打，不刷屏）。
     const planSig = state.plan
@@ -351,6 +384,20 @@ function attachStrategy(socket, options) {
       return;
     }
     candidates.sort((a, b) => b.score - a.score);
+
+    // BOT_TRACE=2：每 tick 候选榜前 6 名（定位「为什么没选 X」）。
+    if (process.env.BOT_TRACE === '2') {
+      const top = candidates
+        .slice(0, 6)
+        .map((c) => {
+          const p = c.op.payload;
+          const desc =
+            c.op.kind === 'build' ? `build ${p.op}@(${p.x},${p.y})` : `(${p.x},${p.y})->(${p.dx},${p.dy})m${p.mode}`;
+          return `${c.tag}:${Math.round(c.score)}:${desc}`;
+        })
+        .join(' ');
+      console.log(`[trace] turn ${turn}: top6 ${top}`);
+    }
 
     const picked = [];
     const usedSources = new Set();
