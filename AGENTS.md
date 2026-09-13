@@ -39,14 +39,23 @@
 - 不要在服务器工作区保留未提交、未推送的改动（包括文档与配置）。
 - **每次修改必须立即推送到远端**（GitHub `main`），不得只停留在本地，防止与他人/自动化流程产生冲突。
 
-## 依赖更新与版本号（Dependabot）
+## 版本号更新
+
+- **任何合并进 `main` 的更新都必须更新 `package.json` 中的版本号，无一例外**：无论改动大小（小功能、缺陷修复、文档、配置、样式调整等），也无论是否来自 Dependabot。
+- **版本号规则（SemVer）**：
+  - `major`：破坏性变更；
+  - `minor`：新功能（`feat`）；
+  - `patch`：缺陷修复、依赖更新、文档、杂项等其余改动（依赖更新一律 `patch`）。
+- **手动改动（非 PR 流程）**：在功能分支上随改动一起提升版本号，使用 `pnpm version <major|minor|patch> --no-git-tag-version`（只修改 `package.json`，不产生 git tag），随后与本次改动一起提交。
+- **PR 流程**：统一使用 `.github/workflows/bump-version-and-merge.yml` 自动提升版本号并合并：
+  - 在 PR 下评论 `OK. <major|minor|patch> [merge|squash|rebase]`（仅限 oimasterkafuu），或通过 `workflow_dispatch` 手动触发；
+  - 工作流会在 PR 分支上自动 `pnpm version` 提升版本号并提交，然后按指定策略合并。
+
+## 依赖更新（Dependabot）
 
 - **Dependabot 配置**：npm 生态，检查频率为每天（`daily`），`open-pull-requests-limit: 0`（不限数量），配置见 `.github/dependabot.yml`。
 - **Dependabot PR 必须第一时间处理**，不积压。
-- **版本号自动更新**：任何更新（含依赖更新）合并时都要同步更新版本号。统一使用 `.github/workflows/bump-version-and-merge.yml`：
-  - 在 PR 下评论 `OK. <major|minor|patch> [merge|squash|rebase]`（仅限 oimasterkafuu），或通过 `workflow_dispatch` 手动触发；
-  - 工作流会在 PR 分支上自动 `pnpm version` 提升版本号并提交，然后按指定策略合并；
-  - 依赖更新一律使用 `patch`。
+- Dependabot 更新同样必须更新版本号（一律 `patch`），走上一节的 PR 流程（`bump-version-and-merge.yml`）。
 - 多个 Dependabot PR 按顺序逐个处理：合并一个后再处理下一个，避免锁文件/版本号并发冲突；出现冲突时合并 `main` 后用 `pnpm install --lockfile-only` 重新生成锁文件。
 - 已合并的 Dependabot 分支及时删除。
 
