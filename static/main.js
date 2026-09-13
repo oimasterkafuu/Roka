@@ -757,9 +757,17 @@ socket.on('room_update', function (data) {
   var isHost = data.players.length > 0 && data.players[0].sid == client_id;
   var allowTeam = Boolean(data.allow_team);
   var roomRunning = Boolean(data.in_game);
+  var hasServerBot = false;
+  for (var i = 0; i < data.players.length; i++) {
+    if (data.players[i].server_bot) {
+      hasServerBot = true;
+      break;
+    }
+  }
   setTabGroupReadonly('tabs-game-speed', roomRunning || !isHost);
   setTabGroupReadonly('tabs-map-mode', roomRunning || !isHost);
-  setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost);
+  setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBot);
+  $('#team-mode-bot-hint').css('display', hasServerBot ? '' : 'none');
   $('#team-mode-section').css('display', isHost && !roomRunning ? '' : 'none');
   if (isHost && !roomRunning) $('#map-token').removeAttr('disabled');
   else $('#map-token').attr('disabled', '');

@@ -165,6 +165,11 @@ class LobbyService {
 
     const player: LobbyPlayer = { sid, uid, team: targetTeam, ready: false };
     if (options?.serverBot) {
+      // 托管策略 Bot 所在房间不允许组队：若房间已开启组队，进房时强制关闭并规整队伍。
+      if (conf.allow_team) {
+        conf.allow_team = false;
+        this.enforceLobbyConstraints(gid);
+      }
       // 服务端托管 bot 永远排在普通成员之后：房主（players[0]）保留给
       // 人类用户或第三方 bot。bot 单独在房时暂居首位，任何普通成员进房即接任。
       player.serverBot = true;
@@ -281,6 +286,7 @@ class LobbyService {
       uid: player.uid,
       team: player.team,
       ready: Boolean(player.ready && player.team !== 0),
+      ...(player.serverBot === true ? { server_bot: true } : {}),
     }));
 
     const ready = players.filter((player) => player.ready && player.team !== 0).length;
