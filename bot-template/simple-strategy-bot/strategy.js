@@ -26,7 +26,7 @@
  *      「守得住 ↔ 守不住」的平衡点上反复立/废计划；无打击计划时转入
  *      前线突破集结：选一个集结后可突破的对峙点做输送焦点，让前线
  *      兵力朝同一方向汇集成股；
- *   5. opening.planOpening：开局发育规划（约 1–50 tick、无活敌逼近时接管）。
+ *   5. opening.planOpening：开局发育规划（约 1–30 tick、无活敌逼近时接管）。
  *      逐 tick 用真实规则模拟一组「等到第 w 拍再开工」的蛇形推进方案，
  *      按 tick-51 时点的爆发期产兵 + 地皮 + 余兵评分选最优——最优解
  *      往往不是从第一 tick 就动，而是先空几个回合憋大兵栈再连续推进；
@@ -320,7 +320,7 @@ function attachStrategy(socket, options) {
     // 冻结建设，也不阻止新打击计划。
     const rescue = planRescue(ctx, state);
     const offense = planOffense(ctx, state, defense.activeThreats);
-    // 开局阶段（约 1–50 tick 且无活敌逼近）由开局规划器接管：逐 tick 模拟
+    // 开局阶段（约 1–30 tick 且无活敌逼近）由开局规划器接管：逐 tick 模拟
     // 「憋几拍再开工」的发育方案选最优——该阶段不建城、不做常规输送，
     // 蛇形兵栈的节奏不被打散；敌情出现即交还常规管线。
     const opening = planOpening(ctx, state, defense.activeThreats);
