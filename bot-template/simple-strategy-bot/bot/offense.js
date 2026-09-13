@@ -58,6 +58,8 @@ const RISK_WEIGHT = 0.35;
 const TEAMMATE_PENALTY = 6;
 // 切换打击目标的滞后系数：新目标评分须超过旧目标 × 此系数才换。
 const REPLAN_MARGIN = 1.3;
+// 集结期（未开打）的目标切换系数：集结纵队是沉没资本，跳目标 = 集结重来。
+const GATHER_SWITCH_MARGIN = 2.0;
 // 进行中/候选路径的入口若紧贴重兵敌格，集结时容易被打断，扣分。
 const ENTRY_EXPOSURE_PENALTY = 0.35;
 // 敌军增援的时间余量：皇冠目标在逼近期间每 tick +1，集结期同样增长。
@@ -69,6 +71,20 @@ const NON_ANCHOR_ENTRY_MARGIN = 1.35;
 // 机动兵力闸：新打击需求不得超过机动兵力的此比例（防倾巢而出）。
 const MOBILE_BUDGET_RATIO = 0.8;
 const MOBILE_BUDGET_FLOOR = 24;
+// 对峙记忆：近距离活跃威胁（hops ≤ 10，含闩锁/宽限平滑）消停满此 tick
+// 数后才开新打击——在「守得住 ↔ 守不住」的平衡点上，威胁随我方集结方向
+// 反复激活/消停，没有这段记忆就会「集结刚见效就另立计划 → 墙变薄威胁
+// 又回来了 → 取消回防」来回捣鼓（state.lastActiveThreatTurn 由
+// strategy.js 每 tick 维护）。
+const STANDOFF_BLOCK_TICKS = 10;
+
+// 决策追踪（BOT_TRACE=1 开启）：进攻评估数值与各闸口决策，离线复盘/调参用。
+const TRACE = process.env.BOT_TRACE === '1' || process.env.BOT_TRACE === '2';
+const tr = (...args) => {
+  if (TRACE) {
+    console.log('[trace]', ...args);
+  }
+};
 
 function attackOp(ctx, fromIdx, toIdx, mode) {
   const from = ctx.xy(fromIdx);
@@ -184,7 +200,10 @@ function evaluateTarget(ctx, state, target) {
     const head = state.plan.headIdx;
     if (head !== null && ctx.operable(head)) {
       const single = ctx.dijkstra([head], enterCost, isTarget);
-      if (single && single.cost <= multi.cost * 1.4) {
+      // 集结期入口滞回（代价放宽到 2 倍）：旧入口周边已集结的纵队是沉没
+      // 资本，入口在相邻格间跳变会把输送纵队反复改道、集结永远不收束
+      // （「反复集兵、多路缓慢输兵」的根因之一）；显著更优才换。
+      if (single && single.cost <= multi.cost * 2.0) {
         chosen = single;
       }
     }
@@ -283,7 +302,9 @@ function cutCandidates(ctx) {
       }
       const owner = ctx.ownerAt(eIdx);
       const kind = ctx.tileKind(eIdx);
-      let score = 210 + 22 * myAdj + Math.min(eArmy, 60);
+      // 基准分压过常规集结输送（340 档）：能吃的敌格立刻吃——免费收割
+      // 不该排在输送纵队后面饿死（「前线有大兵却不主动攻击」的根因之一）。
+      let score = 400 + 22 * myAdj + Math.min(eArmy, 60);
       if (kind === 'crown') {
         score += ctx.crownsOf(owner) === 1 ? 600 : 240;
       } else if (kind === 'city') {
@@ -325,9 +346,10 @@ function cutCandidates(ctx) {
  * 推兵量一够，扩张/切断候选会自动执行突破。没有可突破点时不再乱动
  * （兵力留在皇冠上自然增长，胜过在前线平摊停滞）。
  */
-function breakthroughFocus(ctx) {
+function breakthroughFocus(ctx, preferIdx = -1) {
   const frontierDist = ctx.frontierDist();
   let best = null;
+  let preferred = null;
   for (const sIdx of ctx.myOperable()) {
     if (ctx.isolatedAt(sIdx) || frontierDist[sIdx] !== 1) {
       continue; // 只看贴前线格
@@ -373,18 +395,22 @@ function breakthroughFocus(ctx) {
       if (!best || score > best.score) {
         best = { idx: sIdx, score };
       }
+      if (sIdx === preferIdx && (!preferred || score > preferred.score)) {
+        preferred = { idx: sIdx, score };
+      }
     }
   }
-  return best ? { idx: best.idx, baseScore: 235 } : null;
+  // 滞回：上 tick 的突破点仍可行且不被显著超越就沿用——集结焦点逐 tick
+  // 在相邻对峙点间跳变，会把集结到一半的纵队反复掉头（多光标慢推）。
+  const chosen = preferred && best && preferred.score >= best.score * 0.75 ? preferred : best;
+  return chosen ? { idx: chosen.idx, baseScore: 235 } : null;
 }
 
-/** 计划是否仍然成立：目标仍属原敌、仍是主城/指挥所、敌方未出局。 */
+/** 计划是否仍然成立：目标仍属原敌且敌方未出局。咽喉目标可以是普通格/沼泽，
+ * 只看归属（归属一变 = 目标已易手/中立化）；若还要求主城/指挥所，咽喉计划
+ * 会每 tick 立了废、废了立——体检元数据（需求基线/缺口趋势）永远攒不起来。 */
 function planStillValid(ctx, plan) {
-  if (ctx.ownerAt(plan.targetIdx) !== plan.owner || ctx.ownerDead(plan.owner)) {
-    return false;
-  }
-  const kind = ctx.tileKind(plan.targetIdx);
-  return kind === 'crown' || kind === 'city';
+  return ctx.ownerAt(plan.targetIdx) === plan.owner && !ctx.ownerDead(plan.owner);
 }
 
 /**
@@ -393,6 +419,20 @@ function planStillValid(ctx, plan) {
  */
 function planOffense(ctx, state, threats) {
   const candidates = cutCandidates(ctx);
+
+  // 突破集结（带跨 tick 滞回，state.breakthroughIdx 记忆上一焦点）。
+  // 有活跃威胁时不做突破集结：突破集结的方向与防御集结相反，两边交替
+  // 生效会把墙上的兵反复抽走又拉回（rally 闪烁 ↔ 突破集结互相拉扯，
+  // 是前线往返 shuttle 的一大来源）。威胁记忆不重置，威胁消停后突破
+  // 集结从原焦点继续。
+  const breakthrough = () => {
+    if (threats.length > 0) {
+      return null;
+    }
+    const f = breakthroughFocus(ctx, state.breakthroughIdx ?? -1);
+    state.breakthroughIdx = f ? f.idx : -1;
+    return f;
+  };
 
   if (state.plan && !planStillValid(ctx, state.plan)) {
     state.plan = null;
@@ -403,6 +443,7 @@ function planOffense(ctx, state, threats) {
   for (const target of targets) {
     // 冷却中的目标跳过（无望集结 / 被大幅增援后弃打的），防止反复立计划。
     if ((state.planCooldown?.get(target.idx) ?? 0) > state.turn) {
+      tr(`turn ${state.turn}: target ${target.idx} owner=${target.owner} 冷却中跳过`);
       continue;
     }
     const evaluated = evaluateTarget(ctx, state, target);
@@ -410,8 +451,18 @@ function planOffense(ctx, state, threats) {
       best = evaluated;
     }
   }
+  if (TRACE && best) {
+    tr(
+      `turn ${state.turn}: best target=${best.targetIdx} owner=${best.owner} ` +
+        `${best.isCrown ? 'crown' : 'city/choke'} req=${best.required} effReq=${best.effectiveRequired} ` +
+        `deliver=${best.deliverable} ready=${best.ready} gatherTicks=${best.gatherTicks} ` +
+        `hops=${best.hops} score=${best.score.toFixed(1)}`,
+    );
+  }
 
-  // hysteresis：已有计划的当前评估 × REPLAN_MARGIN 仍不输新目标就继续。
+  // hysteresis：已有计划的当前评估 × 切换系数仍不输新目标就继续。
+  // 集结中（未开打）用更大的切换系数——已在旧入口集结的纵队是沉没资本，
+  // 目标跳来跳去会让集结永远不收束；开打/行军期保持灵敏。
   let current = null;
   if (state.plan) {
     current = evaluateTarget(ctx, state, {
@@ -419,7 +470,8 @@ function planOffense(ctx, state, threats) {
       owner: state.plan.owner,
       isCrown: ctx.tileKind(state.plan.targetIdx) === 'crown',
     });
-    if (current && (!best || current.score * REPLAN_MARGIN >= best.score)) {
+    const margin = current && !current.ready ? GATHER_SWITCH_MARGIN : REPLAN_MARGIN;
+    if (current && (!best || current.score * margin >= best.score)) {
       best = current;
     }
   }
@@ -429,32 +481,51 @@ function planOffense(ctx, state, threats) {
     const meta = state.plan; // 元数据挂在 plan 对象上，下方重写时携带
     if (typeof meta.startRequired !== 'number') {
       meta.startRequired = best.effectiveRequired;
+      meta.startTurn = state.turn;
     }
-    // 目标被大幅增援（超出立计划时已计入的行进/集结期自然增长）：继续
-    // 行军等于把兵栈送进增援后的虎口——弃打，已推进的兵栈转作前哨，
-    // 该目标进入短冷却。
+    // 目标被大幅增援即弃打止损，已推进的兵栈转作前哨，该目标进入短冷却。
+    // 注意扣除「自然增长」：皇冠目标在集结/行军期本来就 +1/tick（立计划时
+    // 已计入行进期增长），长集结自然涨的兵不算增援——否则会把我方正常
+    // 集结时间误判成敌方增援，集一半就弃打，陷入「集结→弃打→再集结」空耗。
+    const naturalGrowth = best.isCrown
+      ? Math.max(0, state.turn - (meta.startTurn ?? state.turn)) * CROWN_GROWTH_PER_HOP
+      : 0;
     if (
       best.effectiveRequired >
-      meta.startRequired + Math.max(15, Math.ceil(meta.startRequired * 0.35))
+      meta.startRequired + naturalGrowth + Math.max(15, Math.ceil(meta.startRequired * 0.35))
     ) {
+      tr(
+        `turn ${state.turn}: 目标 ${best.targetIdx} 被大幅增援弃打 startReq=${meta.startRequired} ` +
+          `natural=${naturalGrowth} effReq=${best.effectiveRequired}`,
+      );
       state.planCooldown.set(best.targetIdx, state.turn + 60);
       state.plan = null;
-      return { candidates, focus: breakthroughFocus(ctx) };
+      return { candidates, focus: breakthrough() };
     }
-    // 无望集结：缺口（需求 − 可交付）连续两个观察窗在扩大 = 产能跟不上
-    // 目标增长（典型：对方皇冠更多，需求 +1/tick 比我输送快）。拖着只会
-    // 把全部机动兵力永远耗在集结上——弃打转发育，产能反超后冷却结束
-    // 自然重开。
+    // 无望集结：缺口（需求 − 可交付）连续两个观察窗（各 ≥25 tick）扩大 =
+    // 产能跟不上目标增长（典型：对方皇冠更多，需求 +1/tick 比我输送快）。
+    // 拖着只会把全部机动兵力永远耗在集结上——弃打转发育，产能反超后冷却
+    // 结束自然重开。缺口 ≤ 0（可交付已饱和）时不追踪：集结只是时间问题。
     if (!best.ready) {
       const gap = best.effectiveRequired - best.deliverable;
-      if (typeof meta.gapAt === 'number' && state.turn - meta.gapAt >= 25) {
-        meta.gapGrew = gap > meta.lastGap + 2 ? (meta.gapGrew || 0) + 1 : 0;
+      if (gap <= 0) {
+        meta.gapAt = undefined;
+        meta.lastGap = undefined;
+        meta.gapGrew = 0;
+      } else if (typeof meta.gapAt === 'number' && state.turn - meta.gapAt >= 25) {
+        const grew = gap > meta.lastGap + 2;
+        meta.gapGrew = grew ? (meta.gapGrew || 0) + 1 : 0;
+        tr(
+          `turn ${state.turn}: 集结窗口检查 gap=${gap} lastGap=${meta.lastGap} grew=${grew} ` +
+            `gapGrew=${meta.gapGrew} effReq=${best.effectiveRequired} deliver=${best.deliverable}`,
+        );
         meta.lastGap = gap;
         meta.gapAt = state.turn;
         if (meta.gapGrew >= 2) {
+          tr(`turn ${state.turn}: 无望集结弃打 target=${best.targetIdx}，冷却 150`);
           state.planCooldown.set(best.targetIdx, state.turn + 150);
           state.plan = null;
-          return { candidates, focus: breakthroughFocus(ctx) };
+          return { candidates, focus: breakthrough() };
         }
       } else if (typeof meta.gapAt !== 'number') {
         meta.lastGap = gap;
@@ -466,6 +537,8 @@ function planOffense(ctx, state, threats) {
 
   // 回防纪律：活跃威胁逼近时取消打击全军回防；除非进行中打击能抢在威胁
   // 到达前端掉威胁来源的最后一座主城（斩首成功 = 威胁源头整军孤军化）。
+  // 取「活跃威胁」（含闩锁/滞留平滑）而非原始清单——原始清单在平衡点上
+  // 高频进出会让打击计划反复立废，集结兵力在入口与集结点间往返 shuttle。
   const topThreat = threats.length > 0 ? threats[0] : null;
   if (state.plan && topThreat && topThreat.hops <= DEFENSE_BUSY_HOPS) {
     const finishing =
@@ -475,16 +548,19 @@ function planOffense(ctx, state, threats) {
       current.owner === topThreat.blobOwner &&
       current.hops <= Math.max(1, topThreat.hops - 1);
     if (!finishing) {
+      tr(`turn ${state.turn}: 活跃威胁 hops=${topThreat.hops}，取消打击回防`);
       state.plan = null;
       return { candidates, focus: null };
     }
     best = current;
   }
 
-  // 防御吃紧时不开新计划（兵力留给防御），进行中的贴近打击继续。
+  // 防御吃紧 / 对峙记忆期内不开新计划（兵力留给防御，也让集结见分晓），
+  // 进行中的贴近打击继续。
   const defenseBusy = topThreat !== null && topThreat.hops <= DEFENSE_BUSY_HOPS;
-  if (!best || (defenseBusy && !state.plan)) {
-    return { candidates, focus: defenseBusy ? null : breakthroughFocus(ctx) };
+  const standoff = state.turn - (state.lastActiveThreatTurn ?? -1000) < STANDOFF_BLOCK_TICKS;
+  if (!best || (!state.plan && (defenseBusy || standoff))) {
+    return { candidates, focus: defenseBusy ? null : breakthrough() };
   }
 
   // 机动兵力闸：新打击需求不得透支机动兵力（全军 − 各格驻军保留）。
@@ -492,7 +568,11 @@ function planOffense(ctx, state, threats) {
   if (!state.plan) {
     const budget = Math.max(MOBILE_BUDGET_FLOOR, ctx.mobileArmy() * MOBILE_BUDGET_RATIO);
     if (!best.ready && best.effectiveRequired > budget) {
-      return { candidates, focus: breakthroughFocus(ctx) };
+      tr(
+        `turn ${state.turn}: 机动兵力闸拦下新打击 target=${best.targetIdx} ` +
+          `effReq=${best.effectiveRequired} budget=${Math.floor(budget)}`,
+      );
+      return { candidates, focus: breakthrough() };
     }
   }
 
@@ -500,8 +580,9 @@ function planOffense(ctx, state, threats) {
   // 不达标——兵栈悬在敌境干等只会被逐个吃掉，放弃计划；该兵栈转作
   // 前哨，由切断/突破等常规逻辑继续使用。
   if (state.plan && best && !best.ready && best.gatherTicks === 0 && best.deliverable < best.effectiveRequired) {
+    tr(`turn ${state.turn}: 断供弃打 target=${best.targetIdx} deliver=${best.deliverable} effReq=${best.effectiveRequired}`);
     state.plan = null;
-    return { candidates, focus: breakthroughFocus(ctx) };
+    return { candidates, focus: breakthrough() };
   }
 
   // 目标明显打不动时不浪费集结。两层判定：
@@ -520,8 +601,15 @@ function planOffense(ctx, state, threats) {
       ctx.mobileArmy() * DEEP_RALLY_MOBILE_RATIO >= best.effectiveRequired &&
       best.deliverable >= best.effectiveRequired * DEEP_RALLY_BASE_RATIO;
     if (!windowViable && !deepViable) {
+      tr(
+        `turn ${state.turn}: 集结可行性否决 target=${best.targetIdx} effReq=${best.effectiveRequired} ` +
+          `deliver=${best.deliverable} projected=${Math.floor(projected)} mobile=${ctx.mobileArmy()}`,
+      );
+      // 短冷却：盘面一 tick 不会突变，同一目标下 tick 还会同样否决——
+      // 冷却期内让次优目标/突破集结接手，而不是每 tick 空转评估。
+      state.planCooldown.set(best.targetIdx, state.turn + 20);
       state.plan = null;
-      return { candidates, focus: breakthroughFocus(ctx) };
+      return { candidates, focus: breakthrough() };
     }
   }
 
@@ -531,9 +619,13 @@ function planOffense(ctx, state, threats) {
     owner: best.owner,
     headIdx: best.entry,
   };
+  if (prevPlan?.targetIdx !== best.targetIdx) {
+    tr(`turn ${state.turn}: 立打击计划 target=${best.targetIdx} owner=${best.owner} effReq=${best.effectiveRequired} deliver=${best.deliverable} ready=${best.ready}`);
+  }
   // 携带同目标旧计划的体检元数据（立计划需求基线、缺口趋势）。
   if (prevPlan && prevPlan.targetIdx === best.targetIdx) {
     state.plan.startRequired = prevPlan.startRequired;
+    state.plan.startTurn = prevPlan.startTurn;
     state.plan.lastGap = prevPlan.lastGap;
     state.plan.gapAt = prevPlan.gapAt;
     state.plan.gapGrew = prevPlan.gapGrew;

@@ -193,7 +193,9 @@ function planRescue(ctx, state) {
           });
           return { candidates, focus: null };
         }
-        return { candidates, focus: { idx: re.entry, baseScore: 360 } };
+        // 救援是时限任务（孤军 10 tick 宽限后衰减）：集结走「就近优先」
+        // 的紧急输送，快速打通走廊，而不是等远处大栈。
+        return { candidates, focus: { idx: re.entry, baseScore: 360, urgent: true } };
       }
     }
   }
@@ -238,7 +240,7 @@ function planRescue(ctx, state) {
     return { candidates, focus: null };
   }
 
-  return { candidates, focus: { idx: best.entry, baseScore: 360 } };
+  return { candidates, focus: { idx: best.entry, baseScore: 360, urgent: true } };
 }
 
 module.exports = { planRescue };

@@ -26,7 +26,8 @@
  *     起喂）、以及兵力回血不足升级线的内陆指挥所输出 feedTarget，
  *     无集结任务时 logistics 的输送流会顺路把它们喂过门槛——指挥所
  *     与普通格自身每 50 tick 才 +1，靠汇集供粮才能让「建城 → 升皇冠」
- *     的链条持续滚动。
+ *     的链条持续滚动。活跃威胁期间不喂养：喂养输送与防御集结方向相反，
+ *     焦点闪烁会把墙上守军来回拉扯。
  *   - 争夺记忆：最近 10 tick 内发生过归属翻转的格子默认不建（拉锯格
  *     上重建只会反复白扔 50 兵），除非兵力特别厚实或开局 bootstrap。
  */
@@ -108,7 +109,9 @@ function planEconomy(ctx, state, threats) {
   // 喂养目标（不占建设冷却）：兵力回血不足升级线的指挥所优先——
   // 指挥所每 50 tick 才 +1，靠输送汇集供粮才能尽快升皇冠。
   // 只喂不贴活敌的（keepAt = 1）：贴着敌军的指挥所喂进去也是送。
-  if (!defenseFreeze) {
+  // 活跃威胁期间不喂养：喂养输送与防御集结方向相反，焦点闪烁时
+  // 墙上守军会被来回拉扯（防线压力大时建设本就该缓一缓）。
+  if (!defenseFreeze && threats.length === 0) {
     let bestCityFeed = null;
     for (const idx of ctx.myCities()) {
       if (ctx.isolatedAt(idx) || ctx.keepAt(idx) > 1) {
@@ -202,7 +205,7 @@ function planEconomy(ctx, state, threats) {
       });
     }
 
-    if (!feedTarget && bestFeed) {
+    if (!feedTarget && bestFeed && threats.length === 0) {
       // bootstrap（还没补上第二锚点）时喂养优先级压过中立扩张（130）——
       // 单皇冠是单点故障，被切断一次就伤筋动骨，先把锚点喂出来再圈地；
       // 平时略优于无焦点的前线输送（50），不抢占扩张与集结。
