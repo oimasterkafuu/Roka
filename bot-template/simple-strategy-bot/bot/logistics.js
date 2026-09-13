@@ -3,9 +3,10 @@
  *
  * 汇集输送：给定焦点格（防御集结点 rally / 救援走廊入口 / 打击入口 /
  * 突破集结点 / 喂养目标），对所有己方格求「到焦点的 BFS 距离场」，每 tick
- * 挑选性价比最高的己方格向焦点方向推进一步。效果上是多源、多链路的
- * 传送带：沿路各格兵力逐 tick 向焦点合流，而不是每次都从兵力最大的单点
- * 出发取兵。无焦点时退化为通用前线输送（沿 frontierDist 向最近前线送兵）。
+ * 挑选性价比最高的己方格向焦点方向推进一步。常规集结「大栈优先」——
+ * 一支肥纵队每 tick 推进一格全速送达（评分规则见 flowCandidates）。
+ * 无焦点时退化为「暴露前线增援」：只向贴着活敌的己方格补线，没有暴露
+ * 前线就赋闲（兵留在皇冠上自然增长，不往前线平摊停滞）。
  *
  * 稳定性细节：
  *   - 推出量用与引擎一致的 previewPush 预演，推不出兵的 op 根本不下发；
@@ -32,8 +33,6 @@ const BURST_END_TURN = 50;
 const RUSH_START_TURN = 12;
 const RUSH_END_TURN = 25;
 const RUSH_BONUS = 100;
-// 无焦点输送只动腹地格（距前线 >= 2），边界格留给扩张/切断/突破决策。
-const FRONTIER_FLOW_MIN_DIST = 2;
 // 升级链保护：兵力未稳过升级线（<52）且不贴活敌的指挥所是「正在攒升级」
 // 的格子——它的兵是升皇冠的本金，不能被输送/扩张顺手抽走（抽走就永远
 // 升不了）。军事操作（打击/切断/防御）不受此限。
@@ -49,9 +48,23 @@ function inUpgradeChain(ctx, idx) {
   return ctx.tileKind(idx) === 'city' && ctx.army(idx) < UPGRADE_CHAIN_LINE && ctx.keepAt(idx) <= 1;
 }
 
-/** 建设 earmark 判定：兵力达到建设门槛的普通格（军事操作不受此限）。 */
+/**
+ * 建设 earmark 判定：兵力达到建设门槛、且地形上真能开建的普通格
+ * （军事操作不受此限）。贴前线格（fd ≤ 1）按经济模块规则根本不会建
+ * （进攻不靠指挥所铺路，死区除外）——给它们 earmark 等于把兵永久冻在
+ * 前线死角（弃打兵堆在前线口袋越积越多的根因之一），故不 earmark。
+ */
 function buildEarmarked(ctx, idx) {
-  return ctx.tileKind(idx) === 'plain' && ctx.army(idx) >= BUILD_EARMARK_ARMY;
+  if (ctx.tileKind(idx) !== 'plain' || ctx.army(idx) < BUILD_EARMARK_ARMY) {
+    return false;
+  }
+  const fd = ctx.frontierDist()[idx];
+  if (fd >= 2) {
+    return true;
+  }
+  // 贴前线：仅死区（周边 5 格无活敌）会被 economy 视同二线开建。
+  const ed = ctx.enemyDistAll()[idx];
+  return ed < 0 || ed > 5;
 }
 
 function attackOp(ctx, fromIdx, toIdx, mode) {
@@ -138,14 +151,40 @@ function expansionCandidates(ctx, state) {
 
 /**
  * 汇集输送候选。focus = {idx, baseScore, overrideGarrison} 时向焦点输送；
- * 否则向最近前线输送。
+ * 否则向暴露前线（贴着活敌的己方格）增援；无暴露前线则不输送（和平期
+ * 兵留在皇冠上自然增长，胜过平摊到前线停滞）。
+ *
+ * 评分分两档（关键：每 tick 服务端只执行一条 op，评分即资源分配）：
+ *   - 紧急（防御 rally / 救援 / 无焦点增援）：就近优先（-2*d、推兵加分
+ *     封顶 80）——少量快送、边守边集，远处大栈反正赶不上；
+ *   - 常规集结（打击入口/突破点/喂养）：大栈优先（推兵加分封顶 600、
+ *     距离只扣 0.5*d）——让一支肥纵队每 tick 推进一格全速送达，而不是
+ *     多路小股分食 op 预算（同一路线三个光标、推进速度慢三倍的根因）；
+ *     顺路把弃打遗留在死角的大兵堆抽回主干网（死角堆几千兵不动的根因）。
  * @returns 候选数组（pipeline 取最高分的一条或两条）
  */
 function flowCandidates(ctx, state, focus) {
-  const field = focus
-    ? ctx.bfsField([focus.idx], (idx) => ctx.isMineIdx(idx) && !ctx.isolatedAt(idx))
-    : ctx.frontierDist();
-  const minDist = focus ? 1 : FRONTIER_FLOW_MIN_DIST;
+  let field;
+  let minDist;
+  if (focus) {
+    field = ctx.bfsField([focus.idx], (idx) => ctx.isMineIdx(idx) && !ctx.isolatedAt(idx));
+    minDist = 1;
+  } else {
+    // 无焦点：只增援「贴着活敌」的暴露前线格（keepAt > 1），没有就赋闲。
+    const exposed = [];
+    const frontierDist = ctx.frontierDist();
+    for (const idx of ctx.myCells()) {
+      if (frontierDist[idx] === 1 && !ctx.isolatedAt(idx) && ctx.keepAt(idx) > 1) {
+        exposed.push(idx);
+      }
+    }
+    if (exposed.length === 0) {
+      return [];
+    }
+    field = ctx.bfsField(exposed, (idx) => ctx.isMineIdx(idx) && !ctx.isolatedAt(idx));
+    minDist = 1;
+  }
+  const urgent = Boolean(focus?.urgent) || !focus;
   const overrideGarrison = Boolean(focus && focus.overrideGarrison);
   const candidates = [];
   for (const sIdx of ctx.myOperable()) {
@@ -161,6 +200,11 @@ function flowCandidates(ctx, state, focus) {
     }
     for (const tIdx of ctx.neighbors(sIdx)) {
       if (!ctx.isMineIdx(tIdx) || ctx.isolatedAt(tIdx) || field[tIdx] !== d - 1) {
+        continue;
+      }
+      // 无焦点增援的够用线：暴露格守军已达标（邻敌推兵量 + 余量）就不再喂，
+      // 试试其他下坡方向。
+      if (!focus && d === 1 && ctx.army(tIdx) >= ctx.keepAt(tIdx) + 10) {
         continue;
       }
       // 防往返：最近几 tick 刚把 tIdx 的兵推进 sIdx，就别再推回去。
@@ -182,8 +226,11 @@ function flowCandidates(ctx, state, focus) {
         continue;
       }
       const base = focus ? focus.baseScore : 50;
+      // 紧急就近优先（快送续命）；常规大栈优先（肥纵队全速送达）。
+      const pushBonus = urgent ? Math.min(push, 80) / 4 : Math.min(push, 600) / 4;
+      const distPenalty = urgent ? 2 * d : 0.5 * d;
       candidates.push({
-        score: base + Math.min(push, 80) / 4 - 2 * d,
+        score: base + pushBonus - distPenalty,
         preempt: false,
         urgentFlow: Boolean(focus && focus.urgent),
         op: attackOp(ctx, sIdx, tIdx, mode),
