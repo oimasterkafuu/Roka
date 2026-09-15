@@ -810,12 +810,15 @@ class LobbyService {
   }
 
   /**
-   * 统一 Rating：多人 ELO 推广。队伍名次取队内最好名次，
+   * 统一 Rating：多人 ELO 推广。队伍名次取队内最好名次在队伍间的位次
+   * （不能直接用成员榜名次代入得分公式：score 的值域是 1..队伍数，
+   * 而成员名次值域是 1..人数，2v2 输队最好名次为 3 时 score 会被压到
+   * -1，输方扣分超过 K 且输赢不对称），
    * 队伍 Rating 按「人数³ × 成员战力之和」折算回 ELO
    * （400 * log10(n³ · Σ 10^(r/400))）：本游戏中人数优势是压倒性的
    * （等分时 1v2 期望胜率约 1/17、1v3 约 1/82），立方加权让队伍分
    * 反映这一点，避免「1 个高分打一堆中分」被视为均势局；
-   * 单人队退化为成员自身分。得分按名次线性分布，K = 24。
+   * 单人队退化为成员自身分。得分按队伍位次线性分布，K = 24。
    */
   private async applyGameResult(result: GameResultEntry[]): Promise<void> {
     if (result.length < 2) {
@@ -834,6 +837,13 @@ class LobbyService {
       return;
     }
 
+    // 队伍位次：按队内最好名次在队伍间排序为 1..teams.length，
+    // 保证 score = (teams - place) / (teams - 1) 落在 [0, 1]。
+    const teamPlace = new Map<number, number>();
+    [...teams]
+      .sort((a, b) => (teamRank.get(a) ?? 0) - (teamRank.get(b) ?? 0))
+      .forEach((team, index) => teamPlace.set(team, index + 1));
+
     const teamRating = new Map<number, number>();
     for (const team of teams) {
       const members = result.filter((entry) => entry.team === team);
@@ -845,7 +855,7 @@ class LobbyService {
 
     const updates: Array<{ username: string; delta: number }> = [];
     for (const team of teams) {
-      const rank = teamRank.get(team) ?? teams.length;
+      const rank = teamPlace.get(team) ?? teams.length;
       const score = (teams.length - rank) / (teams.length - 1);
       let expected = 0;
       for (const other of teams) {

@@ -114,6 +114,13 @@ const computeUpdates = (result, getRating, formula) => {
     return [];
   }
 
+  // 队伍位次：按队内最好名次在队伍间排序为 1..teams.length，
+  // 与 lobby-service.applyGameResult 保持一致（成员榜名次不能直接代入 score）。
+  const teamPlace = new Map();
+  [...teams]
+    .sort((a, b) => (teamRank.get(a) ?? 0) - (teamRank.get(b) ?? 0))
+    .forEach((team, index) => teamPlace.set(team, index + 1));
+
   const teamRating = new Map();
   for (const team of teams) {
     const ratings = result
@@ -124,7 +131,7 @@ const computeUpdates = (result, getRating, formula) => {
 
   const updates = [];
   for (const team of teams) {
-    const rank = teamRank.get(team) ?? teams.length;
+    const rank = teamPlace.get(team) ?? teams.length;
     const score = (teams.length - rank) / (teams.length - 1);
     let expected = 0;
     for (const other of teams) {
