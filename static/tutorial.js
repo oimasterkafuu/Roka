@@ -178,7 +178,7 @@
     },
     {
       title: '攻占敌方主城',
-      body: '最终目标：攻陷敌方主城。占领敌方最后一座主城即获胜：残余领土不会转移给你，而是全部沦为孤军、逐渐衰减消亡。敌方主城会持续产兵（教程中封顶 60），拖得越久越强——从后方主城不断调兵，在旧指挥所废墟上集兵，一击必杀！',
+      body: '最终目标：攻陷敌方主城。占领敌方最后一座主城即获胜：残余领土不会转移给你，而是兵力减半后全部沦为孤军、逐渐衰减消亡。敌方主城会持续产兵（教程中封顶 60），拖得越久越强——从后方主城不断调兵，在旧指挥所废墟上集兵，一击必杀！',
       hint: '集兵后攻击高亮主城。',
       targets: [POS.enemyCrown, POS.enemyCity],
       failHint: '兵力不足，没能占领（守军被等量消耗）！继续从后方调兵，超过守军后再攻。',
@@ -719,9 +719,9 @@
   }
 
   function applyCaptureIfEnemyDefeated() {
-    // 占领敌方最后一座主城：敌方出局，残余领土【不】转移给己方——全部保持敌方归属
-    // 并直接进入孤军状态（不执行断链减半），指挥所降级为普通地块以确保无锚点可重连，
-    // 之后按孤军规则自然衰减至中立。
+    // 占领敌方最后一座主城：敌方出局，残余领土【不】转移给己方——全部保持敌方归属；
+    // 指挥所降级为普通地块以确保无锚点可重连，尚未孤军的格子按断链规则减半
+    // （1 兵保持为 1，减半后归零直接变为中立），之后全部打入孤军按孤军规则衰减至中立。
     for (let x = 0; x < BOARD_ROWS; x += 1) {
       for (let y = 0; y < BOARD_COLS; y += 1) {
         const tile = tileAt(x, y);
@@ -730,6 +730,16 @@
         }
         if (tile.terrain === 'city' || tile.terrain === 'crown') {
           tile.terrain = 'plain';
+        }
+        if (!state.isolated[x][y]) {
+          tile.army = tile.army === 1 ? 1 : Math.floor(tile.army / 2);
+          if (tile.army <= 0) {
+            tile.owner = 0;
+            tile.army = 0;
+            state.isolated[x][y] = false;
+            state.isolatedAge[x][y] = 0;
+            continue;
+          }
         }
         state.isolated[x][y] = true;
         state.isolatedAge[x][y] = 1;

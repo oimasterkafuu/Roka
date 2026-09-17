@@ -18,7 +18,7 @@ import { renderRichText } from './text-render';
 import { FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { CaptchaService } from './server/captcha-service';
-import { EditableLobbyKey, LobbyService } from './server/lobby-service';
+import { EditableLobbyKey, FIXED_SWAMP_RATIO, LobbyService } from './server/lobby-service';
 import { ServerBotManager } from './server/server-bot-manager';
 import { WebhookUpdater } from './server/webhook-updater';
 
@@ -134,7 +134,8 @@ const buildMapExample = async (
     height_ratio: mapSizeRatio,
     city_ratio: 0.5,
     mountain_ratio: 0.5,
-    swamp_ratio: 0,
+    // 与正式对局一致（lobby-service FIXED_SWAMP_RATIO），示例地图应包含沼泽。
+    swamp_ratio: FIXED_SWAMP_RATIO,
     speed: 1,
     allow_team: false,
     map_token: mapToken,
