@@ -23,6 +23,7 @@ const FIXED_HEIGHT_RATIO = 0.5;
 const FIXED_CITY_RATIO = 0.5;
 const FIXED_MOUNTAIN_RATIO = 0.5;
 const FIXED_SWAMP_RATIO = 0.5;
+export { FIXED_SWAMP_RATIO };
 const MAP_TOKEN_MAX_LENGTH = 32;
 const RATING_K = 24;
 /** 房间准备阶段的心跳超时：超过 600 秒无心跳的成员被自动移出房间。 */
