@@ -250,6 +250,8 @@ function update(data) {
     $($('#status-alert').children()[0].children[1]).html(lostText);
     $($('#status-alert').children()[0].children[1]).css('display', '');
     $($('#status-alert').children()[0].children[2]).css('display', 'none');
+    // 战败后游戏尚未结束，玩家仍在房间内观战，隐藏「返回房间」；彻底结束（game_end）时再显示。
+    $($('#status-alert').children()[0].children[4]).css('display', 'none');
     $('#status-alert').css('display', '');
     hideSurrenderAlert();
     lost = true;
@@ -272,6 +274,8 @@ function update(data) {
     $('#status-alert').css('display', '');
     hideSurrenderAlert();
     $($('#status-alert').children()[0].children[2]).css('display', 'none');
+    // 游戏彻底结束才显示「返回房间」（覆盖战败观战时隐藏的状态）。
+    $($('#status-alert').children()[0].children[4]).css('display', '');
     replayBtn.css('display', replay_id ? '' : 'none');
   }
 }
