@@ -23,7 +23,10 @@
  *      行军纪律——锚点起步半兵（主力出征家里留半）、活跃威胁逼近即
  *      回防（除非斩首更快）、新打击需求不得透支机动兵力（全军 − 驻军
  *      保留）；对峙记忆——活跃威胁消停满 12 tick 才开新打击，不在
- *      「守得住 ↔ 守不住」的平衡点上反复立/废计划；无打击计划时转入
+ *      「守得住 ↔ 守不住」的平衡点上反复立/废计划；集结期入口格不出兵
+ *      切断（入口易位会把输送纵队反复改道）；集结缺口停滞两个观察窗
+ *      （对峙超时）即解散集结并登记重集结闸门，可交付率无实质提升不为
+ *      同一目标再集结（防「屯兵不攻」僵死对峙）；无打击计划时转入
  *      前线突破集结：选一个集结后可突破的对峙点做输送焦点，让前线
  *      兵力朝同一方向汇集成股；
  *   5. opening.planOpening：开局发育规划（约 1–30 tick、无活敌逼近时接管）。
@@ -142,7 +145,10 @@ function attachStrategy(socket, options) {
     enemyMenace: new Map(),
     // planCooldown：打击目标格 → 冷却截止 tick。无望集结（缺口持续扩大）
     // 或目标被大幅增援时弃打并冷却，防止同一目标反复立计划空耗输送。
+    // standoffGate：打击目标格 → 弃打时的可交付率。无望集结/对峙超时弃打
+    // 后，可交付率没有实质提升前不为同一目标再集结（offense 维护）。
     planCooldown: new Map(),
+    standoffGate: new Map(),
     // 对峙记忆：最近一次有活跃威胁的 tick（offense 据此暂缓新打击计划）。
     lastActiveThreatTurn: -1000,
     // 突破集结焦点的跨 tick 记忆（滞回防跳变，offense.breakthrough 维护）。
@@ -176,6 +182,7 @@ function attachStrategy(socket, options) {
     state.threatSnapshot = new Map();
     state.enemyMenace = new Map();
     state.planCooldown = new Map();
+    state.standoffGate = new Map();
     state.lastActiveThreatTurn = -1000;
     state.breakthroughIdx = -1;
     state.deadPlayers = new Set();
