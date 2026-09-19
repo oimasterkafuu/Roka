@@ -8,9 +8,11 @@
   background-size: 16px 16px;
 }
 .s1 .txt {
-  font-size: 10px;
-  transform: scale(0.8);
-  /* 有效字号约 8px，需让黑色描边阴影随字号缩小，否则会吞掉白色笔画使文字看似黑色 */
+  font-size: 8px;
+  color: white;
+  /* 直接以 8px 渲染，不再用 transform: scale(0.8) 缩小 10px 文字——transform 会
+     先按 10px 栅格化再降采样，白色笔画与黑色描边阴影糊成一团使文字看似黑色；
+     描边阴影随字号按比例收窄，避免吞掉笔画 */
   text-shadow: 0 0 0.12em black;
 }
 .s2 {
