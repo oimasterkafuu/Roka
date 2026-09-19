@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.16.17",
+  "version": "1.16.18",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -13,6 +13,7 @@
     "test:bot": "node scripts/test-bot.mjs",
     "test:server-bot": "node scripts/test-server-bot.mjs",
     "test:lobby-guards": "node scripts/test-lobby-guards.mjs",
+    "test:strategy": "node scripts/test-strategy-logic.mjs",
     "observe:bot": "node scripts/observe-bot-match.mjs"
   },
   "repository": {
