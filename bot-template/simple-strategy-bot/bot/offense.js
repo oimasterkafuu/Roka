@@ -23,10 +23,15 @@
  *      除非打击能在威胁到达前端掉威胁来源的最后一座主城（斩首更快）。
  *   6. 机动兵力闸：不开需求超过当前机动兵力（全军 − 各格驻军保留）80%
  *      的新打击——进攻不得倾巢而出。
- *   7. 进行中打击的体检：目标被大幅增援（超出立计划时已计入的自然增长）
- *      即弃打止损；集结缺口连续两个观察窗（各 ≥25 tick）扩大 = 产能跟
- *      不上目标增长的无望集结，弃打转发育。弃打目标进入冷却，防止反复
- *      立计划把机动兵力永远耗在输送上。
+ *   7. 进行中打击的体检：目标被大幅增援（超出立计划时已计入的自然增长——
+ *      含爆发期路径上敌方普通格的 +1/tick）即弃打止损；集结缺口连续两个
+ *      观察窗（各 25 tick）扩大 = 产能跟不上目标增长的无望集结，缺口
+ *      连续两个观察窗不变 = 同速增兵的僵死对峙（对峙超时），均弃打转发育。
+ *      弃打目标进入冷却并登记重集结闸门：可交付率没有实质提升前不为同一
+ *      目标再集结——防止冷却一结束就原地重演集结/对峙（「屯兵不攻」）。
+ *   8. 集结期入口纪律：集结中的入口格是全军的锚，不出兵切断——顺手切断
+ *      会把刚集结的兵力推出去、入口随即易位，输送纵队被新入口反复改道
+ *      （走廊地图「集结 → 入口跳变 → 纵队折返」循环的根因）。
  *
  * 前线突破集结：没有打击计划时，挑一个「集结后可突破」的前线对峙点作为
  * 输送焦点——周边兵力朝同一方向汇集成股，推兵量一旦足够就由扩张/切断
@@ -66,6 +71,18 @@ const ENTRY_EXPOSURE_PENALTY = 0.35;
 const CROWN_GROWTH_PER_HOP = 1;
 // 活跃威胁逼近到此步数内：不开新打击、进行中的打击回防（除非斩首更快）。
 const DEFENSE_BUSY_HOPS = 8;
+// 爆发期区间（与 src/game-engine/tick-growth.ts 一致）：路径上敌方普通格
+// 每 tick +1，进行中打击的「自然增长」基线要把它算上。
+const BURST_START_TURN = 26;
+const BURST_END_TURN = 50;
+// 对峙观察窗长度（tick）：窗口内缺口不变记一次停滞。
+const STANDOFF_WINDOW_TICKS = 25;
+// 连续停滞窗口数达到此值 = 对峙超时：解散集结并登记重集结闸门。
+const STANDOFF_MAX_WINDOWS = 2;
+// 对峙超时弃打的冷却（tick）与重集结闸门：可交付率提升不到此值不为同一
+// 目标再集结（局势没有实质变化时，原地再集一遍只是重演对峙）。
+const STANDOFF_COOLDOWN = 250;
+const STANDOFF_GATE_MARGIN = 0.2;
 // 非锚点入口偏好：成本不超过锚点入口的此倍数时改用普通格入口。
 const NON_ANCHOR_ENTRY_MARGIN = 1.35;
 // 机动兵力闸：新打击需求不得超过机动兵力的此比例（防倾巢而出）。
@@ -418,7 +435,17 @@ function planStillValid(ctx, plan) {
  * focus = 集结焦点（{idx, baseScore}），交给 logistics 生成输送流。
  */
 function planOffense(ctx, state, threats) {
-  const candidates = cutCandidates(ctx);
+  if (!state.standoffGate) {
+    state.standoffGate = new Map();
+  }
+  let candidates = cutCandidates(ctx);
+  // 集结期入口纪律：集结中的入口格是全军的锚，让它顺手切断（哪怕吃得下）
+  // 会把刚集结的兵力推出去、入口随即因 head 不可操作而易位（多源重选），
+  // 输送纵队被新入口反复改道——走廊地图上「集结 → 入口跳变 → 纵队折返」
+  // 循环的根因。集结期入口不出手，等就绪后由 strike 统一开打。
+  if (state.plan?.gathering && typeof state.plan.headIdx === 'number') {
+    candidates = candidates.filter((cand) => !(cand.tag === 'cut' && cand.srcKey === state.plan.headIdx));
+  }
 
   // 突破集结（带跨 tick 滞回，state.breakthroughIdx 记忆上一焦点）。
   // 有活跃威胁时不做突破集结：突破集结的方向与防御集结相反，两边交替
@@ -447,7 +474,23 @@ function planOffense(ctx, state, threats) {
       continue;
     }
     const evaluated = evaluateTarget(ctx, state, target);
-    if (evaluated && (!best || evaluated.score > best.score)) {
+    if (!evaluated) {
+      continue;
+    }
+    // 重集结闸门：该目标上次集结被判「产能跟不上/对峙超时」后，可交付率
+    // 没有实质提升且仍未到开打线时不再为其集结——局势没变，原地再集一遍
+    // 只是重演对峙（「反复向该点聚集却不攻」的阻断闸）。已到开打线（对方
+    // 被削弱/我方兵增够）则闸门自动解除，立即触发进攻。
+    const gate = state.standoffGate.get(target.idx);
+    if (typeof gate === 'number' && !evaluated.ready) {
+      const feas = Math.min(1, evaluated.deliverable / (evaluated.effectiveRequired + 1));
+      if (feas < gate + STANDOFF_GATE_MARGIN) {
+        tr(`turn ${state.turn}: target ${target.idx} owner=${target.owner} 对峙闸门拦下 feas=${feas.toFixed(2)} gate=${gate.toFixed(2)}`);
+        continue;
+      }
+      state.standoffGate.delete(target.idx);
+    }
+    if (!best || evaluated.score > best.score) {
       best = evaluated;
     }
   }
@@ -485,11 +528,19 @@ function planOffense(ctx, state, threats) {
     }
     // 目标被大幅增援即弃打止损，已推进的兵栈转作前哨，该目标进入短冷却。
     // 注意扣除「自然增长」：皇冠目标在集结/行军期本来就 +1/tick（立计划时
-    // 已计入行进期增长），长集结自然涨的兵不算增援——否则会把我方正常
-    // 集结时间误判成敌方增援，集一半就弃打，陷入「集结→弃打→再集结」空耗。
-    const naturalGrowth = best.isCrown
-      ? Math.max(0, state.turn - (meta.startTurn ?? state.turn)) * CROWN_GROWTH_PER_HOP
-      : 0;
+    // 已计入行进期增长），爆发期（26–50 tick）路径穿过的敌方普通格同样
+    // 每 tick +1——漏算后者会把正常的集结耗时误判成敌方增援（走廊长路径
+    // 上尤其明显），集一半就弃打换目标，陷入「集结→弃打→再集结」空耗。
+    const elapsed = Math.max(0, state.turn - (meta.startTurn ?? state.turn));
+    let naturalPerTick = best.isCrown ? CROWN_GROWTH_PER_HOP : 0;
+    if (state.turn >= BURST_START_TURN && state.turn <= BURST_END_TURN) {
+      for (const cell of best.path) {
+        if (ctx.isEnemyIdx(cell) && ctx.tileKind(cell) === 'plain') {
+          naturalPerTick += 1;
+        }
+      }
+    }
+    const naturalGrowth = elapsed * naturalPerTick;
     if (
       best.effectiveRequired >
       meta.startRequired + naturalGrowth + Math.max(15, Math.ceil(meta.startRequired * 0.35))
@@ -502,28 +553,45 @@ function planOffense(ctx, state, threats) {
       state.plan = null;
       return { candidates, focus: breakthrough() };
     }
-    // 无望集结：缺口（需求 − 可交付）连续两个观察窗（各 ≥25 tick）扩大 =
-    // 产能跟不上目标增长（典型：对方皇冠更多，需求 +1/tick 比我输送快）。
-    // 拖着只会把全部机动兵力永远耗在集结上——弃打转发育，产能反超后冷却
-    // 结束自然重开。缺口 ≤ 0（可交付已饱和）时不追踪：集结只是时间问题。
+    // 无望集结：缺口（需求 − 可交付）连续两个观察窗扩大 = 产能跟不上目标
+    // 增长（典型：对方皇冠更多，需求 +1/tick 比我输送快）；对峙超时：缺口
+    // 连续两个观察窗既不扩大也不缩小 = 双方同速增兵的僵死对峙，再等一百年
+    // 也不会开打。两者都拖着只会把全部机动兵力永远耗在集结上——弃打转发育，
+    // 并登记重集结闸门（standoffGate）：可交付率没有实质提升前不为同一目标
+    // 再集结，防止冷却一结束就原地重演集结/对峙（「屯兵不攻」的根因）。
+    // 缺口 ≤ 0（可交付已饱和）时不追踪：集结只是时间问题。
     if (!best.ready) {
       const gap = best.effectiveRequired - best.deliverable;
       if (gap <= 0) {
         meta.gapAt = undefined;
         meta.lastGap = undefined;
         meta.gapGrew = 0;
-      } else if (typeof meta.gapAt === 'number' && state.turn - meta.gapAt >= 25) {
+        meta.gapStalled = 0;
+      } else if (typeof meta.gapAt === 'number' && state.turn - meta.gapAt >= STANDOFF_WINDOW_TICKS) {
         const grew = gap > meta.lastGap + 2;
+        const shrank = gap < meta.lastGap - 2;
         meta.gapGrew = grew ? (meta.gapGrew || 0) + 1 : 0;
+        meta.gapStalled = !grew && !shrank ? (meta.gapStalled || 0) + 1 : 0;
         tr(
           `turn ${state.turn}: 集结窗口检查 gap=${gap} lastGap=${meta.lastGap} grew=${grew} ` +
-            `gapGrew=${meta.gapGrew} effReq=${best.effectiveRequired} deliver=${best.deliverable}`,
+            `gapGrew=${meta.gapGrew} gapStalled=${meta.gapStalled} effReq=${best.effectiveRequired} deliver=${best.deliverable}`,
         );
         meta.lastGap = gap;
         meta.gapAt = state.turn;
-        if (meta.gapGrew >= 2) {
-          tr(`turn ${state.turn}: 无望集结弃打 target=${best.targetIdx}，冷却 150`);
-          state.planCooldown.set(best.targetIdx, state.turn + 150);
+        if (meta.gapGrew >= 2 || meta.gapStalled >= STANDOFF_MAX_WINDOWS) {
+          const hopeless = meta.gapGrew >= 2;
+          // 对峙闸门记录当前可交付率：唯有局势实质改善（率提升
+          // 达标/直接到开打线）才允许为该目标再集结。
+          state.standoffGate.set(
+            best.targetIdx,
+            Math.min(1, best.deliverable / (best.effectiveRequired + 1)),
+          );
+          const cooldown = hopeless ? 150 : STANDOFF_COOLDOWN;
+          tr(
+            `turn ${state.turn}: ${hopeless ? '无望集结' : '对峙超时'}弃打 target=${best.targetIdx}，` +
+              `冷却 ${cooldown}，闸门=${state.standoffGate.get(best.targetIdx).toFixed(2)}`,
+          );
+          state.planCooldown.set(best.targetIdx, state.turn + cooldown);
           state.plan = null;
           return { candidates, focus: breakthrough() };
         }
@@ -531,6 +599,7 @@ function planOffense(ctx, state, threats) {
         meta.lastGap = gap;
         meta.gapAt = state.turn;
         meta.gapGrew = 0;
+        meta.gapStalled = 0;
       }
     }
   }
@@ -591,7 +660,7 @@ function planOffense(ctx, state, threats) {
   //      有 15% 根基——龟缩对手的皇冠需求虽在增长，但我方产能更高时，
   //      长集结一定收敛；这条线让「终结龟缩」的仗能集起来。
   if (!best.ready) {
-    const burst = ctx.state.turn >= 26 && ctx.state.turn <= 50;
+    const burst = ctx.state.turn >= BURST_START_TURN && ctx.state.turn <= BURST_END_TURN;
     const myProd = ctx.myCrowns().length + (burst ? ctx.stats().myLand : 0);
     const targetProd = best.isCrown ? 1 : 0;
     const windowTicks = Math.ceil(GATHER_OPS / 2);
@@ -622,16 +691,19 @@ function planOffense(ctx, state, threats) {
   if (prevPlan?.targetIdx !== best.targetIdx) {
     tr(`turn ${state.turn}: 立打击计划 target=${best.targetIdx} owner=${best.owner} effReq=${best.effectiveRequired} deliver=${best.deliverable} ready=${best.ready}`);
   }
-  // 携带同目标旧计划的体检元数据（立计划需求基线、缺口趋势）。
+  // 携带同目标旧计划的体检元数据（立计划需求基线、缺口趋势、集结期标记）。
   if (prevPlan && prevPlan.targetIdx === best.targetIdx) {
     state.plan.startRequired = prevPlan.startRequired;
     state.plan.startTurn = prevPlan.startTurn;
     state.plan.lastGap = prevPlan.lastGap;
     state.plan.gapAt = prevPlan.gapAt;
     state.plan.gapGrew = prevPlan.gapGrew;
+    state.plan.gapStalled = prevPlan.gapStalled;
+    state.plan.gathering = prevPlan.gathering;
   }
 
   if (best.ready) {
+    state.plan.gathering = false;
     const next = best.path[1];
     candidates.push({
       score: best.payoff >= 1000 ? 820 : best.isCrown ? 610 : 560,
@@ -657,6 +729,8 @@ function planOffense(ctx, state, threats) {
     return { candidates, focus: null };
   }
 
+  // 集结期标记：入口格在集结期间不出兵切断（见 planOffense 入口纪律）。
+  state.plan.gathering = true;
   return { candidates, focus: { idx: best.entry, baseScore: 340 } };
 }
 
