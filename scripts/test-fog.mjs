@@ -6,6 +6,7 @@
 //    b. fog=1 的格子 grid_type ∈ {200, 201, 204} 且 army_cnt=0（视野外只泄地形）；
 //    c. 己方主城格 fog=0；视野内只能看到 1 座主城（自己的）；
 // 3) 对照房间：默认配置（不开迷雾）的 update 帧不得携带 fog 字段。
+// 4) Bot 房间（issue #51）：bot 进房后迷雾被强制关闭，且房主再次开启请求被拒绝。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 90 秒。
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -27,6 +28,8 @@ const HARD_TIMEOUT_MS = 90_000;
 const SERVER_READY_TIMEOUT_MS = 20_000;
 const ROOM_FOG = 'fogroom';
 const ROOM_PLAIN = 'plainroom';
+const ROOM_BOT = 'botroom';
+const BOT_TOKEN = 'test-token-fog';
 
 const startedAt = Date.now();
 const children = new Set();
@@ -131,10 +134,11 @@ async function signUser(store, jwtSecret, username, password) {
  * 最小对局客户端：进房自动准备；像前端一样合并 update 帧
  * （全量/差分），把合并后的最新局面快照存到 client.board 供断言。
  */
-function createGameClient(baseUrl, { cookie, room, name, autoReady = true }) {
+function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botToken }) {
   const socket = ioClient(baseUrl, {
     transports: ['websocket', 'polling'],
     extraHeaders: cookie ? { cookie: `auth_token=${encodeURIComponent(cookie)}` } : undefined,
+    auth: botToken ? { token: botToken } : undefined,
     reconnection: false,
   });
   sockets.add(socket);
@@ -188,7 +192,7 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true }) {
     merge('fog', data.fog);
   });
   socket.on('room_update', (data) => {
-    if (room === ROOM_FOG && typeof data?.fog !== 'undefined') {
+    if (typeof data?.fog !== 'undefined') {
       client.roomFogFlag = Boolean(data.fog);
     }
     if (!autoReady || !client.clientId || !Array.isArray(data?.players) || data?.in_game) return;
@@ -270,10 +274,15 @@ async function main() {
   const tokenB = await signUser(store, env.jwtSecret, 'fog_b', 'fog-pass-2');
   const tokenC = await signUser(store, env.jwtSecret, 'fog_c', 'fog-pass-3');
   const tokenD = await signUser(store, env.jwtSecret, 'fog_d', 'fog-pass-4');
+  const tokenE = await signUser(store, env.jwtSecret, 'fog_e', 'fog-pass-5');
 
   const server = spawn('node', [serverEntry, '--port', String(port)], {
     cwd: rootDir,
-    env: { ...process.env, ROKA_DATA_DIR: dataDir },
+    env: {
+      ...process.env,
+      ROKA_DATA_DIR: dataDir,
+      ROKA_BOT_TOKENS: `${BOT_TOKEN}:bot_fog`,
+    },
   });
   children.add(server);
   server.stderr.on('data', (chunk) => log(`服务器 stderr: ${String(chunk).trim()}`));
@@ -317,7 +326,31 @@ async function main() {
   }
   log('场景 2 通过：普通对局协议不变（无 fog 字段）');
 
-  finish(0, '测试通过：迷雾过滤与默认兼容均符合预期');
+  // 场景 3：Bot 房间强制禁用迷雾（issue #51）
+  log('场景 3：Bot 进房强制关闭迷雾');
+  const e = createGameClient(baseUrl, { cookie: tokenE, room: ROOM_BOT, name: 'E', autoReady: false });
+  await waitFor(() => e.clientId !== '', 5000, 'E 进房');
+  await sleep(300);
+  e.socket.emit('change_game_conf', { fog: true });
+  await waitFor(() => e.roomFogFlag === true, 5000, '纯人类房间开启迷雾');
+  log('纯人类房间可正常开启迷雾');
+  const bot = createGameClient(baseUrl, {
+    botToken: BOT_TOKEN,
+    room: ROOM_BOT,
+    name: 'BOT',
+    autoReady: false,
+  });
+  await waitFor(() => bot.clientId !== '', 5000, 'Bot 进房');
+  await waitFor(() => e.roomFogFlag === false, 5000, 'bot 进房后迷雾被强制关闭');
+  log('bot 进房后迷雾已强制关闭');
+  e.socket.emit('change_game_conf', { fog: true });
+  await sleep(800);
+  if (e.roomFogFlag !== false) {
+    throw new Error('房间内有 bot 时房主仍能开启迷雾');
+  }
+  log('场景 3 通过：bot 房间无法开启迷雾');
+
+  finish(0, '测试通过：迷雾过滤、默认兼容与 bot 房禁用均符合预期');
 }
 
 main().catch((error) => finish(1, `测试异常：${error.stack || error.message}`));
