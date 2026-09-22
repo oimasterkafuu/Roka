@@ -1,6 +1,8 @@
 //map format
 //n,m,turn
 //grid_type[n][m] byte 0~49=army 50~99=city 100~149=generals 150~199=swamp with army 200=empty 201=mountain 204=swamp
+//迷雾对局（fog=1 格）：201 兼作「未知占位」（山+问号），204 沼泽始终可见；
+//视野内敌方 city/generals 由服务端降级为普通领地（owner id），不下发建筑身份
 //army_cnt[n][m] int
 
 $(document).ready(function () {
@@ -372,7 +374,9 @@ function moveSelected(d, shift) {
   var nx = selx + dire[d].x,
     ny = sely + dire[d].y;
   if (nx < 0 || ny < 0 || nx >= n || ny >= m) return;
-  if (grid_type[nx][ny] == 201) return;
+  // 山脉不可通行；但迷雾对局中视野外格子统一为未知占位 201（山+问号），
+  // 无法与真实山脉区分——迷雾格允许入队，无效操作由服务器执行时校验跳过。
+  if (grid_type[nx][ny] == 201 && !fog[nx][ny]) return;
   // 命令可能有效时才入队：链式入队（队列非空，由服务器执行时校验），或当前选中
   // 己方正常领土且兵力 > 1（兵力 ≤ 1 时三种模式推出量均为 0；孤军不可推兵）。
   // 即使不入队、不显示箭头，光标也始终跟随移动——光标保持“活着”。

@@ -373,7 +373,7 @@
   }
 
   function refreshVisibility() {
-    // Roka 默认无迷雾：教程同样全图可见。
+    // Roka 默认不开启迷雾远征：教程同样全图可见。
     state.visible = createMatrix(BOARD_ROWS, BOARD_COLS, function () {
       return true;
     });
