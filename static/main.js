@@ -293,6 +293,7 @@ function replayStart() {
     init_map(replay_data.n, replay_data.m);
     in_game = true;
     cur_turn = 0;
+    initReplayViewTabs();
     update(replay_data.initial);
   }
 }

@@ -165,7 +165,7 @@ function decodeReplayBinary(buffer) {
     };
   }
 
-  function readReplayMeta() {
+  function readReplayMeta(version) {
     if (offset >= view.byteLength) {
       return null;
     }
@@ -183,9 +183,12 @@ function decodeReplayBinary(buffer) {
       playerNames[i] = readString();
       playerTeams[i] = readU8();
     }
+    // RPB4 起 meta 末尾带 fog 标志；旧版本一律视为未开启迷雾。
+    var fog = version >= 4 ? readU8() == 1 : false;
     return {
       player_names: playerNames,
       player_teams: playerTeams,
+      fog: fog,
     };
   }
 
@@ -197,6 +200,8 @@ function decodeReplayBinary(buffer) {
   ) {
     var versionByte = readU8();
     if (versionByte == replay_binary_magic[3]) {
+      version = 4;
+    } else if (versionByte == replay_binary_magic_v3[3]) {
       version = 3;
     } else if (versionByte == replay_binary_magic_v2[3]) {
       version = 2;
@@ -219,7 +224,7 @@ function decodeReplayBinary(buffer) {
       backward: readPatchPayload(version),
     };
   }
-  var meta = readReplayMeta();
+  var meta = readReplayMeta(version);
   return {
     n: n,
     m: m,
