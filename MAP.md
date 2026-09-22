@@ -93,7 +93,7 @@ JWT 载荷 `{sub, sid}`，`sid` 经 `userStore.isSessionValid` 校验（重登�
 ### 对局引擎
 
 **src/game-engine.ts** — 对局核心：全状态 + Tick 主循环，无战雾全图广播。
-`GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X 建指挥所/C 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连 ×2）→ AFK 判定 → 胜负判定 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量）。对外接口：`addMove/addBuild/clearQueue/popQueue/addSpectator/sendMessage/surrender/leaveGame`。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、补发 `init_map`+全量帧）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。回放：终局 `saveHistory` 存 ops-v1 操作流；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（回放重建、地图示例均走此路）。
+`GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X/Q 建指挥所、C/E 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连 ×2）→ AFK 判定 → 胜负判定 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量）。对外接口：`addMove/addBuild/clearQueue/popQueue/addSpectator/sendMessage/surrender/leaveGame`。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、补发 `init_map`+全量帧）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。回放：终局 `saveHistory` 存 ops-v1 操作流；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（回放重建、地图示例均走此路）。
 
 **src/game-engine/constants.ts** — 数值常量集中地。
 `LEFT_GAME=52`、`AFK_MIN_TURNS=60`/`AFK_MIN_MS=60_000`（挂机投降需同时满足）、`DISCONNECT_GRACE_MS=10_000`（掉线宽限，1 倍速=20 tick）、`ISOLATED_DECAY_RATIO=0.05`、`ISOLATED_GRACE_TICKS=10`。调平衡数值只改这里。
@@ -202,7 +202,7 @@ _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本
 _一句话：对局/回放页骨架与脚本加载顺序。_
 
 **static/main.js** — 对局/回放主控制器：socket 生命周期、键鼠触屏输入、本地操作队列、房间渲染、回放加载。
-回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）并启动房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；`room_update` 对比成员 uid 快照检测新玩家进房、`starting` 表示开局，两者在页面后台时经 `notify.js` 弹浏览器通知；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/T/Enter/Esc/空格。
+回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）并启动房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；`room_update` 对比成员 uid 快照检测新玩家进房、`starting` 表示开局，两者在页面后台时经 `notify.js` 弹浏览器通知；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/R/F/T/Enter/Esc/空格（X/Q 建指挥所、C/E 升级主城、R 清空队列、F 撤销队尾）。
 _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 
 **static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`。

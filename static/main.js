@@ -387,11 +387,11 @@ function buildSelected(op) {
   // 执行时由服务器校验，条件不满足会自动跳过并继续执行后续操作。
   if (cellType == 201 || cellType == 204 || (cellType >= 150 && cellType < 200)) return;
   if (op == 'b') {
-    // X 建指挥所：普通地块（已有建筑则无效）
+    // X/Q 建指挥所：普通地块（已有建筑则无效）
     if (cellType >= 50 && cellType != 200) return;
     addbuild(selx, sely, 'b');
   } else {
-    // C：己方指挥所直接升级主城；普通地块连续入队两步——先建指挥所、下一回合再升级主城
+    // C/E：己方指挥所直接升级主城；普通地块连续入队两步——先建指挥所、下一回合再升级主城
     if (cellType >= 100 && cellType != 200) return;
     if (cellType >= 50 && cellType % 50 == player) {
       addbuild(selx, sely, 'c');
@@ -470,13 +470,13 @@ function keypress(key, shift) {
       moveSelected(2, shift);
     } else if (key == 'd' || key == 39) {
       moveSelected(3, shift);
-    } else if (key == 'x') {
+    } else if (key == 'x' || key == 'q') {
       buildSelected('b');
-    } else if (key == 'c') {
+    } else if (key == 'c' || key == 'e') {
       buildSelected('c');
-    } else if (key == 'q') {
+    } else if (key == 'r') {
       clear_queue();
-    } else if (key == 'e') {
+    } else if (key == 'f') {
       pop_queue();
     } else if (key == 't') {
       if (!chat_focus) {
