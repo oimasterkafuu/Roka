@@ -122,7 +122,7 @@ class LobbyService {
     return value;
   }
 
-  joinLobby(sid: string, uid: string, gid: string, options?: { serverBot?: boolean }): void {
+  joinLobby(sid: string, uid: string, gid: string, options?: { serverBot?: boolean; bot?: boolean }): void {
     this.lobbyOfSid.set(sid, gid);
     // 进房本身即是「标签页开启」的证明，作为心跳基线。
     this.lobbyHeartbeats.set(sid, Date.now());
@@ -166,6 +166,14 @@ class LobbyService {
     }
 
     const player: LobbyPlayer = { sid, uid, team: targetTeam, ready: false };
+    if (options?.serverBot || options?.bot) {
+      // Bot 对局不支持迷雾远征（issue #51）：bot 进房时若迷雾已开启则强制关闭，
+      // 房主后续重新开启的请求在 server.ts 的 change_game_conf 里拦截。
+      player.bot = true;
+      if (conf.fog) {
+        conf.fog = false;
+      }
+    }
     if (options?.serverBot) {
       // 托管策略 Bot 所在房间不允许组队：若房间已开启组队，进房时强制关闭并规整队伍。
       if (conf.allow_team) {
@@ -289,6 +297,7 @@ class LobbyService {
       team: player.team,
       ready: Boolean(player.ready && player.team !== 0),
       ...(player.serverBot === true ? { server_bot: true } : {}),
+      ...(player.bot === true ? { bot: true } : {}),
     }));
 
     const ready = players.filter((player) => player.ready && player.team !== 0).length;

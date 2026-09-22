@@ -33,6 +33,8 @@ export interface LobbyPlayer {
   ready: boolean;
   /** 服务端托管策略 Bot（管理后台启动）：进房时排在普通成员之后，不当房主。 */
   serverBot?: boolean;
+  /** 任意 Bot 成员（第三方 bot 令牌或服务端托管）：bot 房禁用迷雾远征（issue #51）。 */
+  bot?: boolean;
 }
 
 export interface RoomPlayerView {
@@ -42,6 +44,8 @@ export interface RoomPlayerView {
   ready: boolean;
   /** 服务端托管策略 Bot（管理后台启动）标记，仅在为 true 时下发。 */
   server_bot?: boolean;
+  /** Bot 成员标记（仅在为 true 时下发）：前端据此禁用迷雾开关。 */
+  bot?: boolean;
 }
 
 export interface RoomUpdatePayload {

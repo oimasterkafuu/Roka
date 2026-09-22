@@ -1351,8 +1351,10 @@ const boot = async (): Promise<void> => {
 
       if (!lobbyService.lobbyOfSid.has(socket.id)) {
         const hadAllowTeam = lobbyService.lobbyConfig.get(room)?.allow_team === true;
+        const hadFog = lobbyService.lobbyConfig.get(room)?.fog === true;
         lobbyService.joinLobby(socket.id, username, room, {
           serverBot: socket.data.isServerBot === true,
+          bot: socket.data.isBot === true,
         });
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
@@ -1364,6 +1366,10 @@ const boot = async (): Promise<void> => {
           lobbyService.lobbyConfig.get(room)?.allow_team === false
         ) {
           lobbyService.sendLobbySystemMessage(io, roomVal, '官方策略 Bot 进入房间，组队模式已关闭。');
+        }
+        // Bot 进房会强制关闭迷雾远征（见 lobby-service.joinLobby），补充提示。
+        if (socket.data.isBot === true && hadFog && lobbyService.lobbyConfig.get(room)?.fog === false) {
+          lobbyService.sendLobbySystemMessage(io, roomVal, 'Bot 进入房间，迷雾远征已关闭。');
         }
         lobbyService.emitHomeRooms(io);
         if (lobbyService.isLobbyGameRunning(room)) {
@@ -1520,8 +1526,15 @@ const boot = async (): Promise<void> => {
           const fogRaw = payload.fog;
           const fog = Boolean(fogRaw === true || fogRaw === 1 || fogRaw === '1' || fogRaw === 'true');
           if (fog !== (oldConf.fog === true)) {
-            nextConf.fog = fog;
-            changed.push('fog');
+            if (fog && players.some((player) => player.bot === true)) {
+              // 房间内有 Bot（第三方或官方托管）时禁止开启迷雾远征：拒绝改动
+              // 并回发房间状态复位前端开关。
+              lobbyService.sendLobbySystemMessage(io, roomVal, 'Bot 对局不支持迷雾远征，无法开启。');
+              lobbyService.emitRoomUpdate(io, gid);
+            } else {
+              nextConf.fog = fog;
+              changed.push('fog');
+            }
           }
         }
 
