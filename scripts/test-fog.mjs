@@ -1,4 +1,4 @@
-// 战争迷雾（issue #27）冒烟测试：
+// 迷雾远征（issue #27）冒烟测试：
 // 1) 临时数据目录 + 随机端口启动 dist/server.js，注册 4 个合成用户；
 // 2) 迷雾房间：房主 change_game_conf { fog: true }，双人对局开始后校验
 //    客户端合并后的局面满足迷雾不变量——
@@ -292,7 +292,7 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   // 场景 1：迷雾房间
-  log('场景 1：开启战争迷雾的房间');
+  log('场景 1：开启迷雾远征的房间');
   const a = createGameClient(baseUrl, { cookie: tokenA, room: ROOM_FOG, name: 'A', autoReady: false });
   await waitFor(() => a.clientId !== '', 5000, 'A 进房');
   const b = createGameClient(baseUrl, { cookie: tokenB, room: ROOM_FOG, name: 'B', autoReady: false });
