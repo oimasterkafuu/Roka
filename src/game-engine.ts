@@ -24,6 +24,7 @@ import {
 import { selectMazeGenerals, selectRandomGenerals } from './game-engine/general-selection';
 import { buildFinalRank, buildLeaderboard } from './game-engine/leaderboard';
 import { buildFullVisionArrays } from './game-engine/map-encoding';
+import { buildFoggedVisionArrays, computeTeamVisibility } from './game-engine/fog-vision';
 import { buildReplayPatch, getDiff } from './game-engine/replay-helpers';
 import { buildScheduledReplayActions } from './game-engine/replay-scheduling';
 import { buildReplayPlayerOps, buildTurnMoves } from './game-engine/replay-turns';
@@ -132,6 +133,12 @@ export class GameEngine {
 
   private readonly mapMode: MapMode;
 
+  /**
+   * 战争迷雾开关（房间设置）：开启后存活参赛者只收到己方队伍视野内的
+   * 归属/兵力，视野外仅地形；观战者、出局者与回放始终全视野。
+   */
+  private readonly fogEnabled: boolean;
+
   private readonly rng: SeededRandom;
 
   private readonly replayMeta: ReplayMeta;
@@ -158,6 +165,9 @@ export class GameEngine {
   private readonly armyCntLast: number[][];
 
   private readonly isolatedLast: number[][];
+
+  /** 迷雾帧 diff 基线（仅迷雾对局使用），与 gridTypeLast 平行按玩家维护。 */
+  private readonly fogLast: number[][];
 
   private readonly deadOrder: number[];
 
@@ -237,6 +247,7 @@ export class GameEngine {
 
     this.mapToken = normalizeMapToken(gameConf.map_token) || 'default';
     this.mapMode = gameConf.map_mode;
+    this.fogEnabled = gameConf.fog === true;
     this.mapSeed = resolveMapSeed(this.mapMode, this.mapToken);
     this.rng = new SeededRandom(this.mapSeed);
     const seededCityRatio = resolveSeededTerrainRatio(this.mapSeed, 'city_ratio');
@@ -256,6 +267,7 @@ export class GameEngine {
       swamp_ratio: gameConf.swamp_ratio,
       speed: gameConf.speed,
       allow_team: gameConf.allow_team,
+      fog: gameConf.fog === true,
       map_token: this.mapToken,
       map_mode: gameConf.map_mode,
       player_names: [...gameConf.player_names],
@@ -273,6 +285,7 @@ export class GameEngine {
     this.gridTypeLast = Array.from({ length: pcnt }, () => []);
     this.armyCntLast = Array.from({ length: pcnt }, () => []);
     this.isolatedLast = Array.from({ length: pcnt }, () => []);
+    this.fogLast = Array.from({ length: pcnt }, () => []);
     this.deadOrder = Array.from({ length: pcnt }, () => 0);
     this.replayTurnMoves = [];
     this.replayTurnSurrenders = Array.from({ length: pcnt }, () => new Set<number>());
@@ -321,6 +334,7 @@ export class GameEngine {
       {
         ...meta,
         allow_team: meta.allow_team ?? false,
+        fog: meta.fog === true,
         map_size_version: meta.map_size_version ?? 1,
       },
       dummyPlayerSids,
@@ -359,6 +373,7 @@ export class GameEngine {
       {
         ...replay.meta,
         allow_team: replay.meta.allow_team ?? false,
+        fog: replay.meta.fog === true,
         map_size_version: replay.meta.map_size_version ?? 1,
       },
       dummyPlayerSids,
@@ -674,27 +689,67 @@ export class GameEngine {
     return { x: op.x, y: op.y, dx: -1, dy: -1, half: false, mode: 0, op: op.kind, skip };
   }
 
+  /**
+   * 迷雾是否作用于该玩家：仅存活参赛者被过滤；观战席（team 0）、
+   * 已出局转观战者与外部观战者始终全视野。
+   */
+  private fogAppliesToPlayer(p: number): boolean {
+    return this.fogEnabled && this.team[p] !== 0 && !this.spec[p] && this.pstat[p] !== LEFT_GAME;
+  }
+
+  /**
+   * 按接收者构建地图快照（p = -1 表示观战者）。迷雾对局中存活参赛者得到
+   * 视野过滤后的数组与 fog 标记；其余接收者为全视野。fog 仅在迷雾对局
+   * 中非 null（全视野接收者为全 0，用于复位客户端可能残留的遮罩）。
+   */
+  private buildSnapshotFor(
+    p: number,
+    visionCache: Map<number, number[]>,
+  ): { grid_type: number[]; army_cnt: number[]; isolated: number[]; fog: number[] | null } {
+    const state = {
+      n: this.n,
+      m: this.m,
+      gridType: this.gridType,
+      owner: this.owner,
+      armyCnt: this.armyCnt,
+      isolated: this.isolated,
+      isolatedAge: this.isolatedAge,
+    };
+    if (p >= 0 && this.fogAppliesToPlayer(p)) {
+      const teamId = this.team[p];
+      let visible = visionCache.get(teamId);
+      if (!visible) {
+        visible = computeTeamVisibility(
+          this.n,
+          this.m,
+          this.owner,
+          (ownerId) => this.team[ownerId - 1],
+          teamId,
+        );
+        visionCache.set(teamId, visible);
+      }
+      return buildFoggedVisionArrays(state, visible);
+    }
+    const arrays = buildFullVisionArrays(state);
+    return {
+      ...arrays,
+      fog: this.fogEnabled ? new Array<number>(this.n * this.m).fill(0) : null,
+    };
+  }
+
   private async sendMap(stat: boolean): Promise<void> {
     let historyHash: string | undefined;
 
     const kills = this.recentKills;
     this.recentKills = {};
     const leaderboard = this.buildLeaderboard();
+    const visionCache = new Map<number, number[]>();
 
     for (let p = -1; p < this.playerSids.length; p += 1) {
       if (p !== -1 && !this.watching[p]) {
         continue;
       }
-      // Roka 无战雾：所有玩家与旁观者始终获得全图视野。
-      const snapshot = buildFullVisionArrays({
-        n: this.n,
-        m: this.m,
-        gridType: this.gridType,
-        owner: this.owner,
-        armyCnt: this.armyCnt,
-        isolated: this.isolated,
-        isolatedAge: this.isolatedAge,
-      });
+      const snapshot = this.buildSnapshotFor(p, visionCache);
 
       const lstMovePayload = this.toMovePayload(
         p === -1 ? null : this.lstMove[p],
@@ -726,6 +781,10 @@ export class GameEngine {
             is_diff: true,
           };
 
+      if (snapshot.fog) {
+        payload.fog = fullSnapshot ? snapshot.fog : getDiff(snapshot.fog, this.fogLast[p]);
+      }
+
       if (historyHash) {
         payload.replay = historyHash;
       }
@@ -734,6 +793,9 @@ export class GameEngine {
         this.gridTypeLast[p] = snapshot.grid_type;
         this.armyCntLast[p] = snapshot.army_cnt;
         this.isolatedLast[p] = snapshot.isolated;
+        if (snapshot.fog) {
+          this.fogLast[p] = snapshot.fog;
+        }
         this.lstMove[p] = null;
         this.lstSkip[p] = 0;
         this.update(this.playerSids[p], payload);
@@ -750,17 +812,17 @@ export class GameEngine {
   }
 
   private buildFullVisionPayload(gameEnd: boolean): UpdatePayload {
-    const snapshot = buildFullVisionArrays({
-      n: this.n,
-      m: this.m,
-      gridType: this.gridType,
-      owner: this.owner,
-      armyCnt: this.armyCnt,
-      isolated: this.isolated,
-      isolatedAge: this.isolatedAge,
-    });
+    return this.buildFullFramePayload(-1, gameEnd);
+  }
 
-    return {
+  /**
+   * 全量帧（is_diff=false）：观战者恒为全视野；参赛者按迷雾规则过滤，
+   * 用于断线重连换绑后的状态补发。
+   */
+  private buildFullFramePayload(p: number, gameEnd: boolean): UpdatePayload {
+    const snapshot = this.buildSnapshotFor(p, new Map<number, number[]>());
+
+    const payload: UpdatePayload = {
       grid_type: snapshot.grid_type,
       army_cnt: snapshot.army_cnt,
       isolated: snapshot.isolated,
@@ -771,6 +833,10 @@ export class GameEngine {
       game_end: gameEnd,
       is_diff: false,
     };
+    if (snapshot.fog) {
+      payload.fog = snapshot.fog;
+    }
+    return payload;
   }
 
   addMove(playerSid: string, x: number, y: number, dx: number, dy: number, mode: MoveMode): void {
@@ -889,7 +955,7 @@ export class GameEngine {
       player_ids: [...this.playerIds],
       general: this.generals[id],
     });
-    this.update(newSid, this.buildFullVisionPayload(false));
+    this.update(newSid, this.buildFullFramePayload(id, false));
     return true;
   }
 

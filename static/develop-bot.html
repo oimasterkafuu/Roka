@@ -297,9 +297,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>change_game_conf</code></th>
             <td>
               可选字段 patch：<code>speed</code>（0.5~4）、<code>allow_team</code>（bool）、
-              <code>map_mode</code
-              >（<code>random|maze|archipelago|mediterranean</code>）、<code>map_token</code>（最长 32）。
-              仅房主可改。房间内有服务端托管策略 Bot 时不允许组队：
+              <code>fog</code
+              >（bool，战争迷雾）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean</code>）、<code>map_token</code>（最长
+              32）。 仅房主可改。房间内有服务端托管策略 Bot 时不允许组队：
               <code>allow_team</code> 开启请求会被拒绝（房间消息提示），且托管 Bot
               进房时会强制关闭已开启的组队模式。
             </td>
@@ -322,7 +322,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>room_update</code></th>
             <td>
               房间状态快照：
-              <code>{ speed, allow_team, map_token, map_mode, in_game, players, ready, need }</code>。
+              <code>{ speed, allow_team, fog, map_token, map_mode, in_game, players, ready, need }</code>。
+              <code>fog=true</code> 表示本房间开启了战争迷雾。
             </td>
           </tr>
           <tr>
@@ -388,7 +389,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th>整体结构</th>
             <td>
               <code
-                >{ grid_type, army_cnt, isolated, lst_move, leaderboard, turn, kills, game_end, is_diff,
+                >{ grid_type, army_cnt, isolated, fog?, lst_move, leaderboard, turn, kills, game_end, is_diff,
                 replay? }</code
               >
             </td>
@@ -423,6 +424,16 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               <code>0</code> 正常；<code>1</code> 断链宽限期（断链后前 5 回合 / 10
               Tick，只闪烁、尚未衰减）；<code>2</code> 衰减期（第 11 Tick 起每回合 / 每 2 Tick 衰减 max(1,
               ⌈兵力×5%⌉)，归零变中立）。
+            </td>
+          </tr>
+          <tr>
+            <th><code>fog</code></th>
+            <td>
+              可选数组，仅房间开启「战争迷雾」的实时对局下发（回放与观战不含视野过滤）：长度
+              <code>n*m</code>（差分帧同样为 index-value 对），<code>1</code> 表示该格在己方队伍视野外。 视野
+              = 己方（含队友）任意格子的切比雪夫距离 1 范围。迷雾格的 <code>grid_type</code> 只保留地形（山
+              201 / 中立沼泽 204 / 其余一律 200 中立空地）， <code>army_cnt</code> 与
+              <code>isolated</code> 均为 0——视野外的敌方归属与兵力不会下发， 机器人按中立空地处理即可。
             </td>
           </tr>
           <tr>
@@ -501,8 +512,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           </tr>
         </table>
         <p style="margin-top: 8px">
-          <code>army_cnt</code> 与 <code>grid_type</code> 同维度。没有战争迷雾：<code>update</code>
-          始终携带全图真实状态（全图可见）。
+          <code>army_cnt</code> 与 <code>grid_type</code> 同维度。默认无战争迷雾：<code>update</code>
+          始终携带全图真实状态（全图可见）；房间开启「战争迷雾」时改为按视野过滤（见
+          <code>fog</code> 字段说明）。
         </p>
 
         <h3>4.4 规则要点（与旧版 / generals.io 的差异）</h3>
@@ -510,7 +522,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           <li>主城每 Tick +1 兵；普通地块与指挥所每 50 Tick +1（仅正常状态；指挥所不享受爆发加成）。</li>
           <li>第 26~50 Tick 为全局爆发期：正常普通领土每 Tick 额外 +1。</li>
           <li>
-            无战争迷雾：全图始终可见，<code>update</code> 始终为全图真实状态（202/203/205 迷雾编码已废弃）。
+            战争迷雾为可开关的房间设置（默认关闭）：关闭时全图始终可见（202/203/205
+            迷雾编码已废弃）；开启时存活参赛者仅收到己方队伍视野内的归属与兵力，视野外只下发地形 并附
+            <code>fog</code> 标记，观战者与回放仍全视野。
           </li>
           <li>
             城市（指挥所）不再由地图预置，只能由玩家建造：X / Q 建指挥所消耗 50 兵，C / E 升级主城再消耗 50

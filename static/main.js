@@ -151,6 +151,7 @@ var n,
 var grid_type,
   army_cnt,
   isolated,
+  fog,
   have_build,
   have_route = Array(4);
 var route;
@@ -310,9 +311,14 @@ function init_map(_n, _m, general) {
   }
   isolated = Array(n);
   have_build = Array(n);
+  fog = Array(n);
   for (var i = 0; i < n; i++) {
     isolated[i] = Array(m);
     have_build[i] = Array(m);
+    fog[i] = Array(m);
+    for (var j = 0; j < m; j++) {
+      fog[i][j] = 0;
+    }
   }
   for (var d = 0; d < 4; d++) {
     have_route[d] = Array(n);
@@ -747,6 +753,7 @@ socket.on('disconnect', function (reason) {
 socket.on('room_update', function (data) {
   setTabVal('game-speed', data.speed + 'x');
   setAllowTeamModeByCode(Boolean(data.allow_team));
+  setFogModeByCode(Boolean(data.fog));
   setMapModeByCode(data.map_mode || 'random');
   refreshMapInputHint();
   $('#map-token').val(normalizeMapTokenInput(data.map_token || ''));
@@ -767,6 +774,7 @@ socket.on('room_update', function (data) {
   setTabGroupReadonly('tabs-game-speed', roomRunning || !isHost);
   setTabGroupReadonly('tabs-map-mode', roomRunning || !isHost);
   setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBot);
+  setTabGroupReadonly('tabs-fog-mode', roomRunning || !isHost);
   $('#team-mode-bot-hint').css('display', hasServerBot ? '' : 'none');
   $('#team-mode-section').css('display', isHost && !roomRunning ? '' : 'none');
   if (isHost && !roomRunning) $('#map-token').removeAttr('disabled');
@@ -899,6 +907,13 @@ $(document).ready(function () {
     for (var i = 1; i < this.children.length; i++) {
       initTab(this, this.children[i], function () {
         updateConfPatch({ allow_team: getAllowTeamModeCode() });
+      });
+    }
+  });
+  $('#tabs-fog-mode').each(function () {
+    for (var i = 1; i < this.children.length; i++) {
+      initTab(this, this.children[i], function () {
+        updateConfPatch({ fog: getFogModeCode() });
       });
     }
   });
