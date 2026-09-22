@@ -111,8 +111,8 @@ _一句话：每 tick 排行榜与终局名次计算。_
 `buildFullVisionArrays` 产出 `{grid_type, army_cnt, isolated}`；grid_type 编码：山 201、中立 200、沼泽 204/owner+150、指挥所 owner+50、主城 owner+100、普通格 owner；isolated：0 正常/1 宽限期/2 衰减期。前端渲染直接消费，**改动需前后端同步**。
 _一句话：棋盘状态 → 扁平协议数组编码。_
 
-**src/game-engine/fog-vision.ts** — 迷雾远征（issue #27，房间可开关，默认关）。
-`computeTeamVisibility` 算队伍可见格（己方格切比雪夫半径 FOG_VISION_RADIUS），`buildFoggedVisionArrays` 在全视野快照上过滤视野外格子：只留地形（山 201/中立沼泽 204/其余 200），兵力与孤军归零，附 `fog` 扁平数组（1=迷雾格）。观战者/出局者/回放不过滤。
+**src/game-engine/fog-vision.ts** — 迷雾远征（issue #27，房间可开关，默认关；#52 显示语义）。
+`computeTeamVisibility` 算队伍可见格（己方格切比雪夫半径 FOG_VISION_RADIUS），`buildFoggedVisionArrays` 在全视野快照上过滤：视野外格子 grid_type 只留 204 沼泽 / 201 未知占位（前端渲染「山+问号」，不下发真实地形），兵力与孤军归零，附 `fog` 扁平数组（1=迷雾格）；视野内敌队指挥所/主城降级为普通领地（保留归属与兵力），中立城市（50）不受影响。观战者/出局者/回放不过滤。
 _一句话：队伍视野计算 + 视野外快照过滤。_
 
 **src/game-engine/replay-helpers.ts** — 帧差分与克隆工具。
@@ -212,7 +212,7 @@ _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 **static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3/4、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`、`replay_view_team`（回放视角：0 全知 / 队伍编号）。
 _一句话：共享常量：方向表、回放魔数、转义工具。_
 
-**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头、建造角标；迷雾格只显示地形、隐藏兵力），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。回放模式每帧经 `applyReplayFogView` 按 `replay_view_team` 重算迷雾遮罩（回放不含历史视野，按当前帧局面以对局相同的半径 1 规则重算）。
+**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头、建造角标；迷雾格渲染「山+问号」未知占位、沼泽例外、隐藏兵力，回放队伍视角额外把视野内敌方指挥所/主城降级为普通领地），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。回放模式每帧经 `applyReplayFogView` 按 `replay_view_team` 重算迷雾遮罩（回放不含历史视野，按当前帧局面以对局相同的半径 1 规则重算）。
 _一句话：帧渲染器：update 帧合并 + 地图/榜单更新。_
 
 **static/main/replay-binary.js** — RPB1/2/3/4 回放二进制解码器，产出 `{n,m,initial,patches[],meta}`（RPB4 起 meta 含 fog 标志）；帧结构与 socket `update` 同构，直接喂 render-update.js。**格式变更须与 `src/replay-patch-binary.ts` 同步。**
