@@ -134,7 +134,7 @@ export class GameEngine {
   private readonly mapMode: MapMode;
 
   /**
-   * 战争迷雾开关（房间设置）：开启后存活参赛者只收到己方队伍视野内的
+   * 迷雾远征开关（房间设置）：开启后存活参赛者只收到己方队伍视野内的
    * 归属/兵力，视野外仅地形；观战者、出局者与回放始终全视野。
    */
   private readonly fogEnabled: boolean;

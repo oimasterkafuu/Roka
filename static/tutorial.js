@@ -373,7 +373,7 @@
   }
 
   function refreshVisibility() {
-    // Roka 无战雾：教程同样全图可见。
+    // Roka 默认无迷雾：教程同样全图可见。
     state.visible = createMatrix(BOARD_ROWS, BOARD_COLS, function () {
       return true;
     });
