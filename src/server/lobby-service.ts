@@ -16,7 +16,7 @@ import {
   RoomUpdatePayload,
 } from '../types';
 
-type EditableLobbyKey = 'speed' | 'allow_team' | 'map_mode' | 'map_token';
+type EditableLobbyKey = 'speed' | 'allow_team' | 'fog' | 'map_mode' | 'map_token';
 
 const FIXED_WIDTH_RATIO = 0.5;
 const FIXED_HEIGHT_RATIO = 0.5;
@@ -34,6 +34,7 @@ const LOBBY_HEARTBEAT_SWEEP_MS = 60_000;
 const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
   allow_team: '允许组队',
+  fog: '战争迷雾',
   map_mode: '地图类型',
   map_token: '地图随机种子',
 };
@@ -295,6 +296,7 @@ class LobbyService {
     return {
       speed: conf.speed,
       allow_team: conf.allow_team,
+      fog: conf.fog === true,
       map_token: conf.map_token,
       map_mode: conf.map_mode,
       in_game: this.isLobbyGameRunning(gid),
@@ -385,6 +387,9 @@ class LobbyService {
   formatConfValue(key: EditableLobbyKey, value: LobbyConfig[EditableLobbyKey]): string {
     if (key === 'allow_team') {
       return value ? '允许' : '不允许';
+    }
+    if (key === 'fog') {
+      return value ? '开启' : '关闭';
     }
     if (key === 'map_mode') {
       if (value === 'maze') {
@@ -758,6 +763,7 @@ class LobbyService {
       swamp_ratio: FIXED_SWAMP_RATIO,
       speed: 1,
       allow_team: false,
+      fog: false,
       map_token: this.normalizeMapToken(this.randomHexToken()),
       map_mode: 'random',
     };

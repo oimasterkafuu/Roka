@@ -33,7 +33,8 @@ const encodeFullVisionTile = (tile: Tile, owner: number, army: number): number =
   return owner || army ? owner : 200;
 };
 
-// Roka 无战雾：所有局面快照均为全图视野。
+// 全视野编码（无迷雾对局、观战者、回放均用此快照）；迷雾对局的视野过滤
+// 在此基础上由 fog-vision.ts 完成。
 // isolated 编码：0 = 正常；1 = 断链宽限期（前 5 回合，快速闪烁、尚未衰减）；2 = 衰减期。
 const buildFullVisionArrays = (state: BoardState): FlatMapArrays => {
   const gridTypeFlat: number[] = [];

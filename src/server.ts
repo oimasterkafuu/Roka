@@ -1516,6 +1516,15 @@ const boot = async (): Promise<void> => {
           }
         }
 
+        if (hasOwn('fog')) {
+          const fogRaw = payload.fog;
+          const fog = Boolean(fogRaw === true || fogRaw === 1 || fogRaw === '1' || fogRaw === 'true');
+          if (fog !== (oldConf.fog === true)) {
+            nextConf.fog = fog;
+            changed.push('fog');
+          }
+        }
+
         if (hasOwn('map_mode')) {
           const mapModeRaw = String(payload.map_mode ?? oldConf.map_mode);
           let mapMode: LobbyConfig['map_mode'] = 'random';

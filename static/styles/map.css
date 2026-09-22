@@ -174,7 +174,8 @@
 }
 .fog {
   border: 1px solid rgba(255, 255, 255, 0) !important;
-  background-color: rgba(255, 255, 255, 0.1);
+  /* 战争迷雾：地形背景照常渲染，叠深色遮罩隐藏归属与兵力。 */
+  box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.55);
 }
 
 .selectable,

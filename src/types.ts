@@ -20,6 +20,8 @@ export interface LobbyConfig {
   swamp_ratio: number;
   speed: number;
   allow_team: boolean;
+  /** 战争迷雾开关：开启后玩家仅可见己方队伍视野范围内的归属与兵力。 */
+  fog: boolean;
   map_token: string;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean';
 }
@@ -45,6 +47,8 @@ export interface RoomPlayerView {
 export interface RoomUpdatePayload {
   speed: number;
   allow_team: boolean;
+  /** 战争迷雾开关（房间设置同步给前端展示）。 */
+  fog: boolean;
   map_token: string;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean';
   in_game: boolean;
@@ -82,6 +86,11 @@ export interface UpdatePayload {
   grid_type: number[];
   army_cnt: number[];
   isolated: number[];
+  /**
+   * 战争迷雾扁平数组（1 = 视野外迷雾格），仅迷雾开启的实时对局下发；
+   * diff 帧中与 grid_type 一样以 [index, value] 对编码。回放不含此字段。
+   */
+  fog?: number[];
   lst_move: MovePayload;
   leaderboard: LeaderboardEntry[];
   turn: number;
@@ -129,6 +138,8 @@ export interface ReplayMeta {
   swamp_ratio: number;
   speed: number;
   allow_team: boolean;
+  /** 对局是否开启战争迷雾（仅作元信息记录；回放始终全视野）。 */
+  fog?: boolean;
   map_token: string;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean';
   player_names: string[];
