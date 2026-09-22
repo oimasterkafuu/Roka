@@ -63,6 +63,10 @@ function render() {
       } else if (cellType == 204) {
         cls += ' swamp';
       }
+      // 战争迷雾：视野外格子地形照常渲染，但加暗色遮罩（归属/兵力已由服务端隐藏）。
+      if (fog[i][j]) {
+        cls += ' fog';
+      }
       if (i == selx && j == sely) {
         if (selt == 1) {
           cls += ' selected';
@@ -115,6 +119,12 @@ function update(data) {
         isolated[parseInt(t / m)][t % m] = data.isolated[i * 2 + 1];
       }
     }
+    if (data.fog) {
+      for (var i = 0; i * 2 < data.fog.length; i++) {
+        var t = data.fog[i * 2];
+        fog[parseInt(t / m)][t % m] = data.fog[i * 2 + 1];
+      }
+    }
   } else {
     for (var i = 0, t = 0; i < n; i++) {
       for (var j = 0; j < m; j++) {
@@ -130,6 +140,13 @@ function update(data) {
       for (var i = 0, t = 0; i < n; i++) {
         for (var j = 0; j < m; j++) {
           isolated[i][j] = data.isolated[t++];
+        }
+      }
+    }
+    if (data.fog) {
+      for (var i = 0, t = 0; i < n; i++) {
+        for (var j = 0; j < m; j++) {
+          fog[i][j] = data.fog[t++];
         }
       }
     }

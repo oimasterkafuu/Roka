@@ -92,11 +92,11 @@ JWT 载荷 `{sub, sid}`，`sid` 经 `userStore.isSessionValid` 校验（重登�
 
 ### 对局引擎
 
-**src/game-engine.ts** — 对局核心：全状态 + Tick 主循环，无战雾全图广播。
-`GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X/Q 建指挥所、C/E 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连 ×2）→ AFK 判定 → 胜负判定 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量）。对外接口：`addMove/addBuild/clearQueue/popQueue/addSpectator/sendMessage/surrender/leaveGame`。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、补发 `init_map`+全量帧）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。回放：终局 `saveHistory` 存 ops-v1 操作流；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（回放重建、地图示例均走此路）。
+**src/game-engine.ts** — 对局核心：全状态 + Tick 主循环；默认无迷雾全图广播，迷雾对局按接收者视野过滤（见 fog-vision.ts）。
+`GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X/Q 建指挥所、C/E 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连 ×2）→ AFK 判定 → 胜负判定 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量；`buildSnapshotFor` 按接收者出快照：迷雾对局中存活参赛者经 fog-vision 过滤并附 `fog` 数组，观战/出局者全视野+全 0 fog，`fogLast` 按玩家做 diff 基线）。对外接口：`addMove/addBuild/clearQueue/popQueue/addSpectator/sendMessage/surrender/leaveGame`。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、补发 `init_map`+全量帧——迷雾对局经 `buildFullFramePayload` 按该玩家视野过滤）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。回放：终局 `saveHistory` 存 ops-v1 操作流；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（回放重建、地图示例均走此路，回放始终全视野不含 fog）。
 
 **src/game-engine/constants.ts** — 数值常量集中地。
-`LEFT_GAME=52`、`AFK_MIN_TURNS=60`/`AFK_MIN_MS=60_000`（挂机投降需同时满足）、`DISCONNECT_GRACE_MS=10_000`（掉线宽限，1 倍速=20 tick）、`ISOLATED_DECAY_RATIO=0.05`、`ISOLATED_GRACE_TICKS=10`。调平衡数值只改这里。
+`LEFT_GAME=52`、`AFK_MIN_TURNS=60`/`AFK_MIN_MS=60_000`（挂机投降需同时满足）、`DISCONNECT_GRACE_MS=10_000`（掉线宽限，1 倍速=20 tick）、`ISOLATED_DECAY_RATIO=0.05`、`ISOLATED_GRACE_TICKS=10`、`FOG_VISION_RADIUS=1`（迷雾视野切比雪夫半径）。调平衡数值只改这里。
 _一句话：AFK/掉线/孤军等数值常量。_
 
 **src/game-engine/general-selection.ts** — 开局主城位置选择。
@@ -110,6 +110,10 @@ _一句话：每 tick 排行榜与终局名次计算。_
 **src/game-engine/map-encoding.ts** — 棋盘状态 → 扁平协议数组。
 `buildFullVisionArrays` 产出 `{grid_type, army_cnt, isolated}`；grid_type 编码：山 201、中立 200、沼泽 204/owner+150、指挥所 owner+50、主城 owner+100、普通格 owner；isolated：0 正常/1 宽限期/2 衰减期。前端渲染直接消费，**改动需前后端同步**。
 _一句话：棋盘状态 → 扁平协议数组编码。_
+
+**src/game-engine/fog-vision.ts** — 战争迷雾（issue #27，房间可开关，默认关）。
+`computeTeamVisibility` 算队伍可见格（己方格切比雪夫半径 FOG_VISION_RADIUS），`buildFoggedVisionArrays` 在全视野快照上过滤视野外格子：只留地形（山 201/中立沼泽 204/其余 200），兵力与孤军归零，附 `fog` 扁平数组（1=迷雾格）。观战者/出局者/回放不过滤。
+_一句话：队伍视野计算 + 视野外快照过滤。_
 
 **src/game-engine/replay-helpers.ts** — 帧差分与克隆工具。
 `getDiff` 生成 `[index, value]` 对（实时 diff 帧同用）；`buildReplayPatch` 生成 forward/backward 双向 patch；`toMoveDirection` 坐标→方向索引。
@@ -177,7 +181,7 @@ _一句话：Codeforces 式 rating 段位颜色映射。_
 **src/runtime-env.ts** — 启动期 `.env` 自解析（不依赖 dotenv），`JWT_SECRET`/`WEBHOOK_SECRET` 缺失则自动生成并回写 `.env`。
 _一句话：.env 加载与密钥自动生成回写。_
 
-**src/types.ts** — 全项目共享类型与协议常量（纯类型）：`MAX_TEAMS=16`、`MoveMode`（0 智能分兵/1 半兵/2 全冲）、大厅/房间视图、`UpdatePayload`（grid_type/army_cnt/isolated/lst_move/leaderboard/kills/is_diff）、回放类型（`ReplayPatch` forward/backward、`ReplayActionData` ops-v1 操作流）、Feed 类型。**改协议字段基本都要动这里。**
+**src/types.ts** — 全项目共享类型与协议常量（纯类型）：`MAX_TEAMS=16`、`MoveMode`（0 智能分兵/1 半兵/2 全冲）、大厅/房间视图（`LobbyConfig`/`RoomUpdatePayload` 含 `fog` 迷雾开关）、`UpdatePayload`（grid_type/army_cnt/isolated/可选 fog/lst_move/leaderboard/kills/is_diff）、回放类型（`ReplayPatch` forward/backward、`ReplayActionData` ops-v1 操作流）、Feed 类型。**改协议字段基本都要动这里。**
 _一句话：共享类型/协议定义汇总。_
 
 **dist/** — `pnpm run build`（tsc）产物，目录结构与 `src/` 一一对应，是运行时实际加载的代码；勿手改，行为与源码不符时先确认是否重新 build。
@@ -208,7 +212,7 @@ _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 **static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`。
 _一句话：共享常量：方向表、回放魔数、转义工具。_
 
-**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、队列箭头、建造角标），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧，按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。
+**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头、建造角标），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。
 _一句话：帧渲染器：update 帧合并 + 地图/榜单更新。_
 
 **static/main/replay-binary.js** — RPB1/2/3 回放二进制解码器，产出 `{n,m,initial,patches[],meta}`；帧结构与 socket `update` 同构，直接喂 render-update.js。**格式变更须与 `src/replay-patch-binary.ts` 同步。**
@@ -217,7 +221,7 @@ _一句话：RPB1/2/3 回放二进制解码为 update 帧。_
 **static/main/replay-controls.js** — 回放步进/跳转/自动播放（`backTurn/nextTurn/jumpToTurn/switchAutoplay`）与投降弹窗显隐。
 _一句话：回放步进/跳转/自动播放与投降弹窗。_
 
-**static/main/room-controls.js** — 房间大厅 UI：链接复制、设置 tabs 三件套（`getTabVal/setTabVal/initTab`）、队伍切换（`change_team`）、房主配置 emit `change_game_conf`（种子失焦上传）、聊天队伍前缀。
+**static/main/room-controls.js** — 房间大厅 UI：链接复制、设置 tabs 三件套（`getTabVal/setTabVal/initTab`）、地图类型/组队/迷雾等开关编解码（`getMapModeCode/setFogModeByCode` 等）、队伍切换（`change_team`）、房主配置 emit `change_game_conf`（种子失焦上传）、聊天队伍前缀。
 _一句话：房间设置 tabs、链接复制、队伍与聊天前缀。_
 
 **static/main/blink-clock.js** — 全局闪烁时钟：在 `#map` 容器上周期切换 `blink-slow`（1s 衰减期）/`blink-fast`（0.4s 宽限期）/`pulse-soft`（1.2s 教程目标），单元格只挂声明 class，相位统一驱动。
@@ -257,7 +261,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 ### 样式表（static/styles/，main.css 只做 @import 聚合）
 
 - **base.css** — 全局 CSS 变量、字体（CDN 镜像 + 本地子集兜底）、通用组件基座；全局字体排除 KaTeX。_全局设计令牌与组件基座。_
-- **map.css** — 地图格子全部视觉：尺寸档 `.s1–.s6`、颜色 `.c0–.c17`（`code%50==playerId`）、地形背景图、选中/可攻击态、孤军闪烁、建造角标、移动箭头。_地图格子视觉规则全集。_
+- **map.css** — 地图格子全部视觉：尺寸档 `.s1–.s6`、颜色 `.c0–.c17`（`code%50==playerId`）、地形背景图、选中/可攻击态、孤军闪烁、建造角标、移动箭头、迷雾格 `.fog`（深色 inset 遮罩）。_地图格子视觉规则全集。_
 - **game-ui.css** — 对局 HUD：排行榜（`tr.dead`/`tr.afk`）、回合计数、`#disconnect-banner` 断线横幅、回放控制条。_对局 HUD 与回放控制条样式。_
 - **chat-and-alert.css** — 左下聊天框（含收起态、媒体查询）与 `.alert` 居中弹窗、通知权限引导弹窗（`.notify-permission-*`）。_聊天框与弹窗样式。_
 - **home.css** — 首页（`body.home` 作用域隔离）三栏卡片布局 + 动态/公告/排行榜/回放上传弹窗全套。_首页三栏布局与 feed 全套样式。_
@@ -278,7 +282,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 
 ## 配置 / CI / 脚本 / bot 模板
 
-- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot、test:lobby-guards、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot、test:lobby-guards、test:fog、test:strategy、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 - **tsconfig.json** — src→dist，CommonJS+ES2022+sourceMap；**刻意关闭严格模式**，改严格度会影响整个 src/ 编译面。
 - **eslint.config.cjs** — flat config，只查 `src/**/*.ts`，推荐规则集 + 关闭 `no-explicit-any`；不查 static/。
 - **.prettierrc / .prettierignore** — 单引号/分号/尾逗号/110 列；排除 dist、node_modules、static/vendor。
@@ -290,6 +294,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 - **scripts/test-bot.mjs** — `pnpm run test:bot`：临时数据目录起服务 + 两个 bot 自动对局，双方收到 `init_map` 且累计 ≥10 回合即通过。
 - **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，校验 403 权限闸、房长保留（host 落在第三方 bot）、托管 bot 房间禁止组队（bot 进房强制关闭已开组队 + 房主开启请求被拒绝）、`init_map` + ≥5 条实际 attack、杀服重启后按状态文件自动恢复原配置、停止 API 清空列表与状态文件。
 - **scripts/test-lobby-guards.mjs** — `pnpm run test:lobby-guards`：开局/换绑守卫回归——组队模式全员同队拒绝开局（换队后可开）、对局中同名人类连接不得接管 bot 席位（以观战进房且 bot 持续收 update）、bot 与人类各自断线重连仍可恢复席位。
+- **scripts/test-fog.mjs** — `pnpm run test:fog`：战争迷雾冒烟——房主 `change_game_conf {fog:true}` 开局后，校验客户端合并局面满足迷雾不变量（帧带 `fog` 数组、迷雾格只泄地形且兵力归零、己方主城可见、视野内无敌方主城），对照默认房间不带 `fog` 字段。
 - **scripts/test-strategy-logic.mjs** — `pnpm run test:strategy`：策略逻辑单元测试——合成 1×m 走廊棋盘直接驱动 `bot/` 纯函数模块（buildContext + planOffense），回归四类行为：优势即打（触发即攻）、集结期入口不出兵切断（防入口易位致纵队折返）、僵死对峙超时解散 + 重集结闸门 + 改善后开打、爆发期路径敌格自然增兵不误判增援弃打。
 - **scripts/observe-bot-match.mjs** — `pnpm run observe:bot`：对局观测/病理分析——临时数据目录起 dist 服务 + 进程内观战 recorder 逐 turn 录完整盘面（`frames.jsonl`），按 `OBS_BOTS` 启动 bot 组合（`strategy:`/`random:`/`legacy:` 前缀，`legacy` 从 git main 导出旧版做 A/B 基准），赛后生成 `report.txt`（往返抖动/送兵/前线停滞/切断无救援/主城沦陷时闲散兵力）；环境变量 `OBS_SPEED`/`OBS_MAP_TOKEN`/`OBS_MAP_MODE`/`OBS_OUT`/`OBS_MAX_MS`，输出默认 `data/observe-*/`（gitignored）。
 - **scripts/replay-bot-decisions.mjs** — bot 决策离线复盘：假 socket 驱动真实 `strategy.js` 逐 turn 重放观测目录的 `frames.jsonl`（队列执行按服务端 `chkMove`/`chkBuild` 语义模拟），完整复现跨 tick 决策状态；支持 `--validate`（与 bot 日志逐 op 比对）、`--from/--to`、`--board`、`--cell` 盘面解释；配 `BOT_TRACE=1/2` 输出进攻评估/焦点/候选榜。
