@@ -93,6 +93,14 @@ function setAllowTeamModeByCode(allow) {
   setTabVal('team-mode', allow ? '允许' : '不允许');
 }
 
+function getFogModeCode() {
+  return getTabVal('fog-mode') == '开启';
+}
+
+function setFogModeByCode(fog) {
+  setTabVal('fog-mode', fog ? '开启' : '关闭');
+}
+
 function refreshCustomTeamTabs(allowTeam) {
   var tabs = $('#tabs-custom-team')[0];
   if (!tabs) return;
