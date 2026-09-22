@@ -41,7 +41,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── server/             # 服务层：auth / captcha / lobby / webhook
 │   ├── types.ts            # 全项目共享类型与协议定义
 │   ├── *-store.ts          # 四个持久化存储（公告/用户/动态/回放）
-│   ├── replay-patch-binary.ts  # RPB3 观看二进制编码器
+│   ├── replay-patch-binary.ts  # RPB4 观看二进制编码器
 │   ├── text-render.ts      # Markdown+LaTeX → 消毒 HTML（公告/动态共用）
 │   ├── rating-color.ts     # Codeforces 风格段位配色
 │   └── runtime-env.ts      # .env 引导与密钥自动生成
@@ -165,11 +165,11 @@ _一句话：动态帖子/点赞/评论存储，带发帖冷却。_
 _一句话：公告单文件 JSON 存储，原子串行写。_
 
 **src/replay-store.ts** — 回放存取、索引与观看二进制 gzip 缓存（`data/replays/`）。
-原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中即返回（`size` 取自 gzip 尾 ISIZE 供进度条），未命中则重建整场 → RPB3 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
+原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且解压魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB4 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
 _一句话：回放存储与 RPB gzip 缓存，id 为内容哈希。_
 
-**src/replay-patch-binary.ts** — `ReplayData` → RPB3 观看二进制编码器（手写 LE；initial 全量帧 + 逐 patch forward/backward 差分 + 玩家 meta）。仅编码无解码——解码在前端 `static/main/replay-binary.js`；**改格式需同步前端并升魔数**。
-_一句话：ReplayData → RPB3 观看二进制编码器。_
+**src/replay-patch-binary.ts** — `ReplayData` → RPB4 观看二进制编码器（手写 LE；initial 全量帧 + 逐 patch forward/backward 差分 + 玩家 meta；RPB4 起 meta 末尾追加 fog 标志，供前端回放视角选择器）。仅编码无解码——解码在前端 `static/main/replay-binary.js`；**改格式需同步前端并升魔数**，导出 `REPLAY_BINARY_MAGIC` 供缓存陈旧性校验。
+_一句话：ReplayData → RPB4 观看二进制编码器。_
 
 **src/text-render.ts** — 服务端富文本渲染，公告与动态共用唯一入口 `renderRichText`。
 流程：KaTeX 预渲染 `$$..$$`/`$..$` → marked（GFM+breaks）→ 换回公式 HTML → sanitize-html 白名单（仅 http(s)/mailto scheme）过滤 XSS。新增允许的 KaTeX 标签/样式需同步改 `sanitizeOptions`。
@@ -202,24 +202,24 @@ _一句话：共享类型/协议定义汇总。_
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
 **static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。
-按序加载 crown.js → core-globals → notify.js → replay-binary → room-controls → replay-controls → render-update → blink-clock → main.js（顺序敏感）。关键 DOM：`#disconnect-banner`（断线横幅）、`#map`、`#menu`、`#status-alert`（按钮按下标访问，改结构需同步 main.js）、`#replay-loading(-text)`、`#replay-error-alert`。
+按序加载 crown.js → core-globals → notify.js → replay-binary → room-controls → replay-controls → render-update → blink-clock → main.js（顺序敏感）。关键 DOM：`#disconnect-banner`（断线横幅）、`#map`、`#menu`、`#status-alert`（按钮按下标访问，改结构需同步 main.js）、`#replay-loading(-text)`、`#replay-error-alert`、`#replay-view-section`/`#tabs-replay-view`（回放视角选择器，仅迷雾对局回放显示）。
 _一句话：对局/回放页骨架与脚本加载顺序。_
 
 **static/main.js** — 对局/回放主控制器：socket 生命周期、键鼠触屏输入、本地操作队列、房间渲染、回放加载。
 回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）并启动房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；`room_update` 对比成员 uid 快照检测新玩家进房、`starting` 表示开局，两者在页面后台时经 `notify.js` 弹浏览器通知；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/R/F/T/Enter/Esc/空格（X/Q 建指挥所、C/E 升级主城、R 清空队列、F 撤销队尾）。
 _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 
-**static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`。
+**static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3/4、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`、`replay_view_team`（回放视角：0 全知 / 队伍编号）。
 _一句话：共享常量：方向表、回放魔数、转义工具。_
 
-**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头、建造角标），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。
+**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头、建造角标；迷雾格只显示地形、隐藏兵力），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。回放模式每帧经 `applyReplayFogView` 按 `replay_view_team` 重算迷雾遮罩（回放不含历史视野，按当前帧局面以对局相同的半径 1 规则重算）。
 _一句话：帧渲染器：update 帧合并 + 地图/榜单更新。_
 
-**static/main/replay-binary.js** — RPB1/2/3 回放二进制解码器，产出 `{n,m,initial,patches[],meta}`；帧结构与 socket `update` 同构，直接喂 render-update.js。**格式变更须与 `src/replay-patch-binary.ts` 同步。**
-_一句话：RPB1/2/3 回放二进制解码为 update 帧。_
+**static/main/replay-binary.js** — RPB1/2/3/4 回放二进制解码器，产出 `{n,m,initial,patches[],meta}`（RPB4 起 meta 含 fog 标志）；帧结构与 socket `update` 同构，直接喂 render-update.js。**格式变更须与 `src/replay-patch-binary.ts` 同步。**
+_一句话：RPB1/2/3/4 回放二进制解码为 update 帧。_
 
-**static/main/replay-controls.js** — 回放步进/跳转/自动播放（`backTurn/nextTurn/jumpToTurn/switchAutoplay`）与投降弹窗显隐。
-_一句话：回放步进/跳转/自动播放与投降弹窗。_
+**static/main/replay-controls.js** — 回放步进/跳转/自动播放（`backTurn/nextTurn/jumpToTurn/switchAutoplay`）、迷雾对局回放的视角选择器（`initReplayViewTabs` 按 meta.fog 与参赛队伍动态生成「全知/队伍 N」tabs，`setReplayViewTeam` 切换即时重绘）与投降弹窗显隐。
+_一句话：回放步进/跳转/自动播放、视角选择与投降弹窗。_
 
 **static/main/room-controls.js** — 房间大厅 UI：链接复制、设置 tabs 三件套（`getTabVal/setTabVal/initTab`）、地图类型/组队/迷雾等开关编解码（`getMapModeCode/setFogModeByCode` 等）、队伍切换（`change_team`）、房主配置 emit `change_game_conf`（种子失焦上传）、聊天队伍前缀。
 _一句话：房间设置 tabs、链接复制、队伍与聊天前缀。_

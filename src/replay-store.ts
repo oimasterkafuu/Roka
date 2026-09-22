@@ -3,13 +3,14 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
-import { brotliCompress, brotliDecompress, constants as zlibConstants, gzip } from 'node:zlib';
-import { encodeReplayPatchBinary } from './replay-patch-binary';
+import { brotliCompress, brotliDecompress, constants as zlibConstants, gunzip, gzip } from 'node:zlib';
+import { encodeReplayPatchBinary, REPLAY_BINARY_MAGIC } from './replay-patch-binary';
 import { ReplayActionData, ReplayData, ReplayListItem } from './types';
 
 const brotliCompressAsync = promisify(brotliCompress);
 const brotliDecompressAsync = promisify(brotliDecompress);
 const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
 
 const REPLAY_FILENAME_REGEX = /^[0-9A-Za-z+-]+$/;
 const REPLAY_EXT = '.rpl';
@@ -156,7 +157,11 @@ export class ReplayStore {
     try {
       const cached = await readFile(cachePath);
       if (cached.length >= 4) {
-        return { gzip: cached, size: cached.readUInt32LE(cached.length - 4) };
+        // 编码格式升级（如 RPB3→RPB4）后旧缓存作废：校验解压后的魔数，不匹配则重建。
+        const raw = (await gunzipAsync(cached)) as Buffer;
+        if (raw.length >= 4 && raw.subarray(0, 4).toString('latin1') === REPLAY_BINARY_MAGIC) {
+          return { gzip: cached, size: cached.readUInt32LE(cached.length - 4) };
+        }
       }
     } catch {
       // 缓存不存在或损坏，走下方重建。
