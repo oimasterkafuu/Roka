@@ -34,7 +34,7 @@ const LOBBY_HEARTBEAT_SWEEP_MS = 60_000;
 const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
   allow_team: '允许组队',
-  fog: '战争迷雾',
+  fog: '迷雾远征',
   map_mode: '地图类型',
   map_token: '地图随机种子',
 };

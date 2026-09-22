@@ -19,7 +19,7 @@ const ISOLATED_DECAY_RATIO = 0.05;
 const ISOLATED_GRACE_TICKS = 10;
 
 /**
- * 战争迷雾视野半径（切比雪夫距离）：玩家可见己方（含队友）任意格子
+ * 迷雾远征视野半径（切比雪夫距离）：玩家可见己方（含队友）任意格子
  * 周围 1 圈范围内的地块；范围外只下发地形，隐藏归属与兵力。
  */
 const FOG_VISION_RADIUS = 1;
