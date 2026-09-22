@@ -92,6 +92,55 @@ function setAutoplayRate() {
   autoplay_speed = parseFloat(tmp.substr(0, tmp.length - 1));
 }
 
+function onReplayViewTab() {
+  var val = getTabVal('replay-view');
+  setReplayViewTeam(val == '全知' ? 0 : parseInt(val.substr(3), 10));
+}
+
+// 切换回放视角（0 = 全知，>0 = 队伍编号）：重算迷雾遮罩并立即重绘当前帧。
+function setReplayViewTeam(team) {
+  replay_view_team = team;
+  applyReplayFogView();
+  render();
+}
+
+// 迷雾对局的回放提供视角选择器（全知 + 各参赛队伍）；未开启迷雾的回放不显示。
+function initReplayViewTabs() {
+  var section = $('#replay-view-section');
+  var tabs = $('#tabs-replay-view')[0];
+  if (!tabs) return;
+  // 复位为仅含「全知」（回放页每次加载只进一次，防御性清理）。
+  while (tabs.children.length > 2) {
+    tabs.removeChild(tabs.lastChild);
+  }
+  replay_view_team = 0;
+  setTabVal('replay-view', '全知');
+  var meta = replay_data && replay_data.meta;
+  if (!meta || !meta.fog || !Array.isArray(meta.player_teams)) {
+    section.css('display', 'none');
+    return;
+  }
+  var teams = [];
+  for (var i = 0; i < meta.player_teams.length; i++) {
+    var t = Number(meta.player_teams[i]);
+    if (t > 0 && teams.indexOf(t) < 0) teams.push(t);
+  }
+  teams.sort(function (a, b) {
+    return a - b;
+  });
+  if (!teams.length) {
+    section.css('display', 'none');
+    return;
+  }
+  for (var k = 0; k < teams.length; k++) {
+    $(tabs).append($('<div class="inline-button">队伍 ' + teams[k] + '</div>'));
+  }
+  for (var i = 1; i < tabs.children.length; i++) {
+    initTab(tabs, tabs.children[i], onReplayViewTab);
+  }
+  section.css('display', '');
+}
+
 function _exit() {
   if (typeof allow_page_leave != 'undefined') {
     allow_page_leave = true;

@@ -1,3 +1,42 @@
+// 回放「队伍视角」：回放数据不含历史视野，按当前帧合并后的完整局面
+// 以与对局内相同的规则（己方格子切比雪夫半径 1 邻域可见）重算该队伍
+// 的迷雾格并写入全局 fog 数组（fog=1 表示视野外）；全知视角复位为全可见。
+function replayFogViewActive() {
+  return is_replay && replay_view_team > 0 && replay_data && replay_data.meta && replay_data.meta.fog;
+}
+
+function applyReplayFogView() {
+  var visible = null;
+  if (replayFogViewActive()) {
+    var teams = replay_data.meta.player_teams || [];
+    visible = Array(n);
+    for (var i = 0; i < n; i++) {
+      visible[i] = Array(m).fill(false);
+    }
+    for (var i = 0; i < n; i++) {
+      for (var j = 0; j < m; j++) {
+        var code = grid_type[i][j];
+        if (code >= 200) continue;
+        var ownerId = code % 50;
+        if (ownerId <= 0 || teams[ownerId - 1] != replay_view_team) continue;
+        for (var dx = -1; dx <= 1; dx++) {
+          var x = i + dx;
+          if (x < 0 || x >= n) continue;
+          for (var dy = -1; dy <= 1; dy++) {
+            var y = j + dy;
+            if (y >= 0 && y < m) visible[x][y] = true;
+          }
+        }
+      }
+    }
+  }
+  for (var i = 0; i < n; i++) {
+    for (var j = 0; j < m; j++) {
+      fog[i][j] = visible ? (visible[i][j] ? 0 : 1) : 0;
+    }
+  }
+}
+
 function render() {
   setRoomTopLeftVisible(false);
   $('#menu').css('display', 'none');
@@ -38,6 +77,12 @@ function render() {
         txt = '';
       var cellType = displayGrid[i][j];
       var cellArmy = displayArmy[i][j];
+      // 迷雾格只显示地形：山地照常，己方沼泽按中立沼泽、其余按中立空地，
+      // 归属与兵力一律隐藏（实时迷雾对局服务端已过滤，此处主要服务回放视角）。
+      if (fog[i][j] && cellType < 200) {
+        cellType = cellType >= 150 ? 204 : 200;
+        cellArmy = 0;
+      }
       if (cellType < 200) {
         if (cellType < 50) {
           cls += ' c' + cellType;
@@ -150,6 +195,10 @@ function update(data) {
         }
       }
     }
+  }
+  if (is_replay) {
+    // 回放帧不带 fog 字段：按当前视角（全知/队伍）重算迷雾遮罩。
+    applyReplayFogView();
   }
   if (player > 0) {
     var general_seen = {},

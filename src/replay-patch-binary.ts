@@ -1,6 +1,9 @@
 import { LeaderboardEntry, ReplayData, ReplayPatchPayload, UpdatePayload } from './types';
 
-const MAGIC_BYTES = [0x52, 0x50, 0x42, 0x33] as const; // RPB3（移除 surrender_progress 字段）
+const MAGIC_BYTES = [0x52, 0x50, 0x42, 0x34] as const; // RPB4（meta 追加 fog 标志，供回放视角选择）
+
+/** 当前回放观看二进制魔数（ASCII），供缓存陈旧性校验。 */
+export const REPLAY_BINARY_MAGIC = 'RPB4';
 
 const classToCode = (value: string): number => {
   if (value === 'dead') {
@@ -153,6 +156,9 @@ const writeReplayMeta = (writer: ByteWriter, replay: ReplayData): void => {
     writer.writeString(playerNames[i]);
     writer.writeU8(normalizeU32(playerTeams[i]));
   }
+  // RPB4 起追加迷雾标志：回放全程全视野存储，该标志仅用于前端
+  // 判断是否提供「队伍视角」选择器（按每帧局面在客户端重算视野）。
+  writer.writeU8(replay.meta?.fog === true ? 1 : 0);
 };
 
 export const encodeReplayPatchBinary = (replay: ReplayData): Buffer => {
