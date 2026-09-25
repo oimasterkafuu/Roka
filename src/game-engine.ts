@@ -899,6 +899,16 @@ export class GameEngine {
   }
 
   /**
+   * 该连接是否为当前对局中仍存活的参赛者。
+   * 观战席位（team 0）、已战败/已投降玩家均返回 false，
+   * 用于放行对局进行中「下局模式」（观战/参与）的换队请求。
+   */
+  isActiveParticipant(sid: string): boolean {
+    const idx = this.playerSidToIndex.get(sid);
+    return idx !== undefined && this.team[idx] !== 0 && this.deadOrder[idx] === 0;
+  }
+
+  /**
    * 标记玩家掉线：只记录时间戳，不投降、不清队列、不移除 watching；
    * 已排队操作在宽限期内继续正常执行。
    */
