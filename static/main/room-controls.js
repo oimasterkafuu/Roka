@@ -101,6 +101,14 @@ function setFogModeByCode(fog) {
   setTabVal('fog-mode', fog ? '开启' : '关闭');
 }
 
+function getMapSizeCode() {
+  return getTabVal('map-size') == '大地图' ? 'large' : 'normal';
+}
+
+function setMapSizeByCode(size) {
+  setTabVal('map-size', size == 'large' ? '大地图' : '标准');
+}
+
 function refreshCustomTeamTabs(allowTeam) {
   var tabs = $('#tabs-custom-team')[0];
   if (!tabs) return;

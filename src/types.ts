@@ -24,6 +24,8 @@ export interface LobbyConfig {
   fog: boolean;
   map_token: string;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean';
+  /** 地图大小：normal 标准；large 大地图（边长约 2 倍，面积约 4 倍）。 */
+  map_size: 'normal' | 'large';
 }
 
 export interface LobbyPlayer {
@@ -55,6 +57,8 @@ export interface RoomUpdatePayload {
   fog: boolean;
   map_token: string;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean';
+  /** 地图大小（房间设置同步给前端展示）。 */
+  map_size: 'normal' | 'large';
   in_game: boolean;
   players: RoomPlayerView[];
   ready: number;
@@ -149,6 +153,8 @@ export interface ReplayMeta {
   player_names: string[];
   player_teams: number[];
   map_size_version?: 1 | 2;
+  /** 对局是否使用大地图（仅作元信息记录；实际尺寸由 width/height_ratio 编码）。 */
+  map_size?: 'normal' | 'large';
 }
 
 export interface ReplayListItem {
