@@ -79,7 +79,8 @@ const clampMapSizeRatio = (value: number): number => {
   if (!Number.isFinite(value)) {
     return 0.5;
   }
-  return Math.max(0.2, Math.min(1.35, value));
+  // 上限需容纳大地图：人数比例峰值约 1.24，大地图 ×2 后约 2.5。
+  return Math.max(0.2, Math.min(3, value));
 };
 
 const resolveRuntimeMapSizeRatio = (ratio: number, mapSizeVersion: 1 | 2): number => {
@@ -274,6 +275,7 @@ export class GameEngine {
       player_names: [...gameConf.player_names],
       player_teams: [...gameConf.player_teams],
       map_size_version: mapSizeVersion,
+      map_size: gameConf.map_size === 'large' ? 'large' : 'normal',
     };
 
     const pcnt = playerSids.length;
@@ -337,6 +339,7 @@ export class GameEngine {
         allow_team: meta.allow_team ?? false,
         fog: meta.fog === true,
         map_size_version: meta.map_size_version ?? 1,
+        map_size: meta.map_size ?? 'normal',
       },
       dummyPlayerSids,
       dummyPlayerIds,
@@ -376,6 +379,7 @@ export class GameEngine {
         allow_team: replay.meta.allow_team ?? false,
         fog: replay.meta.fog === true,
         map_size_version: replay.meta.map_size_version ?? 1,
+        map_size: replay.meta.map_size ?? 'normal',
       },
       dummyPlayerSids,
       dummyPlayerIds,

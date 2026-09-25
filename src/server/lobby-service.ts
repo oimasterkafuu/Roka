@@ -16,7 +16,7 @@ import {
   RoomUpdatePayload,
 } from '../types';
 
-type EditableLobbyKey = 'speed' | 'allow_team' | 'fog' | 'map_mode' | 'map_token';
+type EditableLobbyKey = 'speed' | 'allow_team' | 'fog' | 'map_mode' | 'map_token' | 'map_size';
 
 const FIXED_WIDTH_RATIO = 0.5;
 const FIXED_HEIGHT_RATIO = 0.5;
@@ -37,6 +37,7 @@ const confStr: Record<EditableLobbyKey, string> = {
   fog: '迷雾远征',
   map_mode: '地图类型',
   map_token: '地图随机种子',
+  map_size: '地图大小',
 };
 
 /**
@@ -308,6 +309,7 @@ class LobbyService {
       fog: conf.fog === true,
       map_token: conf.map_token,
       map_mode: conf.map_mode,
+      map_size: conf.map_size === 'large' ? 'large' : 'normal',
       in_game: this.isLobbyGameRunning(gid),
       players: roomPlayers,
       ready,
@@ -412,6 +414,9 @@ class LobbyService {
       }
       return '标准地图';
     }
+    if (key === 'map_size') {
+      return value === 'large' ? '大地图' : '标准';
+    }
     return String(value);
   }
 
@@ -470,7 +475,7 @@ class LobbyService {
 
     const gameConf: GameConfig = {
       ...conf,
-      ...this.getMapSizeConfigByPlayers(players),
+      ...this.getMapSizeConfigByPlayers(players, conf),
       player_names: playerNames,
       player_teams: playerTeams,
     };
@@ -775,6 +780,7 @@ class LobbyService {
       fog: false,
       map_token: this.normalizeMapToken(this.randomHexToken()),
       map_mode: 'random',
+      map_size: 'normal',
     };
   }
 
@@ -815,10 +821,15 @@ class LobbyService {
     return resolveMapSizeRatioByPlayers(this.getPlayingCount(players));
   }
 
+  /**
+   * 开局时的实际地图尺寸：按人数取基础比例，房间开启大地图时再 ×2
+   * （边长约 2 倍、面积约 4 倍）。
+   */
   private getMapSizeConfigByPlayers(
     players: LobbyPlayer[],
+    conf: LobbyConfig,
   ): Pick<LobbyConfig, 'width_ratio' | 'height_ratio'> {
-    const ratio = this.getMapSizeRatioByPlayers(players);
+    const ratio = this.getMapSizeRatioByPlayers(players) * (conf.map_size === 'large' ? 2 : 1);
     return {
       width_ratio: ratio,
       height_ratio: ratio,
