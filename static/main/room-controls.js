@@ -144,6 +144,11 @@ function updateTeam() {
   socket.emit('change_team', { team: team });
 }
 
+// 观战中的「下局模式」选择：仅决定下一局的观战/参与身份（team 0/1），不影响当前对局。
+function updateSpectateMode() {
+  socket.emit('change_team', { team: getTabVal('spectate-mode') == '观战' ? 0 : 1 });
+}
+
 function getTabVal(x) {
   return $($('#tabs-' + x)[0].children[0]).val();
 }

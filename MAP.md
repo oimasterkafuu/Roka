@@ -202,7 +202,7 @@ _一句话：共享类型/协议定义汇总。_
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
 **static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。
-按序加载 crown.js → core-globals → notify.js → replay-binary → room-controls → replay-controls → render-update → blink-clock → main.js（顺序敏感）。关键 DOM：`#disconnect-banner`（断线横幅）、`#map`、`#menu`、`#status-alert`（按钮按下标访问，改结构需同步 main.js）、`#replay-loading(-text)`、`#replay-error-alert`、`#replay-view-section`/`#tabs-replay-view`（回放视角选择器，仅迷雾对局回放显示）。
+按序加载 crown.js → core-globals → notify.js → replay-binary → room-controls → replay-controls → render-update → blink-clock → main.js（顺序敏感）。关键 DOM：`#disconnect-banner`（断线横幅）、`#map`、`#menu`、`#status-alert`（按钮按下标访问，改结构需同步 main.js）、`#spectate-mode`/`#tabs-spectate-mode`（观战中的「下局模式」选择器，仅观战时显示）、`#replay-loading(-text)`、`#replay-error-alert`、`#replay-view-section`/`#tabs-replay-view`（回放视角选择器，仅迷雾对局回放显示）。
 _一句话：对局/回放页骨架与脚本加载顺序。_
 
 **static/main.js** — 对局/回放主控制器：socket 生命周期、键鼠触屏输入、本地操作队列、房间渲染、回放加载。
