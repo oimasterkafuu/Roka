@@ -1,0 +1,13 @@
+'use strict';
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { BoardState } = require('../bot/state.cjs');
+const create = () => new BoardState({ n: 1, m: 2, player_ids: ['me','you'] }, 'me');
+const full = () => ({ turn: 0, is_diff: false, grid_type: [51,200], army_cnt: [5,0], leaderboard: [{id:1,team:1,dead:0}] });
+test('完整快照与玩家编号', () => { const s = create(); assert.equal(s.playerId,1); assert.ok(s.apply(full())); assert.deepEqual(s.grid,[51,200]); assert.deepEqual(s.fog,[0,0]); });
+test('稀疏差分不是压缩游程', () => { const s = create(); s.apply(full()); assert.ok(s.apply({turn:1,is_diff:true,grid_type:[1,1],army_cnt:[0,1,1,3]})); assert.deepEqual(s.army,[1,3]); assert.deepEqual(s.grid,[51,1]); });
+test('非法差分原子拒绝', () => { const s=create(); s.apply(full()); assert.equal(s.apply({turn:1,is_diff:true,grid_type:[1,1],army_cnt:[2,5]}),false); assert.deepEqual(s.grid,[51,200]); });
+test('拒绝旧帧与错误尺寸', () => { const s=create(); s.apply(full()); assert.equal(s.apply({...full(),turn:-1}),false); assert.equal(s.apply({...full(),grid_type:[51]}),false); });
+test('结束与死亡状态', () => { const s=create(); s.apply({...full(),game_end:true,leaderboard:[{id:1,team:1,dead:1}]}); assert.ok(s.ended); assert.ok(s.dead); });
+test('未知玩家不操作', () => { const s=new BoardState({n:1,m:1,player_ids:['other']},'me'); assert.equal(s.playerId,0); });
+test('保留实际执行回执并附带对应turn，无回执不沿用旧动作',()=>{const s=create();s.apply({...full(),lst_move:{x:0,y:0,dx:0,dy:1,op:'m'}});assert.equal(s.lastMove.turn,0);assert.equal(s.lastMove.op,'m');s.apply({...full(),turn:1});assert.equal(s.lastMove,null);});
