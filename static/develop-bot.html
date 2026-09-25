@@ -286,7 +286,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>change_team</code></th>
             <td>
               <code>{ team: number }</code>。<code>0</code> 表示观战；<code>1..16</code>
-              表示参赛/队伍号。非组队模式下，非 0 会被规整为参赛。
+              表示参赛/队伍号。非组队模式下，非 0
+              会被规整为参赛。对局进行中仅观战者与已战败玩家可换队（决定下一局的「观战/参与」模式），存活参赛者需等对局结束。
             </td>
           </tr>
           <tr>
