@@ -4,7 +4,9 @@
 // 场景 2（同名换绑冲突）：对局中同名人类连接进房不得接管 bot 令牌连接的席位
 //   （修复前：tryRejoin 按用户名误换绑，bot 收不到 update 而卡死）；
 //   同时校验 bot 自身断线重连与同名人类正常断线重连仍可换绑恢复。
-// 成功 exit 0，失败/超时 exit 1。全程硬上限 90 秒。
+// 场景 3（大地图选项）：房主 change_game_conf {map_size:'large'} 后开局的
+//   地图面积应约为同人数、同种子标准地图的 4 倍。
+// 成功 exit 0，失败/超时 exit 1。全程硬上限 120 秒。
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -21,10 +23,13 @@ const { io: ioClient } = require('socket.io-client');
 
 const serverEntry = path.join(rootDir, 'dist', 'server.js');
 
-const HARD_TIMEOUT_MS = 90_000;
+const HARD_TIMEOUT_MS = 120_000;
 const SERVER_READY_TIMEOUT_MS = 20_000;
 const ROOM_TEAM = 'guardteam';
 const ROOM_DUP = 'guarddup';
+const ROOM_SIZE_NORMAL = 'gsznorm';
+const ROOM_SIZE_LARGE = 'gszbig';
+const MAP_SIZE_TOKEN = 'guard-size-token';
 const DUP_USER = 'guard_dup';
 const USER_A = 'guard_a';
 const USER_B = 'guard_b';
@@ -304,6 +309,42 @@ async function scenarioDuplicateName(baseUrl, dupToken, tokenB) {
   humanB2.socket.disconnect();
 }
 
+async function scenarioMapSize(baseUrl, tokenA, tokenB) {
+  log('场景 3：大地图选项使地图面积放大约 4 倍');
+  // 同人数（2 人）、同种子开两局：标准 vs 大地图，比较 init_map 的 n×m。
+  const normalA = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_SIZE_NORMAL, autoReady: false, name: 'N-A' });
+  await waitFor(() => normalA.clientId !== '', 5000, '标准房 A 进房');
+  const normalB = createRoomClient(baseUrl, { cookie: tokenB, room: ROOM_SIZE_NORMAL, autoReady: false, name: 'N-B' });
+  await waitFor(() => normalB.clientId !== '', 5000, '标准房 B 进房');
+  normalA.socket.emit('change_game_conf', { map_token: MAP_SIZE_TOKEN });
+  normalA.socket.emit('change_ready', { ready: true });
+  normalB.socket.emit('change_ready', { ready: true });
+  await waitFor(() => normalA.inits.length > 0 && normalB.inits.length > 0, 8000, '标准房开局');
+
+  const largeA = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_SIZE_LARGE, autoReady: false, name: 'L-A' });
+  await waitFor(() => largeA.clientId !== '', 5000, '大地图房 A 进房');
+  const largeB = createRoomClient(baseUrl, { cookie: tokenB, room: ROOM_SIZE_LARGE, autoReady: false, name: 'L-B' });
+  await waitFor(() => largeB.clientId !== '', 5000, '大地图房 B 进房');
+  largeA.socket.emit('change_game_conf', { map_size: 'large', map_token: MAP_SIZE_TOKEN });
+  largeA.socket.emit('change_ready', { ready: true });
+  largeB.socket.emit('change_ready', { ready: true });
+  await waitFor(() => largeA.inits.length > 0 && largeB.inits.length > 0, 8000, '大地图房开局');
+
+  const normalInit = normalA.inits[0];
+  const largeInit = largeA.inits[0];
+  const normalArea = normalInit.n * normalInit.m;
+  const largeArea = largeInit.n * largeInit.m;
+  const ratio = largeArea / normalArea;
+  log(`标准图 ${normalInit.n}x${normalInit.m}=${normalArea}，大地图 ${largeInit.n}x${largeInit.m}=${largeArea}，面积比 ${ratio.toFixed(2)}`);
+  if (!(ratio >= 3 && ratio <= 6)) {
+    throw new Error(`大地图面积比 ${ratio.toFixed(2)} 不在预期范围 [3, 6] 内`);
+  }
+  log('场景 3 通过：大地图面积约为标准地图 4 倍');
+  for (const client of [normalA, normalB, largeA, largeB]) {
+    client.socket.disconnect();
+  }
+}
+
 async function main() {
   ensureBuild();
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roka-test-lobby-guards-'));
@@ -329,6 +370,7 @@ async function main() {
 
   await scenarioSameTeam(baseUrl, tokenA, tokenB);
   await scenarioDuplicateName(baseUrl, dupToken, tokenB);
+  await scenarioMapSize(baseUrl, tokenA, tokenB);
 
   finish(0, '全部回归场景通过');
 }

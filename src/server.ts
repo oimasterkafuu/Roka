@@ -1560,6 +1560,15 @@ const boot = async (): Promise<void> => {
           }
         }
 
+        if (hasOwn('map_size')) {
+          const mapSizeRaw = String(payload.map_size ?? oldConf.map_size);
+          const mapSize: LobbyConfig['map_size'] = mapSizeRaw === 'large' ? 'large' : 'normal';
+          if (mapSize !== oldConf.map_size) {
+            nextConf.map_size = mapSize;
+            changed.push('map_size');
+          }
+        }
+
         if (hasOwn('map_token')) {
           const mapToken = lobbyService.normalizeMapToken(payload.map_token);
           if (mapToken !== oldConf.map_token) {
