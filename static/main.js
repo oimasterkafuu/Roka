@@ -537,6 +537,13 @@ function setRoomTopLeftVisible(show) {
   $('#room-top-left').css('display', show ? '' : 'none');
 }
 
+// 观战中（含战败后、终局复盘时）显示「下局模式」选择器：
+// 纯观战用户可提前选好下一局只看不打，避免对局结束后被瞬间重开的下一局拉进场。
+function refreshSpectateMode() {
+  var spectating = !is_replay && in_game && player == 0;
+  $('#spectate-mode').css('display', spectating ? '' : 'none');
+}
+
 $(document).ready(function () {
   $('body').on('keypress', function (e) {
     keypress(e.key.toLowerCase(), e.shiftKey);
@@ -666,6 +673,7 @@ socket.on('init_map', function (data) {
   if (player > 0 && data.general && data.general[0] >= 0) {
     ((selx = data.general[0]), (sely = data.general[1]), (selt = 1));
   }
+  refreshSpectateMode();
 });
 
 $(document).ready(function () {
@@ -837,6 +845,7 @@ socket.on('room_update', function (data) {
   refreshCustomTeamTabs(allowTeam);
   setTabVal('custom-team', selfTeam ? (allowTeam ? selfTeam.toString() : '参赛') : '观战');
   ready_state = selfReady ? 1 : 0;
+  setTabVal('spectate-mode', selfTeam ? '参与' : '观战');
 
   if (allowTeam) {
     for (var i = 0; i <= max_teams; i++) {
@@ -934,6 +943,11 @@ $(document).ready(function () {
       initTab(this, this.children[i], updateTeam);
     }
   });
+  $('#tabs-spectate-mode').each(function () {
+    for (var i = 1; i < this.children.length; i++) {
+      initTab(this, this.children[i], updateSpectateMode);
+    }
+  });
   $('#force-start').on('click', function () {
     ready_state ^= 1;
     socket.emit('change_ready', { ready: ready_state });
@@ -958,6 +972,7 @@ socket.on('left', function () {
   in_game = false;
   game_ended = false;
   replay_id = false;
+  refreshSpectateMode();
 });
 
 $(document).ready(function () {
@@ -1010,7 +1025,12 @@ $(document).ready(function () {
     $('#status-alert').css('display', 'none');
   });
   $($('#status-alert').children()[0].children[4]).on('click', function (e) {
-    socket.emit('return_room');
+    if (lost) {
+      // 战败后该按钮为「观战」：仅关闭弹窗、留在房间内继续观战。
+      $('#status-alert').css('display', 'none');
+    } else {
+      socket.emit('return_room');
+    }
   });
   $($('#status-alert').children()[0].children[6]).on('click', function (e) {
     window.open('/replays/' + encodeURIComponent(replay_id), '_blank');

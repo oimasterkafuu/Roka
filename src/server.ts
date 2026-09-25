@@ -1384,8 +1384,14 @@ const boot = async (): Promise<void> => {
         return;
       }
       if (lobbyService.isLobbyGameRunning(gid)) {
-        lobbyService.emitRoomUpdate(io, gid);
-        return;
+        // 对局进行中仅放行非存活参赛者（观战者/已战败玩家）的换队：
+        // 他们的队伍归属只决定下一局的「观战/参与」模式，不影响当前对局；
+        // 存活参赛者仍需等对局结束，防止中途换队干扰进行中的对局。
+        const runningGame = lobbyService.gameInstances.get(lobbyService.getLobbyVal(gid));
+        if (!runningGame || runningGame.isActiveParticipant(socket.id)) {
+          lobbyService.emitRoomUpdate(io, gid);
+          return;
+        }
       }
 
       const conf = lobbyService.lobbyConfig.get(gid);

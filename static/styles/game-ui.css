@@ -95,6 +95,10 @@
   margin: 0;
   z-index: 25;
 }
+#spectate-mode {
+  bottom: 8px;
+  z-index: 20;
+}
 #replay-bottom-bar {
   display: inline-block;
   margin: 5px;
