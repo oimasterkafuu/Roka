@@ -768,6 +768,7 @@ socket.on('room_update', function (data) {
   setAllowTeamModeByCode(Boolean(data.allow_team));
   setFogModeByCode(Boolean(data.fog));
   setMapModeByCode(data.map_mode || 'random');
+  setMapSizeByCode(data.map_size || 'normal');
   refreshMapInputHint();
   $('#map-token').val(normalizeMapTokenInput(data.map_token || ''));
   var tmp = Array(max_teams + 1);
@@ -792,6 +793,7 @@ socket.on('room_update', function (data) {
   }
   setTabGroupReadonly('tabs-game-speed', roomRunning || !isHost);
   setTabGroupReadonly('tabs-map-mode', roomRunning || !isHost);
+  setTabGroupReadonly('tabs-map-size', roomRunning || !isHost);
   setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBot);
   setTabGroupReadonly('tabs-fog-mode', roomRunning || !isHost || hasBot);
   $('#team-mode-bot-hint').css('display', hasServerBot ? '' : 'none');
@@ -935,6 +937,13 @@ $(document).ready(function () {
     for (var i = 1; i < this.children.length; i++) {
       initTab(this, this.children[i], function () {
         updateConfPatch({ fog: getFogModeCode() });
+      });
+    }
+  });
+  $('#tabs-map-size').each(function () {
+    for (var i = 1; i < this.children.length; i++) {
+      initTab(this, this.children[i], function () {
+        updateConfPatch({ map_size: getMapSizeCode() });
       });
     }
   });
