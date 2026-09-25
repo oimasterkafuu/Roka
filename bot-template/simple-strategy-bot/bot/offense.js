@@ -61,9 +61,9 @@ const DEEP_RALLY_MOBILE_RATIO = 0.8;
 const RISK_WEIGHT = 0.35;
 // 路径代价中「经过队友格」的固定惩罚（避免行军顺手吞并盟友领土）。
 const TEAMMATE_PENALTY = 6;
-// 切换打击目标的滞后系数：新目标评分须超过旧目标 × 此系数才换。
-const REPLAN_MARGIN = 1.3;
-// 集结期（未开打）的目标切换系数：集结纵队是沉没资本，跳目标 = 集结重来。
+// 切换打击目标的滞后系数（集结期）：新目标评分须超过旧目标 × 此系数才换。
+// 集结纵队是沉没资本，跳目标 = 集结重来。行军期（已开打）不换目标——
+// 见 planOffense 的目标锁定。
 const GATHER_SWITCH_MARGIN = 2.0;
 // 进行中/候选路径的入口若紧贴重兵敌格，集结时容易被打断，扣分。
 const ENTRY_EXPOSURE_PENALTY = 0.35;
@@ -199,8 +199,10 @@ function listTargets(ctx) {
 
 /**
  * 评估一个打击目标：路径、入口、需求、可交付兵力与评分。
- * 进行中的计划（同目标）优先从行军栈头部继续，减少路径抖动；
- * 锚点入口成本相近时改选非锚点入口（不从主城倾巢而出）。
+ * 进行中的计划（同目标）入口锁定在行军栈头部——多源重选会随前线推进
+ * 逐 tick 换入口，集结纵队被反复改道永不收束；只有头部不可操作或
+ * 路径不通才落回多源重选。锚点入口成本相近时改选非锚点入口（不从
+ * 主城倾巢而出）。
  */
 function evaluateTarget(ctx, state, target) {
   const pressure = ctx.enemyPressure();
@@ -217,10 +219,11 @@ function evaluateTarget(ctx, state, target) {
     const head = state.plan.headIdx;
     if (head !== null && ctx.operable(head)) {
       const single = ctx.dijkstra([head], enterCost, isTarget);
-      // 集结期入口滞回（代价放宽到 2 倍）：旧入口周边已集结的纵队是沉没
-      // 资本，入口在相邻格间跳变会把输送纵队反复改道、集结永远不收束
-      // （「反复集兵、多路缓慢输兵」的根因之一）；显著更优才换。
-      if (single && single.cost <= multi.cost * 2.0) {
+      // 同目标计划存续期间入口锁定在行军栈头部：多源重选会随前线推进
+      // 不断挑出「更便宜」的新入口，集结中的输送纵队被反复改道、已集结
+      // 的兵力晾在旧入口（「集结 → 入口跳变 → 纵队折返 → 永不收束」
+      // 循环的根因）。只有头部不可操作或路径不通时才落回多源重选。
+      if (single) {
         chosen = single;
       }
     }
@@ -503,9 +506,11 @@ function planOffense(ctx, state, threats) {
     );
   }
 
-  // hysteresis：已有计划的当前评估 × 切换系数仍不输新目标就继续。
-  // 集结中（未开打）用更大的切换系数——已在旧入口集结的纵队是沉没资本，
-  // 目标跳来跳去会让集结永远不收束；开打/行军期保持灵敏。
+  // hysteresis：集结中（未开打）的目标切换用大系数——已在旧入口集结的纵队
+  // 是沉没资本，目标跳来跳去会让集结永远不收束。
+  // 行军期（已开打）目标锁定：兵栈已离港深入，换目标 = 弃栈重来、旧栈晾在
+  // 无人区坐到终局（半途跳目标的根因）；只有计划失效、威胁回防、增援/断供
+  // 弃打这些逃生舱能终止行军。
   let current = null;
   if (state.plan) {
     current = evaluateTarget(ctx, state, {
@@ -513,8 +518,9 @@ function planOffense(ctx, state, threats) {
       owner: state.plan.owner,
       isCrown: ctx.tileKind(state.plan.targetIdx) === 'crown',
     });
-    const margin = current && !current.ready ? GATHER_SWITCH_MARGIN : REPLAN_MARGIN;
-    if (current && (!best || current.score * margin >= best.score)) {
+    if (current && current.ready) {
+      best = current;
+    } else if (current && (!best || current.score * GATHER_SWITCH_MARGIN >= best.score)) {
       best = current;
     }
   }
@@ -712,18 +718,10 @@ function planOffense(ctx, state, threats) {
       srcKey: best.entry,
       tag: 'strike',
     });
-    // 行军加速：路径还长时把再下一步也排进队列（本 tick 只执行一条，
-    // 第二条下 tick 立即执行——若第一步受挫该 op 会被引擎自动跳过）。
-    if (best.path.length >= 3) {
-      const after = best.path[2];
-      candidates.push({
-        score: best.payoff >= 1000 ? 810 : best.isCrown ? 600 : 550,
-        preempt: false,
-        op: attackOp(ctx, next, after, 2),
-        srcKey: next,
-        tag: 'strike',
-      });
-    }
+    // 行军期每 tick 只下一条 strike：服务端每 tick 本就只执行一条 op，
+    // 双排队不带来说速度；空出的 op 名额让给经济/扩张/输送——行军不断
+    // 供、建设不停摆（行军期双 strike 占满名额导致皇冠永远建不起来的
+    // 根因）。
     // 行军栈头部前移到下一格，下 tick 从头部继续规划（防路径抖动）。
     state.plan.headIdx = next;
     return { candidates, focus: null };

@@ -13,6 +13,8 @@
  * 应对手段按优先级：
  *   A. 锚点贴脸应急：能歼灭（推兵严格大于）就歼灭，危急时先削弱；
  *   B. 直接反击兵源：贴住 blob 的己方格能吃掉它就立刻打；
+ *   B2. 局部优势围剿：单格吃不掉但最大两邻格合力明显足够时主动开磨
+ *      （先大后小两刀收割），不让敌兵堆在腹地白站着；合力不足不动；
  *   C. 集结拦截：在威胁路径上挑一个能及时集结足够兵力的己方格作为
  *      集结点（rally），由 logistics 的输送流把兵力调过去——提前防御；
  *      集结点带滞后保持（且路径上已有守得住的格时不再集结），防止
@@ -402,6 +404,50 @@ function planDefense(ctx, threats) {
         });
       }
     }
+  }
+
+  /* ---------- B2. 局部优势围剿（grind）----------
+   * 敌兵堆与至少两格己方格接壤（深入我境或贴边境），单格吃不掉、但最大
+   * 两格合力明显足够时，由最大邻格先打一刀：引擎语义下两刀总代价恒为
+   * blob+1，先大后小让兵堆在第一刀后剩余最少（它下一拍反扑的空间最小），
+   * 第二刀下一 tick 重估后收割。合力不足坚决不动——避免添油式送兵。
+   * 这是「逐格薄防线被集中兵栈平推、邻格大军却因单挑必输而按兵不动」
+   * 的修复：合力够就主动围剿，不让敌兵堆在腹地白站着发展。 */
+  const GRIND_MIN_BLOB = 12;
+  for (let eIdx = 0; eIdx < state.n * state.m; eIdx += 1) {
+    if (!ctx.isAliveEnemyIdx(eIdx)) {
+      continue;
+    }
+    const blob = ctx.army(eIdx);
+    if (blob < GRIND_MIN_BLOB) {
+      continue;
+    }
+    const sources = [];
+    for (const sIdx of ctx.neighbors(eIdx)) {
+      if (ctx.operable(sIdx)) {
+        sources.push({ sIdx, push: ctx.army(sIdx) - 1 });
+      }
+    }
+    if (sources.length < 2) {
+      continue; // 单格吃不掉时无后手，不围剿
+    }
+    sources.sort((a, b) => b.push - a.push);
+    const [first, second] = sources;
+    if (first.push > blob) {
+      continue; // 能单吃的由切断/拦截处理
+    }
+    // 第二刀要有明显富余（覆盖兵堆增兵与反扑余地），否则不发起。
+    const finisherNeed = blob - first.push + 1 + Math.max(4, Math.ceil(blob * 0.1));
+    if (first.push < 2 || second.push < finisherNeed) {
+      continue;
+    }
+    candidates.push({
+      score: 830,
+      preempt: false,
+      op: attackOp(ctx, first.sIdx, eIdx, 2),
+      srcKey: first.sIdx,
+      tag: 'grind',
+    });
   }
 
   if (activeThreat) {
