@@ -351,8 +351,8 @@ function update(data) {
     $('#status-alert').css('display', '');
     hideSurrenderAlert();
     $($('#status-alert').children()[0].children[2]).css('display', 'none');
-    // 战败者终局仍显示「观战」（关闭弹窗继续看终局盘面），其余玩家为「返回房间」。
-    $($('#status-alert').children()[0].children[4]).html(lost ? '观战' : '返回房间');
+    // 游戏彻底结束后统一显示「返回房间」（覆盖战败时显示的「观战」——终局后已无可观战内容）。
+    $($('#status-alert').children()[0].children[4]).html('返回房间');
     $($('#status-alert').children()[0].children[4]).css('display', '');
     replayBtn.css('display', replay_id ? '' : 'none');
   }

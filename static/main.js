@@ -1025,8 +1025,9 @@ $(document).ready(function () {
     $('#status-alert').css('display', 'none');
   });
   $($('#status-alert').children()[0].children[4]).on('click', function (e) {
-    if (lost) {
-      // 战败后该按钮为「观战」：仅关闭弹窗、留在房间内继续观战。
+    if (lost && !game_ended) {
+      // 战败且对局未结束时该按钮为「观战」：仅关闭弹窗、留在房间内继续观战；
+      // 对局彻底结束后按钮变为「返回房间」，走下方 return_room。
       $('#status-alert').css('display', 'none');
     } else {
       socket.emit('return_room');
