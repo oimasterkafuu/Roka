@@ -1,15 +1,20 @@
-// Roka 服务端托管策略 Bot 冒烟测试（issue #18）：
+// Roka 服务端托管策略 Bot 冒烟测试（issue #18 + 多模板/组队选项扩展）：
 // 1) 临时数据目录 + dist/auth-store.js 直接造用户（首个用户 = 超级管理员）；
 // 2) 启动 dist/server.js（ROKA_BOT_TOKENS 注入一个第三方 bot 合成用户）；
-// 3) 以超管身份调 POST /api/admin/bots/start 在服务器进程内启动 simple-strategy-bot；
-// 4) 校验：普通用户访问 bot API 被 403；bot 进房后 host 不是 bot（第三方 bot 进房后接任房主）；
-//    托管 bot 房间禁止组队（独立房间：bot 进房强制关闭已开组队 + 房主开启请求被拒绝）；
-// 5) 启动 random-patch-bot 作为对手触发开局，解析服务器 stdout 中 [server-bot] 日志，
+// 3) 以超管身份调 POST /api/admin/bots/start 在服务器进程内启动托管 Bot；
+// 4) 校验：普通用户访问 bot API 被 403；GET /api/admin/bot-templates 自动发现
+//    simple-strategy-bot 与 anti-human-bot；
+// 5) simple-strategy-bot：进房后 host 不是 bot（第三方 bot 进房后接任房主）；
+// 6) anti-human-bot：启动即自动准备进入对局；同一房间启动第二个 bot 返回 409；
+//    allowTeam=true 的房间允许房主自由开关组队；
+// 7) allowTeam=false 校验（独立房间）：bot 进房强制关闭已开组队 + 房主开启请求被拒绝；
+// 8) 启动 random-patch-bot 作为对手触发开局，解析服务器 stdout 中 [server-bot] 日志，
 //    要求收到 init_map 且发出 >=5 条实际 attack 操作；
-// 6) 重启恢复（issue #28）：不停止 bot 直接杀掉服务器，校验状态文件已记录运行中 bot；
-//    同数据目录重启后 bot 应以相同用户名/房间号自动恢复并连上；
-// 7) 调 POST /api/admin/bots/stop 停止并确认列表清空、状态文件已清除。
-// 成功 exit 0，失败/超时 exit 1。全程硬上限 120 秒。
+// 9) 重启恢复（issue #28）：不停止 bot 直接杀掉服务器，校验状态文件已记录运行中 bot
+//    （含 template/allowTeam）；同数据目录重启后 bot 应以相同用户名/房间号/模板/组队配置
+//    自动恢复并连上；
+// 10) 调 POST /api/admin/bots/stop 停止并确认列表清空、状态文件已清除。
+// 成功 exit 0，失败/超时 exit 1。全程硬上限 180 秒。
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -32,10 +37,12 @@ const GAME_TIMEOUT_MS = 60_000;
 const REQUIRED_ATTACKS = 5;
 const ROOM = 'smokeroom';
 const GUARD_ROOM = 'guardroom';
+const ANTI_ROOM = 'antihumant';
 const ADMIN_USER = 'smoke_admin';
 const BOT_USER = 'smoke_bot';
 const BOT_USER_2 = 'smoke_bot2';
 const NORMAL_USER = 'smoke_user';
+const ANTI_USER = 'smoke_anti';
 const RANDOM_BOT_USER = 'smoke_rand';
 
 const startedAt = Date.now();
@@ -194,6 +201,7 @@ async function prepareUsers(dir) {
   await store.register(BOT_USER, 'smoke-pass-2');
   await store.register(BOT_USER_2, 'smoke-pass-4');
   await store.register(NORMAL_USER, 'smoke-pass-3');
+  await store.register(ANTI_USER, 'smoke-pass-5');
   const adminSid = await store.rotateSession(ADMIN_USER);
   const userSid = await store.rotateSession(NORMAL_USER);
   const env = ensureRuntimeEnv();
@@ -229,7 +237,7 @@ async function main() {
   log(`临时数据目录：${dataDir}，端口：${port}`);
 
   const { adminToken, userToken } = await prepareUsers(dataDir);
-  log('已造用户：smoke_admin（超管）/ smoke_bot（bot 账号）/ smoke_user（普通用户）');
+  log('已造用户：smoke_admin（超管）/ smoke_bot、smoke_bot2、smoke_anti（bot 账号）/ smoke_user（普通用户）');
 
   const serverEnv = {
     ...process.env,
@@ -247,6 +255,7 @@ async function main() {
   const server = spawnServer('服务器');
 
   let sawInitMap = false;
+  let sawAntiInitMap = false;
   let attackCount = 0;
   let serverBuffer = '';
   server.stdout.on('data', (chunk) => {
@@ -261,6 +270,9 @@ async function main() {
       console.log(`    服务器 | ${trimmed}`);
       if (trimmed.includes('init_map')) {
         sawInitMap = true;
+      }
+      if (trimmed.includes('[对局] 初始化')) {
+        sawAntiInitMap = true;
       }
       if (/\[server-bot\] .*: turn \d+: attack /.test(trimmed)) {
         attackCount += 1;
@@ -277,18 +289,41 @@ async function main() {
   if (forbidden.status !== 403) {
     return finish(1, `权限校验失败：普通用户 GET /api/admin/bots 返回 ${forbidden.status}（期望 403）`);
   }
-  log('普通用户访问 /api/admin/bots 被 403 拒绝（符合预期）');
+  const forbiddenTemplates = await api(baseUrl, userToken, 'GET', '/api/admin/bot-templates');
+  if (forbiddenTemplates.status !== 403) {
+    return finish(
+      1,
+      `权限校验失败：普通用户 GET /api/admin/bot-templates 返回 ${forbiddenTemplates.status}（期望 403）`,
+    );
+  }
+  log('普通用户访问 /api/admin/bots 与 /api/admin/bot-templates 被 403 拒绝（符合预期）');
+
+  // 模板枚举校验：应自动发现 simple-strategy-bot 与 anti-human-bot，且不包含 CLI 参考模板。
+  const templates = await api(baseUrl, adminToken, 'GET', '/api/admin/bot-templates');
+  const templateIds = Array.isArray(templates.data?.items) ? templates.data.items.map((item) => item.id) : [];
+  if (templates.status !== 200 || !templateIds.includes('simple-strategy-bot') || !templateIds.includes('anti-human-bot')) {
+    return finish(1, `模板枚举校验失败：HTTP ${templates.status} items=${JSON.stringify(templateIds)}`);
+  }
+  if (templateIds.includes('random-patch-bot')) {
+    return finish(1, `模板枚举校验失败：CLI 参考模板 random-patch-bot 不应可托管（items=${JSON.stringify(templateIds)}）`);
+  }
+  log(`模板枚举校验通过：可托管模板 ${JSON.stringify(templateIds)}`);
 
   // 超管启动服务端托管策略 Bot。
   const started = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/start', {
     username: BOT_USER,
     room: ROOM,
+    template: 'simple-strategy-bot',
+    allowTeam: false,
   });
   if (started.status !== 200 || !started.data?.bot?.id) {
     return finish(1, `启动 bot 失败：HTTP ${started.status} ${JSON.stringify(started.data)}`);
   }
+  if (started.data.bot.template !== 'simple-strategy-bot' || started.data.bot.allowTeam !== false) {
+    return finish(1, `启动 bot 失败：返回记录缺少 template/allowTeam ${JSON.stringify(started.data.bot)}`);
+  }
   const botId = started.data.bot.id;
-  log(`策略 Bot 已启动：id=${botId}`);
+  log(`策略 Bot 已启动：id=${botId}（模板 simple-strategy-bot，不允许组队）`);
 
   // bot 单独在房时暂居首位；第三方 bot 进房后应立即接任房主。
   const randomBot = spawnLogged('random-bot', process.execPath, [path.join(randomBotDir, 'index.js')], {
@@ -309,12 +344,118 @@ async function main() {
   }
   log(`房长保留校验通过：host=${roomAfterJoin.host}（服务端托管 bot 未当房主）`);
 
+  // anti-human-bot 校验：
+  // 1) 启动（allowTeam=true）后 bot 独占房间即为房主，房间允许组队；
+  // 2) 同一房间再启动第二个 bot 应 409；
+  // 3) 普通用户进房后 bot 自动准备（无需 /ready 聊天命令），房主可自由开关组队；
+  // 4) 房主准备后触发开局，bot 自动进入对局（stdout 出现 [对局] 初始化）。
+  const { io: ioClient } = require('socket.io-client');
+  const antiStarted = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/start', {
+    username: ANTI_USER,
+    room: ANTI_ROOM,
+    template: 'anti-human-bot',
+    allowTeam: true,
+  });
+  if (antiStarted.status !== 200 || !antiStarted.data?.bot?.id) {
+    return finish(1, `anti-human 校验失败：启动 bot 出错（HTTP ${antiStarted.status} ${JSON.stringify(antiStarted.data)}）`);
+  }
+  if (antiStarted.data.bot.template !== 'anti-human-bot' || antiStarted.data.bot.allowTeam !== true) {
+    return finish(1, `anti-human 校验失败：返回记录 template/allowTeam 不符 ${JSON.stringify(antiStarted.data.bot)}`);
+  }
+  const antiBotId = antiStarted.data.bot.id;
+  log(`anti-human Bot 已启动：id=${antiBotId}（允许组队）`);
+
+  const antiDup = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/start', {
+    username: BOT_USER_2,
+    room: ANTI_ROOM,
+    template: 'anti-human-bot',
+    allowTeam: false,
+  });
+  if (antiDup.status !== 409) {
+    return finish(1, `anti-human 校验失败：同一房间启动第二个 bot 返回 ${antiDup.status}（期望 409）`);
+  }
+  log('anti-human 校验通过：同一房间启动第二个 bot 被 409 拒绝');
+
+  const badTpl = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/start', {
+    username: BOT_USER_2,
+    room: 'othertplroom',
+    template: 'random-patch-bot',
+    allowTeam: false,
+  });
+  if (badTpl.status !== 400) {
+    return finish(1, `anti-human 校验失败：不可托管模板启动返回 ${badTpl.status}（期望 400）`);
+  }
+  log('anti-human 校验通过：不可托管模板 random-patch-bot 被 400 拒绝');
+
+  const antiSocket = ioClient(baseUrl, {
+    auth: { token: userToken },
+    transports: ['websocket'],
+  });
+  await new Promise((resolve, reject) => {
+    antiSocket.once('connect', resolve);
+    antiSocket.once('connect_error', reject);
+  });
+  try {
+    antiSocket.emit('join_game_room', { room: ANTI_ROOM });
+    await waitRoomUpdate(
+      antiSocket,
+      (d) =>
+        d.allow_team === true &&
+        d.players.length === 2 &&
+        d.players.some((p) => p.uid === ANTI_USER && p.server_bot === true),
+      15_000,
+      'anti-human bot 独占房间允许组队',
+    );
+    log('anti-human 校验通过：allowTeam=true 的 bot 独占房间时房间允许组队');
+
+    await waitRoomUpdate(
+      antiSocket,
+      (d) => d.players.find((p) => p.uid === ANTI_USER)?.ready === true,
+      20_000,
+      'anti-human bot 自动准备',
+    );
+    log('anti-human 校验通过：bot 无需聊天命令即自动准备');
+
+    // 房主（普通用户）关闭再开启组队均不应被拒绝（allowTeam=true 的托管 bot 房间不受限）。
+    const teamOff = waitRoomUpdate(antiSocket, (d) => d.allow_team === false, 10_000, 'allow_team 关闭');
+    antiSocket.emit('change_game_conf', { allow_team: false });
+    await teamOff;
+    const teamBackOn = waitRoomUpdate(antiSocket, (d) => d.allow_team === true, 10_000, 'allow_team 重新开启');
+    antiSocket.emit('change_game_conf', { allow_team: true });
+    await teamBackOn;
+    log('anti-human 校验通过：allowTeam=true 的房间允许房主自由开关组队');
+
+    const inTeam2 = waitRoomUpdate(
+      antiSocket,
+      (d) => d.players.find((p) => p.uid === NORMAL_USER)?.team === 2,
+      10_000,
+      '普通用户切换到 2 队',
+    );
+    antiSocket.emit('change_team', { team: 2 });
+    await inTeam2;
+    antiSocket.emit('change_ready', { ready: true });
+    const antiInitDeadline = Date.now() + 20_000;
+    while (Date.now() < antiInitDeadline && !sawAntiInitMap) {
+      await sleep(500);
+    }
+    if (!sawAntiInitMap) {
+      return finish(1, 'anti-human 校验失败：房主准备后 bot 未自动进入对局（未收到 [对局] 初始化）');
+    }
+    log('anti-human 校验通过：房主准备后 bot 自动进入对局');
+  } finally {
+    antiSocket.disconnect();
+    const antiStopped = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/stop', { id: antiBotId });
+    if (antiStopped.status !== 200) {
+      return finish(1, `anti-human 校验失败：停止 bot 出错（HTTP ${antiStopped.status}）`);
+    }
+    log('anti-human Bot 已停止');
+  }
+
   // 组队禁止校验（独立房间，避免干扰对局校验）：
   // 1) 普通用户作房主开启组队（基线：无托管 bot 时可开）；
   // 2) 超管再启动一个托管 bot 进该房间，bot 进房应强制关闭组队；
   // 3) 房主再次尝试开启组队应被服务端拒绝（收到回发的 room_update 且始终为 false）；
   // 4) 停止该 bot，避免污染后续重启恢复的状态文件校验（期望仅 1 条记录）。
-  const { io: ioClient } = require('socket.io-client');
   const guardSocket = ioClient(baseUrl, {
     auth: { token: userToken },
     transports: ['websocket'],
@@ -341,6 +482,8 @@ async function main() {
   const started2 = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/start', {
     username: BOT_USER_2,
     room: GUARD_ROOM,
+    template: 'simple-strategy-bot',
+    allowTeam: false,
   });
   if (started2.status !== 200 || !started2.data?.bot?.id) {
     return finish(1, `组队禁止校验失败：启动第二个 bot 出错（HTTP ${started2.status}）`);
@@ -420,11 +563,13 @@ async function main() {
     !Array.isArray(savedState) ||
     savedState.length !== 1 ||
     savedState[0]?.username !== BOT_USER ||
-    savedState[0]?.room !== ROOM
+    savedState[0]?.room !== ROOM ||
+    savedState[0]?.template !== 'simple-strategy-bot' ||
+    savedState[0]?.allowTeam !== false
   ) {
     return finish(1, `状态文件校验失败：内容 ${JSON.stringify(savedState)}`);
   }
-  log('状态文件校验通过：运行中 bot 已持久化（username + room）');
+  log('状态文件校验通过：运行中 bot 已持久化（username + room + template + allowTeam）');
 
   // 不停止 bot 直接杀掉服务器，同数据目录重启后应自动以原配置恢复。
   const serverExited = new Promise((resolve) => server.once('exit', resolve));
@@ -452,7 +597,10 @@ async function main() {
   if (!restoredBot) {
     return finish(1, '重启恢复校验失败：重启后 bot 未按原配置自动恢复或未连上服务器');
   }
-  log(`重启恢复校验通过：bot 已自动恢复（id=${restoredBot.id}，房间 ${restoredBot.room}）`);
+  if (restoredBot.template !== 'simple-strategy-bot' || restoredBot.allowTeam !== false) {
+    return finish(1, `重启恢复校验失败：恢复记录 template/allowTeam 不符 ${JSON.stringify(restoredBot)}`);
+  }
+  log(`重启恢复校验通过：bot 已自动恢复（id=${restoredBot.id}，房间 ${restoredBot.room}，模板 ${restoredBot.template}，组队 ${restoredBot.allowTeam}）`);
 
   // 停止 bot 并确认列表清空、状态文件已清除。
   const stopped = await api(baseUrl, adminToken, 'POST', '/api/admin/bots/stop', { id: restoredBot.id });

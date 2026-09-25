@@ -57,13 +57,17 @@
       <section class="card" id="bots-card" style="display: none">
         <h2 class="card-title">策略 Bot</h2>
         <p class="bot-hint">
-          在服务器进程内运行
-          simple-strategy-bot：以指定用户身份自动登录（跳过验证码）进入房间并自动准备，对局结束后自动重新准备。
-          Bot 进房不会成为房主，房主保留给后续进房的人类用户或第三方 Bot。
+          在服务器进程内运行所选模板的策略
+          Bot：以指定用户身份自动登录（跳过验证码）进入房间并自动准备，对局结束后自动重新准备。
+          支持多个模板（由服务端自动枚举 bot-template/ 目录）；同一用户名最多运行一个
+          Bot，同一房间也只能运行一个 Bot。 Bot 进房不会成为房主，房主保留给后续进房的人类用户或第三方
+          Bot；不允许组队的 Bot 会强制关闭房间组队。
         </p>
         <div class="bot-form">
           <input type="text" id="bot-username" placeholder="Bot 使用的用户名" maxlength="20" />
           <input type="text" id="bot-room" placeholder="房间号" maxlength="15" />
+          <select id="bot-template"></select>
+          <label><input type="checkbox" id="bot-allow-team" /> 允许组队</label>
           <button id="bot-start-btn" type="button" class="btn btn-secondary btn-sm">启动</button>
           <button id="bots-refresh-btn" type="button" class="btn btn-ghost btn-sm">刷新</button>
         </div>
@@ -73,6 +77,8 @@
             <tr>
               <th>用户名</th>
               <th>房间</th>
+              <th>模板</th>
+              <th>组队</th>
               <th>启动时间</th>
               <th>连接状态</th>
               <th>操作</th>
