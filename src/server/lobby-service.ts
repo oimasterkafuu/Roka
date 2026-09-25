@@ -123,7 +123,12 @@ class LobbyService {
     return value;
   }
 
-  joinLobby(sid: string, uid: string, gid: string, options?: { serverBot?: boolean; bot?: boolean }): void {
+  joinLobby(
+    sid: string,
+    uid: string,
+    gid: string,
+    options?: { serverBot?: boolean; serverBotAllowTeam?: boolean; bot?: boolean },
+  ): void {
     this.lobbyOfSid.set(sid, gid);
     // 进房本身即是「标签页开启」的证明，作为心跳基线。
     this.lobbyHeartbeats.set(sid, Date.now());
@@ -176,14 +181,25 @@ class LobbyService {
       }
     }
     if (options?.serverBot) {
-      // 托管策略 Bot 所在房间不允许组队：若房间已开启组队，进房时强制关闭并规整队伍。
-      if (conf.allow_team) {
+      // 托管策略 Bot 的组队语义由启动参数决定（serverBotAllowTeam）：
+      // bot 独占房间时把 allow_team 设置为启动参数指定值；allowTeam=false
+      // 的房间沿用强制关闭组队并规整队伍，allowTeam=true 时不强制关闭，
+      // 房主后续可自行开关（change_game_conf 只对 allowTeam=false 的托管
+      // bot 房间拒绝开启组队）。
+      player.serverBot = true;
+      player.serverBotAllowTeam = options.serverBotAllowTeam === true;
+      if (options.serverBotAllowTeam === true) {
+        // 允许组队的托管 bot：不强制关闭组队；独占房间时直接按启动参数开启。
+        if (players.length === 0) {
+          conf.allow_team = true;
+        }
+      } else if (conf.allow_team) {
+        // 不允许组队的托管 bot：进房强制关闭组队并规整队伍。
         conf.allow_team = false;
         this.enforceLobbyConstraints(gid);
       }
       // 服务端托管 bot 永远排在普通成员之后：房主（players[0]）保留给
       // 人类用户或第三方 bot。bot 单独在房时暂居首位，任何普通成员进房即接任。
-      player.serverBot = true;
       players.push(player);
       return;
     }

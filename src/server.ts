@@ -706,7 +706,7 @@ const boot = async (): Promise<void> => {
     return reply.send({ ok: true });
   });
 
-  // ---------- 策略 Bot（仅超级管理员）：服务端进程内运行 simple-strategy-bot ----------
+  // ---------- 策略 Bot（仅超级管理员）：服务端进程内运行所选 bot 模板 ----------
 
   // Bot 管理统一的权限闸：在 requireAdmin 之上再校验超级管理员（与 set-admin 相同）。
   const requireSuperAdmin = (request: FastifyRequest, reply: FastifyReply): AuthUser | null => {
@@ -729,7 +729,17 @@ const boot = async (): Promise<void> => {
     return reply.send({ items: serverBotManager.list() });
   });
 
-  // 启动：{ username, room }。Bot 在服务器进程内以该用户身份连接本服务器并加入房间。
+  // 枚举 bot-template/ 下可托管运行的模板（strategy.js / server-bot.js），供管理页下拉选择。
+  app.get('/api/admin/bot-templates', async (request, reply) => {
+    const admin = requireSuperAdmin(request, reply);
+    if (!admin) {
+      return;
+    }
+    return reply.send({ items: serverBotManager.listTemplates() });
+  });
+
+  // 启动：{ username, room, template, allowTeam }。Bot 在服务器进程内以该用户
+  // 身份连接本服务器，按所选模板加入房间并自动准备。
   app.post(
     '/api/admin/bots/start',
     { preHandler: adminActionRateLimitPreHandler },
@@ -738,9 +748,16 @@ const boot = async (): Promise<void> => {
       if (!admin) {
         return;
       }
-      const body = request.body as { username?: unknown; room?: unknown };
+      const body = request.body as {
+        username?: unknown;
+        room?: unknown;
+        template?: unknown;
+        allowTeam?: unknown;
+      };
       const username = String(body?.username ?? '').trim();
       const room = String(body?.room ?? '').trim();
+      const template = String(body?.template ?? '').trim();
+      const allowTeam = body?.allowTeam === true;
       if (!USERNAME_REGEX.test(username) || !userStore.getPublicProfile(username)) {
         return reply.code(404).send({ error: '用户不存在。' });
       }
@@ -750,8 +767,11 @@ const boot = async (): Promise<void> => {
       if (room.length === 0 || room.length > 15) {
         return reply.code(400).send({ error: '房间号无效（长度 1~15）。' });
       }
+      if (!template || !serverBotManager.listTemplates().some((item) => item.id === template)) {
+        return reply.code(400).send({ error: '模板不存在或不可托管。' });
+      }
       try {
-        const bot = serverBotManager.start(username, room);
+        const bot = serverBotManager.start(username, room, template, allowTeam);
         return reply.send({ ok: true, bot });
       } catch (error) {
         return reply.code(409).send({ error: error instanceof Error ? error.message : '启动失败。' });
@@ -1209,12 +1229,14 @@ const boot = async (): Promise<void> => {
       }
 
       // 服务端托管策略 Bot：命中管理器生成的内存临时令牌时以指定用户放行，
-      // 额外标记 isServerBot（进房不当房主，见 lobby-service.joinLobby）。
-      const serverBotUsername = serverBotManager.resolveToken(fromHandshake);
-      if (serverBotUsername) {
-        socket.data.username = serverBotUsername;
+      // 额外标记 isServerBot（进房不当房主，见 lobby-service.joinLobby）并记录
+      // 启动时的组队许可（serverBotAllowTeam）。
+      const serverBot = serverBotManager.resolveToken(fromHandshake);
+      if (serverBot) {
+        socket.data.username = serverBot.username;
         socket.data.isBot = true;
         socket.data.isServerBot = true;
+        socket.data.serverBotAllowTeam = serverBot.allowTeam;
         next();
         return;
       }
@@ -1354,14 +1376,16 @@ const boot = async (): Promise<void> => {
         const hadFog = lobbyService.lobbyConfig.get(room)?.fog === true;
         lobbyService.joinLobby(socket.id, username, room, {
           serverBot: socket.data.isServerBot === true,
+          serverBotAllowTeam: socket.data.serverBotAllowTeam === true,
           bot: socket.data.isBot === true,
         });
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         lobbyService.sendLobbySystemMessage(io, roomVal, `${username} 加入了自定义房间。`);
-        // 托管策略 Bot 进房会强制关闭组队（见 lobby-service.joinLobby），补充提示。
+        // 不允许组队的托管策略 Bot 进房会强制关闭组队（见 lobby-service.joinLobby），补充提示。
         if (
           socket.data.isServerBot === true &&
+          socket.data.serverBotAllowTeam !== true &&
           hadAllowTeam &&
           lobbyService.lobbyConfig.get(room)?.allow_team === false
         ) {
@@ -1516,9 +1540,12 @@ const boot = async (): Promise<void> => {
             allowTeamRaw === true || allowTeamRaw === 1 || allowTeamRaw === '1' || allowTeamRaw === 'true',
           );
           if (allowTeam !== oldConf.allow_team) {
-            if (allowTeam && players.some((player) => player.serverBot === true)) {
-              // 房间内有服务端托管策略 Bot 时禁止开启组队：拒绝改动并回发
-              // 房间状态复位前端开关。
+            if (
+              allowTeam &&
+              players.some((player) => player.serverBot === true && player.serverBotAllowTeam !== true)
+            ) {
+              // 房间内存在不允许组队的服务端托管策略 Bot 时禁止开启组队：拒绝
+              // 改动并回发房间状态复位前端开关（允许组队的托管 bot 房间不受限）。
               lobbyService.sendLobbySystemMessage(io, roomVal, '房间内有官方策略 Bot，不允许开启组队模式。');
               lobbyService.emitRoomUpdate(io, gid);
             } else {
