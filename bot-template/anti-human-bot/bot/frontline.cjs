@@ -102,7 +102,13 @@ function createFrontline(state, params = {}) {
       const left = A - push;
       // 占领格必须留下能站住的兵，禁止 1 兵蚕食式进攻（那是给对手送地）。
       if (arrive < p.minArrive) continue;
-      if (left < (buildingTarget ? buildingKeep : keepSource)) continue;
+      // 全冲（留 1 兵）的放行条件：目标是敌方领土、源点不是自家建筑，
+      // 且新占格的兵力至少能压住源点旁边的敌军。这样「半兵打不穿、全冲又不许」
+      // 的死锁就不会出现（实地日志里 A=223 对守军 115、A=223 对守军 35 都被卡死）。
+      const allInSafe = !ownBuilding && kind !== 'neutral' &&
+        arrive >= Math.min(keepSource, Math.max(2, src.adj * 1.2));
+      const requiredKeep = ownBuilding ? keepSource : allInSafe ? 1 : keepSource;
+      if (left < requiredKeep) continue;
       if (unknownNear && !buildingTarget && (left < p.unknownMargin || arrive < 4)) continue;
       // 占领后下一 tick 的相对优势：来援的己方邻格 + 新到兵力 − 目标周围可反击的敌军。
       const exposure = arrive + mates.force * 0.5 - tgt.adj * p.counterWeight;
@@ -148,7 +154,9 @@ function createFrontline(state, params = {}) {
         if (reserveEdge >= 1.0 || productionEdge >= 3) need *= 0.6;
         if (dominant) need = Math.min(need, p.stallRatio);
         if (A >= need * defense) {
-          const floor = Math.max(1, Math.min(keepSource, Math.ceil(A * p.grindKeep)));
+          // 消耗战也要留够：自家建筑必须留下挡得住贴邻敌军的守军，普通格才允许只留 20%。
+          const floor = Math.max(1, Math.min(keepSource, Math.ceil(A * p.grindKeep)),
+            ownBuilding ? src.adj + 1 : 0);
           let choice = null;
           for (const mode of [1, 0, 2]) {
             const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;

@@ -15,3 +15,43 @@ test('实际回执已将后方兵送到B时，完整策略不得立即B回A',()=
  const s={n:1,m:5,playerId:1,turn:80,grid:[101,1,1,200,102],army:[10,1,25,0,10],isolated:[0,0,0,0,0],fog:[0,0,0,0,0],teams:new Map([[1,1],[2,2]]),lastMove:{x:0,y:1,dx:0,dy:2,op:'m',turn:80}};
  const a=chooseAction(s);assert.ok(!a||a.kind!=='attack'||!(a.y===2&&a.dy===1));
 });
+
+test('保底：没有前线可打时，后方攒够 50 兵就直接建皇冠', () => {
+  // 全图无敌情 → 补给/进攻都不成立，只剩保底建造
+  const s = { n: 1, m: 5, turn: 900, playerId: 1, grid: [101, 1, 1, 1, 1],
+    army: [5, 300, 1, 1, 1], isolated: Array(5).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  const a = chooseAction(s);
+  assert.ok(a, '不允许空动作');
+  assert.equal(a.kind, 'build');
+  assert.equal(a.op, 'b');
+  assert.equal(a.y, 1);
+});
+
+test('保底：没有建造资金时也要把后方兵力向前线搬一步', () => {
+  const s = { n: 1, m: 6, turn: 900, playerId: 1, grid: [101, 1, 1, 1, 1, 2],
+    army: [5, 40, 1, 1, 1, 5000], isolated: Array(6).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  const a = chooseAction(s);
+  assert.ok(a, '不允许空动作');
+  assert.equal(a.kind, 'attack');
+  assert.equal(a.y, 1);
+  assert.ok(a.dy > a.y, '必须朝前线方向');
+});
+
+test('保底：前线巨堆打不动时横向汇兵，不后退也不空转', () => {
+  const s = { n: 2, m: 4, turn: 900, playerId: 1,
+    grid: [101, 1, 1, 2, 1, 1, 1, 2], army: [5, 3000, 1, 90000, 1, 1, 1, 90000],
+    isolated: Array(8).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  const a = chooseAction(s);
+  assert.ok(a, '不允许空动作');
+  assert.equal(a.kind, 'attack');
+  const from = a.x * 4 + a.y, to = a.dx * 4 + a.dy;
+  assert.equal(s.grid[from] % 50, 1, '只能从己方格出发');
+  assert.equal(s.grid[to] % 50, 1, '保底不越界进攻');
+});
+
+test('保底不会用来白送主城：源点留守规则仍然生效', () => {
+  const s = { n: 1, m: 4, turn: 900, playerId: 1, grid: [101, 2, 2, 2],
+    army: [1, 900, 900, 900], isolated: Array(4).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  const a = chooseAction(s);
+  assert.ok(!a || a.kind !== 'attack' || a.y !== 0, '主城 1 兵不打仗');
+});

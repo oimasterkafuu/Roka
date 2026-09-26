@@ -69,15 +69,20 @@ test('正在被反推（consolidate）时只接高价值目标', () => {
   assert.ok(createFrontline(s2, { consolidate: true }).assess(move));
 });
 
-test('wideKeepWeight 让边境格面对三跳内大军时多留守', () => {
-  // 1×6 走廊：0 皇冠、1 我方前沿(100兵)、2 敌格(2兵)、3 中立、4 敌巨堆(4000，距源点三跳)
-  const s = { n: 1, m: 6, turn: 600, playerId: 1, grid: [101, 1, 2, 200, 2, 2],
-    army: [100, 100, 2, 0, 4000, 0], isolated: Array(6).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+test('全冲的放行条件：新占格压得住源点旁边的敌军', () => {
+  // 1×6 走廊：0 皇冠、1 我方前沿(100兵)、2 敌格(2兵)、3 中立、4 远处敌堆
   const corridor = { x: 0, y: 1, dx: 0, dy: 2, mode: 0 };
-  assert.equal(createFrontline(s).assess(corridor).mode, 2);        // 默认三跳内不计威胁 → 全冲
-  const guarded = createFrontline(s, { wideKeepWeight: 1 }).assess(corridor);
-  assert.ok(guarded);
-  assert.equal(guarded.mode, 1);                                    // 计入三跳压力 → 改半兵
+  // 敌堆在三跳外（源点旁边干净）→ 全冲，新占格 98 兵远强于留守的 1 兵
+  const far = { n: 1, m: 6, turn: 600, playerId: 1, grid: [101, 1, 2, 200, 2, 2],
+    army: [100, 100, 2, 0, 4000, 0], isolated: Array(6).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  assert.equal(createFrontline(far).assess(corridor).mode, 2);
+  assert.equal(createFrontline(far, { wideKeepWeight: 1 }).assess(corridor).mode, 2);
+  // 敌堆贴到源点旁边 → 不允许留 1 兵面对它，改半兵或拒绝
+  const near = { n: 1, m: 6, turn: 600, playerId: 1, grid: [101, 1, 2, 200, 2, 2],
+    army: [100, 100, 2, 0, 4000, 0], isolated: Array(6).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  near.grid[0] = 2; near.army[0] = 4000;   // 源点左侧贴脸 4000 敌兵
+  const guarded = createFrontline(near).assess(corridor);
+  assert.ok(!guarded || guarded.mode !== 2, '贴脸强敌时必须留守');
 });
 
 test('服从FFA目标限制与禁行边', () => {
@@ -232,4 +237,38 @@ test('choose 会优先挑建筑而不是同强度的普通敌格', () => {
   const chosen = createFrontline(s).choose();
   assert.ok(chosen);
   assert.equal(chosen.dx * 7 + chosen.dy, 15);
+});
+
+// 复现实地日志：2×6 棋盘，源点 (0,1)=223 兵，旁边 (1,1) 有 51 敌兵，
+// 目标 (0,2)=43 兵且被 (1,2) 的 100 兵增援（对应日志 defense:115 / sourceAdj:51 / keepSource:64）。
+const LIVE = (sourceArmy, sourceGrid, targetArmy, reinforceArmy) => {
+  const n = 2, m = 6, at = (x, y) => x * m + y;
+  const grid = Array(12).fill(1), army = Array(12).fill(1);
+  grid[at(0, 0)] = 101; army[at(0, 0)] = 50;
+  grid[at(0, 1)] = sourceGrid; army[at(0, 1)] = sourceArmy;
+  grid[at(0, 2)] = 2; army[at(0, 2)] = targetArmy;
+  grid[at(1, 1)] = 2; army[at(1, 1)] = 51;
+  grid[at(1, 2)] = 2; army[at(1, 2)] = reinforceArmy;
+  return { n, m, turn: 2731, playerId: 1, grid, army, isolated: Array(12).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+};
+const LIVE_MOVE = { x: 0, y: 1, dx: 0, dy: 2, mode: 0 };
+
+test('复现实地日志：A=223 对守军115 必须打下来，而不是空动作', () => {
+  const f = createFrontline(LIVE(223, 1, 43, 100));
+  const result = f.assess(LIVE_MOVE);
+  assert.ok(result, `必须能打，实际桶=${JSON.stringify(f.diagnostics.rejected)}`);
+  assert.equal(result.mode, 2);      // 半兵打不穿 → 全冲
+});
+
+test('复现实地日志：A=223 对守军35 也不能因为源点旁边有敌军就空转', () => {
+  assert.ok(createFrontline(LIVE(223, 1, 18, 10)).assess(LIVE_MOVE), '能拿下就必须拿下');
+});
+
+test('自家建筑不会被抽空：从皇冠出兵后仍留下挡得住贴邻敌军的守军', () => {
+  const result = createFrontline(LIVE(223, 101, 43, 100)).assess(LIVE_MOVE);
+  if (result) {
+    const sent = Number(/出兵(\d+)/.exec(result.reason)[1]);
+    const garrison = 223 + 1 - sent;   // 皇冠本 tick 先 +1
+    assert.ok(garrison >= 51, `皇冠留守必须压住贴邻的 51 敌兵，实际留守 ${garrison}`);
+  }
 });
