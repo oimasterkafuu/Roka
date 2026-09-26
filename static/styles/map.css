@@ -173,9 +173,8 @@
   background-image: url('/city.png');
 }
 .fog {
-  border: 1px solid rgba(255, 255, 255, 0) !important;
-  /* 迷雾远征：未知占位格渲染为山+问号（沼泽例外照常），叠深色遮罩隐藏归属与兵力。 */
-  box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.55);
+  /* 迷雾远征：视野外格子叠轻微暗色遮罩，山脉与沼泽仍可见。 */
+  box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.32);
 }
 
 .selectable,
