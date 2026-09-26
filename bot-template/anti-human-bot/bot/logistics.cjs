@@ -2,295 +2,258 @@
 const { resolveParams } = require('./params.cjs');
 const { architecture } = require('./architecture.cjs');
 const { chooseBuild, urgent, crownTarget, clusterValue } = require('./building.cjs');
+const { createContext } = require('./threat.cjs');
 
-// 只以局面对象为键，不把任何局面的引用放进共享计划。
-const memories = new WeakMap();
+// 本模块**不保存任何跨回合计划**：每次调用都按当前局面重新算
+// 「哪个格子该补兵、补到多少、这一 tick 从哪搬到哪」。
+// 唯一的缓存是同一 tick 内 getSupplyBatch 需要读取的计算结果（当前回合的函数值）。
+const currentBatch = new WeakMap();
+// 同一 tick 内 policy 会调用本模块 2–3 次（军用/经济/常规），
+// 这里缓存「本回合算出来的函数值」，换回合即失效并整份重算。
+const turnMemo = new WeakMap();
+// 缓存键必须覆盖所有会影响结果的入参：模式、FFA 允许目标集合、禁行边集合。
+// 同一 tick 内 policy 会用不同参数多次调用，键不同就各算一份，绝不互相污染。
+function memoFor(state, turn, key) {
+  let all = turnMemo.get(state);
+  if (!all || all.turn !== turn) { all = { turn, entries: new Map() }; turnMemo.set(state, all); }
+  let memo = all.entries.get(key);
+  if (!memo) {
+    memo = { transport: new Map(), forecast: new Map(), rally: null, economySite: null };
+    all.entries.set(key, memo);
+  }
+  return memo;
+}
 
-// 只公开本 tick 已重新验证过、确有运输动作的一轮补给。
+// 只公开本 tick 重新计算出来的补给需求；没有真实运输就是 null。
 function getSupplyBatch(state) {
-  const memory = state && memories.get(state);
-  if (!memory || state.ended || state.dead || memory.turn !== (Number.isFinite(state.turn) ? state.turn : 0)) return null;
-  return memory.activeBatch ? { ...memory.activeBatch } : null;
+  const record = state && currentBatch.get(state);
+  if (!record || !Number.isFinite(state.turn) || record.turn !== state.turn) return null;
+  return record.batch ? { ...record.batch } : null;
 }
 
 function chooseLogistics(state, move, build, params = {}) {
-  const previous = state && memories.get(state);
-  if (previous) previous.activeBatch = null;
-  if (!state || state.ended || state.dead) {
-    if (state) memories.delete(state);
-    return null;
-  }
+  if (!state || state.ended || state.dead) return null;
   const { n, m, grid, army, playerId: me } = state;
   const size = n * m;
   if (!Number.isInteger(n) || !Number.isInteger(m) || n <= 0 || m <= 0 ||
       !Number.isInteger(me) || me < 1 || me > 49 || !grid || !army ||
       grid.length !== size || army.length !== size) return null;
   const turn = Number.isFinite(state.turn) ? state.turn : 0;
-  let memory = memories.get(state);
-  if (!memory || turn < memory.turn || memory.me !== me || memory.size !== size) {
-    memory = { turn, me, size, rally: null, economy: null, lastTransport: -Infinity, lastBuild: -Infinity, observations: new Map(), lastEconomy: -Infinity, edges: new Map() };
-    memories.set(state, memory);
-  }
-  memory.turn = turn;
-  // 先处理回退，再让行，避免紧急 tick 掩盖重开。
-  const militaryOnly = params.militaryOnly === true;
-  if (!militaryOnly && urgent(state, move)) return null;
+  currentBatch.set(state, { turn, batch: null });
+  const memoKey = '';   // 占位，真正的键在模式判定之后构建
+  let memo = null;
+  const ctx = createContext(state, params);
+  if (!ctx) return null;
   const p = resolveParams(params);
+  const militaryOnly = params.militaryOnly === true;
+  const economyOnly = params.economyOnly === true;
+  // 缓存键必须覆盖所有会影响结果的入参：模式、FFA 允许目标集合、禁行边集合。
+  // 同一 tick 内 policy 会用不同参数多次调用，键不同就各算一份，绝不互相污染。
+  memo = memoFor(state, turn, [
+    militaryOnly ? 'm' : '', economyOnly ? 'e' : '',
+    params.allowedOwners ? [...params.allowedOwners].sort((a, b) => a - b).join(',') : '*',
+    params.blockedEdges ? params.blockedEdges.size : 0,
+  ].join('|'));
+  if (!militaryOnly && !economyOnly && urgent(state, move)) return null;
   const architecturePlan = architecture(state, p);
-  const owner = v => v > 0 && v < 200 ? v % 50 : 0;
-  const owners = Array.from(grid, owner);
-  const team = state.teams instanceof Map ? state.teams.get(me) : 0;
-  const allied = id => id === me || (id > 0 && team > 0 && state.teams.get(id) === team);
-  const unknown = i => !!state.fog?.[i] || grid[i] === 202 || grid[i] === 203;
-  const own = i => owners[i] === me && !state.isolated?.[i] && !unknown(i);
-  const count = i => Number.isFinite(army[i]) ? Math.max(0, army[i]) : 0;
-  const enemy = i => owners[i] > 0 && !allied(owners[i]) && !unknown(i) && !state.isolated?.[i];
-  const neighbors = Array.from({ length: size }, (_, i) => {
-    const a = [];
-    if (i >= m) a.push(i - m);
-    if (i % m) a.push(i - 1);
-    if (i % m + 1 < m) a.push(i + 1);
-    if (i + m < size) a.push(i + m);
-    return a;
-  });
-  function field(seeds, allowed) {
-    const d = new Int32Array(size).fill(-1), q = [];
-    for (const i of seeds) { d[i] = 0; q.push(i); }
-    for (let h = 0; h < q.length; h++) for (const j of neighbors[q[h]]) {
-      if (d[j] < 0 && allowed(j)) { d[j] = d[q[h]] + 1; q.push(j); }
-    }
-    return d;
-  }
-  function pushed(from, to) {
-    let reserve = 0;
-    for (const k of neighbors[from]) {
-      if (k === to || grid[k] === 201 || grid[k] === 203 || allied(owners[k])) continue;
-      reserve += unknown(k) ? 2 : count(k) - 1;
-    }
-    return Math.min(count(from) - 1, Math.max(0, count(from) - reserve - 1));
-  }
-  const pressure = i => neighbors[i].reduce((s, j) => s + (enemy(j) ? Math.max(0, count(j) - 1) : 0), 0);
-  const lands = [], fronts = [], borders = [], threats = [];
+  const { owners, count, own, hostile: enemy, allied, neighbors } = ctx;
+  const unknown = (i) => !ctx.knownAt(i);
+  const lands = [], fronts = [], borders = [];
   let crowns = 0, cities = 0, available = 0;
   for (let i = 0; i < size; i++) {
-    if (enemy(i) || unknown(i)) threats.push(i);
     if (!own(i)) continue;
     lands.push(i);
     if (grid[i] === me + 100) crowns++;
     if (grid[i] === me + 50) cities++;
     available += Math.max(0, count(i) - 1);
-    if (neighbors[i].some(j => enemy(j) && (!params.allowedOwners || params.allowedOwners.has(owners[j])))) fronts.push(i);
-    if (neighbors[i].some(j => !allied(owners[j]) && (!owners[j] || !params.allowedOwners || params.allowedOwners.has(owners[j])) && grid[j] !== 201 && grid[j] !== 203)) borders.push(i);
+    if (neighbors[i].some((j) => enemy(j) && (!params.allowedOwners || params.allowedOwners.has(owners[j])))) fronts.push(i);
+    if (neighbors[i].some((j) => !allied(owners[j], me) && !owners[j] && grid[j] !== 201 && grid[j] !== 203)) borders.push(i);
   }
   if (!lands.length) return null;
-  const danger = field(threats, i => grid[i] !== 201 && grid[i] !== 203);
-  const safe = i => own(i) && (danger[i] < 0 || danger[i] > Math.max(3, p.enemyDistance));
-  const economicSite = i => {
-    const risk = architecturePlan.assess(i);
-    if (!risk.complete || !Number.isFinite(risk.reserve)) return false;
-    // 只证明筹齐后的安全潜力，不拿虚拟兵放行真实建造。
-    if (risk.crownSafe) return true;
-    const virtualArmy = Array.from(army);
-    virtualArmy[i] = 100 + risk.reserve;
-    return architecture({ ...state, army: virtualArmy }, p).assess(i).crownSafe;
-  };
+  const race = ctx.race;
   const targetCrowns = crownTarget(lands.length, turn, p, state);
+
+  function pushed(from, to) {
+    let reserve = 0;
+    for (const k of neighbors[from]) {
+      if (k === to || grid[k] === 201 || grid[k] === 203 || allied(owners[k], me)) continue;
+      reserve += unknown(k) ? 2 : count(k) - 1;
+    }
+    return Math.min(count(from) - 1, Math.max(0, count(from) - reserve - 1));
+  }
+  const pressureAt = (i) => ctx.pressure(i, { radius: 1 }).adj;
+  // enemyDistance < 0 表示这片区域根本走不到敌人（最安全），不能当成“不安全”。
+  const safe = (i) => own(i) && (ctx.enemyDistance[i] < 0 || ctx.enemyDistance[i] > Math.max(3, p.enemyDistance));
   const safety = Math.max(2, Math.ceil(p.buildSafety));
-  // 仅比较连续可见、同属同类型格的增量；扣掉自然增长，不读取敌方命令。
-  function growth(i, start, ticks) {
-    if (!owners[i] || state.isolated?.[i] || unknown(i)) return 0;
-    if (grid[i] > 100 && grid[i] < 150) return ticks;
-    if (grid[i] >= 150) return 0;
-    const periodic = Math.floor((start + ticks) / 50) - Math.floor(start / 50);
-    return periodic + (grid[i] < 50 ? Math.max(0, Math.min(50, start + ticks) - Math.max(25, start)) : 0);
-  }
-  const rates = new Map(), observed = new Map();
-  for (const i of threats) if (enemy(i)) {
-    const old = memory.observations.get(i);
-    let rate = 0;
-    if (old && old.code === grid[i] && turn > old.turn)
-      rate = Math.max(0, count(i) - old.count - growth(i, old.turn, turn - old.turn)) / (turn - old.turn);
-    else if (old && old.turn === turn) rate = old.rate;
-    rates.set(i, rate);
-    observed.set(i, { code: grid[i], count: count(i), turn, rate });
-  }
-  memory.observations = observed;
-  // 远端敌总量属于进攻预测，不可再次折算为每个后方格的无限留兵。
-  const reserveAt = i => Math.max(safety, pressure(i) + 1);
+
+  /** 反向有向 BFS：只把兵往目标方向搬，天然不会来回倒兵。 */
   function transport(target, funding = false) {
-    // 反向有向BFS把禁行边纳入路径，而非求完最短路才发现第一步不能走。
+    // 关键：把「当前经济工地」纳入缓存键，否则同一 tick 内不同模式会读到彼此的结果。
+    const memoKey = `${target}:${funding ? 1 : 0}:${economySiteTarget}`;
+    if (memo.transport.has(memoKey)) return memo.transport.get(memoKey);
+    const result = computeTransport(target, funding);
+    memo.transport.set(memoKey, result);
+    return result;
+  }
+  function computeTransport(target, funding = false) {
     const d = new Int32Array(size).fill(-1), queue = [target]; d[target] = 0;
-    for (let h=0;h<queue.length;h++) for (const j of neighbors[queue[h]]) {
-      if (d[j]>=0 || !own(j) || params.blockedEdges?.has(`${j}:${queue[h]}`)) continue;
-      if (!militaryOnly && (memory.edges.get(`${queue[h]}:${j}`) ?? -Infinity)+12>turn) continue;
-      d[j]=d[queue[h]]+1;queue.push(j);
+    for (let h = 0; h < queue.length; h++) for (const j of neighbors[queue[h]]) {
+      if (d[j] >= 0 || !own(j) || params.blockedEdges?.has(`${j}:${queue[h]}`)) continue;
+      d[j] = d[queue[h]] + 1; queue.push(j);
     }
     let best = null, rear = 0;
     for (const from of lands) {
       if (d[from] <= 0 || neighbors[from].some(enemy)) continue;
-      // 已筹资金及运输途中的资金不再向前线抽走；目标失守、失去安全资格或达标即解除。
-      if (!militaryOnly && !funding && memory.economy && (memory.economy.target === from || memory.economy.funded.has(from)) && safe(from) &&
-          crowns < targetCrowns && (grid[memory.economy.target] === me + 50 || (grid[memory.economy.target] === me && crowns + cities < targetCrowns))) continue;
+      if (!funding && economySiteTarget === from) continue;   // 工地自己不吃自己的存量
       rear += Math.max(0, count(from) - 1);
       for (const to of neighbors[from]) {
         if (!own(to) || d[to] !== d[from] - 1 || params.blockedEdges?.has(`${from}:${to}`)) continue;
-        if (!militaryOnly && (memory.edges.get(`${to}:${from}`) ?? -Infinity) + 12 > turn) continue;
         let amount = pushed(from, to), mode = 0;
         if (amount <= 0) continue;
-        // 附近皇冠不能全抽就改用真实半兵，不应因此跳过它去搬最远巨堆。
         if (grid[from] === me + 100) {
-          const keep = safe(from) ? 1 : Math.max(safety, pressure(from) + 1);
+          const keep = safe(from) && from !== economySiteTarget
+            ? Math.max(4, Math.round(safety / 2))
+            : Math.max(safety, pressureAt(from) + 1);
           if (count(from) - amount < keep) { amount = Math.floor(amount / 2); mode = 1; }
           if (amount <= 0 || count(from) - amount < keep) continue;
         }
-        // 不能让近处1兵/2兵循环或皇冠每tick新长的几兵永远压住远方有效兵源。
-        if (militaryOnly && amount < Math.max(5, Math.min(50, Math.ceil(count(target) * 0.01)))) continue;
         const gain = amount / Math.max(1, d[from]);
         const local = d[from] <= 3 && amount >= 5;
-        // 军事补给优先已在近处的有效兵源；经济筹资保留按效率选源。
-        if (!best || (!funding && local && !best.local) ||
-            ((funding || local === best.local) && gain > best.gain))
+        if (!best || (!funding && local && !best.local) || ((funding || local === best.local) && gain > best.gain))
           best = { from, to, amount, gain, distance: d[from], local, mode };
       }
     }
     return { best, rear, ratio: rear / Math.max(1, available) };
   }
-  // 真实敌人边界优先；只有没有可达敌前线时才选择中立/雾边界。
-  const validRally = plan => {
-    if (!plan || !own(plan.target) || !(fronts.length ? fronts : borders).includes(plan.target)) return false;
-    const d = field([plan.target], own);
-    return lands.some(i => d[i] > 0);
+
+  // ── 经济工地：每 tick 重新挑一次（安全、可负担、离敌远） ────────────────
+  // 工地的「可建成性」= 有足够资金就能安全开工：reserve 只由敌方威胁决定，与我方驻军无关，
+  // 所以不需要为每个候选重建一次整张 architecture（那是 95% 的决策耗时）。
+  const economicSite = (i) => {
+    const risk = architecturePlan.assess(i);
+    return Boolean(risk.complete) && Number.isFinite(risk.reserve);
   };
-  if (militaryOnly && memory.batch) {
-    const b = memory.batch;
-    if (turn - b.since >= 16 || !own(b.target) || !enemy(b.enemy) ||
-        grid[b.enemy] !== b.enemyCode || !neighbors[b.target].includes(b.enemy) ||
-        !fronts.includes(b.target) || count(b.target) >= b.required) {
-      memory.batch = null;
-      return null;
-    }
-    memory.rally = { target: b.target, since: b.since };
+  let economySiteTarget = -1;
+  function pickEconomySite() {
+    if (memo.economySite !== null) return memo.economySite;
+    if (crowns >= targetCrowns) { memo.economySite = -1; return -1; }
+    const candidates = lands.filter((i) => safe(i) && economicSite(i) &&
+      (grid[i] === me + 50 || (grid[i] === me && crowns + cities < targetCrowns)));
+    const clusterScore = (i) => clusterValue(state, i) + count(i) +
+      neighbors[i].reduce((s, j) => s + (own(j) && (grid[j] === me + 100 || grid[j] === me + 50) ? 12 : 0), 0);
+    candidates.sort((a, b) => (grid[b] === me + 50) - (grid[a] === me + 50) || clusterScore(b) - clusterScore(a) || a - b);
+    memo.economySite = candidates.length ? candidates[0] : -1;
+    return memo.economySite;
   }
-  if (!validRally(memory.rally)) {
-    memory.rally = null;
+  function economyGoal(target) {
+    const risk = architecturePlan.assess(target);
+    const base = grid[target] === me + 50 ? 50 : 50 + (race.behind ? 0 : p.foundationPremium);
+    return base + (Number.isFinite(risk.reserve) ? risk.reserve : safety);
+  }
+  function economyAction() {
+    const buildNow = chooseBuild(state, null, p);
+    if (buildNow) return { ...buildNow, kind: 'build',
+      reason: { code: 'logistics-invest', phase: buildNow.op === 'c' ? 'upgrade' : 'foundation', detail: buildNow.reason } };
+    if (economySiteTarget < 0) return null;
+    const goal = economyGoal(economySiteTarget);
+    if (count(economySiteTarget) >= goal) return null;
+    const flow = transport(economySiteTarget, true), job = flow.best;
+    if (!job) return null;
+    return { kind: 'attack', x: Math.floor(job.from / m), y: job.from % m,
+      dx: Math.floor(job.to / m), dy: job.to % m, half: job.mode === 1, mode: job.mode ?? 0,
+      reason: { code: 'economy-fund', phase: 'fund', target: economySiteTarget, goal,
+        amount: job.amount, distanceBefore: job.distance, distanceAfter: job.distance - 1,
+        rearAvailable: flow.rear, raceDeficit: race.deficit } };
+  }
+  // 无论哪种模式，先把本 tick 的经济工地定下来（每 tick 重算，供运输缓存键与保护逻辑共用）。
+  economySiteTarget = crowns < targetCrowns ? pickEconomySite() : -1;
+  if (economyOnly) return economyAction();
+
+  // ── 前线补给：每 tick 重新找集结点与「最弱可打邻格」的缺口 ──────────────
+  // 先用 O(1) 启发式把候选压到常数个（附近兵多、贴近敌人、离我方腹地近），
+  // 再对这几个候选做真正的运输 BFS——避免每个前线格都跑一次全图搜索。
+  function pickRally() {
+    if (memo.rally !== null) return memo.rally;
     for (const pool of [fronts, borders]) {
-      let selected = null;
-      for (const target of pool) {
+      if (!pool.length) continue;
+      const ranked = pool.map((target) => {
+        const near = ctx.support(target, { radius: 2 }).total;
+        const foe = ctx.pressure(target, { radius: 1 }).adj;
+        return { target, key: near + foe * 0.5 - (ctx.frontDistance[target] || 0) * 2 };
+      }).sort((a, b) => b.key - a.key).slice(0, 8);
+      let selected = -1, bestScore = -Infinity;
+      for (const { target } of ranked) {
         const flow = transport(target);
         if (!flow.best) continue;
         const score = flow.best.gain + Math.min(flow.rear, 200) * 0.1;
-        if (!selected || score > selected.score) selected = { target, score, since: turn, until: turn + 12 };
+        if (score > bestScore) { bestScore = score; selected = target; }
       }
-      if (selected) { memory.rally = selected; break; }
+      if (selected >= 0) { memo.rally = selected; return selected; }
     }
+    memo.rally = -1;
+    return -1;
   }
-  function forecast(plan, flow) {
-    if (!plan) return null;
-    const interval = flow.ratio >= 0.35 || flow.best?.gain >= 20 ? 2 : 4;
-    const eta = Math.min(militaryOnly ? 16 : Infinity, (flow.best?.distance || 0) * interval + 1);
-    let defense = 0, naturalGrowth = 0, reinforcement = 0, observedGain = 0, enemyTarget = null;
-    for (const target of neighbors[plan.target].filter(i => enemy(i) &&
-        (!params.allowedOwners || params.allowedOwners.has(owners[i])))) {
-      const d = field([target], j => enemy(j) && owners[j] === owners[target]);
-      let support = 0;
-      // 只计两步内的有限局部后援；远端敌军不进入本轮预算。
-      for (const j of threats) if (j !== target && enemy(j) && d[j] > 0 && d[j] <= (militaryOnly ? Math.min(2, eta) : eta))
-        support += Math.max(0, count(j) + growth(j, turn, eta - d[j]) - d[j] - 1);
-      const cap = militaryOnly ? Math.ceil(count(target) * 0.05) : Infinity;
-      support = Math.min(cap, support);
-      const g = growth(target, turn, eta), trend = Math.min(cap, (rates.get(target) || 0) * eta);
-      if (count(target) + g + Math.max(support, trend) >= defense + naturalGrowth + reinforcement) {
-        enemyTarget = target;
-        defense = count(target); naturalGrowth = g; reinforcement = Math.max(support, trend); observedGain = trend;
-      }
+  function forecast(target) {
+    if (memo.forecast.has(target)) return memo.forecast.get(target);
+    let weakest = null;
+    for (const i of neighbors[target]) {
+      if (!enemy(i) || (params.allowedOwners && !params.allowedOwners.has(owners[i]))) continue;
+      const local = ctx.support(i, { radius: 2, exclude: target });
+      const total = count(i, 1) + Math.min(local.total * 0.35, count(i, 1) * 0.5);
+      if (!weakest || total < weakest.total) weakest = { index: i, total };
     }
-    const margin = militaryOnly ? Math.max(2, Math.ceil(defense * 0.1)) : 2;
-    const required = defense + naturalGrowth + reinforcement + margin;
-    return { eta, enemyTarget, defense, naturalGrowth, reinforcement, observedGain, margin, required,
-      needed: Math.max(0, required - count(plan.target)) };
+    if (!weakest) { memo.forecast.set(target, null); return null; }
+    const margin = Math.min(40, Math.max(2, Math.ceil(weakest.total * 0.03)));
+    const required = Math.ceil(weakest.total) + margin;
+    const result = { enemyTarget: weakest.index, defense: Math.ceil(weakest.total), required, margin,
+      needed: Math.max(0, required - count(target)) };
+    memo.forecast.set(target, result);
+    return result;
   }
-  const rallyFlow = memory.rally ? transport(memory.rally.target) : null;
-  const prediction = forecast(memory.rally, rallyFlow);
-  // 专门的前线缺口通道：不要求总军力领先、不要求看见敌皇冠，
-  // 不受普通经济/隔tick配额影响。只有当前确实缺兵且存在有效运输才抢占微操。
+  const rally = pickRally();
   if (militaryOnly) {
-    if (!memory.rally || !fronts.includes(memory.rally.target) || !prediction ||
-        (!memory.batch && prediction.needed <= 0)) { memory.batch = null; return null; }
-    const job = rallyFlow?.best;
-    if (!job) { memory.batch = null; memory.rally = null; return null; }
-    if (!memory.batch && params.allowStartBatch === false) return null;
-    if (!memory.batch) memory.batch = { target: memory.rally.target, required: prediction.required,
-      since: turn, enemy: prediction.enemyTarget, enemyCode: grid[prediction.enemyTarget], forecast: prediction };
-    const b = memory.batch;
-    const batch = { target: b.target, required: b.required, active: true };
-    memory.activeBatch = batch;
-    const batchForecast = { ...b.forecast, needed: Math.max(0, b.required - count(b.target)) };
-    return {kind:'attack', x:Math.floor(job.from/m), y:job.from%m,
-      dx:Math.floor(job.to/m), dy:job.to%m, mode:job.mode, reason:{code:'frontline-supply',
-        phase:'reinforce', target:memory.rally.target, amount:job.amount, forecast:batchForecast, batch: { ...batch },
-        distanceBefore:job.distance, distanceAfter:job.distance-1}};
+    if (rally < 0) return null;
+    const prediction = forecast(rally);
+    if (!prediction || prediction.needed <= 0) return null;
+    const flow = transport(rally), job = flow.best;
+    if (!job) return null;
+    // 本 tick 的缺口（纯计算结果，不跨回合保存）
+    currentBatch.set(state, { turn, batch: { target: rally, required: prediction.required, active: true } });
+    const batch = { target: rally, required: prediction.required, active: true };
+    return { kind: 'attack', x: Math.floor(job.from / m), y: job.from % m,
+      dx: Math.floor(job.to / m), dy: job.to % m, mode: job.mode, reason: { code: 'frontline-supply',
+        phase: 'reinforce', target: rally, amount: job.amount, batch,
+        forecast: { ...prediction, eta: job.distance + 1 }, distanceBefore: job.distance,
+        distanceAfter: job.distance - 1 } };
   }
-  // 军事预算最多占安全后方的一半，为产能留出份额；不无限扣除敌援军预测。
-  function budget(target) {
-    const d = field([target], own);
-    const rear = lands.reduce((sum, i) => sum + (d[i] >= 0 && safe(i) ?
-      Math.max(0, count(i) - reserveAt(i) - d[i]) : 0), 0);
-    return rear - Math.min(prediction?.needed || 0, rear * 0.5);
+
+  // ── 常规物流：先建设（资金到位就建）、再筹资、最后向前线/边界输送 ────────
+  const buildNow = chooseBuild(state, move, p);
+  if (buildNow) {
+    const i = buildNow.x * m + buildNow.y;
+    const risk = architecturePlan.assess(i);
+    return { ...buildNow, kind: 'build', reason: { code: 'logistics-invest',
+      phase: buildNow.op === 'c' ? 'upgrade' : risk.crownSafe ? 'foundation' : 'anchor-tower',
+      target: i, reserve: risk.reserve, detail: buildNow.reason } };
   }
-  const economicValid = plan => plan && safe(plan.target) && economicSite(plan.target) && crowns < targetCrowns &&
-    (grid[plan.target] === me + 50 || (grid[plan.target] === me && cities === 0 && crowns + cities < targetCrowns));
-  if (!economicValid(memory.economy)) memory.economy = null;
-  if (!memory.economy && crowns < targetCrowns) {
-    const candidates = lands.filter(i => safe(i) && economicSite(i) &&
-      (grid[i] === me + 50 || (grid[i] === me && cities === 0 && crowns + cities < targetCrowns)));
-    // 相邻产能集群降低筹资路程，但不为集群牺牲安全条件。
-    const clusterScore = i => clusterValue(state,i) + count(i) + neighbors[i].reduce((s,j) => s + (own(j) && (grid[j] === me+100 || grid[j] === me+50) ? 12 : 0), 0);
-    candidates.sort((a, b) => (grid[b] === me + 50) - (grid[a] === me + 50) || clusterScore(b) - clusterScore(a) || a - b);
-    for (const target of candidates) {
-      if (budget(target) < (grid[target] === me + 50 ? 50 : 100) &&
-          !(grid[target] === me + 50 && turn >= 100 && lands.length >= 20 && crowns === 1)) continue;
-      memory.economy = { target, since: turn, funded: new Set([target]) };
-      break;
+  let plan = rally, phase = 'reinforce';
+  if (crowns < targetCrowns) {
+    if (economySiteTarget >= 0) {
+      const goal = economyGoal(economySiteTarget);
+      if (count(economySiteTarget) < goal) { plan = economySiteTarget; phase = 'fund'; }
     }
   }
-  const economy = memory.economy;
-  // 建造和筹资共享配额；升级不用等待旧 building 再次给出建议。
-  const economicSlot = !memory.rally || turn - memory.lastEconomy >= 4;
-  if (economicSlot && turn > memory.lastBuild) {
-    // 不信任外部 build 提示，也不凭物流预算自行放行；实际建造入口完全共用。
-    const approved = chooseBuild(state, move, p);
-    if (approved) {
-      const i = approved.x * m + approved.y;
-      const risk = architecturePlan.assess(i);
-      memory.lastBuild = turn; memory.lastEconomy = turn;
-      return { ...approved, kind: 'build', reason: { code: 'logistics-invest',
-        phase: approved.op === 'c' ? 'upgrade' : risk.crownSafe ? 'foundation' : 'anchor-tower',
-        target: i, reserve: risk.reserve, detail: approved.reason } };
-    }
+  if (plan < 0) return null;
+  if (phase === 'reinforce') {
+    const prediction = forecast(plan);
+    if (!prediction || prediction.needed <= 0) return null;
   }
-  let plan = memory.rally, phase = 'reinforce';
-  // 筹资每四tick最多取得一次额外行动，不能长期吞掉真实前线运输。
-  if (economy && economicSlot) {
-    const risk = architecturePlan.assess(economy.target);
-    const goal = (grid[economy.target] === me + 50 ? 50 : 100) + risk.reserve;
-    if (count(economy.target) < goal) { plan = economy; phase = 'fund'; }
-  }
-  if (!plan) return null;
-  if (phase === 'reinforce' && prediction && prediction.defense > 0 && prediction.needed === 0) return null;
-  const flow = transport(plan.target, phase === 'fund'), job = flow.best;
+  const flow = transport(plan, phase === 'fund'), job = flow.best;
   if (!job) return null;
-  const elapsed = turn - memory.lastTransport;
-  // 高闲置比例/高收益有隔tick配额，小规模后方也会在等待后获得配额。
-  const interval = flow.ratio >= 0.35 || job.gain >= 20 ? 2 : 4;
-  if (elapsed <= 0 || (move && (elapsed < interval || (job.amount < 3 && elapsed < 8)))) return null;
-  memory.edges.set(`${job.from}:${job.to}`, turn);
-  memory.lastTransport = turn;
-  if (phase === 'fund') { memory.lastEconomy = turn; economy.funded.add(job.to); }
   return { kind: 'attack', x: Math.floor(job.from / m), y: job.from % m,
     dx: Math.floor(job.to / m), dy: job.to % m, half: job.mode === 1, mode: job.mode ?? 0,
-    reason: { code: 'logistics-transport', phase, target: plan.target, planSince: plan.since,
-      lockedUntil: null, forecast: prediction, amount: job.amount, distanceBefore: job.distance,
-      distanceAfter: job.distance - 1, rearAvailable: flow.rear, rearRatio: flow.ratio,
-      gain: job.gain, quotaInterval: interval, waited: Number.isFinite(elapsed) ? elapsed : null } };
+    reason: { code: phase === 'fund' ? 'economy-fund' : 'logistics-transport', phase, target: plan,
+      amount: job.amount, distanceBefore: job.distance, distanceAfter: job.distance - 1,
+      rearAvailable: flow.rear, rearRatio: flow.ratio, gain: job.gain, raceDeficit: race.deficit } };
 }
 module.exports = { chooseLogistics, getSupplyBatch };

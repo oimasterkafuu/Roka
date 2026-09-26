@@ -1,9 +1,10 @@
 'use strict';
 
-// 无跨回合计划：每次调用都按当前棋盘重算目标、集结点与攻城树。
+// 只保存目标和已由真实棋盘确认的树节点，不保存未来动作队列。
+const memories = new WeakMap();
 function chooseCampaign(state, params = {}, options = {}) {
   if (!state || typeof state !== 'object') return null;
-  const reset = () => null;
+  const reset = () => { memories.delete(state); return null; };
   const { n, m, grid, army, playerId: me } = state;
   const size = n * m, turn = state.turn ?? 0;
   if (state.dead || state.ended || options.threatened || !Number.isInteger(n) || !Number.isInteger(m) ||
@@ -52,11 +53,18 @@ function chooseCampaign(state, params = {}, options = {}) {
       if (grid[i] === os[i] + 100 && pass(i)) crowns.push(i);
     }
   }
-  if (!crowns.length || power <= (Number.isFinite(options.ratio) ? options.ratio : 1.4) * enemyPower) return reset();
-  const mem = { target: null, rally: null };
+  if (!crowns.length || power <= 1.4 * enemyPower) return reset();
+  let mem = memories.get(state);
+  if (!mem || turn < mem.turn || mem.me !== me || mem.n !== n || mem.m !== m ||
+      mem.gameId !== state.gameId || mem.targetOwner !== targetOwner) {
+    mem = { turn, me, n, m, gameId: state.gameId, targetOwner, target: null, rally: null, done: new Set() };
+    memories.set(state, mem);
+  }
+  mem.turn = turn;
+  if (mem.target !== null && !crowns.includes(mem.target)) return reset();
   // 反向 BFS 同时寻找皇冠路径和最接近的己方前线，每格只访问一次。
   const toward = new Int32Array(size).fill(-1), root = new Int32Array(size).fill(-1);
-  const q = crowns.slice();
+  const q = mem.target === null ? crowns.slice() : [mem.target];
   const approachDistance = new Int32Array(size);
   for (const i of q) { toward[i] = i; root[i] = i; }
   let nearest = -1;
@@ -67,12 +75,13 @@ function chooseCampaign(state, params = {}, options = {}) {
       toward[j] = i; root[j] = root[i]; approachDistance[j]=approachDistance[i]+1; q.push(j);
     }
   }
-  // 兵源、树和前线终点每 tick 重算。
+  // 只缓存对手目标；兵源、树和前线终点每tick滚动重算，执行过的格子增长后仍可供兵。
+  mem.done.clear();mem.pending=null;
   // 选择当下的前线出发点，兼顾接敌距离与现有大军，给旧点微小迟滞而非锁死。
   let bestRally=-1,bestRallyScore=-Infinity;
   const fronts = options.boundaryAdvance ? new Set(Array.from({length:size}, (_,i)=>i)
     .filter(i=>own(i)&&toward[i]>=0&&ns(i).some(j=>targetSide(j)))) : null;
-  for(let i=0;i<size;i++)if(own(i)&&toward[i]>=0&&root[i]===root[i]){
+  for(let i=0;i<size;i++)if(own(i)&&toward[i]>=0&&root[i]=== (mem.target??root[i])){
     if (fronts?.size && !fronts.has(i)) continue;
     const d=approachDistance[i];
     const score=Math.log2(1+count(i))*2-(options.boundaryAdvance ? Math.min(d, 3) : d)+(i===mem.rally?1:0);

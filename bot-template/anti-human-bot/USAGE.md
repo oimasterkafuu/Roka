@@ -11,7 +11,7 @@ BOT_TOKEN='你的令牌' pnpm start        # 默认连接 https://roka.oim.moe:4
 BOT_TOKEN='你的令牌' node bot.cjs --room=abc
 ```
 
-CLI 默认**不自动准备**：管理员 `oimaster` 在当前房间公开聊天发送 `/ready` 切换自动准备，`/room abc` 换房。
+CLI 默认**自动准备**（`BOT_AUTO_READY=0` 关闭），开启后每次局间等待 5 秒再准备；管理员 `oimaster` 在当前房间公开聊天发送 `/ready` 切换自动准备，`/room abc` 换房。
 
 ## 服务端托管运行
 
