@@ -64,7 +64,6 @@ function render() {
   }
   var displayGrid = grid_type;
   var displayArmy = army_cnt;
-  var replayTeams = replayFogViewActive() ? replay_data.meta.player_teams || [] : null;
   var ownSelected =
     selx >= 0 &&
     sely >= 0 &&
@@ -88,12 +87,7 @@ function render() {
         else if (isSwamp) cellType = 204;
         cellArmy = 0;
       }
-      // 回放队伍视角：视野内敌方的指挥所/主城不显示建筑身份，降级为普通领地
-      // （保留归属颜色与兵力；中立城市 50 不受影响；实时对局由服务端过滤）。
-      if (replayTeams && !fog[i][j] && cellType > 50 && cellType < 150) {
-        var structOwner = cellType % 50;
-        if (structOwner > 0 && replayTeams[structOwner - 1] != replay_view_team) cellType = structOwner;
-      }
+
       if (cellType < 200) {
         if (cellType < 50) {
           cls += ' c' + cellType;
