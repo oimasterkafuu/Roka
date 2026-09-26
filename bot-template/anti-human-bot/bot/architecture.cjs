@@ -1,100 +1,81 @@
 'use strict';
+const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
 
-// 每次决策独立快照；不缓存可变 state。候选 BFS 共用硬预算，耗尽时拒绝投资。
+// 建造选址评估：某格现在投 50 兵（或升级）值不值、守不守得住。
+// 与旧版差别：威胁按到达时间衰减（不再把 8 跳外的大军当贴脸），
+// 经济落后时自动放宽安全门槛，避免「因为怕死所以永远不建」。
+// 同回合缓存：一次决策里 policy/logistics/building 会反复问同一局面，
+// 缓存的是「本回合的函数值」，下一回合 turn 变化后必然重算，不构成跨回合计划。
+const turnCache = new WeakMap();
 function architecture(state, params = {}) {
+  const turn = Number.isFinite(state?.turn) ? state.turn : -1;
+  const cached = turnCache.get(state);
+  if (cached && cached.turn === turn) return cached.instance;
+  const instance = buildArchitecture(state, params);
+  turnCache.set(state, { turn, instance });
+  return instance;
+}
+function buildArchitecture(state, params = {}) {
   const p = resolveParams(params);
-  const { n, m, grid, army, playerId: me } = state, size = n * m;
-  const owner = v => v > 0 && v < 200 ? v % 50 : 0;
-  const owners = Array.from(grid, owner);
-  const team = state.teams instanceof Map ? state.teams.get(me) : 0;
-  const allied = id => id === me || (id > 0 && team > 0 && state.teams.get(id) === team);
-  const unknown = i => !!state.fog?.[i] || grid[i] === 202 || grid[i] === 203;
-  const count = i => Number.isFinite(army[i]) ? Math.max(0, army[i]) : 0;
-  const friendly = i => allied(owners[i]) && !unknown(i) && !state.isolated?.[i];
-  const own = i => owners[i] === me && friendly(i);
-  const anchor = i => friendly(i) && grid[i] >= 50 && grid[i] < 150;
-  const neighbors = Array.from({ length: size }, (_, i) => {
-    const a = [];
-    if (i >= m) a.push(i - m);
-    if (i % m) a.push(i - 1);
-    if (i % m + 1 < m) a.push(i + 1);
-    if (i + m < size) a.push(i + m);
-    return a;
-  });
-  let budget = 200000;
+  const ctx = createContext(state, params);
+  if (!ctx) return { assess: () => Object.freeze({ crownSafe: false, foundationSafe: false, towerSafe: false, tactical: false, complete: false, reserve: Infinity, incoming: Infinity, distance: 0, funding: 0, anchorGroups: 0 }), neighbors: [], own: () => false, count: () => 0, unknown: () => false, owners: [], params: p, race: null };
+  const { size, me, owners, grid, army, neighbors, own, count, known } = ctx;
+  const race = ctx.race;
   const cache = new Map();
   const rejected = Object.freeze({ crownSafe: false, foundationSafe: false, towerSafe: false,
-    tactical: false, complete: false, reserve: Infinity, incoming: Infinity, distance: 0, funding: 0 });
-  function field(start, allowed) {
-    const d = new Int32Array(size).fill(-1), q = [start]; d[start] = 0;
-    for (let h = 0; h < q.length; h++) {
-      if (--budget < 0) return null;
-      for (const j of neighbors[q[h]]) if (d[j] < 0 && allowed(j)) {
-        d[j] = d[q[h]] + 1; q.push(j);
-      }
-    }
-    return { d, q };
-  }
+    tactical: false, complete: false, reserve: Infinity, incoming: Infinity, distance: 0, funding: 0, anchorGroups: 0 });
+
   function assess(i) {
     if (cache.has(i)) return cache.get(i);
-    let result = rejected;
-    // 即使调整参数，也不允许把地形、雾或队友建筑当作自己的候选。
-    if (!own(i) || (grid[i] !== me && grid[i] !== me + 50) || budget <= 0) return result;
-    const path = field(i, j => grid[j] !== 201);
-    const supply = field(i, own);
-    if (!path || !supply) return result;
-    let distance = Infinity, incoming = 0, uncertain = false, immediate = 0;
-    const turn = Number.isFinite(state.turn) ? Math.max(0, state.turn) : 1;
-    // 不使用最近源的 power 场：遍历同一地形分量的所有敌军，包含后排强军。
-    // 不抵扣沿途攻占损耗，不依赖队友阻挡；所有可达兵可协同，是保守上界。
-    for (const j of path.q) {
-      const d = path.d[j];
-      // 有限到达窗口：远在另一端的全部敌兵不能被当作立刻贴脸，否则永不建设。
-      const horizon = Math.max(8, Math.ceil(p.enemyDistance) + 2);
-      if (unknown(j)) { distance = Math.min(distance, d); if (d <= horizon) uncertain = true; continue; }
-      if (!owners[j] || allied(owners[j]) || state.isolated?.[j]) continue;
-      distance = Math.min(distance, d);
-      if (d > horizon) continue;
-      const ticks = horizon;
-      const growth = grid[j] >= 100 && grid[j] < 150 ? ticks :
-        Math.floor((turn + ticks) / 50) - Math.floor(turn / 50) +
-        (grid[j] < 50 ? Math.max(0, Math.min(50, turn + ticks) - Math.max(25, turn)) : 0);
-      const force = Math.max(0, count(j) - 1) + (state.isolated?.[j] ? 0 : growth);
-      incoming += force;
-      if (d <= 2) immediate += force;
+    if (!own(i) || (grid[i] !== me && grid[i] !== me + 50)) return rejected;
+    // 敌军按到达时间衰减：5 跳外的一万兵不再是「下 tick 就贴脸」。
+    const spot = ctx.pressure(i, { radius: p.buildThreatRadius, decay: p.buildPressureDecay, ticks: p.buildThreatRadius });
+    const nearest = ctx.enemyDistance[i];
+    let uncertain = false;
+    if (nearest >= 0 && nearest <= p.buildThreatRadius) {
+      const seen = new Set([i]);
+      let layer = [i];
+      for (let d = 0; d <= p.buildThreatRadius && layer.length; d++) {
+        const next = [];
+        for (const u of layer) for (const v of neighbors[u]) {
+          if (seen.has(v) || !ctx.passable(v)) continue;
+          seen.add(v);
+          if (!known[v]) { uncertain = true; break; }
+          if (d < p.buildThreatRadius) next.push(v);
+        }
+        if (uncertain) break;
+        layer = next;
+      }
     }
-    const reserve = p.buildSafety + incoming * Math.max(1, p.threatWeight);
-    const after = count(i) - 50;
-    // 本地实兵证明，不把尚未下达命令的己方援军/皇冠未来增长算成保证。
-    const crownSafe = !uncertain && after >= reserve;
-    let funding = count(i);
-    for (const j of supply.q) if (j !== i)
-      funding += Math.max(0, count(j) - Math.max(1, p.buildSafety) - supply.d[j]);
-    // 删除候选后，至少两个仍含团队建筑锚点的分量，才具有独立连通价值。
-    // 普通边界、无建筑的长尾、平坦前线均不自动成为塔点。
+    const defending = race.behind ? p.raceAggression : 1;
+    const safety = Math.max(2, Math.ceil(p.buildSafety / defending));
+    const weight = p.threatWeight / defending;
+    const reserve = safety + spot.total * weight;
+    const afterUpgrade = count(i) - 50;
+    const crownSafe = !uncertain && afterUpgrade >= reserve;
+    const premium = race.behind ? 0 : p.foundationPremium;
+    const foundationSafe = crownSafe && count(i) >= 50 + premium + reserve;
+    // 减损塔：只有切断候选格会分裂出第二个带建筑的连通块时才有独立价值。
     const seen = new Uint8Array(size); seen[i] = 1;
     let anchorGroups = 0;
     for (const start of neighbors[i]) {
-      if (seen[start] || !friendly(start)) continue;
+      if (seen[start] || !ctx.friendly(start)) continue;
       const q = [start]; seen[start] = 1; let anchors = 0;
       for (let h = 0; h < q.length; h++) {
-        if (--budget < 0) return rejected;
-        const k = q[h]; if (anchor(k)) anchors++;
-        for (const j of neighbors[k]) if (!seen[j] && friendly(j)) { seen[j] = 1; q.push(j); }
+        const k = q[h];
+        if (ctx.friendly(k) && grid[k] >= 50 && grid[k] < 150) anchors++;
+        for (const j of neighbors[k]) if (!seen[j] && ctx.friendly(j)) { seen[j] = 1; q.push(j); }
       }
       if (anchors) anchorGroups++;
     }
-    const tactical = anchorGroups >= 2 && distance <= Math.max(4, p.enemyDistance + 2);
-    // 塔损失较低，但仍不能把50兵花在即将被直接攻破的位置。
-    const towerSafe = tactical && after >= p.buildSafety + immediate * Math.max(1, p.threatWeight) &&
-      !neighbors[i].some(unknown);
-    // 后方先把两阶段费用集中到同一格再落塔；不能以分散资金承诺未来升级。
-    result = { crownSafe, foundationSafe: crownSafe && count(i) >= 100 + reserve,
-      towerSafe, tactical, complete: true, reserve, incoming, distance, funding, anchorGroups };
+    const tactical = anchorGroups >= 2 && (nearest < 0 || nearest <= Math.max(3, p.enemyDistance + 1));
+    const towerSafe = tactical && count(i) - 50 >= safety + spot.adj * weight && !ctx.unknownNear(i);
+    const result = { crownSafe, foundationSafe, towerSafe, tactical, complete: true,
+      reserve, incoming: spot.total, distance: nearest < 0 ? 99 : nearest, funding: count(i), anchorGroups };
     cache.set(i, result);
     return result;
   }
-  return { assess, neighbors, own, count, unknown, owners, params: p };
+  return { assess, neighbors, own, count, unknown: (i) => !known[i], owners, params: p, race, context: ctx };
 }
 module.exports = { architecture };

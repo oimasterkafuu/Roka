@@ -1,7 +1,7 @@
 'use strict';
 
 // 每局实例独立；只读取真实棋盘，不改写 owner/team 或制造和平地块。
-// 全模块无状态：目标、威胁、允许目标集合都在每次调用里按当前棋盘重算。
+const memories = new WeakMap();
 const owner = v => Number.isInteger(v) && v > 0 && v < 200 && v % 50 ? v % 50 : 0;
 const empty = () => ({ targetOwner: null, defensiveOwners: new Set(), allowedOwners: new Set(), emergencyMove: null, threats: [] });
 function context(s) {
@@ -44,8 +44,17 @@ function analyzeFFA(state) {
   if (!c) return result;
   const { size, me, allied, faction, ns, known, passable, os, counts, alive } = c;
   const turn = Number.isFinite(state.turn) ? state.turn : 0;
+  let mem = memories.get(state);
+  if (!mem || turn < mem.turn || mem.previous.length !== size || mem.me !== me) {
+    mem = { turn, me, previous: [], aggression: new Map(), target: null, lockedAt: turn };
+    memories.set(state, mem);
+  }
   const enemies = [...alive].filter(p => !allied(me, p));
   const active = new Set([...alive].map(faction)).size >= 3;
+  for (let i = 0; i < size; i++) {
+    if (mem.previous[i] === me && known(i) && enemies.includes(os[i])) mem.aggression.set(os[i], turn + 40);
+  }
+  for (const [p, until] of mem.aggression) if (until < turn || !enemies.includes(p)) mem.aggression.delete(p);
   const anchors = [], crowns = [], own = [];
   for (let i = 0; i < size; i++) if (os[i] === me && known(i)) {
     own.push(i);
@@ -79,11 +88,16 @@ function analyzeFFA(state) {
     if (attack > counts[a]) result.threats.push({ owner: p, index: i, anchor: a, distance: d[i], attack,
       strong: d[i] <= 2 && state.grid[a] === 100 + me, reason: '锚点可达兵力威胁' });
   }
+  for (const p of mem.aggression.keys()) result.threats.push({ owner: p, reason: '近期实际夺地', strong: false });
   for (const p of enemies) if (result.threats.some(t => allied(t.owner, p))) result.defensiveOwners.add(p);
   const ranked = enemies.slice().sort((a, b) => scores.get(b) - scores.get(a) || a - b);
   const urgent = result.threats.filter(t => t.strong).sort((a, b) => a.distance - b.distance || b.attack - a.attack)[0];
-  // 目标每 tick 重算：有紧急威胁就打威胁方，否则打当前评分最高的对手。
-  const target = urgent ? urgent.owner : (ranked[0] ?? null);
+  let target = mem.target;
+  if (!enemies.includes(target)) target = ranked[0] ?? null;
+  else if (urgent && !allied(urgent.owner, target)) target = urgent.owner;
+  else if (turn - mem.lockedAt >= 60) target = ranked[0] ?? null;
+  if (target !== mem.target || turn - mem.lockedAt >= 60) mem.lockedAt = turn;
+  mem.target = target;
   result.targetOwner = active ? target : null;
   for (const p of enemies) if (!active || allied(p, target) || result.defensiveOwners.has(p)) result.allowedOwners.add(p);
 
@@ -114,6 +128,7 @@ function analyzeFFA(state) {
       dx: Math.floor(best.t / state.m), dy: best.t % state.m, mode: 0, half: false,
       reason: best.defend ? 'FFA紧急自有地汇兵防守' : 'FFA清除近锚点威胁' };
   }
+  mem.previous = os.map((p, i) => known(i) ? p : 0); mem.turn = turn;
   return result;
 }
 

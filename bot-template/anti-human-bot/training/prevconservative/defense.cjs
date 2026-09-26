@@ -1,18 +1,14 @@
 'use strict';
-const { resolveParams } = require('./params.cjs');
 
 // 每个活局面单独保存锁定；不保留全局玩家/地图引用，也不预测雾中兵力。
 const plans = new WeakMap();
 const HORIZON = 12;
-const URGENT_TICKS = 3;
-function chooseDefense(state, params = {}) {
+function chooseDefense(state) {
   if (!state || state.dead || state.ended) return null;
   const { n, m, grid, army, playerId: me } = state;
   const size = n * m, turn = Number.isInteger(state.turn) ? state.turn : 0;
   if (!Number.isInteger(n) || !Number.isInteger(m) || n < 1 || m < 1 || size > 100000 ||
       !Number.isInteger(me) || me < 1 || me > 49 || grid?.length !== size || army?.length !== size) return null;
-  const p = resolveParams(params);
-  const rallyWindow = Math.max(URGENT_TICKS, Math.round(p.defenseHorizon));
   const owner = v => v > 0 && v < 200 ? v % 50 : 0;
   const os = Array.from(grid, owner);
   const team = p => state.teams instanceof Map ? state.teams.get(p) : 0;
@@ -44,14 +40,34 @@ function chooseDefense(state, params = {}) {
   }
   let memory = plans.get(state);
   if (!memory || turn < memory.turn || memory.me !== me || memory.size !== size) {
-    memory = { turn, me, size };
+    memory = { turn, me, size, lock: null, edges: new Map(), attempts: new Map(),
+      pending: null, receiptTurn: -Infinity, defenses: [], progress: new Map() };
     plans.set(state, memory);
   }
   memory.turn = turn;
-  // 只保留本 tick 的距离场缓存（同一回合内重复查询用），不做跨回合快照。
+  // 同拍重入使用同一份上一拍快照；跨拍缺测不推断雾中移动。
   if (memory.observation?.turn !== turn) {
-    memory.observation = { turn, distances: new Map() };
+    memory.previous = memory.observation;
+    memory.observation = { turn, grid: Array.from(grid), army: Array.from(army),
+      visible: Array.from({ length: size }, (_, i) => !unknown(i)), distances: new Map() };
   }
+  const previousObservation = memory.previous;
+  // 只有服务器回执匹配本模块上一拍提议，才占用回防配额。
+  const receipt = state.lastMove, pending = memory.pending;
+  if (receipt && Number.isInteger(receipt.turn) && receipt.turn <= turn && receipt.turn > memory.receiptTurn) {
+    memory.receiptTurn = receipt.turn;
+    if (pending && receipt.op === 'm' && receipt.turn > pending.turn && receipt.turn <= pending.turn + 1 &&
+        receipt.x * m + receipt.y === pending.s && receipt.dx * m + receipt.dy === pending.dest &&
+        (receipt.mode == null || [0, 1, 2].includes(receipt.mode))) {
+      memory.edges.set(pending.key, receipt.turn);
+      if (!pending.urgent && !pending.counter) {
+        memory.defenses.push(receipt.turn);
+        memory.progress.set(pending.signature, { ...pending, executed: receipt.turn });
+      }
+    }
+    memory.pending = null;
+  }
+  memory.defenses = memory.defenses.filter(t => t > turn - 5);
   // 对每个兵团分别搜索距离严格下降的最短路 DAG，避免多层绕路枚举。
   // BFS 保留绕山最短路；盟军格可汇合，其他守军消耗入侵兵力。
   const threats = [], pressure = new Map();
@@ -68,10 +84,20 @@ function chooseDefense(state, params = {}) {
       }
     }
     memory.observation.distances.set(c, distance);
+    const oldDistance = previousObservation?.turn === turn - 1 ? previousObservation.distances.get(c) : null;
+    function advancing(e) {
+      // 必须朝同一个既有皇冠实际搬兵，不能把新建皇冠或地形变化当成逼近。
+      if (!oldDistance || !previousObservation.visible[e] || oldDistance[e] < 1) return false;
+      const oldOwner = owner(previousObservation.grid[e]);
+      const gained = oldOwner !== os[e] || army[e] > previousObservation.army[e] + 2;
+      return gained && ns(e).some(s => previousObservation.visible[s] && !unknown(s) &&
+        owner(previousObservation.grid[s]) === os[e] && os[s] === os[e] &&
+        oldDistance[s] > oldDistance[e] && distance[s] > distance[e] &&
+        previousObservation.army[s] > army[s] + 1);
+    }
     for (const e of enemies) {
       if (distance[e] < 1 || distance[e] > HORIZON) continue;
-      // 只看当前局面：威胁离皇冠的当前距离是否落在反应窗口内。
-      const approaching = distance[e] <= rallyWindow;
+      const approaching = distance[e] <= 3 || advancing(e);
       let layer = new Map([[e, { left: count(e, 1), path: [e], incoming: [count(e, 1)] }]]);
       let best = null;
       for (let t = 1; t <= distance[e] && layer.size; t++) {
@@ -100,7 +126,7 @@ function chooseDefense(state, params = {}) {
       if (best) threats.push({ ...best, approaching });
     }
   }
-  if (!threats.length) return null;
+  if (!threats.length) { memory.lock = null; return null; }
   const threatOwners = new Set(threats.map(t => os[t.e]));
   // mode0 与服务器智能留兵一致；未知邻格拒绝运输，不将不可见数值当已知。
   function push(s, t, amount, tick) {
@@ -116,8 +142,7 @@ function chooseDefense(state, params = {}) {
       const target = threat.path[k];
       if (!own(target) && target !== threat.e) continue;
       const deadline = Math.max(1, k), hostile = target === threat.e;
-      // 反应窗口不再只有 3 tick：能提前拦的威胁提前拦，避免敌堆贴脸才动。
-      if (threat.time > rallyWindow && !hostile && !threat.approaching) continue;
+      if (threat.time > 3 && !hostile && !threat.approaching) continue;
       const need = hostile ? count(target, 1) + 1 : Math.max(0, threat.arrivals[k] - count(target, deadline) + 1);
       if (!hostile && need <= 0) continue;
       const d = new Int32Array(size).fill(-1), toward = new Int32Array(size).fill(-1), q = [target]; d[target] = 0;
@@ -128,7 +153,10 @@ function chooseDefense(state, params = {}) {
       const routes = [];
       for (const s of lands) {
         if (d[s] < 1 || d[s] > deadline) continue;
-        const dest = toward[s];
+        const dest = toward[s], key = `${s}:${dest}`;
+        if ((memory.edges.get(`${dest}:${s}`) ?? -Infinity) > turn - HORIZON) continue;
+        const attempt = memory.attempts.get(key);
+        if (attempt && attempt.turn < turn && attempt.count === army[s] && attempt.targetCount === army[dest] && turn - attempt.since >= 3) continue;
         let amount = push(s, dest, count(s, 1), 1);
         if (!amount) continue;
         // 所有有入侵路径的皇冠都保留足够守军，不牺牲另一个皇冠救最近者。
@@ -143,10 +171,10 @@ function chooseDefense(state, params = {}) {
           current = toward[current]; steps++;
         }
         const contribution = Math.max(0, amount - baseline);
-        const urgent = threat.time <= URGENT_TICKS;
+        const urgent = threat.time <= 3;
         const minimum = Math.max(3, Math.ceil(threat.deficit * d[s] / threat.time));
         if (contribution > 0 && (urgent || (firstAmount >= minimum && contribution >= minimum)))
-          routes.push({ s, dest, amount: contribution, contribution, firstAmount, distance: d[s] });
+          routes.push({ s, dest, amount: contribution, contribution, firstAmount, distance: d[s], key });
       }
       routes.sort((a, b) => a.distance - b.distance || b.amount - a.amount || a.s - b.s);
       // 单路有效截击优先；否则只在串行搬运总时限内汇兵。路径不重叠，避免重复计算沿途守军。
@@ -161,17 +189,29 @@ function chooseDefense(state, params = {}) {
         }
       }
       if (chosen) {
-        const urgent = threat.time <= URGENT_TICKS, counter = hostile;
-        candidates.push({ ...chosen, target, threat, duration, frontline: k, urgent, counter });
+        const urgent = threat.time <= 3, counter = hostile;
+        const signature = `${threat.c}:${os[threat.e]}`;
+        const previous = memory.progress.get(signature);
+        // 停滞的集兵威胁不应永久压住经济；真实三拍内致命救援、可胜截击不受此限制。
+        if (!urgent && !counter && (memory.defenses.length >= 2 ||
+            (previous && turn < previous.executed + 5 &&
+              (threat.deficit >= previous.deficit || threat.time >= previous.time)))) continue;
+        candidates.push({ ...chosen, target, threat, duration, frontline: k, urgent, counter, signature });
       }
     }
   }
-  // 纯当前局面排序：先截击、再早到达、再短路径、再靠前的前线、再多兵。
-  candidates.sort((a, b) => Number(b.counter) - Number(a.counter) || a.threat.time - b.threat.time ||
-    a.duration - b.duration || a.frontline - b.frontline || b.amount - a.amount);
+  candidates.sort((a, b) => Number(b.counter) - Number(a.counter) || a.threat.time - b.threat.time || a.duration - b.duration ||
+    ((b.target === memory.lock?.target ? 1 : 0) - (a.target === memory.lock?.target ? 1 : 0)) || a.frontline - b.frontline || b.amount - a.amount);
   const best = candidates[0];
-  if (!best) return null;
-  const urgent = best.threat.time <= URGENT_TICKS && best.threat.deficit > 0;
+  if (!best) { memory.lock = null; return null; }
+  memory.lock = { target: best.target, crown: best.threat.c };
+  memory.pending = { ...best, turn, deficit: best.threat.deficit, time: best.threat.time };
+  const previous = memory.attempts.get(best.key);
+  memory.attempts.set(best.key, { turn, since: previous?.count === army[best.s] && previous?.targetCount === army[best.dest] ? previous.since : turn,
+    count: army[best.s], targetCount: army[best.dest] });
+  for (const [key, tick] of memory.edges) if (tick < turn - HORIZON) memory.edges.delete(key);
+  for (const [key, a] of memory.attempts) if (a.turn < turn - HORIZON) memory.attempts.delete(key);
+  const urgent = best.threat.time <= 3 && best.threat.deficit > 0;
   const reason = `皇冠防守：${best.target === best.threat.e ? '前线截击' : '提前汇兵'}，敌军约${best.threat.time}tick抵达皇冠`;
   return { move: { x: Math.floor(best.s / m), y: best.s % m, dx: Math.floor(best.dest / m), dy: best.dest % m,
     half: false, mode: 0, reason }, threatOwners, urgent, reason };
