@@ -3,7 +3,7 @@
 // 2) 迷雾房间：房主 change_game_conf { fog: true }，双人对局开始后校验
 //    客户端合并后的局面满足迷雾不变量——
 //    a. update 帧携带 fog 数组（全量帧长度 n*m）；
-//    b. fog=1 的格子 grid_type ∈ {201 未知占位, 204 沼泽} 且 army_cnt=0（视野外不泄真实地形）；
+//    b. fog=1 的格子 grid_type ∈ {200 空地, 201 山脉, 204 沼泽} 且 army_cnt=0（视野外不泄真实地形/归属）；
 //    c. 己方主城格 fog=0；视野内只能看到 1 座主城（自己的）；
 // 3) 对照房间：默认配置（不开迷雾）的 update 帧不得携带 fog 字段。
 // 4) Bot 房间（issue #51）：bot 进房后迷雾被强制关闭，且房主再次开启请求被拒绝。
@@ -235,9 +235,9 @@ function assertFogInvariants(client) {
     if (code >= 100 && code < 150) visibleGenerals += 1;
     if (!board.fog[idx]) continue;
     foggedCells += 1;
-    if (code !== 201 && code !== 204) {
+    if (code !== 200 && code !== 201 && code !== 204) {
       throw new Error(
-        `${client.name}：迷雾格 idx=${idx} 泄漏了真实地形/归属信息（grid_type=${code}，应只下发 201 未知占位或 204 沼泽）`,
+        `${client.name}：迷雾格 idx=${idx} 泄漏了真实地形/归属信息（grid_type=${code}，应只下发 200 空地、201 山脉或 204 沼泽）`,
       );
     }
     if (board.army_cnt[idx] !== 0) {
