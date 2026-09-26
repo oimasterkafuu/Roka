@@ -50,6 +50,8 @@ export interface RoomPlayerView {
   server_bot?: boolean;
   /** Bot 成员标记（仅在为 true 时下发）：前端据此禁用迷雾开关。 */
   bot?: boolean;
+  /** 服务端托管策略 Bot 的组队许可（仅在为 true 时下发）：前端据此判断房主是否可开关组队。 */
+  server_bot_allow_team?: boolean;
 }
 
 export interface RoomUpdatePayload {
