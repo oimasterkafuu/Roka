@@ -25,6 +25,8 @@ const socket = io(process.env.BOT_SERVER || 'https://roka.oim.moe:444/', {
 const bot = attachBot(socket, {
   roomName: process.argv.find((a) => a.startsWith('--room='))?.slice(7) || process.env.BOT_ROOM || 'bot',
   params,
+  // 线上入口默认自动准备；BOT_AUTO_READY=0 可关闭。
+  autoReady: process.env.BOT_AUTO_READY !== '0',
   log: (message) => console.log(`${new Date().toISOString()} ${message}`),
 });
 function shutdown() { bot.close(); socket.disconnect(); process.exit(0); }

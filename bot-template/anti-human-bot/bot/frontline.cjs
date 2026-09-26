@@ -1,65 +1,36 @@
 'use strict';
 
-// 一次决策只执行一步；不保存突击路线或等待多个军团到齐。
+// 边界进攻评估：只回答「这一步打下去，下几个 tick 会不会亏」。
+// 与旧版的关键差别：
+//   1. 不再使用「2 跳内敌军全额」「全图敌军总量」这类聚合门槛；
+//   2. 敌方 2 跳兵力按到达时间衰减（默认 0.45），相邻兵力才按全额算；
+//   3. 目标格本 tick 可能得到的同 tick 增援按可动兵折算；
+//   4. 攻城/攻冠/碾压三种情况允许「交换」，不再要求纯赚；
+//   5. 不再存在「前沿两格内没有自家建筑就一律不许深入」的 deep 规则。
+const { createContext } = require('./threat.cjs');
+const { resolveParams } = require('./params.cjs');
+
+
 function createFrontline(state, params = {}) {
-  const { n, m, grid, army, playerId: me } = state;
-  const size = n * m, turn = state.turn ?? 0;
-  const diagnostics = { rejected:{}, examples:[] };
+  const ctx = createContext(state, params);
+  if (!ctx) return null;
+  const p = resolveParams(params);
+  const { n, m, size, owners, grid, army, me, count, own, hostile, friendly, allied, passable, known } = ctx;
+  const diagnostics = { rejected: {}, examples: [], candidates: 0 };
   function reject(code, detail) {
     diagnostics.rejected[code] = (diagnostics.rejected[code] || 0) + 1;
-    if (detail && diagnostics.examples.length < 4) diagnostics.examples.push({code,...detail});
+    if (detail && diagnostics.examples.length < 5) diagnostics.examples.push({ code, ...detail });
     return null;
   }
-  const owner = i => grid[i] > 0 && grid[i] < 200 ? grid[i] % 50 : 0;
-  const team = p => state.teams instanceof Map ? state.teams.get(p) : state.teams?.[p];
-  const ally = p => p > 0 && (p === me || (team(p) > 0 && team(p) === team(me)));
-  const known = i => !state.fog?.[i] && ![201, 202, 203].includes(grid[i]);
-  const friendly = i => known(i) && ally(owner(i)) && !state.isolated?.[i];
-  const hostile = i => known(i) && owner(i) > 0 && !ally(owner(i));
-  const ns = i => {
-    const out = [];
-    if (i >= m) out.push(i - m);
-    if (i + m < size) out.push(i + m);
-    if (i % m) out.push(i - 1);
-    if (i % m < m - 1) out.push(i + 1);
-    return out;
-  };
-  const count = (i, ticks = 1) => {
-    let growth = 0;
-    if (owner(i) && !state.isolated?.[i]) {
-      if (grid[i] === 100 + owner(i)) growth = ticks;
-      else if (grid[i] < 150) {
-        growth = Math.floor((turn + ticks) / 50) - Math.floor(turn / 50);
-        if (grid[i] < 50) growth += Math.max(0, Math.min(50, turn + ticks) - Math.max(25, turn));
-      }
-    }
-    return army[i] + growth;
-  };
+  const allowed = (owner) => !params.allowedOwners || params.allowedOwners.has(owner);
   const blocked = (a, b) => params.blockedEdges?.has(`${a}:${b}`);
-  // 敌军两步机动上界。被隔断的兵仍参与目标防守，但不计为可动侧翼兵。
-  const threats = new Map();
-  function threat(i, excluded) {
-    const key = `${i}:${excluded}`;
-    if (threats.has(key)) return threats.get(key);
-    const seen = new Set([i]), queue = [[i, 0]];
-    let value = 0;
-    for (let h = 0; h < queue.length; h++) {
-      const [u, d] = queue[h];
-      if (u !== excluded && hostile(u) && !state.isolated?.[u]) value += Math.max(0, count(u, 2) - d);
-      if (d === 2) continue;
-      for (const v of ns(u)) if (known(v) && !seen.has(v)) {
-        seen.add(v); queue.push([v, d + 1]);
-      }
-    }
-    threats.set(key, value); return value;
+
+  function classify(a, b) {
+    if (grid[b] === owners[b] + 100) return 'crown';
+    if (grid[b] === owners[b] + 50) return 'city';
+    if (owners[b]) return 'enemy';
+    return 'neutral';
   }
-  // 所有已知友方锚点的补给距离，每帧仅算一次。
-  const distance = new Int32Array(size).fill(-1), queue = [];
-  for (let i = 0; i < size; i++) if (friendly(i) && grid[i] >= 50 && grid[i] < 150) {
-    distance[i] = 0; queue.push(i);
-  }
-  for (let h = 0; h < queue.length; h++) for (const v of ns(queue[h]))
-    if (friendly(v) && distance[v] < 0) { distance[v] = distance[queue[h]] + 1; queue.push(v); }
 
   function evaluate(move) {
     if (!move) return null;
@@ -68,112 +39,164 @@ function createFrontline(state, params = {}) {
     if (![x, y, dx, dy].every(Number.isInteger) || x < 0 || x >= n || dx < 0 || dx >= n ||
         y < 0 || y >= m || dy < 0 || dy >= m || Math.abs(x - dx) + Math.abs(y - dy) !== 1) return null;
     const a = x * m + y, b = dx * m + dy;
-    if (owner(a) !== me || !friendly(a)) return reject('来源非可操作己方格');
-    if (blocked(a,b)) return reject('移动历史禁行边');
-    if (ally(owner(b))) {
-      // 己方安全腹地整批运输；靠敌前线/未知地形不冒充内部。
-      const interior = !threat(a, -1) && !threat(b, -1) &&
-        [...ns(a), ...ns(b)].every(v => !state.fog?.[v] && (known(v) || grid[v] === 201));
-      return { move: interior ? { ...move, mode:2, half:false } : move, score: -Infinity };
+    if (!own(a)) return reject('来源非可操作己方格', { from: a, to: b });
+    if (blocked(a, b)) return reject('移动历史禁行边', { from: a, to: b });
+    const targetOwner = owners[b];
+    if (allied(targetOwner, me)) {
+      // 己方内部运输：两端 2 跳内都没有敌人时整批运输，否则保留引擎的智能留兵。
+      const quiet = ctx.pressure(a, { exclude: b }).total === 0 && ctx.pressure(b, { exclude: a }).total === 0 &&
+        !ctx.unknownNear(a) && !ctx.unknownNear(b);
+      return { move: quiet ? { ...move, mode: 2, half: false } : move, score: -Infinity };
     }
-    if (!known(b)) return reject('目标不可见或不可通行');
-    if (hostile(b) && params.allowedOwners && !params.allowedOwners.has(owner(b))) return reject('FFA目标限制');
-    const A = count(a), D = count(b), cap = Math.max(0, A - 1);
-    let B = 0;
-    for (const v of ns(a)) if (v !== b && grid[v] !== 201 && !ally(owner(v))) B += count(v) - 1;
-    const theoretical = Math.max(0, A - B - 1);
-    const half = Math.min(cap, Math.floor(theoretical / 2));
-    const automatic = Math.min(cap, theoretical);
-    // 向源点的两步路径若必经本次攻击目标，属于战线正面反击，
-    // 不是能绕过战斗直接切断源点的侧翼。两者不能使用同一个威胁总和。
-    const sourceSeen = new Set([a, b]), sourceQueue = [[a, 0]];
-    let sourceThreat = 0;
-    for (let h=0;h<sourceQueue.length;h++) {
-      const [u,d] = sourceQueue[h];
-      if (hostile(u) && !state.isolated?.[u]) sourceThreat += Math.max(0,count(u,2)-d);
-      if (d===2) continue;
-      for (const v of ns(u)) if (known(v) && !sourceSeen.has(v)) {
-        sourceSeen.add(v);sourceQueue.push([v,d+1]);
-      }
+    if (!known[b]) return reject('目标不可见或不可通行', { from: a, to: b });
+    if (targetOwner && !allowed(targetOwner)) return reject('FFA目标限制', { from: a, to: b, owner: targetOwner });
+
+    const A = count(a);
+    const D = count(b, 1);
+    const cap = A - 1;
+    if (cap <= 0) return reject('来源无兵', { from: a, A });
+    // 引擎 mode 0 的邻格留兵（不含目标格），用于估算 mode 0/1 的实际出兵量。
+    let sideReserve = 0;
+    for (const v of ctx.neighbors[a]) {
+      if (v === b || !passable(v) || allied(owners[v], me)) continue;
+      sideReserve += Math.max(0, count(v) - 1);
     }
-    const targetThreat = threat(b, b);
-    // 攻冠是已可执行的战术机会，不再以未来六层供给稳定或未知侧翼否决。
-    // 不把任何一座皇冠当作最后皇冠：仍保留来源皇冠的即时留守。
-    if (grid[b] === 100 + owner(b) && hostile(b)) {
-      if (cap <= D) return reject('攻冠兵力不足', {from:a,to:b,available:cap,defense:D});
-      const reserve = grid[a] === 100 + me ? sourceThreat + 1 : 1;
-      const splitUnknown = ns(a).some(v=>v!==b && (state.fog?.[v] || (!known(v) && grid[v]!==201)));
-      for (const mode of (splitUnknown ? [2] : [1, 0, 2])) {
-        const push = mode === 1 ? half : mode === 0 ? automatic : cap;
-        if (push <= D || A - push < reserve) continue;
-        return {move:{...move,mode,half:false,reason:`直接攻冠：出兵${push}，增长后守军${D}，留守${A-push}`},score:1000000+Math.min(push-D,1000)};
-      }
-      return reject('攻冠来源皇冠需留守', {from:a,to:b,available:cap,defense:D,reserve});
-    }
-    const unknown = [...ns(a), ...ns(b)].some(v => state.fog?.[v] || (grid[v] !== 201 && !known(v)));
-    const supports = ns(b).filter(v => v !== a && friendly(v));
-    const supportArmy = supports.reduce((s, v) => s + Math.max(0, count(v) - 2), 0);
-    // 检查源点以及最多六层补给链：后方被绕切不能靠目标格兵多抵消。
-    let cursor = a, fragile = false, inspected = 0;
-    const visited = new Set();
-    while (distance[cursor] > 0 && inspected++ < 6 && !visited.has(cursor)) {
-      visited.add(cursor);
-      const parents = ns(cursor).filter(v => friendly(v) && distance[v] >= 0 && distance[v] < distance[cursor]);
-      if (!parents.length) break;
-      parents.sort((u, v) => (count(v) - threat(v, b)) - (count(u) - threat(u, b)));
-      const parent = parents[0];
-      if (parents.every(v => threat(v, b) >= count(v) && threat(v, b) > 0)) fragile = true;
-      cursor = parent;
-    }
-    const deep = supports.length === 0 && distance[a] > 2;
-    const secureAdvance = supportArmy >= targetThreat && sourceThreat === 0 && !fragile && !unknown;
-    // 断供风险不是无条件否决：即使按最坏被切减半，仍压倒可见敌军时可推进。
-    // 必须在具体出兵模式下验证占领后兵力，不能仅看出发总量。
-    let visibleEnemy = 0;
-    if (fragile) for (let i = 0; i < size; i++) if (hostile(i)) visibleEnemy += count(i, 2);
-    if (deep && targetThreat > 0 && !secureAdvance && A < 3 * (D + targetThreat + sourceThreat + 1)) return reject('深入风险', {from:a,to:b,A,D,sourceThreat,targetThreat});
-    // mode1并非总兵力50%。必须按引擎公式计算；不能发送不存在的模式。
-    const modes = [1, 2];
-    // 自动分兵仅用于已知安全环境；不以它替代侧翼判断。
-    if (!sourceThreat && !targetThreat && !unknown) modes.push(0);
+    const smart = Math.max(0, Math.min(cap, A - sideReserve - 1));
+    const src = ctx.pressure(a, { exclude: b });
+    const tgt = ctx.pressure(b, { exclude: a });
+    const mates = ctx.friendlyAdjacent(b, a);
+    const reinforce = ctx.reinforcement(b, a, p);
+    const defense = D + reinforce;
+    const kind = classify(a, b);
+    const isCrown = kind === 'crown';
+    const isCity = kind === 'city';
+    const unknownNear = ctx.unknownNear(a) || ctx.unknownNear(b);
+    // 源点留守：贴着源点的敌人必须留够（下一 tick 就可能反打），两跳外的按折扣计。
+    // 周围完全干净时保留 1 兵即可，全冲（mode 2）才有意义。
+    const pressureKeep = Math.ceil(src.adj * p.sourceKeep + src.near * 0.3);
+    // 3 跳内的敌军同样算数（不能只看贴脸的两跳），但最多只强制留守一半，
+    // 保证「有威胁时仍能打出去」，同时不再让边境格被抽成 1 兵空壳。
+    const wide = ctx.frontDistance[a] === 0 && p.wideKeepWeight > 0
+      ? ctx.pressure(a, { radius: 3, decay: 0.5 }).total : 0;
+    const wideKeep = Math.min(Math.ceil(A * 0.5), Math.ceil(wide * p.wideKeepWeight));
+    const keepSource = Math.max(pressureKeep > 0 ? 2 : 1, pressureKeep, wideKeep);
+    const localRatio = A / Math.max(1, defense + tgt.adj + src.adj);
+    // 全局兵力落后时不再做亏本交换：只打真正赚的仗。
+    const behindArmy = ctx.race.bestOwner !== null && ctx.race.myArmy < 0.95 * ctx.race.bestArmy;
+    const exchangeNeed = p.exchangeRatio * (behindArmy ? 1.6 : 1);
+    // ── 拆建筑最高优先 ────────────────────────────────────────────────
+    // 拿下敌方的皇冠/指挥所会直接摧毁它：对方至少损失 100 兵的投资与每 tick +1 的产能，
+    // 所以只要能攻下就照打，不要求「打赚」、不看全局兵力落后、不被 console 整合期挡住。
+    // 唯一例外：不能拿我们自己的建筑去换（那等于互删，净亏产能）。
+    const buildingTarget = isCrown || isCity;
+    const ownBuilding = grid[a] === me + 100 || grid[a] === me + 50;
+    // 拆建筑愿意付出的是「占领后守不住」的代价，不是把自家源点抽空：
+    // 源点留守规则照旧（否则一兵建筑下一 tick 就被顺手拆掉，净亏产能）。
+    const buildingKeep = keepSource;
+    const modes = [1, 2, 0];
+    let best = null;
     for (const mode of modes) {
-      const push = mode === 1 ? half : mode === 2 ? cap : automatic;
-      const left = A - push, arrived = push - D;
-      if (arrived <= 0 || left <= sourceThreat) continue;
-      // 能反击夺回目标不等于这次攻击无效。保住补给源、无脆弱后链时，
-      // 对有实际守军的敌格允许兵力交换；不为几兵空地送掉巨大远征军。
-      const exchange = hostile(b) && !fragile && !unknown && !deep;
-      if (arrived <= targetThreat && !exchange) continue;
-      // 可见单步且即使减半仍压倒敌军才放行；留在源点的大军可用于重新接通。
-      if (fragile && (unknown || Math.floor(arrived / 2) <= 3 * (visibleEnemy + 1) ||
-          left <= 2 * (sourceThreat + 1))) continue;
-      if (unknown && (left < Math.max(5, Math.ceil(A * .25)) || arrived < 5)) continue;
-      // 全冲不能把新占地唯一连接点留给可见两跳威胁。
-      const score = (hostile(b) ? 35 : 0) + supports.length * 12 + Math.min(30, D) +
-        (grid[b] === 100 + owner(b) ? 40 : 0) - targetThreat * .15 -
-        (deep ? 20 : 0) - Math.max(0, distance[a]) * .4 + Math.min(arrived, 100) * .08;
-      return { move: { ...move, mode, reason: `${arrived <= targetThreat ? '边界交换' : '边界推进'}：${mode === 1 ? '受限半兵' : mode === 2 ? '安全全冲' : '安全自动分兵'}，保留${left}，占领后${arrived}` }, score };
+      const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
+      if (push <= 0) continue;
+      const arrive = push - defense;
+      const left = A - push;
+      // 占领格必须留下能站住的兵，禁止 1 兵蚕食式进攻（那是给对手送地）。
+      if (arrive < p.minArrive) continue;
+      if (left < (buildingTarget ? buildingKeep : keepSource)) continue;
+      if (unknownNear && !buildingTarget && (left < p.unknownMargin || arrive < 4)) continue;
+      // 占领后下一 tick 的相对优势：来援的己方邻格 + 新到兵力 − 目标周围可反击的敌军。
+      const exposure = arrive + mates.force * 0.5 - tgt.adj * p.counterWeight;
+      let accepted = exposure > 0;
+      let exchange = false;
+      // 正在被反推：只接高价值目标，先把地守住再谈扩张。
+      if (params.consolidate === true && !buildingTarget) continue;
+      if (!accepted) {
+        if (buildingTarget) accepted = true;                               // 拆建筑：损失可接受
+        else if (!behindArmy && localRatio >= exchangeNeed && left > src.adj) { accepted = true; exchange = true; }
+      }
+      if (!accepted) continue;
+      const value = isCrown ? 900 : isCity ? 500 : kind === 'enemy' ? 62 : 26;
+      const kill = kind === 'neutral' ? 0 : Math.min(D, 90) * 1.1;
+      const exposureScore = Math.max(-160, Math.min(160, exposure * 0.45));
+      const rear = ctx.frontDistance[a];
+      const supportBonus = Math.min(3, mates.tiles) * 14;
+      const lingerPenalty = (rear >= 0 ? Math.max(0, 4 - rear) : 4) * 8;
+      const score = value + kill + exposureScore + supportBonus - lingerPenalty +
+        Math.min(arrive, 250) * 0.3 + Math.min(left, 400) * 0.05 - (exchange ? 30 : 0);
+      const reason = isCrown ? `攻冠：出兵${push}，留守${left}`
+        : isCity ? `攻指挥所：出兵${push}，留守${left}`
+          : exchange ? `边界交换：出兵${push}，留守${left}`
+            : `边界推进：${mode === 1 ? '半兵' : mode === 2 ? '全冲' : '智能分兵'}，留守${left}，占领后${arrive}`;
+      if (!best || score > best.score) best = { move: { ...move, mode, half: false, reason }, score, kind };
     }
-    return reject('出兵或留守预算未通过', {from:a,to:b,A,D,sourceThreat,targetThreat,fragile,unknown});
+    if (!best) {
+      // ── 消耗冲击：打破「两堆兵隔着一条线无限积累」的对峙死锁 ──────────────
+      // 拿不下目标格也要打：用同等兵力换掉对方守军，把大堆打小，为后续突破留出兵力差。
+      // 兵力接近、或我方全局产能占优时主动换；同一条边静默超过 stallTicks 时，
+      // 即使我方不占优也要动手——长期对峙本身就是最差的结果（节奏死、产能白攒）。
+      // 是否值得打消耗战，完全由当前局面推出（不看历史、不看计时器）：
+      // 兵力储备或产能占优的一方，1:1 换兵就是赚的；优势越大越愿意用局部劣势换对方主力。
+      if (kind !== 'neutral' && A >= p.grindMin && params.consolidate !== true) {
+        const reserveEdge = ctx.race.myArmy / Math.max(1, ctx.race.bestArmy);
+        const myProduction = ctx.race.myCrowns + ctx.race.myLand / 50;
+        const foeProduction = ctx.race.bestCrowns + ctx.race.bestLand / 50;
+        const productionEdge = myProduction / Math.max(0.1, foeProduction);
+        // 兵力不落后就可以按「接近均势」换；产能碾压（对方几乎没有皇冠）时，
+        // 哪怕局部兵力少一半也换——他们补不回来，我们补得回来。
+        let need = p.grindAdvantage;
+        const dominant = reserveEdge >= 1.4 || productionEdge >= 6;
+        if (reserveEdge >= 1.0 || productionEdge >= 3) need *= 0.6;
+        if (dominant) need = Math.min(need, p.stallRatio);
+        if (A >= need * defense) {
+          const floor = Math.max(1, Math.min(keepSource, Math.ceil(A * p.grindKeep)));
+          let choice = null;
+          for (const mode of [1, 0, 2]) {
+            const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
+            if (push < p.grindMin || A - push < floor) continue;
+            if (!choice || push > choice.push) choice = { mode, push };
+          }
+          if (choice) {
+            const killed = Math.round(Math.min(choice.push, defense));
+            const grindScore = 5 + Math.min(killed, 600) * 0.05 + (isCrown ? 300 : isCity ? 80 : 0);
+            return { move: { ...move, mode: choice.mode, half: false,
+              reason: `消耗冲击${dominant ? '（优势换兵）' : ''}：出兵${choice.push}，换掉约${killed}敌兵` }, score: grindScore };
+          }
+        }
+      }
+      return reject('出兵或留守预算未通过', { from: a, to: b, A, D, defense: Math.round(defense),
+        sourceAdj: Math.round(src.adj), targetAdj: Math.round(tgt.adj), keepSource, unknownNear });
+    }
+    return best;
   }
+
   return {
     diagnostics,
-    assess: move => evaluate(move)?.move ?? null,
+    context: ctx,
+    assess: (move) => evaluate(move)?.move ?? null,
     choose() {
       const candidates = [];
-      for (let a = 0; a < size; a++) if (owner(a) === me && friendly(a) && count(a) > 2)
-        for (const b of ns(a)) if (hostile(b) && !blocked(a, b) &&
-          (!params.allowedOwners || params.allowedOwners.has(owner(b)))) candidates.push({ a, b, strength: count(a) - count(b) });
-      candidates.sort((a, b) => Number(grid[b.b] === 100 + owner(b.b)) - Number(grid[a.b] === 100 + owner(a.b)) || b.strength - a.strength);
+      for (let a = 0; a < size; a++) {
+        if (owners[a] !== me || !own(a) || count(a) <= 2) continue;
+        for (const b of ctx.neighbors[a]) {
+          if (!passable(b) || allied(owners[b], me) || !known[b]) continue;
+          if (owners[b] && !allowed(owners[b])) continue;
+          if (blocked(a, b)) continue;
+          const crown = grid[b] === owners[b] + 100 ? 1 : 0;
+          const city = grid[b] === owners[b] + 50 ? 1 : 0;
+          candidates.push({ a, b, crown, city, edge: count(a) - count(b) });
+        }
+      }
+      candidates.sort((a, b) => b.crown - a.crown || b.city - a.city || b.edge - a.edge || a.a - b.a);
       diagnostics.candidates = candidates.length;
-      diagnostics.isolatedSources = Array.from({length:size},(_,i)=>i).filter(i=>owner(i)===me && state.isolated?.[i] && army[i]>1).length;
+      diagnostics.isolatedSources = 0;
+      for (let i = 0; i < size; i++) if (owners[i] === me && ctx.isolated(i) && army[i] > 1) diagnostics.isolatedSources++;
       let best = null;
-      for (const { a, b } of candidates.slice(0, 96)) {
+      for (const { a, b } of candidates.slice(0, 128)) {
         const value = evaluate({ x: Math.floor(a / m), y: a % m, dx: Math.floor(b / m), dy: b % m, mode: 1 });
         if (value && (!best || value.score > best.score)) best = value;
       }
       return best?.move ?? null;
-    }
+    },
   };
 }
 module.exports = { createFrontline };
