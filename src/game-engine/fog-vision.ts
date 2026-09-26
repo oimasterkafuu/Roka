@@ -51,16 +51,10 @@ const computeTeamVisibility = (
  * 迷雾远征过滤（issue #52 语义，仿原版）：
  * - 视野外（fog=1）：山脉（201）与沼泽（204 / 150~199）保持可见，
  *   其余一律抹成空地（200）；兵力与孤军状态归零。
- * - 视野内：地形正常下发，但敌队的指挥所（owner+50）与主城（owner+100）
- *   降级为普通领地（owner），保留归属与兵力；中立城市（50）不受影响。
+ * - 视野内：地形正常下发，包含敌队指挥所、主城与中立城市。
  * 并附带 fog 扁平数组（1 = 迷雾格）供前端加轻微暗色遮罩。
  */
-const buildFoggedVisionArrays = (
-  state: BoardState,
-  visible: number[],
-  teamOf: (ownerId: number) => number,
-  teamId: number,
-): FlatMapArrays & { fog: number[] } => {
+const buildFoggedVisionArrays = (state: BoardState, visible: number[]): FlatMapArrays & { fog: number[] } => {
   const full = buildFullVisionArrays(state);
   const fog = new Array<number>(state.n * state.m).fill(0);
   for (let idx = 0; idx < visible.length; idx += 1) {
@@ -76,14 +70,6 @@ const buildFoggedVisionArrays = (
       }
       full.army_cnt[idx] = 0;
       full.isolated[idx] = 0;
-      continue;
-    }
-    const code = full.grid_type[idx];
-    if (code > 50 && code < 150) {
-      const ownerId = code % 50;
-      if (ownerId > 0 && teamOf(ownerId) !== teamId) {
-        full.grid_type[idx] = ownerId;
-      }
     }
   }
   return { ...full, fog };

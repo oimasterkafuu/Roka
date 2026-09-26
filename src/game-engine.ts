@@ -136,9 +136,8 @@ export class GameEngine {
 
   /**
    * 迷雾远征开关（房间设置）：开启后存活参赛者只收到己方队伍视野内的
-   * 归属/兵力；视野外格子只保留山脉（201）与沼泽（204），其余抹成空地
-   * （200），视野内敌方指挥所/主城降级为普通领地；观战者、出局者与回放
-   * 始终全视野。
+   * 真实归属/兵力；视野外格子只保留山脉（201）与沼泽（204），其余抹成
+   * 空地（200）；观战者、出局者与回放始终全视野。
    */
   private readonly fogEnabled: boolean;
 
@@ -734,7 +733,7 @@ export class GameEngine {
         );
         visionCache.set(teamId, visible);
       }
-      return buildFoggedVisionArrays(state, visible, (ownerId) => this.team[ownerId - 1], teamId);
+      return buildFoggedVisionArrays(state, visible);
     }
     const arrays = buildFullVisionArrays(state);
     return {

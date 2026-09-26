@@ -2,7 +2,7 @@
 //n,m,turn
 //grid_type[n][m] byte 0~49=army 50~99=city 100~149=generals 150~199=swamp with army 200=empty 201=mountain 204=swamp
 //迷雾对局（fog=1 格）：201 山脉、204 沼泽保持可见，其余抹成空地（200）；
-//视野内敌方 city/generals 由服务端降级为普通领地（owner id），不下发建筑身份
+//视野内地形、归属与兵力正常下发，包含敌方建筑。
 //army_cnt[n][m] int
 
 $(document).ready(function () {
