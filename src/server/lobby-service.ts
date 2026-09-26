@@ -148,6 +148,7 @@ class LobbyService {
       return;
     }
 
+    const isBot = options?.serverBot === true || options?.bot === true;
     const playingCount = players.filter((player) => player.team !== 0).length;
     let targetTeam = 0;
 
@@ -155,24 +156,12 @@ class LobbyService {
       if (!conf.allow_team) {
         targetTeam = 1;
       } else {
-        const teamCount = Array.from({ length: MAX_TEAMS + 1 }, () => 0);
-        for (const player of players) {
-          teamCount[player.team] += 1;
-        }
-
-        let minCount = Number.POSITIVE_INFINITY;
-        targetTeam = 1;
-        for (let i = 1; i <= MAX_TEAMS; i += 1) {
-          if (teamCount[i] < minCount) {
-            minCount = teamCount[i];
-            targetTeam = i;
-          }
-        }
+        targetTeam = this.pickCompatibleTeam(players, isBot);
       }
     }
 
     const player: LobbyPlayer = { sid, uid, team: targetTeam, ready: false };
-    if (options?.serverBot || options?.bot) {
+    if (isBot) {
       // Bot 对局不支持迷雾远征（issue #51）：bot 进房时若迷雾已开启则强制关闭，
       // 房主后续重新开启的请求在 server.ts 的 change_game_conf 里拦截。
       player.bot = true;
@@ -182,18 +171,11 @@ class LobbyService {
     }
     if (options?.serverBot) {
       // 托管策略 Bot 的组队语义由启动参数决定（serverBotAllowTeam）：
-      // bot 独占房间时把 allow_team 设置为启动参数指定值；allowTeam=false
-      // 的房间沿用强制关闭组队并规整队伍，allowTeam=true 时不强制关闭，
-      // 房主后续可自行开关（change_game_conf 只对 allowTeam=false 的托管
-      // bot 房间拒绝开启组队）。
+      // allowTeam=false 的房间强制关闭组队并规整队伍；allowTeam=true 时不强制
+      // 开启组队，仅移除 change_game_conf 的组队开关限制，由房主决定是否启用。
       player.serverBot = true;
       player.serverBotAllowTeam = options.serverBotAllowTeam === true;
-      if (options.serverBotAllowTeam === true) {
-        // 允许组队的托管 bot：不强制关闭组队；独占房间时直接按启动参数开启。
-        if (players.length === 0) {
-          conf.allow_team = true;
-        }
-      } else if (conf.allow_team) {
+      if (options.serverBotAllowTeam !== true && conf.allow_team) {
         // 不允许组队的托管 bot：进房强制关闭组队并规整队伍。
         conf.allow_team = false;
         this.enforceLobbyConstraints(gid);
@@ -314,6 +296,7 @@ class LobbyService {
       team: player.team,
       ready: Boolean(player.ready && player.team !== 0),
       ...(player.serverBot === true ? { server_bot: true } : {}),
+      ...(player.serverBot === true ? { server_bot_allow_team: player.serverBotAllowTeam === true } : {}),
       ...(player.bot === true ? { bot: true } : {}),
     }));
 
@@ -822,6 +805,147 @@ class LobbyService {
       }
       playingCount += 1;
     }
+  }
+
+  /** 按队伍统计人数与其中的机器人数（可排除某个 sid，如换队时排除自己）。 */
+  private countTeams(
+    players: LobbyPlayer[],
+    excludeSid?: string,
+  ): { teamCount: number[]; teamBotCount: number[] } {
+    const teamCount = Array.from({ length: MAX_TEAMS + 1 }, () => 0);
+    const teamBotCount = Array.from({ length: MAX_TEAMS + 1 }, () => 0);
+    for (const player of players) {
+      const team = player.team;
+      if (team <= 0 || team > MAX_TEAMS || player.sid === excludeSid) {
+        continue;
+      }
+      teamCount[team] += 1;
+      if (player.bot) {
+        teamBotCount[team] += 1;
+      }
+    }
+    return { teamCount, teamBotCount };
+  }
+
+  /** 队伍是否可容纳该类型玩家：机器人队中不得有人类，人类队中不得有机器人。 */
+  private isTeamCompatible(
+    teamCount: number[],
+    teamBotCount: number[],
+    team: number,
+    isBot: boolean,
+  ): boolean {
+    const botCount = teamBotCount[team];
+    const humanCount = teamCount[team] - botCount;
+    return isBot ? humanCount === 0 : botCount === 0;
+  }
+
+  /** 同类型中人数最少的非空队伍；没有时取最低的空队伍；均无则返回 0（观战）。 */
+  private findCompatibleTeam(teamCount: number[], teamBotCount: number[], isBot: boolean): number {
+    let bestTeam = 0;
+    let minCount = Number.POSITIVE_INFINITY;
+    for (let team = 1; team <= MAX_TEAMS; team += 1) {
+      if (teamCount[team] === 0 || !this.isTeamCompatible(teamCount, teamBotCount, team, isBot)) {
+        continue;
+      }
+      if (teamCount[team] < minCount) {
+        minCount = teamCount[team];
+        bestTeam = team;
+      }
+    }
+    if (bestTeam !== 0) {
+      return bestTeam;
+    }
+    for (let team = 1; team <= MAX_TEAMS; team += 1) {
+      if (teamCount[team] === 0) {
+        return team;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * 在允许组队的房间中为即将进房的玩家挑选默认队伍：机器人进机器人队、
+   * 人类进人类队，保证人类不会和机器人同队。
+   */
+  private pickCompatibleTeam(players: LobbyPlayer[], isBot: boolean): number {
+    const { teamCount, teamBotCount } = this.countTeams(players);
+    return this.findCompatibleTeam(teamCount, teamBotCount, isBot);
+  }
+
+  /**
+   * 允许组队被开启后，重新规整房间内的队伍分配：
+   * 机器人独占一队，人类独占一队，避免混合队伍。
+   */
+  reassignTeamsForAllowTeam(gid: string): void {
+    const players = this.lobbyPlayers.get(gid);
+    if (!players) {
+      return;
+    }
+
+    const { teamCount, teamBotCount } = this.countTeams(players);
+    const relocate = (player: LobbyPlayer): void => {
+      if (player.team === 0) {
+        return;
+      }
+      const isBot = player.bot === true;
+      if (this.isTeamCompatible(teamCount, teamBotCount, player.team, isBot)) {
+        return;
+      }
+
+      // 先把自己从统计中移除，再挑选不会混合的落点。
+      const oldTeam = player.team;
+      teamCount[oldTeam] -= 1;
+      if (isBot) {
+        teamBotCount[oldTeam] -= 1;
+      }
+      const bestTeam = this.findCompatibleTeam(teamCount, teamBotCount, isBot);
+      if (bestTeam === 0) {
+        player.team = 0;
+        player.ready = false;
+        return;
+      }
+      player.team = bestTeam;
+      teamCount[bestTeam] += 1;
+      if (isBot) {
+        teamBotCount[bestTeam] += 1;
+      }
+    };
+
+    // 先迁移机器人（人类保留原队伍），再兜底处理仍处混合队伍的人类。
+    for (const player of players) {
+      if (player.bot === true) {
+        relocate(player);
+      }
+    }
+    for (const player of players) {
+      if (player.bot !== true) {
+        relocate(player);
+      }
+    }
+  }
+
+  /**
+   * 校验并修正玩家在组队模式下的换队请求：目标队伍不得混合机器人与人类。
+   * 目标不兼容时优先留在当前队伍，其次选择同类型且人数最少的队伍；无可用队伍时返回 0。
+   */
+  resolveCompatibleTeam(players: LobbyPlayer[], sid: string, requestedTeam: number): number {
+    if (requestedTeam <= 0 || requestedTeam > MAX_TEAMS) {
+      return requestedTeam;
+    }
+    const player = players.find((p) => p.sid === sid);
+    if (!player) {
+      return requestedTeam;
+    }
+
+    const isBot = player.bot === true;
+    const { teamCount, teamBotCount } = this.countTeams(players, sid);
+    if (this.isTeamCompatible(teamCount, teamBotCount, requestedTeam, isBot)) {
+      return requestedTeam;
+    }
+    if (player.team !== 0 && this.isTeamCompatible(teamCount, teamBotCount, player.team, isBot)) {
+      return player.team;
+    }
+    return this.findCompatibleTeam(teamCount, teamBotCount, isBot);
   }
 
   private getReqReady(x: number): number {
