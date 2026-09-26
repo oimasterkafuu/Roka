@@ -78,11 +78,14 @@ function render() {
         txt = '';
       var cellType = displayGrid[i][j];
       var cellArmy = displayArmy[i][j];
-      // 迷雾格统一为「山+问号」未知占位：沼泽例外始终显示为沼泽，其余
-      // （含真实山地）一律按未知占位 201，归属与兵力一律隐藏
-      // （实时迷雾对局服务端已过滤为 201/204，此处主要服务回放视角）。
+      // 迷雾格（仿原版）：山脉（201）与沼泽（204 / 150~199）保持可见，
+      // 其余一律抹成空地（200）；归属与兵力隐藏（实时对局服务端已过滤，
+      // 此处主要服务回放视角）。
       if (fog[i][j]) {
-        if (cellType < 200) cellType = cellType >= 150 ? 204 : 201;
+        var isMountain = cellType == 201;
+        var isSwamp = cellType == 204 || (cellType >= 150 && cellType < 200);
+        if (!isMountain && !isSwamp) cellType = 200;
+        else if (isSwamp) cellType = 204;
         cellArmy = 0;
       }
       // 回放队伍视角：视野内敌方的指挥所/主城不显示建筑身份，降级为普通领地
@@ -116,11 +119,9 @@ function render() {
       } else if (cellType == 204) {
         cls += ' swamp';
       }
-      // 迷雾远征：视野外格子叠暗色遮罩（归属/兵力已由服务端隐藏）；
-      // 未知占位（201）追加问号，表示「有东西但未知」。
+      // 迷雾远征：视野外格子叠轻微暗色遮罩（归属/兵力已由服务端隐藏）。
       if (fog[i][j]) {
         cls += ' fog';
-        if (cellType == 201) txt = '?';
       }
       if (i == selx && j == sely) {
         if (selt == 1) {
