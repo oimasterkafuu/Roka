@@ -33,10 +33,17 @@ test('两个阵营不施加主动限制和紧急覆盖', () => {
   const a = analyzeFFA(s); assert.equal(a.targetOwner, null); assert.equal(a.emergencyMove, null);
   for (const t of [1, 5, 7]) assert.ok(acceptFFAAction(s, move(4, t), a));
 });
-test('目标锁定60tick内不因兵力评分微变切换', () => {
-  const s = board(), first = analyzeFFA(s).targetOwner;
-  s.turn = 35; s.army[0] = 15; s.army[2] = 20; s.army[6] = 10;
-  assert.equal(analyzeFFA(s).targetOwner, first);
+test('目标每 tick 按当前局面重算，不跨回合锁定', () => {
+  const s = board();
+  const first = analyzeFFA(s).targetOwner;
+  assert.ok(first);
+  // 把另一个对手变成贴脸的弱势方 → 同一回合内目标应当立刻切换，不需要等任何冷却
+  const other = [2, 3, 4].find((p) => p !== first);
+  const at = other === 2 ? 0 : other === 3 ? 2 : 6;
+  s.grid[at] = other; s.army[at] = 1; s.turn = 35;
+  const a = analyzeFFA(s);
+  assert.ok(a.allowedOwners.size >= 1);
+  assert.ok(a.allowedOwners.has(a.targetOwner));
 });
 test('leaderboard dead排除残留领地，目标消失切换', () => {
   const s = board(), first = analyzeFFA(s).targetOwner;
@@ -48,17 +55,17 @@ test('无排行榜时目标失去全部领地会切换', () => {
   s.grid = s.grid.map(v => v % 50 === first ? 0 : v); s.turn++;
   assert.notEqual(analyzeFFA(s).targetOwner, first);
 });
-test('真实夺地建立侵略记忆并允许第三方防御', () => {
-  const s = board(), initial = analyzeFFA(s), p = [2, 3, 4].find(p => p !== initial.targetOwner);
-  s.grid[3] = p; s.army[3] = 1; s.turn++;
-  const a = analyzeFFA(s); assert.ok(a.defensiveOwners.has(p));
+test('防御方名单只由当前威胁推导，不依赖历史夺地记忆', () => {
+  const s = board(), initial = analyzeFFA(s);
+  const p = [2, 3, 4].find((x) => x !== initial.targetOwner);
+  // 让 p 的兵力直接压到我方锚点门口 → 当前威胁成立
+  s.grid[3] = p; s.army[3] = 500; s.turn++;
+  const a = analyzeFFA(s);
+  assert.ok(a.allowedOwners.has(p), '当前构成威胁的对手必须可打');
   assert.ok(acceptFFAAction(s, move(4, 3), a));
-  s.turn++; assert.ok(analyzeFFA(s).defensiveOwners.has(p));
-});
-test('侵略记忆过期，不永久将所有人当威胁', () => {
-  const s = board(); analyzeFFA(s); s.grid[3] = 3; s.army[3] = 1; s.turn++;
-  assert.ok(analyzeFFA(s).defensiveOwners.has(3)); s.turn += 41;
-  assert.equal(analyzeFFA(s).defensiveOwners.has(3), false);
+  // 把威胁撤掉（兵力归零）后同一 tick 立即恢复原状，不需要等待过期
+  const t = structuredClone(s); t.teams = new Map(s.teams); t.army[3] = 0;
+  assert.equal(analyzeFFA(t).defensiveOwners.has(p), false);
 });
 test('强皇冠入侵可打破锁定', () => {
   const s = board(), first = analyzeFFA(s).targetOwner, p = first === 3 ? 4 : 3;
@@ -106,11 +113,13 @@ test('墙隔开不可达敌兵不是近皇冠威胁', () => {
   const s = defense(); s.grid[1] = 201; s.army[1] = 0; s.army[3] = 1000;
   assert.equal(analyzeFFA(s).defensiveOwners.has(2), false);
 });
-test('回合回退重置夺地记忆和目标，实例记忆互相隔离', () => {
-  const s = board(); analyzeFFA(s); s.turn = 10; s.grid[3] = 3; s.army[3] = 1;
-  assert.ok(analyzeFFA(s).defensiveOwners.has(3));
-  assert.equal(analyzeFFA(structuredClone(s)).defensiveOwners.has(3), false);
-  s.turn = 0; assert.equal(analyzeFFA(s).defensiveOwners.has(3), false);
+test('同一局面重复分析结果一致，实例之间互不污染', () => {
+  const s = board(); s.grid[3] = 3; s.army[3] = 1;
+  const first = analyzeFFA(s), second = analyzeFFA(s);
+  assert.equal(first.targetOwner, second.targetOwner);
+  assert.deepEqual([...first.allowedOwners].sort(), [...second.allowedOwners].sort());
+  const clone = structuredClone(s); clone.teams = new Map(s.teams);
+  assert.equal(analyzeFFA(clone).targetOwner, first.targetOwner);
 });
 test('攻击过滤拒绝非目标，允许自有、中立与建造', () => {
   const s = board(), a = analyzeFFA(s);
