@@ -16,6 +16,76 @@ const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
 
 const decisionDiagnostics = new WeakMap();
+
+// ── 保底动作 ─────────────────────────────────────────────────────────────
+// 任何模块都没给出动作时，也必须做一件「保守且绝不亏」的事，不允许空转：
+//   1) 后方有空闲资金 → 直接建/升皇冠（哪怕位置不是最优，产能也是净赚）；
+//   2) 后方有大堆不贴敌的兵 → 往最需要的前线格搬一步（聚兵）；
+//   3) 前线有大堆但打不动 → 横向汇兵到邻敌压力最大的己方邻格（不后退、不空转）。
+// 全部只看当前局面，不保存任何计划。
+function guaranteedAction(state, ctx, params) {
+  if (!ctx) return null;
+  const { me, size, grid, count, own, hostile, neighbors, frontDistance } = ctx;
+  const blocked = (a, b) => params.blockedEdges?.has(`${a}:${b}`);
+  const coord = (i) => ({ x: Math.floor(i / ctx.m), y: i % ctx.m });
+  // 1) 后方建皇冠：不贴敌的安全格，攒够 50 兵就开工（指挥所先升级，其次新建）。
+  let foundSite = -1, newSite = -1;
+  for (let i = 0; i < size; i++) {
+    if (!own(i) || count(i) < 50) continue;
+    if (neighbors[i].some((j) => hostile(j))) continue;
+    if (grid[i] === me + 50) { foundSite = i; break; }
+    if (newSite < 0 && grid[i] === me) newSite = i;
+  }
+  const site = foundSite >= 0 ? foundSite : newSite;
+  if (site >= 0) {
+    const { x, y } = coord(site);
+    return { kind: 'build', op: foundSite >= 0 ? 'c' : 'b', x, y,
+      reason: foundSite >= 0 ? '保底：升级后方皇冠' : '保底：后方新建皇冠' };
+  }
+  // 2) 聚兵：把后方最大的一堆（不贴敌）往最近的前线格方向搬一步。
+  let source = -1, best = 1;
+  for (let i = 0; i < size; i++) {
+    if (!own(i) || count(i) <= best) continue;
+    if (neighbors[i].some((j) => hostile(j))) continue;
+    const d = frontDistance[i];
+    source = i; best = count(i);
+  }
+  if (source >= 0) {
+    const d = frontDistance[source];
+    let dest = -1;
+    for (const j of neighbors[source]) {
+      if (!own(j) || blocked(source, j)) continue;
+      const dj = frontDistance[j];
+      if (dj >= 0 && (d < 0 || dj < d)) { if (dest < 0 || dj < frontDistance[dest]) dest = j; }
+    }
+    if (dest < 0) for (const j of neighbors[source]) if (own(j) && !blocked(source, j)) { dest = j; break; }
+    if (dest >= 0) {
+      const from = coord(source), to = coord(dest);
+      return { kind: 'attack', ...from, dx: to.x, dy: to.y, half: false, mode: 0, reason: '保底：后方聚兵向前' };
+    }
+  }
+  // 3) 前线横向汇兵：不后退，把兵挪向邻敌压力最大的己方邻格。
+  let frontSource = -1, frontBest = 1;
+  for (let i = 0; i < size; i++) {
+    if (!own(i) || count(i) <= frontBest) continue;
+    if (!neighbors[i].some((j) => hostile(j))) continue;
+    frontSource = i; frontBest = count(i);
+  }
+  if (frontSource >= 0) {
+    let dest = -1, pressure = -1;
+    for (const j of neighbors[frontSource]) {
+      if (!own(j) || blocked(frontSource, j)) continue;
+      const foe = ctx.pressure(j, { radius: 1 }).adj;
+      if (foe > pressure) { pressure = foe; dest = j; }
+    }
+    if (dest < 0) for (const j of neighbors[frontSource]) if (own(j) && !blocked(frontSource, j)) { dest = j; break; }
+    if (dest >= 0) {
+      const from = coord(frontSource), to = coord(dest);
+      return { kind: 'attack', ...from, dx: to.x, dy: to.y, half: false, mode: 0, reason: '保底：前线横向汇兵' };
+    }
+  }
+  return null;
+}
 // 「是否该转守」完全由当前局面推出：前线密度明显低于对手、且对手是真正的竞争者时才算过度扩张。
 // 不保存任何跨回合状态，因此不会出现「昨天决定今天还照着做」。
 function consolidation(state, ctx, params) {
@@ -24,11 +94,11 @@ function consolidation(state, ctx, params) {
   if (tuning.consolidateLoss <= 0) return false;
   const race = ctx.race;
   if (race.myLand < 8 || race.bestLand < 4) return false;
-  const contested = race.bestLand >= 0.3 * race.myLand || race.bestArmy >= 0.8 * race.myArmy;
-  if (!contested) return false;
-  const density = race.myArmy / Math.max(1, race.myLand);
-  const foeDensity = race.bestArmy / Math.max(1, race.bestLand);
-  return density * 1.6 < foeDensity;
+  // 只有「兵力明显少 + 地皮也没领先」才算被压着打，才值得暂时只守不扩。
+  // 只看"每格兵力密度"会让大后期的大国永久进入守势（实地日志里因此连续 20 tick 空动作）。
+  const weakerArmy = race.myArmy < 0.7 * race.bestArmy;
+  const notAheadLand = race.myLand < 1.2 * race.bestLand;
+  return weakerArmy && notAheadLand;
 }
 function getDecisionDiagnostics(state) { return decisionDiagnostics.get(state) || null; }
 
@@ -147,10 +217,13 @@ function decide(state, params, guard) {
   const logistics = rawLogistics?.kind === 'build' ? rawLogistics : attack(rawLogistics);
   if (allowed(logistics)) return take(logistics, 'logistics');
   if (build) return take({ kind: 'build', ...build }, 'build');
-  // 空动作回退：还有经济可做就先做经济，其次才是扩张/探路，避免整 tick 空转。
+  // 空动作回退：经济 → 规划器 → 保底动作，绝不留空 tick。
   const fallbackEconomy = attack(chooseLogistics(state, move, build, { ...constrained, economyOnly: true }));
   if (allowed(fallbackEconomy)) return take(fallbackEconomy, 'economy-fallback');
-  return allowed(attack(move)) ? take(attack(move), 'planner') : null;
+  if (allowed(attack(move))) return take(attack(move), 'planner');
+  const guaranteed = guaranteedAction(state, ctx, constrained);
+  if (allowed(guaranteed)) return take(guaranteed, 'fallback');
+  return null;
 }
 
 function chooseAction(state, params = {}) {
