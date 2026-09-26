@@ -1450,6 +1450,10 @@ const boot = async (): Promise<void> => {
         return;
       }
 
+      if (conf.allow_team && team !== 0) {
+        team = lobbyService.resolveCompatibleTeam(players, socket.id, team);
+      }
+
       let nickname = username;
       player.team = team;
       if (team === 0) {
@@ -1551,6 +1555,10 @@ const boot = async (): Promise<void> => {
             } else {
               nextConf.allow_team = allowTeam;
               changed.push('allow_team');
+              if (allowTeam && !oldConf.allow_team) {
+                // 允许组队开启后重新规整队伍，确保机器人与人类分属不同队伍。
+                lobbyService.reassignTeamsForAllowTeam(gid);
+              }
             }
           }
         }
