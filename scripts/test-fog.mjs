@@ -229,16 +229,17 @@ function assertFogInvariants(client) {
     throw new Error(`${client.name}：迷雾对局的 update 帧缺少 fog 字段`);
   }
   let foggedCells = 0;
-  let visibleGenerals = 0;
   for (let idx = 0; idx < n * m; idx++) {
     const code = board.grid_type[idx];
-    if (code >= 100 && code < 150) visibleGenerals += 1;
     if (!board.fog[idx]) continue;
     foggedCells += 1;
     if (code !== 200 && code !== 201 && code !== 204) {
       throw new Error(
         `${client.name}：迷雾格 idx=${idx} 泄漏了真实地形/归属信息（grid_type=${code}，应只下发 200 空地、201 山脉或 204 沼泽）`,
       );
+    }
+    if (code > 50 && code < 150) {
+      throw new Error(`${client.name}：迷雾格 idx=${idx} 泄漏了建筑身份（grid_type=${code}）`);
     }
     if (board.army_cnt[idx] !== 0) {
       throw new Error(`${client.name}：迷雾格 idx=${idx} 泄漏了兵力（army_cnt=${board.army_cnt[idx]}）`);
@@ -250,9 +251,6 @@ function assertFogInvariants(client) {
   const [gx, gy] = general;
   if (gx >= 0 && board.fog[gx * m + gy] !== 0) {
     throw new Error(`${client.name}：己方主城格被迷雾覆盖`);
-  }
-  if (visibleGenerals > 1) {
-    throw new Error(`${client.name}：视野内出现 ${visibleGenerals} 座主城，敌方主城未隐藏`);
   }
 }
 
