@@ -2,7 +2,7 @@
 // mock 时间验证以下语义（issue：排行榜 7 天不活跃下榜，重新活跃即回榜）：
 //   场景 1：最后活动距今 6 天（< 7 天阈值）仍在榜。
 //   场景 2：最后活动距今 8 天（≥ 7 天阈值）下榜。
-//   场景 3：下榜用户重新登录（rotateSession 刷新 updatedAt + markLastSeen
+//   场景 3：下榜用户重新登录（rotateSession 刷新 updatedAt + setLastSeenAt
 //           刷新 lastSeenAt）后立即回榜，无需重新开一局。
 //   场景 4：没打过任何对局（ratingGames=0）的用户本就不在榜。
 //   场景 5：lastSeenAt 与 updatedAt 取较大者——对局结算只刷 updatedAt、
@@ -79,9 +79,9 @@ async function main() {
   check('没打过对局的用户不在榜', !board.includes('never_played'));
   check('仅靠对局结算（updatedAt 6 天前）的用户在榜', board.includes('settled_only'));
 
-  console.log('场景 3：重新登录（rotateSession + markLastSeen）后立即回榜');
+  console.log('场景 3：重新登录（rotateSession + setLastSeenAt）后立即回榜');
   await store.rotateSession('relogin_back');
-  await store.markLastSeen('relogin_back');
+  await store.setLastSeenAt('relogin_back');
   board = store.listTopRated(10, NOW).map((e) => e.username);
   check('重新登录后回榜', board.includes('relogin_back'));
 
