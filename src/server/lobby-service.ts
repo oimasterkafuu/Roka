@@ -25,7 +25,7 @@ const FIXED_MOUNTAIN_RATIO = 0.5;
 const FIXED_SWAMP_RATIO = 0.5;
 export { FIXED_SWAMP_RATIO };
 const MAP_TOKEN_MAX_LENGTH = 32;
-const RATING_K = 24;
+const RATING_K = 64;
 /** 房间准备阶段的心跳超时：超过 600 秒无心跳的成员被自动移出房间。 */
 const LOBBY_HEARTBEAT_TIMEOUT_MS = 600_000;
 /** 心跳扫描周期：每分钟检查一次全部房间成员的最后心跳时间。 */
