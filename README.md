@@ -16,7 +16,7 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:leaderboard`（排行榜不活跃过滤单元测试：mock 时间验证 7 天下榜/活跃回榜/无对局不在榜等边界；需先 `pnpm run build`）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）。
 
 启动后访问 `http://localhost:23333/` 并注册账号。
 
@@ -46,7 +46,7 @@ pnpm run start
 - 策略 Bot 模板 `bot-template/simple-strategy-bot`：具备开局发育模拟规划/威胁推演/集结防御/风险感知路径打击/前线突破集结/积极皇冠建设/多源兵力汇集的综合策略（`strategy.js` 管线编排 + `bot/` 纯函数模块），并按双层危险场对咽喉格定量驻军、为被切断的孤军组织走廊救援或止损、行军有纪律（防抖防送兵、打击体检与无望集结弃打）；可独立运行（与 random-patch-bot 相同的 CLI 用法），其 `strategy.js` 同时被服务端托管运行复用。
 - 策略 Bot 模板 `bot-template/anti-human-bot`：独立实现的 AI 机器人（自研协议/状态/移动/建造策略与离线训练管线，用法见其包内 `USAGE.md`）；CLI 默认自动准备（`BOT_AUTO_READY=0` 关闭，管理员聊天 `/ready` 仍可切换），经 `server-bot.js` 适配托管运行时自动准备并优先加入 1 队（组队模式下服务端保证机器人与人类分属不同队伍，会被归入机器人队伍），可在后台作为托管模板直接运行。
 - FFA 与组队模式，统一 Rating（不区分 1v1 / FFA）；Codeforces 风格段位名字颜色。新手显示分仿 Codeforces 从 0 起步（按 1200 / 2^对局数 的 delta 逼近真实分），内部结算仍按 1200 初始分。组队结算时队伍分按人数立方加权（400·log10(n³·Σ10^(r/400))：人数优势是压倒性的，等分 1v2 期望胜率约 1/17、1v3 约 1/82；单人队即自身分），避免以少打多被视为均势局。
-- 首页三栏布局：左侧个人信息、房间列表（状态列区分「游戏中 / 人数不足 / 准备进度」）与回放列表（自己参与的对局浅黄高亮）；中间「动态」feed；右侧公告（仅管理员可编辑，与动态同一条管线，支持 Markdown 与服务端渲染的 LaTeX）、Rating 排行榜（前 10，Unrated 不参与）与「刚刚在线」列表（最近下线的前 8 位用户及下线相对时间）。
+- 首页三栏布局：左侧个人信息、房间列表（状态列区分「游戏中 / 人数不足 / 准备进度」）与回放列表（自己参与的对局浅黄高亮）；中间「动态」feed；右侧公告（仅管理员可编辑，与动态同一条管线，支持 Markdown 与服务端渲染的 LaTeX）、Rating 排行榜（前 10，Unrated 不参与）与「刚刚在线」列表（最近下线的前 8 位用户及下线相对时间）。排行榜只展示最近 7 天内有活动的用户——最后活动（对局结算、上线/下线等）距今满 7 天即暂时下榜，rating 数据保留，重新登录或有任意活动后立即回榜；长期停用的 Bot 账号同样会下榜（与人类账号同一规则，天天对局的 Bot 经结算刷新不受影响）。
 - 顶栏实时展示当前在线人数：覆盖网站所有页面的 socket 连接，同一用户多个标签页只计一次，bot 令牌连接不计入；通过 `home_online` socket 失效通知（2 秒节流）驱动首页刷新，数据来自 `GET /api/online`。
 - 回放可下载为原始 `.rpl` 操作流文件（仅几百字节，只有服务端能解码）；观看页直接下发 gzip 压缩后的转码二进制（服务端按回放 id 落盘缓存，首次观看后无需再重建整场对局），加载期间显示下载进度；首页回放面板支持「上传并查看回放」——POST 给服务器转码后播放，版本过旧或损坏会弹出「不兼容」提示，服务端库存的不兼容回放会被自动删除。
 - 「动态」：类似推特的 feed，支持点赞、评论、编辑与删除（管理员可管理全部），支持 Markdown 与服务端渲染的 LaTeX；发布有 30 秒冷却；URL 带页码可分享翻页位置。
