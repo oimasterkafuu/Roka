@@ -1,6 +1,8 @@
 'use strict';
 
 // 无跨回合计划：每次调用都按当前棋盘重算目标、集结点与攻城树。
+const { resolveParams } = require('./params.cjs');
+
 function chooseCampaign(state, params = {}, options = {}) {
   if (!state || typeof state !== 'object') return null;
   const reset = () => null;
@@ -23,6 +25,7 @@ function chooseCampaign(state, params = {}, options = {}) {
     return out;
   };
   const blocked = (a, b) => params.blockedEdges?.has(`${a}:${b}`) || state.blockedEdges?.has(`${a}:${b}`);
+  const p = resolveParams(params);
   const growth = (i, ticks) => {
     if (!os[i] || !known(i)) return 0;
     if (grid[i] === os[i] + 100) return ticks;
@@ -185,7 +188,24 @@ function chooseCampaign(state, params = {}, options = {}) {
     }
     active[p] = 1;
   }
-  forecast = { ...forecast, required, available };
+  // ── 浓缩突击（学自 _E_ 的单堆全冲，2026-09-27）──────────────────────────
+  // 出击兵力达到决定性规模（≥megaStackMin 且 ≥所需×assaultMargin）时建议 mode2
+  // 全冲（留 1 兵）逐格压向皇冠——大堆不被 mode0 智能留兵逐格剥皮，保持完整
+  // 直到贴脸，最后一击由 frontline 的斩首锁定/合力推接管（整合点，非平行系统）。
+  // 无跨回合状态：大堆被打残（跌破决定性规模）的下一 tick 自动回到稳推/汇兵，
+  // 不死磕（止损）；家里有事时 defense/lastStand/cutoff/neck-guard 在 policy
+  // 调度中全部优先于本模块（防斩首约束）。
+  const stack = count(rally) - 1;
+  const stackReady = stack >= p.megaStackMin && stack >= Math.ceil(required * p.assaultMargin);
+  // 截断风险联动（cutoff/neck-guard）：全冲后 rally 只留 1 兵——若 rally 是大堆
+  // 回锚的唯一通道（走廊头部没有其他连锚的我方邻格）、且 rally 贴脸有可动敌军
+  // 能随手吃掉这 1 兵，大堆立即变孤军（不能移动、5 tick 后衰减——_E_ 败局形态）。
+  // 这种脖子不全冲，降级为 mode0 稳推：智能留兵会在 rally 留下压得住贴脸敌军的
+  // 守军，脖子有人守，大堆照样前进（policy 管线里 frontline 的 allInSafe 闸门
+  // 与 neck-guard 模块是同一方向的第二、三道保险）。
+  const neckRisk = stackReady && !ns(path[0]).some((j) => j !== rally && own(j)) &&
+    ns(rally).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j] && count(j) > 2);
+  const assault = stackReady && !neckRisk;
   // 只有真实 rally 兵足够才出击；不把尚未到达的树上兵计入 available。
   let phase, from, to, amount;
   if (available >= required) { phase = 'advance'; from = rally; to = path[0]; amount = available; }
@@ -195,8 +215,12 @@ function chooseCampaign(state, params = {}, options = {}) {
   const last = state.lastMove;
   if (last?.op === 'm' && last.turn >= turn - 1 && last.x * m + last.y === to && last.dx * m + last.dy === from) return null;
   mem.pending = { turn, from, to, before: army[from], destination: army[to], phase };
+  const striking = phase === 'advance';
   return { x: Math.floor(from / m), y: from % m, dx: Math.floor(to / m), dy: to % m,
-    mode: 0, half: false, reason: { code: 'campaign', detail: phase === 'gather' ? '攻城树先叶后根汇兵' : '全程军力预算充足，进攻目标皇冠',
-      phase, target: mem.target, rally, amount, distanceBefore: depth[from], distanceAfter: depth[to], forecast } };
+    mode: striking && assault ? 2 : 0, half: false, reason: { code: 'campaign',
+      detail: phase === 'gather' ? '攻城树先叶后根汇兵'
+        : assault ? '浓缩突击：决定性大堆全冲压向皇冠，沿途只留1兵' : '全程军力预算充足，进攻目标皇冠',
+      phase, assault: striking ? assault : undefined, target: mem.target, rally, amount,
+      distanceBefore: depth[from], distanceAfter: depth[to], forecast } };
 }
 module.exports = { chooseCampaign };

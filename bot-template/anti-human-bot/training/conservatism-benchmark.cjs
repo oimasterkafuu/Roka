@@ -13,28 +13,32 @@ const { runMatch, MAP_MODES } = require('./arena.cjs');
 const args = Object.fromEntries(process.argv.slice(2).map((x) => x.replace(/^--/, '').split('=')));
 const opponentName = args.opponent || 'prevconservative';
 const currentName = args.current || 'bot';
-const CURRENT = {
-  bot: () => require('../bot/policy.cjs').chooseAction,
-  prevconservative: () => require('./prevconservative/policy.cjs').chooseAction,
-  precampaign: () => require('./precampaign/policy.cjs').chooseAction,
-  preresilience: () => require('./preresilience/policy.cjs').chooseAction,
-  precutoff: () => require('./precutoff/policy.cjs').chooseAction,
-  premacro: () => require('./premacro/policy.cjs').chooseAction,
+// dir:<相对 training/ 的目录> 加载任意冻结副本（如改动前基线快照），目录内需含 policy.cjs。
+const loadPolicy = (name) => {
+  if (name.startsWith('dir:')) {
+    const dir = path.resolve(__dirname, name.slice(4));
+    return () => require(path.join(dir, 'policy.cjs')).chooseAction;
+  }
+  const TABLE = {
+    bot: '../bot',
+    prevconservative: './prevconservative',
+    precampaign: './precampaign',
+    preresilience: './preresilience',
+    preburst: './preburst',
+    prearchitecture: './prearchitecture',
+    precutoff: './precutoff',
+    premacro: './premacro',
+  };
+  if (!TABLE[name]) return null;
+  const dir = TABLE[name];
+  return () => require(`${dir}/policy.cjs`).chooseAction;
 };
-if (!CURRENT[currentName]) throw new Error(`未知 current: ${currentName}`);
-const current = CURRENT[currentName]();
-const OPPONENTS = {
-  prevconservative: () => require('./prevconservative/policy.cjs').chooseAction,
-  precampaign: () => require('./precampaign/policy.cjs').chooseAction,
-  preresilience: () => require('./preresilience/policy.cjs').chooseAction,
-  preburst: () => require('./preburst/policy.cjs').chooseAction,
-  prearchitecture: () => require('./prearchitecture/policy.cjs').chooseAction,
-  precutoff: () => require('./precutoff/policy.cjs').chooseAction,
-  premacro: () => require('./premacro/policy.cjs').chooseAction,
-  self: () => current,
-};
-if (!OPPONENTS[opponentName]) throw new Error(`未知对手: ${opponentName}`);
-const opponent = OPPONENTS[opponentName]();
+const currentLoader = loadPolicy(currentName);
+if (!currentLoader) throw new Error(`未知 current: ${currentName}`);
+const current = currentLoader();
+const opponentLoader = opponentName === 'self' ? () => current : loadPolicy(opponentName);
+if (!opponentLoader) throw new Error(`未知对手: ${opponentName}`);
+const opponent = opponentLoader();
 const modes = (args.modes || MAP_MODES.join(',')).split(',');
 for (const mode of modes) if (!MAP_MODES.includes(mode)) throw new Error(`未知地图: ${mode}`);
 const seeds = Number(args.seeds || 4);
@@ -122,8 +126,10 @@ function sideMetrics(tracker) {
 }
 
 const jobs = [];
+let jobIndex = 0;
 for (const mapMode of modes) for (let s = 0; s < seeds; s++) for (const seat of [0, 1]) {
-  if (jobs.length % shardCount === shardIndex) jobs.push({ mapMode, seed: `${mapMode}-${s}`, seat });
+  // 分片必须按全局任务序号取模——用已筛选的 jobs.length 会让分片永远只跑第一个任务。
+  if (jobIndex++ % shardCount === shardIndex) jobs.push({ mapMode, seed: `${mapMode}-${s}`, seat });
 }
 const matches = [];
 const start = Date.now();
