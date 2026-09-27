@@ -567,3 +567,37 @@ A/B（4 图 × 2 种子 × 双方各坐先手，对改动前冻结副本 `_preci
 12 座指挥所（8 次截断风险抢先）并 2253 tick 歼灭基线；画圈侧扫是窄突出部
 专用校正，开阔地锋面本已是宽块时不触发（实局 0 次属预期）。结果见
 training/results/circlepush-ab.json。
+
+### 同 tick 预锚 + 腾出格补锚 + 深入决心（2026-09-27 第二轮，用户硬方针）
+
+实战观察：深入的大部队被截断后损失特别大，且深入过程不够果断。三条方针
+全部落在 `bot/campaign.cjs`（policy 调度只加一个提前槽位）：
+
+- **同 tick 原地预锚**：rally 距皇冠 >2 的深入大堆（兵力 ≥`preemptAnchorMinArmy`），
+  推进走廊存在「敌方下一 tick 就能打下、且打下后 ≥`cutoffMinIsolate` 兵力断锚」
+  的脖子格（1-tick 切断判定，与 neck-guard 同一口径，连通仍共用 `ownStrandedMass`）
+  时，本 tick 大堆**不移动**、原地起一座指挥所——服务端同 tick 语义下，被切断
+  的同一 tick 里落成的指挥所照样生效，切断落空。紧急动作，不受
+  `anchorChainGap`/`anchorBuildEvery` 节奏限制；仍受锚点链既有安全条件约束
+  （攒够 51 兵、建成后余兵压得住贴脸敌兵）。钱不够 51 时允许原地等凑兵，超过
+  `preemptAnchorWaitTicks` 仍不够就放弃预锚、恢复正常推进。
+- **腾出格补锚**：大堆上一步从某格走进 rally（`lastMove` 回执确认），腾出的格
+  仍是我方平地、够 51 兵、建成后压得住贴脸敌兵时，立即在该格补一座指挥所——
+  锚链贴着大堆脚跟向前延伸。与预锚交替即「建一个 → 走一步 → 再建一个 →
+  再走一步」的极限节奏。两个动作同步纳入队伍的操作序列，不等节奏 tick。
+- **深入决心**（跨回合防抖，与 frontline 斩首锁定同款思路）：大堆出击（advance）
+  即登记决心——`campaignResolveTicks` 窗口内 rally 选择锁定同一个皇冠方向，
+  除非另一方向的集结点评分好出 `campaignResolveMargin` 以上、目标皇冠消失或
+  形势剧变（reset 路径，含家里告急 threatened）才解锁。已投入深入的大堆不再
+  每 tick 因微小评分波动换目标、原地摇摆。
+- **policy 优先级**：预锚/补锚建造提到截断与脖子纪律之前（压过本 tick 的移动
+  决策），仍让位于背水一战/皇冠告急（defense-urgent/lastStand 分支在前，且
+  threatened 时 campaign 整体不出手）与「本 tick 能拆敌方皇冠/指挥所」的斩首
+  推进（`advanceWinsBuilding` 例外）。
+
+参数：`preemptAnchorMinArmy`（120）、`preemptAnchorWaitTicks`（2）、
+`campaignResolveTicks`（8）、`campaignResolveMargin`（3）。
+
+372 项测试通过（359 既有 + 13 新增 `test/preempt-anchor.test.cjs`：同 tick
+预锚/间距节奏豁免/广义风险不触发/小堆不触发/余兵安全条件/等钱上限/腾出格
+补锚/policy 预锚压脖子纪律/拆建筑例外/背水优先/决心保持/甩开换向/窗口过期）。
