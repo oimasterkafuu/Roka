@@ -19,6 +19,7 @@ import { FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { CaptchaService } from './server/captcha-service';
 import { EditableLobbyKey, FIXED_SWAMP_RATIO, LobbyService } from './server/lobby-service';
+import { PresenceService } from './server/presence-service';
 import { ServerBotManager } from './server/server-bot-manager';
 import { WebhookUpdater } from './server/webhook-updater';
 
@@ -79,6 +80,8 @@ const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
 const RECENTLY_ONLINE_LIMIT = 8;
 // 连接/断开频繁，home_online 失效通知做简单节流合并。
 const HOME_ONLINE_NOTIFY_DELAY_MS = 2000;
+// 在线状态会随时间自然过期（无事件触发），周期扫描掉线用户并补广播。
+const PRESENCE_SWEEP_INTERVAL_MS = 30_000;
 // 封禁时长入参下限/上限（毫秒）：最短 1 分钟，最长约 100 年（相当于永久之外的极大值）。
 const BAN_DURATION_MIN_MS = 60_000;
 const BAN_DURATION_MAX_MS = 100 * 365 * 24 * 3600_000;
@@ -90,9 +93,23 @@ const formatBanDeadline = (timestamp: number): string => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-// 在线状态追踪表：覆盖所有页面的已登录连接（含 ?home=1 首页监听连接），
-// 同一用户多个标签页按用户名去重只计一次；bot 令牌连接（合成用户）不计入。
-const onlineSocketIds = new Map<string, Set<string>>();
+// 统一在线状态模型：「用户最近一次有效请求/动作时间」是唯一事实来源——
+// 在线 = 最近 5 分钟内有活动；「最后在线」= 该时间戳；在线人数 = 在线用户去重计数。
+// 任何已认证 HTTP 请求（/api/online 自身除外）与任何 socket 事件都经 recordPresence
+// 刷新活动时间；bot 连接（ROKA_BOT_TOKENS 合成用户 / 服务端托管 bot）不计入。
+const presenceService = new PresenceService({
+  persist: (username, lastSeenAt) => {
+    void userStore.setLastSeenAt(username, lastSeenAt).catch(() => undefined);
+  },
+});
+// home_online 广播在 boot 内创建 io 后赋值；此前（启动期）为空操作。
+let notifyHomeOnline: () => void = () => undefined;
+// 记录一次用户活动；离线→在线转换时广播 home_online。
+const recordPresence = (username: string): void => {
+  if (presenceService.touch(username)) {
+    notifyHomeOnline();
+  }
+};
 
 /**
  * Bot 令牌表：ROKA_BOT_TOKENS 格式 "token1:username1,token2:username2"。
@@ -395,6 +412,9 @@ const boot = async (): Promise<void> => {
   await feedStore.ensureReady();
   await announcementStore.ensureReady();
 
+  // 重启恢复：从落盘的 lastSeenAt 重建在线状态内存表。
+  presenceService.seed(userStore.listLastSeen());
+
   await app.register(fastifyRateLimit, {
     max: GENERAL_RATE_LIMIT.max,
     timeWindow: GENERAL_RATE_LIMIT.timeWindow,
@@ -418,6 +438,11 @@ const boot = async (): Promise<void> => {
     }
 
     (request as AuthRequest).authUser = authUser;
+    // 任何已认证请求都算一次用户活动；/api/online 自身除外（在线状态查询是被动
+    // 轮询，计入会让在线状态自我维持、永不掉线）。
+    if (pathname !== '/api/online') {
+      recordPresence(authUser.username);
+    }
   });
 
   await app.register(fastifyStatic, {
@@ -625,7 +650,9 @@ const boot = async (): Promise<void> => {
     return reply.send({
       items: userStore.listUsersForAdmin().map((entry) => {
         const tier = ratingTier(entry.rating, entry.ratingGames);
-        return { ...entry, colorClass: tier.className, title: tier.title };
+        // 「最后在线」以 presence 内存表为准（落盘值最多滞后一个节流间隔）。
+        const lastSeenAt = presenceService.getLastSeen(entry.username) ?? entry.lastSeenAt;
+        return { ...entry, lastSeenAt, colorClass: tier.className, title: tier.title };
       }),
       viewer: admin.username,
       viewerIsSuperAdmin: userStore.isSuperAdminUser(admin.username),
@@ -945,14 +972,12 @@ const boot = async (): Promise<void> => {
   });
 
   app.get('/api/online', async (_request, reply) => {
-    const items = userStore
-      .listRecentlySeen(RECENTLY_ONLINE_LIMIT, (username) => onlineSocketIds.has(username))
-      .map((entry) => {
-        const { rating, ratingGames } = userStore.getDisplayRating(entry.username);
-        const tier = ratingTier(rating, ratingGames);
-        return { ...entry, colorClass: tier.className, title: tier.title };
-      });
-    return reply.send({ count: onlineSocketIds.size, items });
+    const items = presenceService.listRecentlySeen(RECENTLY_ONLINE_LIMIT).map((entry) => {
+      const { rating, ratingGames } = userStore.getDisplayRating(entry.username);
+      const tier = ratingTier(rating, ratingGames);
+      return { ...entry, colorClass: tier.className, title: tier.title };
+    });
+    return reply.send({ count: presenceService.countOnline(), items });
   });
 
   app.get('/api/profile/:username', async (request, reply) => {
@@ -1175,9 +1200,9 @@ const boot = async (): Promise<void> => {
   authService.attachSocketServer(io);
   lobbyService.startLobbyHeartbeatSweep(io);
 
-  // home_online 失效通知做简单节流合并：连接/断开频繁时最多每 2 秒广播一次。
+  // home_online 失效通知做简单节流合并：上线/下线转换频繁时最多每 2 秒广播一次。
   let homeOnlineTimer: NodeJS.Timeout | null = null;
-  const notifyHomeOnline = (): void => {
+  notifyHomeOnline = (): void => {
     if (homeOnlineTimer) {
       return;
     }
@@ -1187,32 +1212,13 @@ const boot = async (): Promise<void> => {
     }, HOME_ONLINE_NOTIFY_DELAY_MS);
   };
 
-  const trackOnline = (username: string, socketId: string): void => {
-    let set = onlineSocketIds.get(username);
-    if (!set) {
-      set = new Set();
-      onlineSocketIds.set(username, set);
+  // 在线状态无事件也会过期：周期扫描掉出在线窗口的用户，补广播下线并兜底落盘。
+  const presenceSweepTimer = setInterval(() => {
+    if (presenceService.sweep().length > 0) {
+      notifyHomeOnline();
     }
-    set.add(socketId);
-    // 任一页面建立连接即刷新「最后上线」时间。
-    void userStore.markLastSeen(username).catch(() => undefined);
-    notifyHomeOnline();
-  };
-
-  const untrackOnline = (username: string, socketId: string): void => {
-    const set = onlineSocketIds.get(username);
-    if (!set) {
-      return;
-    }
-    set.delete(socketId);
-    if (set.size > 0) {
-      return;
-    }
-    onlineSocketIds.delete(username);
-    // 最后一个连接断开即记录「下线时间」。
-    void userStore.markLastSeen(username).catch(() => undefined);
-    notifyHomeOnline();
-  };
+  }, PRESENCE_SWEEP_INTERVAL_MS);
+  presenceSweepTimer.unref();
 
   io.use((socket, next) => {
     const fromHandshake =
@@ -1262,18 +1268,19 @@ const boot = async (): Promise<void> => {
     }
 
     const isBot = socket.data.isBot === true;
+    // 统一 presence：连接建立与任何入站 socket 事件（对局操作、房间心跳、聊天等）
+    // 都算用户活动；bot 连接不计入在线（ROKA_BOT_TOKENS 合成用户 / 服务端托管 bot）。
     if (!isBot) {
-      trackOnline(username, socket.id);
+      recordPresence(username);
+      socket.use((_packet, next) => {
+        recordPresence(username);
+        next();
+      });
     }
 
     // 首页只接收全局失效通知：不参与「同一用户单连接」互斥，
     // 否则打开首页会踢掉该用户在游戏页/其他标签页的连接（反之亦然）。
     if (socket.handshake.query?.home === '1') {
-      if (!isBot) {
-        socket.on('disconnect', () => {
-          untrackOnline(username, socket.id);
-        });
-      }
       return;
     }
 
@@ -1718,7 +1725,6 @@ const boot = async (): Promise<void> => {
 
     socket.on('disconnect', () => {
       if (!isBot) {
-        untrackOnline(username, socket.id);
         authService.untrackSocket(username, socket.id);
       }
       lobbyService.heartbeatExempt.delete(socket.id);
