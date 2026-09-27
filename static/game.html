@@ -29,6 +29,7 @@
     <script src="/main/replay-binary.js"></script>
     <script src="/main/room-controls.js"></script>
     <script src="/main/replay-controls.js"></script>
+    <script src="/main/replay-stats.js"></script>
     <script src="/main/render-update.js"></script>
     <script src="/main/blink-clock.js"></script>
     <script src="/main.js"></script>
@@ -77,6 +78,18 @@
         </tr>
       </tbody>
     </table>
+
+    <div id="replay-title" class="fixed-center-horizontal background" style="display: none"></div>
+
+    <div id="replay-stats" style="display: none">
+      <div id="tabs-replay-stats" class="tabs unselectable">
+        <input type="hidden" value="兵力" />
+        <div class="inline-button inverted">兵力</div>
+        <div class="inline-button">领土</div>
+      </div>
+      <canvas id="replay-stats-canvas"></canvas>
+      <div id="replay-stats-legend"></div>
+    </div>
 
     <div id="room-top-left" style="display: none; position: fixed; top: 12px; left: 12px; z-index: 24">
       <button id="room-home-btn" class="small">返回首页</button>

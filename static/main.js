@@ -296,6 +296,8 @@ function replayStart() {
     in_game = true;
     cur_turn = 0;
     initReplayViewTabs();
+    initReplayTitle();
+    initReplayStats();
     update(replay_data.initial);
   }
 }

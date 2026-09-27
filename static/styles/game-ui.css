@@ -31,6 +31,74 @@
   color: white;
   max-width: 350px;
 }
+/* 组队局回放排行榜：队条目加粗显示团队合计，成员行缩进弱化 */
+#game-leaderboard tr.lb-team td {
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+}
+#game-leaderboard tr.lb-member td {
+  font-size: 13px;
+  padding: 3px 6px;
+  color: rgba(37, 48, 66, 0.8);
+}
+#game-leaderboard tr.lb-member td.leaderboard-name {
+  max-width: 200px;
+  font-size: 12px;
+}
+
+/* 回放页顶部参赛者标题区：同队成员逗号分隔、队伍间「>」分隔 */
+#replay-title {
+  top: 0;
+  z-index: 24;
+  padding: 5px 14px;
+  font-size: 14px;
+  color: #253042;
+  white-space: nowrap;
+  max-width: 50vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 0 0 8px 8px;
+}
+
+/* 回放局势统计图：固定于右上角排行榜正下方（top 由 replay-stats.js 逐帧对齐） */
+#replay-stats {
+  position: fixed;
+  right: 0;
+  z-index: 24;
+  width: 264px;
+  box-sizing: border-box;
+  padding: 6px 8px 8px;
+  background: #ffffff;
+  border-radius: 0 0 0 8px;
+  box-shadow: 0 2px 8px rgba(37, 48, 66, 0.15);
+}
+#replay-stats .tabs {
+  margin-bottom: 4px;
+}
+#replay-stats .inline-button {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+#replay-stats-canvas {
+  display: block;
+  cursor: crosshair;
+}
+#replay-stats-legend {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #253042;
+  max-height: 52px;
+  overflow: hidden;
+}
+#replay-stats-legend .replay-stats-legend-item {
+  display: inline-block;
+  margin-right: 8px;
+  white-space: nowrap;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
 
 #turn-counter {
   position: fixed;
