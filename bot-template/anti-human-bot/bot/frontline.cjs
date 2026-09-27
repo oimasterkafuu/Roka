@@ -9,6 +9,7 @@
 //   5. 不再存在「前沿两格内没有自家建筑就一律不许深入」的 deep 规则。
 const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
+const { ownStrandedMass } = require('./cutoff.cjs');
 
 // 斩首锁定（跨回合）：合力推皇冠是多 tick 连续攻击——第一击打残、第二击收割。
 // 锁定期间 choose() 优先继续打同一皇冠，不被别的候选抢走 tick；目标被推掉、
@@ -153,12 +154,35 @@ function createFrontline(state, params = {}) {
     // 皇冠前自剥殆尽。全冲仍受 allInSafe 闸门（新占格兵力须压得住源点旁敌军）约束，
     // 全冲后走廊脖子的截断风险由 neck-guard 模块兜底；普通深入推进的半兵方针不变。
     const decisiveStack = A >= p.megaStackMin && A >= p.assaultMargin * (defense + tgt.adj);
+    // ── maze 拓展纪律（用户 2026-09-27 硬方针）─────────────────────────────
+    // 迷宫里拓展走廊一旦被截断可能永久失联：① 拓展（打中立格）只派必要兵力——
+    // 模式排序换成 [半兵, 智能分兵]（能占下目标格的最小比例），大部队留在原地
+    // 镇关卡；② 源点是「移除后会冻住 ≥cutoffMinIsolate 兵力」的关卡且贴脸有敌时
+    // （敌方一 tick 就能切断走廊），不为拓展削弱关卡——先打/先守，不拓（攻击
+    // 对方土块不受此限）；③ 中立拓展不做交换（占下也站不住的拓展不拓）。
+    // 「优先攻击对方土块」由既有估值顺序保证（敌格 62 > 中立 26）。
+    const mazeExpand = ctx.mazeLike && kind === 'neutral';
+    if (mazeExpand && src.adj > 0) {
+      const stranded = ownStrandedMass(ctx, a, p.cutoffScan);
+      if (stranded !== null && stranded >= p.cutoffMinIsolate)
+        return reject('maze拓展：源点关卡贴敌，先打先守不削弱咽喉', { from: a, to: b, stranded: Math.round(stranded) });
+    }
+    // ── 阶段化扩张-要塞方针（用户 2026-09-27 定稿，E 原局校准）───────────────
+    // E 的净扩张速率在 turn 60–75 坍缩、皇冠从 75 起跳：前期抢地盘不动；中后期
+    // 薄皮大摊子是自杀形态——中立扩张必须「有要塞撑腰」（源点在己方建筑
+    // lateAnchorRadius 辐射圈内）或「自己够厚」（占领后驻军 ≥ lateSkinMin），
+    // 否则这一 tick 不拓，兵留在源点养厚/转投要塞建设。敌方目标与拆建筑不算
+    // 「扩张」，不受此限（中后期少量精要扩张，不是完全不扩）。
+    const fortressBacked = ctx.anchorDistance[a] >= 0 && ctx.anchorDistance[a] <= p.lateAnchorRadius;
+    const lateThinExpand = Number.isInteger(ctx.turn) && ctx.turn >= p.fortressPhaseTurn &&
+      kind === 'neutral' && !fortressBacked;
     // 深入且有威胁时能半兵就半兵（像正常扩散铺路一样，半兵够拿下目标格就只派一半，
     // 留一半守原地）；半兵攻不进去时按顺序落到全兵——「半兵推不动还硬推」被 arrive
     // 闸门拦住。常规推进（非深入）维持第二轮「全兵优先」：按 [全冲, 半兵, 智能分兵]
     // 顺序取第一个通过留守/预算闸门的模式，「兵够却分多次小勺推同一目标」视为 bug。
     const deepHalf = deepPush && !noThreat && !decisiveStack;
-    const modes = deepHalf ? [1, 2, 0] : [2, 1, 0];
+    const modes = mazeExpand ? [1, 0] : deepHalf ? [1, 2, 0] : [2, 1, 0];
+    const arriveFloor = lateThinExpand ? Math.max(p.minArrive, p.lateSkinMin) : p.minArrive;
     let best = null;
     for (const mode of modes) {
       const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
@@ -166,7 +190,8 @@ function createFrontline(state, params = {}) {
       const arrive = push - defense;
       const left = A - push;
       // 占领格必须留下能站住的兵，禁止 1 兵蚕食式进攻（那是给对手送地）。
-      if (arrive < p.minArrive) continue;
+      // 中后期无要塞撑腰的中立扩张还要「自己够厚」（lateSkinMin），否则不拓。
+      if (arrive < arriveFloor) continue;
       // 全冲（留 1 兵）的放行条件：目标是敌方领土、源点不是自家建筑，
       // 且新占格的兵力至少能压住源点旁边的敌军。这样「半兵打不穿、全冲又不许」
       // 的死锁就不会出现（实地日志里 A=223 对守军 115、A=223 对守军 35 都被卡死）。
@@ -185,7 +210,7 @@ function createFrontline(state, params = {}) {
       if (params.consolidate === true && !buildingTarget && !accepted) continue;
       if (!accepted) {
         if (buildingTarget) accepted = true;                               // 拆建筑：损失可接受
-        else if (!behindArmy && localRatio >= exchangeNeed && left > src.adj) { accepted = true; exchange = true; }
+        else if (!mazeExpand && !behindArmy && localRatio >= exchangeNeed && left > src.adj) { accepted = true; exchange = true; }
       }
       if (!accepted) continue;
       const value = isCrown ? 900 : isCity ? 500 : kind === 'enemy' ? 62 : 26;
@@ -193,8 +218,11 @@ function createFrontline(state, params = {}) {
       const exposureScore = Math.max(-160, Math.min(160, exposure * 0.45));
       const rear = ctx.frontDistance[a];
       const supportBonus = Math.min(3, mates.tiles) * 14;
+      // 深入敌境的宽块滚动：目标占领后连同源点有 ≥2 个己方邻格时，锋面加厚成块
+      // 而不是露出新的单格突出（侧翼不露单格突出，与画圈推进同向）。
+      const widenBonus = deepPush && mates.tiles >= 2 ? 20 : 0;
       const lingerPenalty = (rear >= 0 ? Math.max(0, 4 - rear) : 4) * 8;
-      const score = value + kill + exposureScore + supportBonus - lingerPenalty +
+      const score = value + kill + exposureScore + supportBonus + widenBonus - lingerPenalty +
         Math.min(arrive, 250) * 0.3 + Math.min(left, 400) * 0.05 - (exchange ? 30 : 0);
       const reason = isCrown ? `攻冠：出兵${push}，留守${left}`
         : isCity ? `攻指挥所：出兵${push}，留守${left}`

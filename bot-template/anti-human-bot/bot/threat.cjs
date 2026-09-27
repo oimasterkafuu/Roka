@@ -185,6 +185,11 @@ function createContext(state, params = {}) {
   }
   const all = factions();
   const mine = all.get(me) || { land: 0, army: 0, crowns: 0, cities: 0 };
+  // 迷宫图检测（maze 拓展纪律）：已知格中山体占比。maze 生成器约 0.45–0.55，
+  // random ≤0.24，群岛/地中海以沼泽为主——0.3 阈值干净地区分「走廊图」。
+  let mountains = 0, knownCells = 0;
+  for (let i = 0; i < size; i++) if (known[i]) { knownCells++; if (grid[i] === 201) mountains++; }
+  const mazeLike = knownCells > 0 && mountains / knownCells >= p.mazeMountainRatio;
   let best = null, enemyCrowns = 0, enemyArmy = 0, enemyLand = 0;
   for (const entry of all.values()) {
     if (allied(entry.owner, me)) continue;
@@ -207,7 +212,7 @@ function createContext(state, params = {}) {
     state, n, m, size, turn, me, params: p, owners, grid, army, known, neighbors,
     ownerOf, allied, knownAt: (i) => known[i] === 1, passable, isolated, own, hostile, friendly, unknownNear,
     count, growth, anchorDistance, frontDistance, enemyDistance,
-    pressure, support, friendlyAdjacent, reinforcement, race, factions: all,
+    pressure, support, friendlyAdjacent, reinforcement, race, factions: all, mazeLike,
   };
   fieldCache.set(state, ctx);
   return ctx;
