@@ -27,6 +27,9 @@ const DEFAULT_PARAMS = Object.freeze({
   cutoffMaxDefense: 4000, cutoffUrgentRange: 8,
   // 宏观方针（2026-09-27 第二轮）：运输小勺下限、集结点僵持放弃、工地/集结点滞回
   minTransport: 8, rallyStallTicks: 24, rallyAbandonTicks: 40, siteHysteresis: 1.5,
+  // 浓缩突击（2026-09-27，学自 _E_ 单堆全冲）：出击余量倍数与决定性大堆最小规模
+  // （E 的大堆为 367–1240 兵，300 以下的堆不构成「决定性」，深入半兵方针不变）
+  assaultMargin: 1.3, megaStackMin: 300,
 });
 const PARAM_RANGES = Object.freeze({
   buildSafety: [0, 30], enemyDistance: [1, 8], threatWeight: [0.5, 3],
@@ -45,6 +48,7 @@ const PARAM_RANGES = Object.freeze({
   cutoffRange: [3, 20], cutoffScan: [20, 600], cutoffMaxSteps: [1, 8], cutoffMinIsolate: [0, 500],
   cutoffMaxDefense: [0, 100000], cutoffUrgentRange: [0, 20],
   minTransport: [0, 200], rallyStallTicks: [0, 300], rallyAbandonTicks: [0, 600], siteHysteresis: [1, 4],
+  assaultMargin: [1, 3], megaStackMin: [0, 2000],
 });
 function resolveParams(params = {}) {
   const result = {};
