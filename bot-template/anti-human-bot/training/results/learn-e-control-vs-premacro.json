@@ -1,0 +1,1484 @@
+{
+  "createdAt": "2026-09-27T10:14:29.082Z",
+  "config": {
+    "currentName": "bot",
+    "opponentName": "premacro",
+    "modes": [
+      "random",
+      "maze",
+      "archipelago",
+      "mediterranean"
+    ],
+    "seeds": 3,
+    "turns": 1500,
+    "size": 0.5,
+    "shard": "0/1"
+  },
+  "summary": {
+    "current": "bot",
+    "opponent": "premacro",
+    "games": 24,
+    "outcome": {
+      "even": 15,
+      "dominant": 3,
+      "dominated": 5,
+      "elimination_win": 1
+    },
+    "byMap": {
+      "random": {
+        "even": 3,
+        "dominant": 2,
+        "dominated": 1
+      },
+      "maze": {
+        "even": 3,
+        "dominated": 2,
+        "elimination_win": 1
+      },
+      "archipelago": {
+        "even": 3,
+        "dominant": 1,
+        "dominated": 2
+      },
+      "mediterranean": {
+        "even": 6
+      }
+    },
+    "wallMs": 149954,
+    "winRate": 0.167,
+    "lossRate": 0.208,
+    "means": {
+      "myCrowns": 12.59,
+      "foeCrowns": 12.45,
+      "myFinalLand": 191.21,
+      "foeFinalLand": 172.75,
+      "myLandShare": 0.52,
+      "myBorderPile": 168.43,
+      "myInnerPile": 3580.9,
+      "myMaxPile": 21.86,
+      "myBuildings": 13.03,
+      "foeBuildings": 12.92,
+      "builds": 46.67,
+      "foeBuilds": 47.33,
+      "ratio": 29.6
+    }
+  },
+  "matches": [
+    {
+      "mapMode": "random",
+      "seed": "random-0",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 20439,
+      "foeMat": 18917,
+      "ratio": 1.08,
+      "crownLead": -1,
+      "my": {
+        "army": 20191,
+        "land": 248,
+        "class_": ""
+      },
+      "foe": {
+        "army": 18727,
+        "land": 190,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 11535,
+          "army": 269835,
+          "crowns": 1041,
+          "cities": 38,
+          "buildings": 1079,
+          "borderPile": 5832,
+          "maxPile": 1269,
+          "innerPile": 253050,
+          "crownsLast": 59,
+          "landLast": 255,
+          "armyLast": 18594,
+          "borderPileLast": 108,
+          "innerPileLast": 18253
+        },
+        "foe": {
+          "samples": 60,
+          "land": 10649,
+          "army": 245710,
+          "crowns": 988,
+          "cities": 33,
+          "buildings": 1021,
+          "borderPile": 5171,
+          "maxPile": 1750,
+          "innerPile": 230456,
+          "crownsLast": 60,
+          "landLast": 188,
+          "armyLast": 17314,
+          "borderPileLast": 374,
+          "innerPileLast": 16771
+        }
+      },
+      "builds": 123,
+      "foeBuilds": 126
+    },
+    {
+      "mapMode": "random",
+      "seed": "random-0",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 21302,
+      "foeMat": 19172,
+      "ratio": 1.111,
+      "crownLead": 0,
+      "my": {
+        "army": 21091,
+        "land": 211,
+        "class_": ""
+      },
+      "foe": {
+        "army": 18947,
+        "land": 225,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 10575,
+          "army": 526727,
+          "crowns": 1218,
+          "cities": 36,
+          "buildings": 1254,
+          "borderPile": 10673,
+          "maxPile": 1189,
+          "innerPile": 506138,
+          "crownsLast": 26,
+          "landLast": 214,
+          "armyLast": 20516,
+          "borderPileLast": 330,
+          "innerPileLast": 19992
+        },
+        "foe": {
+          "samples": 60,
+          "land": 10887,
+          "army": 516411,
+          "crowns": 1243,
+          "cities": 24,
+          "buildings": 1267,
+          "borderPile": 16351,
+          "maxPile": 2717,
+          "innerPile": 489805,
+          "crownsLast": 26,
+          "landLast": 222,
+          "armyLast": 18244,
+          "borderPileLast": 423,
+          "innerPileLast": 17620
+        }
+      },
+      "builds": 53,
+      "foeBuilds": 55
+    },
+    {
+      "mapMode": "random",
+      "seed": "random-1",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "dominant",
+      "myMat": 48109,
+      "foeMat": 43217,
+      "ratio": 1.113,
+      "crownLead": 4,
+      "my": {
+        "army": 47895,
+        "land": 214,
+        "class_": ""
+      },
+      "foe": {
+        "army": 43045,
+        "land": 172,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 10858,
+          "army": 948108,
+          "crowns": 2465,
+          "cities": 18,
+          "buildings": 2483,
+          "borderPile": 13940,
+          "maxPile": 1121,
+          "innerPile": 924230,
+          "crownsLast": 62,
+          "landLast": 216,
+          "armyLast": 46298,
+          "borderPileLast": 82,
+          "innerPileLast": 46019
+        },
+        "foe": {
+          "samples": 60,
+          "land": 9276,
+          "army": 870629,
+          "crowns": 2334,
+          "cities": 37,
+          "buildings": 2371,
+          "borderPile": 10960,
+          "maxPile": 1616,
+          "innerPile": 851299,
+          "crownsLast": 58,
+          "landLast": 172,
+          "armyLast": 41708,
+          "borderPileLast": 244,
+          "innerPileLast": 41308
+        }
+      },
+      "builds": 126,
+      "foeBuilds": 156
+    },
+    {
+      "mapMode": "random",
+      "seed": "random-1",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "dominated",
+      "myMat": 6714,
+      "foeMat": 13917,
+      "ratio": 0.482,
+      "crownLead": 1,
+      "my": {
+        "army": 6571,
+        "land": 143,
+        "class_": ""
+      },
+      "foe": {
+        "army": 13677,
+        "land": 240,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 7649,
+          "army": 206643,
+          "crowns": 785,
+          "cities": 35,
+          "buildings": 820,
+          "borderPile": 15181,
+          "maxPile": 1504,
+          "innerPile": 184667,
+          "crownsLast": 20,
+          "landLast": 145,
+          "armyLast": 6220,
+          "borderPileLast": 403,
+          "innerPileLast": 5692
+        },
+        "foe": {
+          "samples": 60,
+          "land": 12631,
+          "army": 325098,
+          "crowns": 790,
+          "cities": 38,
+          "buildings": 828,
+          "borderPile": 10945,
+          "maxPile": 2851,
+          "innerPile": 302424,
+          "crownsLast": 19,
+          "landLast": 246,
+          "armyLast": 13290,
+          "borderPileLast": 815,
+          "innerPileLast": 12254
+        }
+      },
+      "builds": 46,
+      "foeBuilds": 38
+    },
+    {
+      "mapMode": "random",
+      "seed": "random-2",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "dominant",
+      "myMat": 8255,
+      "foeMat": 6472,
+      "ratio": 1.275,
+      "crownLead": 3,
+      "my": {
+        "army": 8034,
+        "land": 221,
+        "class_": ""
+      },
+      "foe": {
+        "army": 6309,
+        "land": 163,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 10017,
+          "army": 241884,
+          "crowns": 693,
+          "cities": 19,
+          "buildings": 712,
+          "borderPile": 16901,
+          "maxPile": 2901,
+          "innerPile": 215766,
+          "crownsLast": 21,
+          "landLast": 220,
+          "armyLast": 7847,
+          "borderPileLast": 67,
+          "innerPileLast": 7577
+        },
+        "foe": {
+          "samples": 60,
+          "land": 9219,
+          "army": 191555,
+          "crowns": 659,
+          "cities": 37,
+          "buildings": 696,
+          "borderPile": 11678,
+          "maxPile": 2246,
+          "innerPile": 171502,
+          "crownsLast": 18,
+          "landLast": 164,
+          "armyLast": 6423,
+          "borderPileLast": 76,
+          "innerPileLast": 6198
+        }
+      },
+      "builds": 55,
+      "foeBuilds": 59
+    },
+    {
+      "mapMode": "random",
+      "seed": "random-2",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 5390,
+      "foeMat": 5532,
+      "ratio": 0.974,
+      "crownLead": 0,
+      "my": {
+        "army": 5160,
+        "land": 230,
+        "class_": ""
+      },
+      "foe": {
+        "army": 5371,
+        "land": 161,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 9789,
+          "army": 187234,
+          "crowns": 519,
+          "cities": 40,
+          "buildings": 559,
+          "borderPile": 15347,
+          "maxPile": 1501,
+          "innerPile": 162863,
+          "crownsLast": 11,
+          "landLast": 234,
+          "armyLast": 5495,
+          "borderPileLast": 1134,
+          "innerPileLast": 4148
+        },
+        "foe": {
+          "samples": 60,
+          "land": 9218,
+          "army": 217215,
+          "crowns": 547,
+          "cities": 19,
+          "buildings": 566,
+          "borderPile": 11769,
+          "maxPile": 1026,
+          "innerPile": 197002,
+          "crownsLast": 11,
+          "landLast": 163,
+          "armyLast": 5439,
+          "borderPileLast": 425,
+          "innerPileLast": 4872
+        }
+      },
+      "builds": 24,
+      "foeBuilds": 28
+    },
+    {
+      "mapMode": "maze",
+      "seed": "maze-0",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 12799,
+      "foeMat": 15453,
+      "ratio": 0.828,
+      "crownLead": 0,
+      "my": {
+        "army": 12664,
+        "land": 135,
+        "class_": ""
+      },
+      "foe": {
+        "army": 15334,
+        "land": 119,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 7194,
+          "army": 392356,
+          "crowns": 1920,
+          "cities": 20,
+          "buildings": 1940,
+          "borderPile": 31193,
+          "maxPile": 3869,
+          "innerPile": 354144,
+          "crownsLast": 39,
+          "landLast": 121,
+          "armyLast": 12726,
+          "borderPileLast": 152,
+          "innerPileLast": 12461
+        },
+        "foe": {
+          "samples": 60,
+          "land": 6020,
+          "army": 447538,
+          "crowns": 1774,
+          "cities": 33,
+          "buildings": 1807,
+          "borderPile": 7982,
+          "maxPile": 2363,
+          "innerPile": 433736,
+          "crownsLast": 39,
+          "landLast": 133,
+          "armyLast": 15462,
+          "borderPileLast": 512,
+          "innerPileLast": 14824
+        }
+      },
+      "builds": 99,
+      "foeBuilds": 129
+    },
+    {
+      "mapMode": "maze",
+      "seed": "maze-0",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "dominated",
+      "myMat": 8198,
+      "foeMat": 19910,
+      "ratio": 0.412,
+      "crownLead": -8,
+      "my": {
+        "army": 8108,
+        "land": 90,
+        "class_": ""
+      },
+      "foe": {
+        "army": 19769,
+        "land": 141,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 5607,
+          "army": 450339,
+          "crowns": 1738,
+          "cities": 17,
+          "buildings": 1755,
+          "borderPile": 14930,
+          "maxPile": 3474,
+          "innerPile": 429956,
+          "crownsLast": 30,
+          "landLast": 88,
+          "armyLast": 8143,
+          "borderPileLast": 1435,
+          "innerPileLast": 6622
+        },
+        "foe": {
+          "samples": 60,
+          "land": 7226,
+          "army": 583115,
+          "crowns": 1848,
+          "cities": 13,
+          "buildings": 1861,
+          "borderPile": 17544,
+          "maxPile": 6915,
+          "innerPile": 558502,
+          "crownsLast": 38,
+          "landLast": 145,
+          "armyLast": 19822,
+          "borderPileLast": 3962,
+          "innerPileLast": 15717
+        }
+      },
+      "builds": 113,
+      "foeBuilds": 78
+    },
+    {
+      "mapMode": "maze",
+      "seed": "maze-1",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 1312,
+      "foeMat": 1861,
+      "ratio": 0.705,
+      "crownLead": 1,
+      "my": {
+        "army": 1237,
+        "land": 75,
+        "class_": ""
+      },
+      "foe": {
+        "army": 1734,
+        "land": 127,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 5085,
+          "army": 45296,
+          "crowns": 285,
+          "cities": 23,
+          "buildings": 308,
+          "borderPile": 3084,
+          "maxPile": 496,
+          "innerPile": 37333,
+          "crownsLast": 13,
+          "landLast": 98,
+          "armyLast": 1872,
+          "borderPileLast": 22,
+          "innerPileLast": 1756
+        },
+        "foe": {
+          "samples": 60,
+          "land": 6558,
+          "army": 61666,
+          "crowns": 254,
+          "cities": 6,
+          "buildings": 260,
+          "borderPile": 5812,
+          "maxPile": 1112,
+          "innerPile": 49498,
+          "crownsLast": 12,
+          "landLast": 112,
+          "armyLast": 2037,
+          "borderPileLast": 426,
+          "innerPileLast": 1502
+        }
+      },
+      "builds": 32,
+      "foeBuilds": 23
+    },
+    {
+      "mapMode": "maze",
+      "seed": "maze-1",
+      "seat": 1,
+      "turns": 1490,
+      "ended": true,
+      "winner": 1,
+      "outcome": "elimination_win",
+      "myMat": 3446,
+      "foeMat": 5,
+      "ratio": 689.2,
+      "crownLead": 7,
+      "my": {
+        "army": 3246,
+        "land": 200,
+        "class_": ""
+      },
+      "foe": {
+        "army": 3,
+        "land": 2,
+        "class_": "dead"
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 5867,
+          "army": 77340,
+          "crowns": 307,
+          "cities": 34,
+          "buildings": 341,
+          "borderPile": 4739,
+          "maxPile": 865,
+          "innerPile": 66871,
+          "crownsLast": 8,
+          "landLast": 186,
+          "armyLast": 3161,
+          "borderPileLast": 4,
+          "innerPileLast": 2973
+        },
+        "foe": {
+          "samples": 60,
+          "land": 3247,
+          "army": 32780,
+          "crowns": 283,
+          "cities": 25,
+          "buildings": 308,
+          "borderPile": 2950,
+          "maxPile": 475,
+          "innerPile": 26715,
+          "crownsLast": 1,
+          "landLast": 13,
+          "armyLast": 30,
+          "borderPileLast": 12,
+          "innerPileLast": 7
+        }
+      },
+      "builds": 20,
+      "foeBuilds": 23
+    },
+    {
+      "mapMode": "maze",
+      "seed": "maze-2",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 5615,
+      "foeMat": 5478,
+      "ratio": 1.025,
+      "crownLead": 1,
+      "my": {
+        "army": 5500,
+        "land": 115,
+        "class_": ""
+      },
+      "foe": {
+        "army": 5386,
+        "land": 92,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 5343,
+          "army": 189486,
+          "crowns": 945,
+          "cities": 28,
+          "buildings": 973,
+          "borderPile": 7668,
+          "maxPile": 1256,
+          "innerPile": 176718,
+          "crownsLast": 20,
+          "landLast": 103,
+          "armyLast": 5522,
+          "borderPileLast": 11,
+          "innerPileLast": 5412
+        },
+        "foe": {
+          "samples": 60,
+          "land": 5312,
+          "army": 193668,
+          "crowns": 972,
+          "cities": 38,
+          "buildings": 1010,
+          "borderPile": 7783,
+          "maxPile": 2957,
+          "innerPile": 180810,
+          "crownsLast": 19,
+          "landLast": 104,
+          "armyLast": 5607,
+          "borderPileLast": 26,
+          "innerPileLast": 5482
+        }
+      },
+      "builds": 45,
+      "foeBuilds": 39
+    },
+    {
+      "mapMode": "maze",
+      "seed": "maze-2",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "dominated",
+      "myMat": 672,
+      "foeMat": 5066,
+      "ratio": 0.133,
+      "crownLead": -1,
+      "my": {
+        "army": 649,
+        "land": 23,
+        "class_": ""
+      },
+      "foe": {
+        "army": 4919,
+        "land": 147,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 3243,
+          "army": 79280,
+          "crowns": 711,
+          "cities": 8,
+          "buildings": 719,
+          "borderPile": 11089,
+          "maxPile": 1242,
+          "innerPile": 65152,
+          "crownsLast": 12,
+          "landLast": 40,
+          "armyLast": 578,
+          "borderPileLast": 1,
+          "innerPileLast": 538
+        },
+        "foe": {
+          "samples": 60,
+          "land": 6527,
+          "army": 176702,
+          "crowns": 683,
+          "cities": 44,
+          "buildings": 727,
+          "borderPile": 7306,
+          "maxPile": 1769,
+          "innerPile": 163074,
+          "crownsLast": 13,
+          "landLast": 127,
+          "armyLast": 4494,
+          "borderPileLast": 277,
+          "innerPileLast": 4091
+        }
+      },
+      "builds": 33,
+      "foeBuilds": 29
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "archipelago-0",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 1139,
+      "foeMat": 1323,
+      "ratio": 0.861,
+      "crownLead": 2,
+      "my": {
+        "army": 936,
+        "land": 203,
+        "class_": ""
+      },
+      "foe": {
+        "army": 1089,
+        "land": 234,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 9636,
+          "army": 55327,
+          "crowns": 209,
+          "cities": 39,
+          "buildings": 248,
+          "borderPile": 5104,
+          "maxPile": 357,
+          "innerPile": 41569,
+          "crownsLast": 9,
+          "landLast": 203,
+          "armyLast": 1016,
+          "borderPileLast": 53,
+          "innerPileLast": 789
+        },
+        "foe": {
+          "samples": 60,
+          "land": 11313,
+          "army": 67441,
+          "crowns": 174,
+          "cities": 25,
+          "buildings": 199,
+          "borderPile": 6184,
+          "maxPile": 452,
+          "innerPile": 50976,
+          "crownsLast": 7,
+          "landLast": 234,
+          "armyLast": 1170,
+          "borderPileLast": 139,
+          "innerPileLast": 824
+        }
+      },
+      "builds": 26,
+      "foeBuilds": 19
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "archipelago-0",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 1495,
+      "foeMat": 1298,
+      "ratio": 1.152,
+      "crownLead": 0,
+      "my": {
+        "army": 1283,
+        "land": 212,
+        "class_": ""
+      },
+      "foe": {
+        "army": 1077,
+        "land": 221,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 12496,
+          "army": 57329,
+          "crowns": 69,
+          "cities": 44,
+          "buildings": 113,
+          "borderPile": 1912,
+          "maxPile": 172,
+          "innerPile": 43519,
+          "crownsLast": 3,
+          "landLast": 217,
+          "armyLast": 1235,
+          "borderPileLast": 135,
+          "innerPileLast": 902
+        },
+        "foe": {
+          "samples": 60,
+          "land": 9004,
+          "army": 36525,
+          "crowns": 110,
+          "cities": 37,
+          "buildings": 147,
+          "borderPile": 2199,
+          "maxPile": 154,
+          "innerPile": 25905,
+          "crownsLast": 3,
+          "landLast": 216,
+          "armyLast": 1004,
+          "borderPileLast": 27,
+          "innerPileLast": 782
+        }
+      },
+      "builds": 4,
+      "foeBuilds": 5
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "archipelago-1",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "dominant",
+      "myMat": 2749,
+      "foeMat": 2096,
+      "ratio": 1.312,
+      "crownLead": -1,
+      "my": {
+        "army": 2465,
+        "land": 284,
+        "class_": ""
+      },
+      "foe": {
+        "army": 1967,
+        "land": 129,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 10433,
+          "army": 59902,
+          "crowns": 167,
+          "cities": 17,
+          "buildings": 184,
+          "borderPile": 3235,
+          "maxPile": 323,
+          "innerPile": 46952,
+          "crownsLast": 6,
+          "landLast": 263,
+          "armyLast": 2301,
+          "borderPileLast": 184,
+          "innerPileLast": 1883
+        },
+        "foe": {
+          "samples": 60,
+          "land": 10072,
+          "army": 47421,
+          "crowns": 179,
+          "cities": 16,
+          "buildings": 195,
+          "borderPile": 3270,
+          "maxPile": 582,
+          "innerPile": 34781,
+          "crownsLast": 7,
+          "landLast": 150,
+          "armyLast": 1818,
+          "borderPileLast": 62,
+          "innerPileLast": 1637
+        }
+      },
+      "builds": 10,
+      "foeBuilds": 13
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "archipelago-1",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "dominated",
+      "myMat": 928,
+      "foeMat": 1596,
+      "ratio": 0.581,
+      "crownLead": 0,
+      "my": {
+        "army": 743,
+        "land": 185,
+        "class_": ""
+      },
+      "foe": {
+        "army": 1354,
+        "land": 242,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 10142,
+          "army": 34893,
+          "crowns": 82,
+          "cities": 27,
+          "buildings": 109,
+          "borderPile": 2780,
+          "maxPile": 271,
+          "innerPile": 23036,
+          "crownsLast": 3,
+          "landLast": 182,
+          "armyLast": 672,
+          "borderPileLast": 61,
+          "innerPileLast": 449
+        },
+        "foe": {
+          "samples": 60,
+          "land": 11103,
+          "army": 48828,
+          "crowns": 89,
+          "cities": 36,
+          "buildings": 125,
+          "borderPile": 2919,
+          "maxPile": 131,
+          "innerPile": 35839,
+          "crownsLast": 3,
+          "landLast": 250,
+          "armyLast": 1289,
+          "borderPileLast": 90,
+          "innerPileLast": 967
+        }
+      },
+      "builds": 5,
+      "foeBuilds": 4
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "archipelago-2",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "dominated",
+      "myMat": 973,
+      "foeMat": 2765,
+      "ratio": 0.352,
+      "crownLead": 1,
+      "my": {
+        "army": 835,
+        "land": 138,
+        "class_": ""
+      },
+      "foe": {
+        "army": 2497,
+        "land": 268,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 8281,
+          "army": 55621,
+          "crowns": 292,
+          "cities": 7,
+          "buildings": 299,
+          "borderPile": 7399,
+          "maxPile": 482,
+          "innerPile": 40920,
+          "crownsLast": 6,
+          "landLast": 156,
+          "armyLast": 1298,
+          "borderPileLast": 313,
+          "innerPileLast": 846
+        },
+        "foe": {
+          "samples": 60,
+          "land": 11905,
+          "army": 88057,
+          "crowns": 273,
+          "cities": 13,
+          "buildings": 286,
+          "borderPile": 6642,
+          "maxPile": 589,
+          "innerPile": 70458,
+          "crownsLast": 5,
+          "landLast": 249,
+          "armyLast": 2681,
+          "borderPileLast": 197,
+          "innerPileLast": 2255
+        }
+      },
+      "builds": 17,
+      "foeBuilds": 12
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "archipelago-2",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 1488,
+      "foeMat": 1064,
+      "ratio": 1.398,
+      "crownLead": 2,
+      "my": {
+        "army": 1270,
+        "land": 218,
+        "class_": ""
+      },
+      "foe": {
+        "army": 875,
+        "land": 189,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 10989,
+          "army": 55248,
+          "crowns": 135,
+          "cities": 14,
+          "buildings": 149,
+          "borderPile": 2786,
+          "maxPile": 235,
+          "innerPile": 42298,
+          "crownsLast": 12,
+          "landLast": 206,
+          "armyLast": 1019,
+          "borderPileLast": 19,
+          "innerPileLast": 808
+        },
+        "foe": {
+          "samples": 60,
+          "land": 10073,
+          "army": 37434,
+          "crowns": 141,
+          "cities": 22,
+          "buildings": 163,
+          "borderPile": 3491,
+          "maxPile": 270,
+          "innerPile": 24704,
+          "crownsLast": 10,
+          "landLast": 200,
+          "armyLast": 740,
+          "borderPileLast": 23,
+          "innerPileLast": 533
+        }
+      },
+      "builds": 24,
+      "foeBuilds": 24
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "mediterranean-0",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 21869,
+      "foeMat": 19919,
+      "ratio": 1.098,
+      "crownLead": 1,
+      "my": {
+        "army": 21626,
+        "land": 243,
+        "class_": ""
+      },
+      "foe": {
+        "army": 19716,
+        "land": 203,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 10799,
+          "army": 499221,
+          "crowns": 1177,
+          "cities": 22,
+          "buildings": 1199,
+          "borderPile": 15782,
+          "maxPile": 1964,
+          "innerPile": 473533,
+          "crownsLast": 26,
+          "landLast": 250,
+          "armyLast": 21133,
+          "borderPileLast": 786,
+          "innerPileLast": 20118
+        },
+        "foe": {
+          "samples": 60,
+          "land": 10160,
+          "army": 479483,
+          "crowns": 1139,
+          "cities": 43,
+          "buildings": 1182,
+          "borderPile": 11797,
+          "maxPile": 1267,
+          "innerPile": 458452,
+          "crownsLast": 25,
+          "landLast": 197,
+          "armyLast": 19233,
+          "borderPileLast": 486,
+          "innerPileLast": 18572
+        }
+      },
+      "builds": 54,
+      "foeBuilds": 53
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "mediterranean-0",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 14834,
+      "foeMat": 13082,
+      "ratio": 1.134,
+      "crownLead": 1,
+      "my": {
+        "army": 14547,
+        "land": 287,
+        "class_": ""
+      },
+      "foe": {
+        "army": 12903,
+        "land": 179,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 11682,
+          "army": 286356,
+          "crowns": 761,
+          "cities": 16,
+          "buildings": 777,
+          "borderPile": 8901,
+          "maxPile": 919,
+          "innerPile": 266469,
+          "crownsLast": 21,
+          "landLast": 280,
+          "armyLast": 13991,
+          "borderPileLast": 109,
+          "innerPileLast": 13629
+        },
+        "foe": {
+          "samples": 60,
+          "land": 9196,
+          "army": 259465,
+          "crowns": 727,
+          "cities": 42,
+          "buildings": 769,
+          "borderPile": 6633,
+          "maxPile": 800,
+          "innerPile": 244320,
+          "crownsLast": 20,
+          "landLast": 186,
+          "armyLast": 12440,
+          "borderPileLast": 153,
+          "innerPileLast": 12125
+        }
+      },
+      "builds": 40,
+      "foeBuilds": 46
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "mediterranean-1",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 8485,
+      "foeMat": 9062,
+      "ratio": 0.936,
+      "crownLead": -1,
+      "my": {
+        "army": 8337,
+        "land": 148,
+        "class_": ""
+      },
+      "foe": {
+        "army": 8909,
+        "land": 153,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 7674,
+          "army": 141312,
+          "crowns": 681,
+          "cities": 10,
+          "buildings": 691,
+          "borderPile": 5851,
+          "maxPile": 1390,
+          "innerPile": 128311,
+          "crownsLast": 35,
+          "landLast": 138,
+          "armyLast": 8082,
+          "borderPileLast": 595,
+          "innerPileLast": 7370
+        },
+        "foe": {
+          "samples": 60,
+          "land": 7162,
+          "army": 148407,
+          "crowns": 745,
+          "cities": 21,
+          "buildings": 766,
+          "borderPile": 6816,
+          "maxPile": 1217,
+          "innerPile": 134944,
+          "crownsLast": 36,
+          "landLast": 164,
+          "armyLast": 8698,
+          "borderPileLast": 247,
+          "innerPileLast": 8304
+        }
+      },
+      "builds": 72,
+      "foeBuilds": 71
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "mediterranean-1",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 15659,
+      "foeMat": 18178,
+      "ratio": 0.861,
+      "crownLead": -1,
+      "my": {
+        "army": 15461,
+        "land": 198,
+        "class_": ""
+      },
+      "foe": {
+        "army": 18042,
+        "land": 136,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 7491,
+          "army": 386003,
+          "crowns": 1210,
+          "cities": 50,
+          "buildings": 1260,
+          "borderPile": 15129,
+          "maxPile": 2288,
+          "innerPile": 363842,
+          "crownsLast": 26,
+          "landLast": 193,
+          "armyLast": 15336,
+          "borderPileLast": 23,
+          "innerPileLast": 15136
+        },
+        "foe": {
+          "samples": 60,
+          "land": 6902,
+          "army": 452869,
+          "crowns": 1272,
+          "cities": 13,
+          "buildings": 1285,
+          "borderPile": 6826,
+          "maxPile": 1288,
+          "innerPile": 439607,
+          "crownsLast": 27,
+          "landLast": 140,
+          "armyLast": 17941,
+          "borderPileLast": 409,
+          "innerPileLast": 17405
+        }
+      },
+      "builds": 52,
+      "foeBuilds": 55
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "mediterranean-2",
+      "seat": 0,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 4868,
+      "foeMat": 4212,
+      "ratio": 1.156,
+      "crownLead": -1,
+      "my": {
+        "army": 4615,
+        "land": 253,
+        "class_": ""
+      },
+      "foe": {
+        "army": 3977,
+        "land": 235,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 11811,
+          "army": 159222,
+          "crowns": 337,
+          "cities": 50,
+          "buildings": 387,
+          "borderPile": 11581,
+          "maxPile": 945,
+          "innerPile": 137046,
+          "crownsLast": 14,
+          "landLast": 263,
+          "armyLast": 4352,
+          "borderPileLast": 140,
+          "innerPileLast": 3988
+        },
+        "foe": {
+          "samples": 60,
+          "land": 12986,
+          "army": 160364,
+          "crowns": 314,
+          "cities": 49,
+          "buildings": 363,
+          "borderPile": 9616,
+          "maxPile": 724,
+          "innerPile": 138998,
+          "crownsLast": 15,
+          "landLast": 225,
+          "armyLast": 3631,
+          "borderPileLast": 648,
+          "innerPileLast": 2793
+        }
+      },
+      "builds": 27,
+      "foeBuilds": 30
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "mediterranean-2",
+      "seat": 1,
+      "turns": 1500,
+      "ended": false,
+      "winner": null,
+      "outcome": "even",
+      "myMat": 7258,
+      "foeMat": 6286,
+      "ratio": 1.155,
+      "crownLead": -1,
+      "my": {
+        "army": 6943,
+        "land": 315,
+        "class_": ""
+      },
+      "foe": {
+        "army": 6108,
+        "land": 178,
+        "class_": ""
+      },
+      "metrics": {
+        "me": {
+          "samples": 60,
+          "land": 14697,
+          "army": 197020,
+          "crowns": 385,
+          "cities": 20,
+          "buildings": 405,
+          "borderPile": 11497,
+          "maxPile": 1451,
+          "innerPile": 172107,
+          "crownsLast": 10,
+          "landLast": 311,
+          "armyLast": 6941,
+          "borderPileLast": 465,
+          "innerPileLast": 6188
+        },
+        "foe": {
+          "samples": 60,
+          "land": 10519,
+          "army": 148735,
+          "crowns": 395,
+          "cities": 8,
+          "buildings": 403,
+          "borderPile": 7829,
+          "maxPile": 846,
+          "innerPile": 131638,
+          "crownsLast": 11,
+          "landLast": 179,
+          "armyLast": 5985,
+          "borderPileLast": 408,
+          "innerPileLast": 5423
+        }
+      },
+      "builds": 20,
+      "foeBuilds": 21
+    }
+  ]
+}

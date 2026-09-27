@@ -1,8 +1,8 @@
 //map format
 //n,m,turn
 //grid_type[n][m] byte 0~49=army 50~99=city 100~149=generals 150~199=swamp with army 200=empty 201=mountain 204=swamp
-//迷雾对局（fog=1 格）：201 兼作「未知占位」（山+问号），204 沼泽始终可见；
-//视野内敌方 city/generals 由服务端降级为普通领地（owner id），不下发建筑身份
+//迷雾对局（fog=1 格）：201 山脉、204 沼泽保持可见，其余抹成空地（200）；
+//视野内地形、归属与兵力正常下发，包含敌方建筑。
 //army_cnt[n][m] int
 
 $(document).ready(function () {
@@ -164,6 +164,8 @@ var room_id = '',
   client_id,
   ready_state = 0,
   lost;
+// 部署更新排队中：禁止开新局（开始按钮禁用），对局中显示「系统即将更新」横幅。
+var deploy_queued = false;
 // 上一份房间成员 uid 列表快照，用于 room_update 里检测新玩家进房（null = 尚未收到首帧）。
 var prev_room_uids = null;
 var allow_page_leave = false,
@@ -296,6 +298,8 @@ function replayStart() {
     in_game = true;
     cur_turn = 0;
     initReplayViewTabs();
+    initReplayTitle();
+    initReplayStats();
     update(replay_data.initial);
   }
 }
@@ -374,8 +378,8 @@ function moveSelected(d, shift) {
   var nx = selx + dire[d].x,
     ny = sely + dire[d].y;
   if (nx < 0 || ny < 0 || nx >= n || ny >= m) return;
-  // 山脉不可通行；但迷雾对局中视野外格子统一为未知占位 201（山+问号），
-  // 无法与真实山脉区分——迷雾格允许入队，无效操作由服务器执行时校验跳过。
+  // 山脉不可通行；迷雾格中除山脉、沼泽外均已抹成空地，故 201 只代表
+  // 真实山脉，无需额外区分——非迷雾的真实山脉直接阻断入队。
   if (grid_type[nx][ny] == 201 && !fog[nx][ny]) return;
   // 命令可能有效时才入队：链式入队（队列非空，由服务器执行时校验），或当前选中
   // 己方正常领土且兵力 > 1（兵力 ≤ 1 时三种模式推出量均为 0；孤军不可推兵）。
@@ -539,9 +543,13 @@ function setRoomTopLeftVisible(show) {
 
 // 观战中（含战败后、终局复盘时）显示「下局模式」选择器：
 // 纯观战用户可提前选好下一局只看不打，避免对局结束后被瞬间重开的下一局拉进场。
+// 迷雾对局中的观战者（含观战席成员）额外显示「视角」选择器（看齐回放视角切换）。
 function refreshSpectateMode() {
   var spectating = !is_replay && in_game && player == 0;
-  $('#spectate-mode').css('display', spectating ? '' : 'none');
+  var viewEligible = typeof spectateViewEligible == 'function' && spectateViewEligible();
+  $('#spectate-mode').css('display', spectating || viewEligible ? '' : 'none');
+  $('#spectate-mode-box').css('display', spectating ? '' : 'none');
+  $('#spectate-view-section').css('display', viewEligible ? '' : 'none');
 }
 
 $(document).ready(function () {
@@ -608,9 +616,30 @@ async function loadAccountProfile() {
   }
 }
 
+// 部署更新横幅：仅对局进行中（含观战）显示；准备阶段由禁用的开始按钮传达。
+function refreshDeployBanner() {
+  $('#deploy-banner').css('display', deploy_queued && in_game && !game_ended ? '' : 'none');
+}
+
 socket.on('update', update);
 
+// 部署更新排队广播：对局中显示警告横幅，准备阶段禁用开始按钮
+// （room_update 的 update_queued 字段随后会同步完整房间状态）。
+socket.on('deploy_queued', function (data) {
+  deploy_queued = !data || data.queued !== false;
+  refreshDeployBanner();
+  if (deploy_queued && !in_game) {
+    $('#force-start').css('display', 'block');
+    $('#force-start').prop('disabled', true);
+    $('#force-start').attr('class', '');
+    $('#force-start').html('系统即将排队更新，请稍等');
+  }
+});
+
 socket.on('starting', function () {
+  // 新对局开始：观战视角复位为全图（新引擎实例不携带旧的视角偏好）。
+  spectate_view_team = 0;
+  spectate_view_uids = [];
   setRoomTopLeftVisible(false);
   $('#status-alert').css('display', 'none');
   $($('#status-alert').children()[0].children[6]).css('display', 'none');
@@ -661,6 +690,13 @@ socket.on('init_map', function (data) {
   game_ended = false;
   lost = false;
   player = 0;
+  fog_mode = false;
+  spectate_view_uids = [];
+  // 断线重连补发 init_map 的场景（无 starting 前置）：恢复此前选择的观战视角。
+  if (spectate_view_team > 0) {
+    socket.emit('spectate_view', { team: spectate_view_team });
+  }
+  refreshDeployBanner();
   $('#status-alert').css('display', 'none');
   hideSurrenderAlert();
   console.log(data);
@@ -778,25 +814,26 @@ socket.on('room_update', function (data) {
   var isHost = data.players.length > 0 && data.players[0].sid == client_id;
   var allowTeam = Boolean(data.allow_team);
   var roomRunning = Boolean(data.in_game);
-  var hasServerBot = false;
+  var hasServerBotForbiddingTeam = false;
   var hasBot = false;
   for (var i = 0; i < data.players.length; i++) {
-    if (data.players[i].server_bot) {
-      hasServerBot = true;
+    var p = data.players[i];
+    if (p.server_bot && p.server_bot_allow_team !== true) {
+      hasServerBotForbiddingTeam = true;
     }
-    if (data.players[i].bot || data.players[i].server_bot) {
+    if (p.bot || p.server_bot) {
       hasBot = true;
     }
-    if (hasServerBot && hasBot) {
+    if (hasServerBotForbiddingTeam && hasBot) {
       break;
     }
   }
   setTabGroupReadonly('tabs-game-speed', roomRunning || !isHost);
   setTabGroupReadonly('tabs-map-mode', roomRunning || !isHost);
   setTabGroupReadonly('tabs-map-size', roomRunning || !isHost);
-  setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBot);
+  setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBotForbiddingTeam);
   setTabGroupReadonly('tabs-fog-mode', roomRunning || !isHost || hasBot);
-  $('#team-mode-bot-hint').css('display', hasServerBot ? '' : 'none');
+  $('#team-mode-bot-hint').css('display', hasServerBotForbiddingTeam ? '' : 'none');
   $('#fog-mode-bot-hint').css('display', hasBot ? '' : 'none');
   $('#team-mode-section').css('display', isHost && !roomRunning ? '' : 'none');
   if (isHost && !roomRunning) $('#map-token').removeAttr('disabled');
@@ -842,6 +879,7 @@ socket.on('room_update', function (data) {
   }
 
   var canSelectPlayer = selfTeam != 0 || playingCount < max_teams;
+  self_team = selfTeam;
   $('#team-select-section').css('display', !roomRunning && canSelectPlayer ? '' : 'none');
   setTabGroupReadonly('tabs-custom-team', roomRunning || !canSelectPlayer);
   refreshCustomTeamTabs(allowTeam);
@@ -877,14 +915,24 @@ socket.on('room_update', function (data) {
     $('#teams').html(compact_html);
   }
 
-  if (!roomRunning && data.need > 1) {
+  deploy_queued = Boolean(data.update_queued);
+  refreshDeployBanner();
+  if (!roomRunning && deploy_queued) {
+    // 部署更新排队期间禁止开新局：开始按钮禁用并提示。
     $('#force-start').css('display', 'block');
+    $('#force-start').prop('disabled', true);
+    $('#force-start').attr('class', '');
+    $('#force-start').html('系统即将排队更新，请稍等');
+  } else if (!roomRunning && data.need > 1) {
+    $('#force-start').css('display', 'block');
+    $('#force-start').prop('disabled', false);
     $('#force-start').html('强制开局 ' + data.ready + ' / ' + data.need);
   } else {
     ready_state = 0;
     $('#force-start').css('display', 'none');
+    $('#force-start').prop('disabled', false);
   }
-  if (!roomRunning && data.need > 1 && ready_state) {
+  if (!roomRunning && !deploy_queued && data.need > 1 && ready_state) {
     $('#force-start').attr('class', 'inverted');
   } else {
     $('#force-start').attr('class', '');
@@ -957,7 +1005,13 @@ $(document).ready(function () {
       initTab(this, this.children[i], updateSpectateMode);
     }
   });
+  // 「全图」tab 常驻 DOM 只绑一次；玩家 tab 由 refreshSpectateViewTabs 生成时绑定。
+  $('#tabs-spectate-view').each(function () {
+    initTab(this, this.children[1], onSpectateViewTab);
+  });
   $('#force-start').on('click', function () {
+    // 部署更新排队期间禁止开新局（服务端 change_ready 同样拦截兜底）。
+    if (deploy_queued) return;
     ready_state ^= 1;
     socket.emit('change_ready', { ready: ready_state });
   });
@@ -981,6 +1035,7 @@ socket.on('left', function () {
   in_game = false;
   game_ended = false;
   replay_id = false;
+  refreshDeployBanner();
   refreshSpectateMode();
 });
 

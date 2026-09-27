@@ -24,11 +24,13 @@
       referrerpolicy="no-referrer"
     ></script>
     <script src="/crown.js"></script>
+    <script src="/sw-register.js"></script>
     <script src="/main/core-globals.js"></script>
     <script src="/notify.js"></script>
     <script src="/main/replay-binary.js"></script>
     <script src="/main/room-controls.js"></script>
     <script src="/main/replay-controls.js"></script>
+    <script src="/main/replay-stats.js"></script>
     <script src="/main/render-update.js"></script>
     <script src="/main/blink-clock.js"></script>
     <script src="/main.js"></script>
@@ -38,6 +40,7 @@
 
   <body>
     <div id="disconnect-banner" style="display: none">连接已断开，正在尝试重连…10 秒内重连可恢复对局</div>
+    <div id="deploy-banner" style="display: none">系统即将更新</div>
 
     <div id="game" style="display: none">
       <div id="map"></div>
@@ -47,12 +50,23 @@
     <div id="turn-counter" style="display: none"></div>
 
     <div id="spectate-mode" class="fixed-center-horizontal" style="display: none">
-      <div class="background" style="padding: 4px 8px; white-space: nowrap">
+      <div id="spectate-mode-box" class="background" style="padding: 4px 8px; white-space: nowrap">
         <span class="unselectable" style="font-size: 12px; color: #253042">下局模式：</span>
         <div id="tabs-spectate-mode" class="tabs unselectable">
           <input type="hidden" value="参与" />
           <div class="inline-button">观战</div>
           <div class="inline-button inverted">参与</div>
+        </div>
+      </div>
+      <div
+        id="spectate-view-section"
+        class="background"
+        style="display: none; padding: 4px 8px; white-space: nowrap; margin-top: 6px"
+      >
+        <span class="unselectable" style="font-size: 12px; color: #253042">视角：</span>
+        <div id="tabs-spectate-view" class="tabs unselectable">
+          <input type="hidden" value="全图" />
+          <div class="inline-button inverted">全图</div>
         </div>
       </div>
     </div>
@@ -66,6 +80,18 @@
         </tr>
       </tbody>
     </table>
+
+    <div id="replay-title" class="fixed-center-horizontal background" style="display: none"></div>
+
+    <div id="replay-stats" style="display: none">
+      <div id="tabs-replay-stats" class="tabs unselectable">
+        <input type="hidden" value="兵力" />
+        <div class="inline-button inverted">兵力</div>
+        <div class="inline-button">领土</div>
+      </div>
+      <canvas id="replay-stats-canvas"></canvas>
+      <div id="replay-stats-legend"></div>
+    </div>
 
     <div id="room-top-left" style="display: none; position: fixed; top: 12px; left: 12px; z-index: 24">
       <button id="room-home-btn" class="small">返回首页</button>

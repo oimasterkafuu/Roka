@@ -344,9 +344,39 @@ $('#ban-confirm').on('click', async function () {
 /* ---------- 策略 Bot（仅超级管理员） ---------- */
 
 var botsCache = [];
+var botTemplatesCache = [];
 
 function showBotError(message) {
   $('#bot-error').text(message).toggle(Boolean(message));
+}
+
+function renderBotTemplates() {
+  var $select = $('#bot-template').empty();
+  botTemplatesCache.forEach(function (tpl) {
+    $('<option></option>')
+      .attr('value', tpl.id)
+      .text(tpl.name + (tpl.description ? '（' + tpl.description + '）' : ''))
+      .appendTo($select);
+  });
+  var hasTemplate = botTemplatesCache.length > 0;
+  $('#bot-start-btn').prop('disabled', !hasTemplate);
+  if (!hasTemplate) {
+    showBotError('未发现可托管的 Bot 模板（bot-template/ 下缺少 strategy.js 或 server-bot.js）。');
+  }
+}
+
+async function loadBotTemplates() {
+  try {
+    var res = await fetch('/api/admin/bot-templates');
+    if (!res.ok) {
+      return;
+    }
+    var data = await res.json();
+    botTemplatesCache = Array.isArray(data.items) ? data.items : [];
+    renderBotTemplates();
+  } catch (e) {
+    // 加载失败不阻塞页面
+  }
 }
 
 function renderBots() {
@@ -356,6 +386,10 @@ function renderBots() {
     var $tr = $('<tr></tr>');
     $('<td></td>').text(bot.username).appendTo($tr);
     $('<td></td>').text(bot.room).appendTo($tr);
+    $('<td></td>').text(bot.template).appendTo($tr);
+    $('<td></td>')
+      .text(bot.allowTeam ? '允许' : '不允许')
+      .appendTo($tr);
     $('<td></td>').text(fullTime(bot.startedAt)).appendTo($tr);
     $('<td></td>')
       .append(
@@ -392,13 +426,25 @@ async function loadBots() {
 async function startBot() {
   var username = $('#bot-username').val().trim();
   var room = $('#bot-room').val().trim();
+  var template = $('#bot-template').val();
+  var allowTeam = $('#bot-allow-team').prop('checked');
   if (!username || !room) {
     showBotError('请填写用户名与房间号。');
     return;
   }
+  if (!template) {
+    showBotError('请选择 Bot 模板。');
+    return;
+  }
   try {
-    await apiPost('/api/admin/bots/start', { username: username, room: room });
+    await apiPost('/api/admin/bots/start', {
+      username: username,
+      room: room,
+      template: template,
+      allowTeam: allowTeam,
+    });
     showBotError('');
+    // 保留模板与组队选择，仅清空房间输入便于连续启动。
     $('#bot-room').val('');
     loadBots();
   } catch (err) {
@@ -429,6 +475,7 @@ loadViewer().then(function (ok) {
       // viewerIsSuperAdmin 由 loadUsers 填充；超管才展示策略 Bot 分区。
       if (viewerIsSuperAdmin) {
         $('#bots-card').show();
+        loadBotTemplates();
         loadBots();
       }
     });
