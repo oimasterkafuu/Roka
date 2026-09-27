@@ -64,6 +64,8 @@ export interface RoomUpdatePayload {
   /** 地图大小（房间设置同步给前端展示）。 */
   map_size: 'normal' | 'large';
   in_game: boolean;
+  /** 部署更新排队中（禁止开新局，前端据此禁用开始按钮并显示提示）。 */
+  update_queued: boolean;
   players: RoomPlayerView[];
   ready: number;
   need: number;

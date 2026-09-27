@@ -62,6 +62,20 @@
   text-align: center;
 }
 
+/* 部署更新排队警告横幅（对局进行中显示），与断线横幅错位避免重叠。 */
+#deploy-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 99;
+  padding: 8px 0;
+  background: #b26a00;
+  color: #ffffff;
+  font-size: 16px;
+  text-align: center;
+}
+
 #replay-top-left {
   position: fixed;
   top: 40px;

@@ -16,7 +16,7 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）、`pnpm run test:deploy-update`（部署更新 UX 回归：webhook 排队广播、排队期禁开局、宽限到期按当前名次清算、dry-run 恢复）。
 
 启动后访问 `http://localhost:23333/` 并注册账号。
 
@@ -55,6 +55,7 @@ pnpm run start
 - **房间心跳检测**：房间准备阶段客户端每 30 秒上报一次心跳；超过 600 秒（10 分钟）无心跳的成员被服务端自动移出房间并跳回首页。对局进行中不检查心跳（对局断线仍走 10 秒宽限期）；`ROKA_BOT_TOKENS` 鉴权的 bot 连接豁免。
 - **只剩 Bot 自动重置房间设置**：房间内有 Bot（第三方 bot 令牌或服务端托管）时，若所有人类成员都离开（断开连接或心跳超时被移出）、房间只剩 Bot，准备阶段的房间设置会自动重置为新建房间的默认值（地图类型/种子/倍速/组队/迷雾/地图大小全部回默认，种子重新随机），Bot 留在房内继续待命不被踢出。边界：观战席（队伍 0）的人类仍算人类占用，不触发重置；对局进行中不触发——若人类在对局中离开，等服务端对局结束回到准备阶段时才会重置；没有 Bot 的普通房间人走光后不触发（下次有人进房本就按新房间重建默认配置）。
 - **浏览器通知**：登录后首次访问首页或房间页时，若浏览器通知权限尚未决定，会先弹解释窗说明用途（新玩家进房、游戏开始、有人上线或建房），由按钮手势申请权限；拒绝后不再打扰，解释窗每个浏览器最多弹一次。页面在后台时，房间内新玩家加入、游戏开始、首页有人上线或创建新房间都会弹系统通知；同一用户多个后台标签页通过 Notification `tag` 与 localStorage 时间戳互斥保证只弹一次。浏览器不支持 Notification 时静默跳过。
+- **部署更新 UX**：GitHub push 触发自动部署时，若有对局在跑则进入「更新排队」状态——广播 `deploy_queued` 事件且 `room_update` 携带 `update_queued`：排队期间禁止开新局（开始按钮禁用并提示「系统即将排队更新，请稍等」），进行中的对局页面顶部显示「系统即将更新」警告横幅；120 秒宽限期（`ROKA_DEPLOY_GRACE_MS` 可覆盖）内玩家可继续打完，最后一局结束立即部署，到期仍未结束的对局按当前排行榜名次直接清算（正常结算给分并存档回放）后重启。重启期间页面由 Service Worker（`static/sw.js`）接管，显示「正在更新」提示页并轮询等待、服务恢复后自动刷新；更新失败（或 `ROKA_DEPLOY_DRY_RUN=1` 演练）时解除排队状态恢复正常。
 - 实时聊天框跨房间同步。
 - 教程分文字版（`/tutorial`）与互动版（`/tutorial/interactive`）两步。
 

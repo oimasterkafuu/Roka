@@ -228,6 +228,9 @@ export class GameEngine {
 
   private tickTimer: NodeJS.Timeout | null = null;
 
+  /** 终局幂等标记：正常终局与部署更新清算（forceFinish）共用，防止重复结算。 */
+  private finished = false;
+
   private lastTickAt = 0;
 
   private constructor(
@@ -492,6 +495,10 @@ export class GameEngine {
   private async tickOnce(): Promise<void> {
     this.lastTickAt = Date.now();
     const ended = await this.gameTick();
+    // 清算路径（forceFinish）可能在本 Tick 结算期间接管终局，避免重复 finishGame。
+    if (this.finished) {
+      return;
+    }
     if (ended) {
       this.finishGame();
       return;
@@ -1663,24 +1670,48 @@ export class GameEngine {
     return replayId;
   }
 
-  private finishGame(): void {
+  private finishGame(endMessage?: string): void {
+    if (this.finished) {
+      return;
+    }
+    this.finished = true;
     if (this.tickTimer) {
       clearTimeout(this.tickTimer);
       this.tickTimer = null;
     }
 
-    let winners = '';
-    for (let p = 0; p < this.playerSids.length; p += 1) {
-      if (this.pstat[p] !== LEFT_GAME) {
-        winners += winners.length > 0 ? `,${this.names[p]}` : this.names[p];
+    if (endMessage) {
+      this.sendSystemMessage(endMessage);
+    } else {
+      let winners = '';
+      for (let p = 0; p < this.playerSids.length; p += 1) {
+        if (this.pstat[p] !== LEFT_GAME) {
+          winners += winners.length > 0 ? `,${this.names[p]}` : this.names[p];
+        }
+      }
+      if (winners.length > 0) {
+        this.sendSystemMessage(`${winners} 获胜。`);
+      } else {
+        this.sendSystemMessage('本局结束，无人获胜。');
       }
     }
-    if (winners.length > 0) {
-      this.sendSystemMessage(`${winners} 获胜。`);
-    } else {
-      this.sendSystemMessage('本局结束，无人获胜。');
-    }
     this.endGame(this.gid, this.buildGameResult());
+  }
+
+  /**
+   * 部署更新宽限期清算：立即停表，以当前战况按正常终局路径结束对局——
+   * sendMap(true) 广播终局帧并存档回放（名次取 buildFinalRank 当前排行榜），
+   * finishGame 经 endGame 回调完成 rating 结算与房间清理。幂等。
+   */
+  async forceFinish(endMessage: string): Promise<void> {
+    if (this.finished || !this.tickTimer) {
+      return;
+    }
+    clearTimeout(this.tickTimer);
+    this.tickTimer = null;
+    await this.sendMap(true);
+    // 期间若有在途 Tick 已自然终局，finishGame 内的 finished 守卫保证只结算一次。
+    this.finishGame(endMessage);
   }
 }
 

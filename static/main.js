@@ -164,6 +164,8 @@ var room_id = '',
   client_id,
   ready_state = 0,
   lost;
+// 部署更新排队中：禁止开新局（开始按钮禁用），对局中显示「系统即将更新」横幅。
+var deploy_queued = false;
 // 上一份房间成员 uid 列表快照，用于 room_update 里检测新玩家进房（null = 尚未收到首帧）。
 var prev_room_uids = null;
 var allow_page_leave = false,
@@ -612,7 +614,25 @@ async function loadAccountProfile() {
   }
 }
 
+// 部署更新横幅：仅对局进行中（含观战）显示；准备阶段由禁用的开始按钮传达。
+function refreshDeployBanner() {
+  $('#deploy-banner').css('display', deploy_queued && in_game && !game_ended ? '' : 'none');
+}
+
 socket.on('update', update);
+
+// 部署更新排队广播：对局中显示警告横幅，准备阶段禁用开始按钮
+// （room_update 的 update_queued 字段随后会同步完整房间状态）。
+socket.on('deploy_queued', function (data) {
+  deploy_queued = !data || data.queued !== false;
+  refreshDeployBanner();
+  if (deploy_queued && !in_game) {
+    $('#force-start').css('display', 'block');
+    $('#force-start').prop('disabled', true);
+    $('#force-start').attr('class', '');
+    $('#force-start').html('系统即将排队更新，请稍等');
+  }
+});
 
 socket.on('starting', function () {
   // 新对局开始：观战视角复位为全图（新引擎实例不携带旧的视角偏好）。
@@ -674,6 +694,7 @@ socket.on('init_map', function (data) {
   if (spectate_view_team > 0) {
     socket.emit('spectate_view', { team: spectate_view_team });
   }
+  refreshDeployBanner();
   $('#status-alert').css('display', 'none');
   hideSurrenderAlert();
   console.log(data);
@@ -892,14 +913,24 @@ socket.on('room_update', function (data) {
     $('#teams').html(compact_html);
   }
 
-  if (!roomRunning && data.need > 1) {
+  deploy_queued = Boolean(data.update_queued);
+  refreshDeployBanner();
+  if (!roomRunning && deploy_queued) {
+    // 部署更新排队期间禁止开新局：开始按钮禁用并提示。
     $('#force-start').css('display', 'block');
+    $('#force-start').prop('disabled', true);
+    $('#force-start').attr('class', '');
+    $('#force-start').html('系统即将排队更新，请稍等');
+  } else if (!roomRunning && data.need > 1) {
+    $('#force-start').css('display', 'block');
+    $('#force-start').prop('disabled', false);
     $('#force-start').html('强制开局 ' + data.ready + ' / ' + data.need);
   } else {
     ready_state = 0;
     $('#force-start').css('display', 'none');
+    $('#force-start').prop('disabled', false);
   }
-  if (!roomRunning && data.need > 1 && ready_state) {
+  if (!roomRunning && !deploy_queued && data.need > 1 && ready_state) {
     $('#force-start').attr('class', 'inverted');
   } else {
     $('#force-start').attr('class', '');
@@ -977,6 +1008,8 @@ $(document).ready(function () {
     initTab(this, this.children[1], onSpectateViewTab);
   });
   $('#force-start').on('click', function () {
+    // 部署更新排队期间禁止开新局（服务端 change_ready 同样拦截兜底）。
+    if (deploy_queued) return;
     ready_state ^= 1;
     socket.emit('change_ready', { ready: ready_state });
   });
@@ -1000,6 +1033,7 @@ socket.on('left', function () {
   in_game = false;
   game_ended = false;
   replay_id = false;
+  refreshDeployBanner();
   refreshSpectateMode();
 });
 

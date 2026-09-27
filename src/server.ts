@@ -52,8 +52,29 @@ const serverBotManager = new ServerBotManager({
   getPort: () => listenPort,
   stateFilePath: path.join(dataDir, 'server-bots.json'),
 });
-const webhookUpdater = new WebhookUpdater(app.log, runtimeEnv.webhookSecret, () =>
-  lobbyService.hasActiveGames(),
+// Socket.IO 实例在 boot() 内创建；webhook 广播回调经此引用延迟绑定
+// （webhook 只在 listen 后可达，回调触发时 socketServer 必然已赋值）。
+let socketServer: SocketIOServer | null = null;
+const DEPLOY_SETTLE_MESSAGE = '系统即将更新，本局按当前名次提前结算。';
+const webhookUpdater = new WebhookUpdater(
+  app.log,
+  runtimeEnv.webhookSecret,
+  () => lobbyService.hasActiveGames(),
+  {
+    onUpdateQueued: (graceMs) => {
+      if (socketServer) {
+        lobbyService.setUpdateQueued(socketServer, true, graceMs);
+      }
+    },
+    onGraceExpired: () => {
+      lobbyService.settleActiveGamesForUpdate(DEPLOY_SETTLE_MESSAGE);
+    },
+    onUpdateAborted: () => {
+      if (socketServer) {
+        lobbyService.setUpdateQueued(socketServer, false);
+      }
+    },
+  },
 );
 lobbyService.onGameEnded = () => webhookUpdater.notifyGameEnded();
 
@@ -1172,6 +1193,7 @@ const boot = async (): Promise<void> => {
   const io = new SocketIOServer(app.server, {
     transports: ['websocket', 'polling'],
   });
+  socketServer = io;
   authService.attachSocketServer(io);
   lobbyService.startLobbyHeartbeatSweep(io);
 
@@ -1492,6 +1514,12 @@ const boot = async (): Promise<void> => {
         return;
       }
       if (lobbyService.isLobbyGameRunning(gid)) {
+        lobbyService.emitRoomUpdate(io, gid);
+        return;
+      }
+      // 部署更新排队期间禁止开新局：拒绝就绪变更并回发房间状态复位前端按钮。
+      if (lobbyService.isUpdateQueued()) {
+        lobbyService.sendLobbySystemMessage(io, lobbyService.getLobbyVal(gid), '系统即将排队更新，请稍等。');
         lobbyService.emitRoomUpdate(io, gid);
         return;
       }
