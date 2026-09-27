@@ -323,8 +323,21 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>room_update</code></th>
             <td>
               房间状态快照：
-              <code>{ speed, allow_team, fog, map_token, map_mode, in_game, players, ready, need }</code>。
-              <code>fog=true</code> 表示本房间开启了迷雾远征。
+              <code
+                >{ speed, allow_team, fog, map_token, map_mode, in_game, update_queued, players, ready, need
+                }</code
+              >。 <code>fog=true</code> 表示本房间开启了迷雾远征。
+              <code>update_queued=true</code> 表示部署更新排队中：禁止开新局（<code>change_ready</code>
+              会被拒绝并收到提示消息），宽限期（默认 120 秒）内未结束的对局将按当前名次清算。
+            </td>
+          </tr>
+          <tr>
+            <th><code>deploy_queued</code></th>
+            <td>
+              <code>{ queued }</code>。部署更新排队状态全局广播（所有连接，含首页）：<code>queued=true</code>
+              表示进入排队（网页端对局中显示「系统即将更新」横幅、禁用开始按钮）；
+              <code>false</code> 表示更新未重启而结束（失败或演练），排队状态解除。排队状态解除后
+              服务端不主动重开对局，bot 需照常重新准备触发开局。
             </td>
           </tr>
           <tr>
