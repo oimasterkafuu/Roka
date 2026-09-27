@@ -1465,9 +1465,7 @@ const boot = async (): Promise<void> => {
         return;
       }
 
-      if (conf.allow_team && team !== 0) {
-        team = lobbyService.resolveCompatibleTeam(players, socket.id, team);
-      }
+      // 服务端不做 bot/人类分池修正：换队请求按原样生效，由成员自行决定队伍。
 
       let nickname = username;
       player.team = team;
@@ -1570,10 +1568,7 @@ const boot = async (): Promise<void> => {
             } else {
               nextConf.allow_team = allowTeam;
               changed.push('allow_team');
-              if (allowTeam && !oldConf.allow_team) {
-                // 允许组队开启后重新规整队伍，确保机器人与人类分属不同队伍。
-                lobbyService.reassignTeamsForAllowTeam(gid);
-              }
+              // 开启组队后不再重排队伍：成员自行换队（bot 自主避让人类）。
             }
           }
         }

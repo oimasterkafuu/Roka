@@ -30,6 +30,19 @@ const DEFAULT_PARAMS = Object.freeze({
   // 浓缩突击（2026-09-27，学自 _E_ 单堆全冲）：出击余量倍数与决定性大堆最小规模
   // （E 的大堆为 367–1240 兵，300 以下的堆不构成「决定性」，深入半兵方针不变）
   assaultMargin: 1.3, megaStackMin: 300,
+  // 优势垃圾话（bot/trash-talk.cjs）：只在优势时开口；全局冷却 + 每局上限 + 概率门控
+  trashTalk: 1, trashTalkMinTurn: 60, trashTalkMaxPerGame: 4,
+  trashTalkGlobalCd: 150, trashTalkChance: 0.6,
+  trashLandRatio: 1.3, trashArmyRatio: 2,
+  trashCrushArmyRatio: 4, trashCrushLandRatio: 3,
+  trashStreakBuildings: 3, trashStreakWindow: 60, trashStallTicks: 120,
+  trashEatenTotal: 5, trashWololoLandDrop: 15,
+  trashCdLand: 250, trashCdArmy: 250, trashCdCrush: 300, trashCdStreak: 200, trashCdStall: 300, trashCdEaten: 250,
+  // 绝境投降（bot/surrender.cjs）：四条全满足才投，宁可少投不误投
+  surrenderEnabled: 1, surrenderMinTurn: 150,
+  surrenderArmyRatio: 8, surrenderLandRatio: 4, surrenderCrownGap: 3,
+  surrenderHopelessArmyRatio: 10,
+  surrenderTeaseTicks: 250, surrenderTeaseNearCrownTicks: 30, surrenderEnemyActiveTicks: 80,
 });
 const PARAM_RANGES = Object.freeze({
   buildSafety: [0, 30], enemyDistance: [1, 8], threatWeight: [0.5, 3],
@@ -49,6 +62,17 @@ const PARAM_RANGES = Object.freeze({
   cutoffMaxDefense: [0, 100000], cutoffUrgentRange: [0, 20],
   minTransport: [0, 200], rallyStallTicks: [0, 300], rallyAbandonTicks: [0, 600], siteHysteresis: [1, 4],
   assaultMargin: [1, 3], megaStackMin: [0, 2000],
+  trashTalk: [0, 1], trashTalkMinTurn: [0, 600], trashTalkMaxPerGame: [0, 12],
+  trashTalkGlobalCd: [30, 2000], trashTalkChance: [0, 1],
+  trashLandRatio: [1.05, 4], trashArmyRatio: [1.2, 8],
+  trashCrushArmyRatio: [2, 20], trashCrushLandRatio: [1.5, 12],
+  trashStreakBuildings: [2, 10], trashStreakWindow: [20, 300], trashStallTicks: [40, 600],
+  trashEatenTotal: [2, 30], trashWololoLandDrop: [5, 200],
+  trashCdLand: [30, 2000], trashCdArmy: [30, 2000], trashCdCrush: [30, 2000], trashCdStreak: [30, 2000], trashCdStall: [30, 2000], trashCdEaten: [30, 2000],
+  surrenderEnabled: [0, 1], surrenderMinTurn: [30, 2000],
+  surrenderArmyRatio: [2, 50], surrenderLandRatio: [1.5, 30], surrenderCrownGap: [1, 12],
+  surrenderHopelessArmyRatio: [3, 60],
+  surrenderTeaseTicks: [60, 3000], surrenderTeaseNearCrownTicks: [5, 500], surrenderEnemyActiveTicks: [20, 500],
 });
 function resolveParams(params = {}) {
   const result = {};
