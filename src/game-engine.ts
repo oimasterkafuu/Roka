@@ -136,8 +136,8 @@ export class GameEngine {
 
   /**
    * 迷雾远征开关（房间设置）：开启后存活参赛者只收到己方队伍视野内的
-   * 归属/兵力；视野外格子统一为未知占位（201，沼泽 204 例外），视野内
-   * 敌方指挥所/主城降级为普通领地；观战者、出局者与回放始终全视野。
+   * 真实归属/兵力；视野外格子只保留山脉（201）与沼泽（204），其余抹成
+   * 空地（200）；观战者、出局者与回放始终全视野。
    */
   private readonly fogEnabled: boolean;
 
@@ -178,6 +178,12 @@ export class GameEngine {
   private readonly replayTurnSurrenders: Array<Set<number>>;
 
   private readonly externalSpectatorSids: Set<string>;
+
+  /**
+   * 观战视角偏好：sid → 队伍编号（仅迷雾对局生效；缺省/0 = 全图全视野）。
+   * 覆盖中途进房的外部观战者与观战席/已战败玩家；存活参赛者被 setSpectatorView 拒绝。
+   */
+  private readonly spectatorViewTeams: Map<string, number>;
 
   private readonly afkLastMoveTurn: number[];
 
@@ -221,6 +227,9 @@ export class GameEngine {
   private recentKills: Record<string, string> = {};
 
   private tickTimer: NodeJS.Timeout | null = null;
+
+  /** 终局幂等标记：正常终局与部署更新清算（forceFinish）共用，防止重复结算。 */
+  private finished = false;
 
   private lastTickAt = 0;
 
@@ -293,6 +302,7 @@ export class GameEngine {
     this.replayTurnMoves = [];
     this.replayTurnSurrenders = Array.from({ length: pcnt }, () => new Set<number>());
     this.externalSpectatorSids = new Set<string>();
+    this.spectatorViewTeams = new Map<string, number>();
     this.afkLastMoveTurn = Array.from({ length: pcnt }, () => 0);
     this.afkLastMoveAt = Array.from({ length: pcnt }, () => this.startAt);
     this.disconnectedAt = Array.from({ length: pcnt }, () => null);
@@ -485,6 +495,10 @@ export class GameEngine {
   private async tickOnce(): Promise<void> {
     this.lastTickAt = Date.now();
     const ended = await this.gameTick();
+    // 清算路径（forceFinish）可能在本 Tick 结算期间接管终局，避免重复 finishGame。
+    if (this.finished) {
+      return;
+    }
     if (ended) {
       this.finishGame();
       return;
@@ -702,6 +716,41 @@ export class GameEngine {
     return this.fogEnabled && this.team[p] !== 0 && !this.spec[p] && this.pstat[p] !== LEFT_GAME;
   }
 
+  /** 当前棋盘状态（fog-vision / map-encoding 共用的输入视图）。 */
+  private boardState() {
+    return {
+      n: this.n,
+      m: this.m,
+      gridType: this.gridType,
+      owner: this.owner,
+      armyCnt: this.armyCnt,
+      isolated: this.isolated,
+      isolatedAge: this.isolatedAge,
+    };
+  }
+
+  /**
+   * 按指定队伍的可见性构建迷雾过滤快照（队伍内所有玩家共享同一视野）。
+   * visionCache 按 tick 复用，避免同队多接收者重复计算可见格。
+   */
+  private buildTeamFoggedSnapshot(
+    teamId: number,
+    visionCache: Map<number, number[]>,
+  ): { grid_type: number[]; army_cnt: number[]; isolated: number[]; fog: number[] } {
+    let visible = visionCache.get(teamId);
+    if (!visible) {
+      visible = computeTeamVisibility(
+        this.n,
+        this.m,
+        this.owner,
+        (ownerId) => this.team[ownerId - 1],
+        teamId,
+      );
+      visionCache.set(teamId, visible);
+    }
+    return buildFoggedVisionArrays(this.boardState(), visible);
+  }
+
   /**
    * 按接收者构建地图快照（p = -1 表示观战者）。迷雾对局中存活参赛者得到
    * 视野过滤后的数组与 fog 标记；其余接收者为全视野。fog 仅在迷雾对局
@@ -711,31 +760,10 @@ export class GameEngine {
     p: number,
     visionCache: Map<number, number[]>,
   ): { grid_type: number[]; army_cnt: number[]; isolated: number[]; fog: number[] | null } {
-    const state = {
-      n: this.n,
-      m: this.m,
-      gridType: this.gridType,
-      owner: this.owner,
-      armyCnt: this.armyCnt,
-      isolated: this.isolated,
-      isolatedAge: this.isolatedAge,
-    };
     if (p >= 0 && this.fogAppliesToPlayer(p)) {
-      const teamId = this.team[p];
-      let visible = visionCache.get(teamId);
-      if (!visible) {
-        visible = computeTeamVisibility(
-          this.n,
-          this.m,
-          this.owner,
-          (ownerId) => this.team[ownerId - 1],
-          teamId,
-        );
-        visionCache.set(teamId, visible);
-      }
-      return buildFoggedVisionArrays(state, visible, (ownerId) => this.team[ownerId - 1], teamId);
+      return this.buildTeamFoggedSnapshot(this.team[p], visionCache);
     }
-    const arrays = buildFullVisionArrays(state);
+    const arrays = buildFullVisionArrays(this.boardState());
     return {
       ...arrays,
       fog: this.fogEnabled ? new Array<number>(this.n * this.m).fill(0) : null,
@@ -754,7 +782,14 @@ export class GameEngine {
       if (p !== -1 && !this.watching[p]) {
         continue;
       }
-      const snapshot = this.buildSnapshotFor(p, visionCache);
+      // 观战席/已战败玩家可按 spectatorViewTeams 选择的队伍视角接收迷雾帧；
+      // diff 基线始终记录「最后实际下发的快照」，跨视角切换由 setSpectatorView
+      // 补发的全量帧重新对齐，因此这里照常 diff 即可。
+      const povTeam = p >= 0 && this.fogEnabled ? (this.spectatorViewTeams.get(this.playerSids[p]) ?? 0) : 0;
+      const snapshot =
+        povTeam > 0
+          ? this.buildTeamFoggedSnapshot(povTeam, visionCache)
+          : this.buildSnapshotFor(p, visionCache);
 
       const lstMovePayload = this.toMovePayload(
         p === -1 ? null : this.lstMove[p],
@@ -809,8 +844,22 @@ export class GameEngine {
           historyHash = await this.saveHistory();
           payload.replay = historyHash;
         }
+        // 外部观战者默认共享全图帧；选了玩家视角的单独按该队伍视野出全量帧
+        // （观战者基数小，且复用本 tick 的 visionCache，不影响正常广播）。
         for (const spectatorSid of this.externalSpectatorSids) {
-          this.update(spectatorSid, payload);
+          const povTeam = this.fogEnabled ? (this.spectatorViewTeams.get(spectatorSid) ?? 0) : 0;
+          if (povTeam > 0) {
+            const povPayload = this.fullFrameFromSnapshot(
+              this.buildTeamFoggedSnapshot(povTeam, visionCache),
+              stat,
+            );
+            if (historyHash) {
+              povPayload.replay = historyHash;
+            }
+            this.update(spectatorSid, povPayload);
+          } else {
+            this.update(spectatorSid, payload);
+          }
         }
       }
     }
@@ -820,13 +869,11 @@ export class GameEngine {
     return this.buildFullFramePayload(-1, gameEnd);
   }
 
-  /**
-   * 全量帧（is_diff=false）：观战者恒为全视野；参赛者按迷雾规则过滤，
-   * 用于断线重连换绑后的状态补发。
-   */
-  private buildFullFramePayload(p: number, gameEnd: boolean): UpdatePayload {
-    const snapshot = this.buildSnapshotFor(p, new Map<number, number[]>());
-
+  /** 由快照组装全量帧（is_diff=false）。 */
+  private fullFrameFromSnapshot(
+    snapshot: { grid_type: number[]; army_cnt: number[]; isolated: number[]; fog: number[] | null },
+    gameEnd: boolean,
+  ): UpdatePayload {
     const payload: UpdatePayload = {
       grid_type: snapshot.grid_type,
       army_cnt: snapshot.army_cnt,
@@ -842,6 +889,14 @@ export class GameEngine {
       payload.fog = snapshot.fog;
     }
     return payload;
+  }
+
+  /**
+   * 全量帧（is_diff=false）：观战者恒为全视野；参赛者按迷雾规则过滤，
+   * 用于断线重连换绑后的状态补发。
+   */
+  private buildFullFramePayload(p: number, gameEnd: boolean): UpdatePayload {
+    return this.fullFrameFromSnapshot(this.buildSnapshotFor(p, new Map<number, number[]>()), gameEnd);
   }
 
   addMove(playerSid: string, x: number, y: number, dx: number, dy: number, mode: MoveMode): void {
@@ -900,6 +955,42 @@ export class GameEngine {
 
   removeSpectator(sid: string): void {
     this.externalSpectatorSids.delete(sid);
+    this.spectatorViewTeams.delete(sid);
+  }
+
+  /**
+   * 观战视角切换（纯显示层，仅迷雾对局）：team > 0 时该连接改看指定队伍的
+   * 迷雾视野，team <= 0（或队伍不存在）恢复全图。存活参赛者的请求直接忽略，
+   * 防止借观战视角窥探他队视野；对局内玩家的迷雾计算不受影响。
+   * 切换后立即补发一帧全量帧（并同步 diff 基线），客户端无需等到下个 Tick。
+   */
+  setSpectatorView(sid: string, team: number): void {
+    if (!this.fogEnabled || this.isActiveParticipant(sid)) {
+      return;
+    }
+    const povTeam = Number.isInteger(team) && team > 0 && this.team.includes(team) ? team : 0;
+    if (povTeam > 0) {
+      this.spectatorViewTeams.set(sid, povTeam);
+    } else {
+      this.spectatorViewTeams.delete(sid);
+    }
+    const visionCache = new Map<number, number[]>();
+    const snapshot =
+      povTeam > 0
+        ? this.buildTeamFoggedSnapshot(povTeam, visionCache)
+        : this.buildSnapshotFor(-1, visionCache);
+    // 基线 = 最后实际下发的快照：座位上（观战席/已战败）的接收者后续 diff 帧
+    // 以此为基准，外部观战者本就只收全量帧、无基线。
+    const idx = this.playerSidToIndex.get(sid);
+    if (idx !== undefined) {
+      this.gridTypeLast[idx] = snapshot.grid_type;
+      this.armyCntLast[idx] = snapshot.army_cnt;
+      this.isolatedLast[idx] = snapshot.isolated;
+      if (snapshot.fog) {
+        this.fogLast[idx] = snapshot.fog;
+      }
+    }
+    this.update(sid, this.fullFrameFromSnapshot(snapshot, false));
   }
 
   /**
@@ -959,6 +1050,12 @@ export class GameEngine {
     this.playerSidToIndex.set(newSid, id);
     this.playerSids[id] = newSid;
     this.playerIds[id] = this.md5(newSid);
+    // 观战视角偏好随 sid 换绑迁移（观战席/已战败玩家重连后保留所选视角）。
+    const povTeam = this.spectatorViewTeams.get(oldSid) ?? 0;
+    if (povTeam > 0) {
+      this.spectatorViewTeams.delete(oldSid);
+      this.spectatorViewTeams.set(newSid, povTeam);
+    }
     this.disconnectedAt[id] = null;
     this.watching[id] = true;
     this.afkLastMoveTurn[id] = this.turn;
@@ -970,7 +1067,19 @@ export class GameEngine {
       player_ids: [...this.playerIds],
       general: this.generals[id],
     });
-    this.update(newSid, this.buildFullFramePayload(id, false));
+    // 换绑后补发全量帧：保留观战席/已战败玩家已选的观战视角；同时把 diff 基线
+    // 对齐到本次补发的快照（客户端 init_map 已重置棋盘，后续 diff 以此为准）。
+    const snapshot =
+      povTeam > 0 && this.fogEnabled
+        ? this.buildTeamFoggedSnapshot(povTeam, new Map<number, number[]>())
+        : this.buildSnapshotFor(id, new Map<number, number[]>());
+    this.gridTypeLast[id] = snapshot.grid_type;
+    this.armyCntLast[id] = snapshot.army_cnt;
+    this.isolatedLast[id] = snapshot.isolated;
+    if (snapshot.fog) {
+      this.fogLast[id] = snapshot.fog;
+    }
+    this.update(newSid, this.fullFrameFromSnapshot(snapshot, false));
     return true;
   }
 
@@ -1561,24 +1670,48 @@ export class GameEngine {
     return replayId;
   }
 
-  private finishGame(): void {
+  private finishGame(endMessage?: string): void {
+    if (this.finished) {
+      return;
+    }
+    this.finished = true;
     if (this.tickTimer) {
       clearTimeout(this.tickTimer);
       this.tickTimer = null;
     }
 
-    let winners = '';
-    for (let p = 0; p < this.playerSids.length; p += 1) {
-      if (this.pstat[p] !== LEFT_GAME) {
-        winners += winners.length > 0 ? `,${this.names[p]}` : this.names[p];
+    if (endMessage) {
+      this.sendSystemMessage(endMessage);
+    } else {
+      let winners = '';
+      for (let p = 0; p < this.playerSids.length; p += 1) {
+        if (this.pstat[p] !== LEFT_GAME) {
+          winners += winners.length > 0 ? `,${this.names[p]}` : this.names[p];
+        }
+      }
+      if (winners.length > 0) {
+        this.sendSystemMessage(`${winners} 获胜。`);
+      } else {
+        this.sendSystemMessage('本局结束，无人获胜。');
       }
     }
-    if (winners.length > 0) {
-      this.sendSystemMessage(`${winners} 获胜。`);
-    } else {
-      this.sendSystemMessage('本局结束，无人获胜。');
-    }
     this.endGame(this.gid, this.buildGameResult());
+  }
+
+  /**
+   * 部署更新宽限期清算：立即停表，以当前战况按正常终局路径结束对局——
+   * sendMap(true) 广播终局帧并存档回放（名次取 buildFinalRank 当前排行榜），
+   * finishGame 经 endGame 回调完成 rating 结算与房间清理。幂等。
+   */
+  async forceFinish(endMessage: string): Promise<void> {
+    if (this.finished || !this.tickTimer) {
+      return;
+    }
+    clearTimeout(this.tickTimer);
+    this.tickTimer = null;
+    await this.sendMap(true);
+    // 期间若有在途 Tick 已自然终局，finishGame 内的 finished 守卫保证只结算一次。
+    this.finishGame(endMessage);
   }
 }
 

@@ -3,10 +3,12 @@
 // 2) 迷雾房间：房主 change_game_conf { fog: true }，双人对局开始后校验
 //    客户端合并后的局面满足迷雾不变量——
 //    a. update 帧携带 fog 数组（全量帧长度 n*m）；
-//    b. fog=1 的格子 grid_type ∈ {201 未知占位, 204 沼泽} 且 army_cnt=0（视野外不泄真实地形）；
+//    b. fog=1 的格子 grid_type ∈ {200 空地, 201 山脉, 204 沼泽} 且 army_cnt=0（视野外不泄真实地形/归属）；
 //    c. 己方主城格 fog=0；视野内只能看到 1 座主城（自己的）；
 // 3) 对照房间：默认配置（不开迷雾）的 update 帧不得携带 fog 字段。
-// 4) Bot 房间（issue #51）：bot 进房后迷雾被强制关闭，且房主再次开启请求被拒绝。
+// 4) 观战视角：中途进房观战者默认全图；spectate_view 选定队伍后按该队伍迷雾视野下发
+//    （复用同一套迷雾不变量断言），存活参赛者的切换请求被忽略，切回 team=0 恢复全图。
+// 5) Bot 房间（issue #51）：bot 进房后迷雾被强制关闭，且房主再次开启请求被拒绝。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 90 秒。
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -229,16 +231,17 @@ function assertFogInvariants(client) {
     throw new Error(`${client.name}：迷雾对局的 update 帧缺少 fog 字段`);
   }
   let foggedCells = 0;
-  let visibleGenerals = 0;
   for (let idx = 0; idx < n * m; idx++) {
     const code = board.grid_type[idx];
-    if (code >= 100 && code < 150) visibleGenerals += 1;
     if (!board.fog[idx]) continue;
     foggedCells += 1;
-    if (code !== 201 && code !== 204) {
+    if (code !== 200 && code !== 201 && code !== 204) {
       throw new Error(
-        `${client.name}：迷雾格 idx=${idx} 泄漏了真实地形/归属信息（grid_type=${code}，应只下发 201 未知占位或 204 沼泽）`,
+        `${client.name}：迷雾格 idx=${idx} 泄漏了真实地形/归属信息（grid_type=${code}，应只下发 200 空地、201 山脉或 204 沼泽）`,
       );
+    }
+    if (code > 50 && code < 150) {
+      throw new Error(`${client.name}：迷雾格 idx=${idx} 泄漏了建筑身份（grid_type=${code}）`);
     }
     if (board.army_cnt[idx] !== 0) {
       throw new Error(`${client.name}：迷雾格 idx=${idx} 泄漏了兵力（army_cnt=${board.army_cnt[idx]}）`);
@@ -250,9 +253,6 @@ function assertFogInvariants(client) {
   const [gx, gy] = general;
   if (gx >= 0 && board.fog[gx * m + gy] !== 0) {
     throw new Error(`${client.name}：己方主城格被迷雾覆盖`);
-  }
-  if (visibleGenerals > 1) {
-    throw new Error(`${client.name}：视野内出现 ${visibleGenerals} 座主城，敌方主城未隐藏`);
   }
 }
 
@@ -275,6 +275,7 @@ async function main() {
   const tokenC = await signUser(store, env.jwtSecret, 'fog_c', 'fog-pass-3');
   const tokenD = await signUser(store, env.jwtSecret, 'fog_d', 'fog-pass-4');
   const tokenE = await signUser(store, env.jwtSecret, 'fog_e', 'fog-pass-5');
+  const tokenS = await signUser(store, env.jwtSecret, 'fog_s', 'fog-pass-6');
 
   const server = spawn('node', [serverEntry, '--port', String(port)], {
     cwd: rootDir,
@@ -308,6 +309,30 @@ async function main() {
   assertFogInvariants(a);
   assertFogInvariants(b);
   log('场景 1 通过：迷雾帧过滤满足全部不变量');
+
+  // 场景 1b：观战者视角切换——默认全图；spectate_view 选定队伍后按该队伍迷雾视野下发；
+  // 存活参赛者的切换请求被忽略；切回 0 恢复全图。
+  log('场景 1b：观战者选择玩家视角');
+  const s = createGameClient(baseUrl, { cookie: tokenS, room: ROOM_FOG, name: 'S', autoReady: false });
+  await waitFor(() => s.frames >= 2, 10_000, '观战者收到初始全图帧');
+  const countGenerals = (client) =>
+    client.board.grid_type.filter((code) => code >= 100 && code < 150).length;
+  const countFogged = (client) => client.board.fog.filter((v) => v).length;
+  if (!s.board.fogFieldSeen || countFogged(s) !== 0 || countGenerals(s) !== 2) {
+    throw new Error('观战者默认应为全图视野（fog 全 0、双方主城可见）');
+  }
+  s.socket.emit('spectate_view', { team: 1 });
+  await waitFor(() => countFogged(s) > 0, 10_000, '观战者切换到队伍 1 视角');
+  assertFogInvariants(s);
+  log('观战者队伍视角满足迷雾不变量');
+  a.socket.emit('spectate_view', { team: 2 });
+  await sleep(1200);
+  assertFogInvariants(a);
+  log('存活参赛者的视角切换请求已被忽略');
+  s.socket.emit('spectate_view', { team: 0 });
+  await waitFor(() => s.frames >= 2 && countFogged(s) === 0 && countGenerals(s) === 2, 10_000, '观战者切回全图');
+  log('场景 1b 通过：观战视角可切换且不泄漏、可恢复全图');
+  s.socket.disconnect();
   a.socket.disconnect();
   b.socket.disconnect();
 
