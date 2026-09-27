@@ -144,6 +144,15 @@ function decide(state, params, guard) {
   const cutoffAction = cutoff ? { kind: 'attack', ...cutoff.move } : null;
   const advanceWinsBuilding = advance && state.grid[advance.dx * state.m + advance.dy] > 50 &&
     state.grid[advance.dx * state.m + advance.dy] < 150;
+  // 背水一战最高优先（学自 _E_ 的胜局：rjWd t302 / jlms t346 / bIEK t514，
+  // 400+ 兵堆压向皇冠的 5+ tick 里，旧策略因「补不齐缺口」零防守反应，
+  // 照常筹资/建设/补给，皇冠被一击斩首）。补不齐也要每 tick 送最强一路——
+  // 皇冠陷落即终局，每拖一 tick 都可能有援军进入窗口。
+  // 唯一例外：本 tick 能反拆对方皇冠/指挥所（对攻抢先，拆了对面就赢赛跑）。
+  if (defense?.lastStand && !advanceWinsBuilding) {
+    const stand = attack(defense.move, true);
+    if (allowed(stand, true)) return take(stand, 'defense-last-stand');
+  }
   // 截断的优先级仅次于「本 tick 能拆敌方皇冠/指挥所」的推进：
   // urgent（偷家贴脸或冻住规模很大）时无条件抢占；
   // 防守场景（对手正在威胁我方皇冠/生命，defense 有动作）下，截断也压过普通推进与调兵。

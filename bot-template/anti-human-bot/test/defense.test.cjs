@@ -67,3 +67,29 @@ test('防御模块不修改输入局面', () => {
   chooseDefense(s);
   assert.equal(JSON.stringify(s), before);
 });
+
+test('补不齐缺口时背水一战：送最强一路部分增援，不再零反应', () => {
+  // _E_ 胜局根因（rjWd t302 / jlms t346）：400+ 兵堆压向皇冠，没有任何一路
+  // 能补齐缺口，旧实现返回 null → bot 随后几 tick 照常筹资/建设，皇冠零增援陷落。
+  const s = lane({ foeDistance: 3, rearPile: 60 }); // 200 敌堆，最多只能送约 59 兵
+  const d = chooseDefense(s);
+  assert.ok(d, '补不齐也不能零反应');
+  assert.equal(d.lastStand, true);
+  assert.equal(d.urgent, true);
+  assert.deepEqual([d.move.x, d.move.y], [1, 1]); // 最强一路 = 后方 60 兵堆
+  assert.match(d.reason, /背水一战/);
+});
+
+test('反应窗口外的远威胁不触发背水一战，交给补给管线预置兵力', () => {
+  // 敌堆距皇冠 7 tick（> defenseHorizon 5）：提前锁死全部动作反而拖垮运营。
+  const s = { n: 1, m: 12, turn: 600, playerId: 1,
+    grid: [101, 1, 1, 1, 1, 1, 1, 2, 201, 201, 201, 102],
+    army: [30, 5, 5, 5, 5, 5, 300, 500, 0, 0, 0, 100],
+    isolated: Array(12).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  assert.equal(chooseDefense(s), null);
+});
+
+test('零星碎兵不打背水一战：贡献不足缺口一成的增援是白送', () => {
+  const s = lane({ foeDistance: 3, rearPile: 12 }); // 最多送约 11 兵，不足缺口 10%
+  assert.equal(chooseDefense(s), null);
+});
