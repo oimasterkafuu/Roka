@@ -19,12 +19,47 @@ function architecture(state, params = {}) {
 function buildArchitecture(state, params = {}) {
   const p = resolveParams(params);
   const ctx = createContext(state, params);
-  if (!ctx) return { assess: () => Object.freeze({ crownSafe: false, foundationSafe: false, towerSafe: false, tactical: false, complete: false, reserve: Infinity, incoming: Infinity, distance: 0, funding: 0, anchorGroups: 0 }), neighbors: [], own: () => false, count: () => 0, unknown: () => false, owners: [], params: p, race: null };
+  if (!ctx) return { assess: () => Object.freeze({ crownSafe: false, foundationSafe: false, towerSafe: false, tactical: false, complete: false, reserve: Infinity, incoming: Infinity, distance: 0, funding: 0, anchorGroups: 0 }), neighbors: [], own: () => false, count: () => 0, unknown: () => false, owners: [], params: p, race: null,
+    buildFund: () => 51, locationRisk: () => 0, frontStable: () => false };
   const { size, me, owners, grid, army, neighbors, own, count, known } = ctx;
   const race = ctx.race;
   const cache = new Map();
   const rejected = Object.freeze({ crownSafe: false, foundationSafe: false, towerSafe: false,
     tactical: false, complete: false, reserve: Infinity, incoming: Infinity, distance: 0, funding: 0, anchorGroups: 0 });
+
+  // ── 建造位置分档（用户 2026-09-27 硬方针）────────────────────────────────
+  // 位置判断不按出生点（迁都很常见，出生点早就不是参照系），按现场因素：
+  // 「该格距最近敌方压力的跳数」与「局部威胁场」综合评估这是大后方还是前线。
+  // locationRisk ∈ [0,1]：0 = 大后方，1 = 前线。威胁极大（≥buildDesperateThreat，
+  // 敌人已打穿到腹地）时回落 0——退无可退，按大后方阈值尽快建造。
+  const riskCache = new Map();
+  function locationRisk(i) {
+    if (riskCache.has(i)) return riskCache.get(i);
+    const dist = ctx.enemyDistance[i];
+    const lo = p.buildFrontDist, hi = Math.max(lo + 1, p.buildRearDist);
+    const distRisk = dist < 0 ? 0 : dist <= lo ? 1 : dist >= hi ? 0 : (hi - dist) / (hi - lo);
+    const spot = ctx.pressure(i, { radius: p.buildThreatRadius, decay: p.buildPressureDecay, ticks: p.buildThreatRadius });
+    const risk = spot.total >= p.buildDesperateThreat ? 0
+      : Math.max(distRisk, Math.min(1, spot.total / Math.max(1, p.buildFundThreat)));
+    riskCache.set(i, risk);
+    return risk;
+  }
+  // 建造资金阈值分档：大后方 rearBuildFund（约 100，一次集满可连续建造两次），
+  // 前线 frontBuildFund（约 150，风险高留足余量），中间按危险度线性过渡。
+  // 下限 51 是引擎硬门槛（建造花 50 且至少留 1 兵）。
+  function buildFund(i) {
+    return Math.max(51, Math.round(p.rearBuildFund + (p.frontBuildFund - p.rearBuildFund) * locationRisk(i)));
+  }
+  // 前线稳定格：前线区域内（贴脸不算、纯后方不算）但威胁场低、我方局部兵力
+  // 占优——「相对稳定下来」的前线位置，应更积极地建造（前线迁都：兵源/产能前移）。
+  function frontStable(i) {
+    if (!own(i)) return false;
+    const dist = ctx.enemyDistance[i];
+    if (dist < 2 || dist >= p.buildRearDist) return false;
+    const spot = ctx.pressure(i, { radius: p.buildThreatRadius, decay: p.buildPressureDecay, ticks: p.buildThreatRadius });
+    if (spot.total > p.frontStableThreat) return false;
+    return ctx.support(i, { radius: 2 }).total >= spot.total * p.frontStableMargin;
+  }
 
   function assess(i) {
     if (cache.has(i)) return cache.get(i);
@@ -83,6 +118,7 @@ function buildArchitecture(state, params = {}) {
     cache.set(i, result);
     return result;
   }
-  return { assess, neighbors, own, count, unknown: (i) => !known[i], owners, params: p, race, context: ctx };
+  return { assess, neighbors, own, count, unknown: (i) => !known[i], owners, params: p, race, context: ctx,
+    buildFund, locationRisk, frontStable };
 }
 module.exports = { architecture };

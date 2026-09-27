@@ -222,7 +222,17 @@ function createFrontline(state, params = {}) {
       // 而不是露出新的单格突出（侧翼不露单格突出，与画圈推进同向）。
       const widenBonus = deepPush && mates.tiles >= 2 ? 20 : 0;
       const lingerPenalty = (rear >= 0 ? Math.max(0, 4 - rear) : 4) * 8;
-      const score = value + kill + exposureScore + supportBonus + widenBonus - lingerPenalty +
+      // ── 推进方向纪律（用户 2026-09-27 硬方针）：不要大范围涂色 ────────────
+      // 方向权重向「敌方皇冠/核心方向」强倾斜：目标格比源点更靠近敌核心
+      // （crownDistance 严格下降）加分，侧向/倒退减分；与进攻主线无关的侧翼
+      // 中立涂色格再按距敌核心远近大幅降权——离我家远、离敌家也远的中间地带
+      // 最不值钱，兵力向敌人家附近逼近、深入推进，而不是横向摊面积。
+      const coreFrom = ctx.crownDistance[a], coreTo = ctx.crownDistance[b];
+      const towardCore = coreFrom >= 0 && coreTo >= 0 ? Math.sign(coreFrom - coreTo) : 0;
+      let directionScore = towardCore * p.pushDirectionWeight;
+      if (kind === 'neutral' && towardCore <= 0 && coreTo >= 0)
+        directionScore -= Math.ceil(p.flankPaintPenalty * Math.min(1, coreTo / Math.max(1, p.paintDiscardDist)));
+      const score = value + kill + exposureScore + supportBonus + widenBonus - lingerPenalty + directionScore +
         Math.min(arrive, 250) * 0.3 + Math.min(left, 400) * 0.05 - (exchange ? 30 : 0);
       const reason = isCrown ? `攻冠：出兵${push}，留守${left}`
         : isCity ? `攻指挥所：出兵${push}，留守${left}`
