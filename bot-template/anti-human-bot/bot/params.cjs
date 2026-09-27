@@ -75,11 +75,18 @@ const DEFAULT_PARAMS = Object.freeze({
   // 回落大后方阈值——都打到大后方了没别的选择，必须尽快建造。
   rearBuildFund: 100, frontBuildFund: 150, buildFrontDist: 5, buildRearDist: 12,
   buildFundThreat: 60, buildDesperateThreat: 200,
-  // 前线迁都（用户 2026-09-27 硬方针）：前线区域（敌距 <buildRearDist）内威胁场
-  // ≤frontStableThreat 且我方局部兵力 ≥frontStableMargin 倍于威胁的格子算「稳定
-  // 前线」——稳定下来后更积极地建造（可作经济工地并获 frontBaseBonus 选址加成，
-  // 越靠前加成越多），把主要兵源/新皇冠聚集到前线。
-  frontStableThreat: 12, frontStableMargin: 2, frontBaseBonus: 30,
+  // 前线迁都（用户 2026-09-28 回调：后方优先，缓缓前推）：前线区域（敌距
+  // <buildRearDist）内威胁场 ≤frontStableThreat 且我方局部兵力
+  // ≥frontStableMargin 倍于威胁的格子算「稳定前线」——产能富余（后方皇冠群
+  // 成型，crowns ≥ frontBaseMinCrowns）后，稳定前线格才与大后方安全格同等
+  // 可作工地并获 frontBaseBonus 选址加成（越靠前加成越多），把主要兵源、
+  // 新皇冠缓缓聚集到前线；产能不足时工地权重回到后方安全区。
+  frontStableThreat: 12, frontStableMargin: 2, frontBaseBonus: 10, frontBaseMinCrowns: 3,
+  // 开局提速（用户 2026-09-28 回调）：前 earlyBuildTurns 个 tick 内阈值分档
+  // 整体后移——buildFrontDist/buildRearDist 按 earlyDistScale 收缩（开局
+  // 「中间档」不抬高到拖慢建造）、前线阈值按 earlyFrontFundScale 下调，
+  // 保证开局就用得上、用得早；升级指挥所仍维持 51。
+  earlyBuildTurns: 60, earlyDistScale: 0.6, earlyFrontFundScale: 0.66,
   // 集兵树形化（用户 2026-09-27 硬方针）：缺口 ≥bulkPullMin 时进入树形汇聚调度——
   // 最远的子树先动（逐级向目标汇聚，远端与近端同时在路上，避免一条链式长跑）；
   // 深后方（≥supplyTreeDepth 跳）大堆一次性整批拉出，不被近源小股插队。
@@ -122,6 +129,8 @@ const PARAM_RANGES = Object.freeze({
   rearBuildFund: [51, 300], frontBuildFund: [51, 400], buildFrontDist: [2, 12], buildRearDist: [4, 30],
   buildFundThreat: [10, 400], buildDesperateThreat: [50, 2000],
   frontStableThreat: [0, 200], frontStableMargin: [0, 6], frontBaseBonus: [0, 200],
+  frontBaseMinCrowns: [0, 20],
+  earlyBuildTurns: [0, 200], earlyDistScale: [0.2, 1], earlyFrontFundScale: [0.2, 1],
   supplyTreeDepth: [2, 12], bulkPullMin: [20, 1000],
 
 });

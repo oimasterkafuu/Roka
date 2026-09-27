@@ -29,6 +29,8 @@ function guaranteedAction(state, ctx, params) {
   const blocked = (a, b) => params.blockedEdges?.has(`${a}:${b}`);
   const coord = (i) => ({ x: Math.floor(i / ctx.m), y: i % ctx.m });
   // 1) 后方建皇冠：不贴敌的安全格，攒够 50 兵就开工（指挥所先升级，其次新建）。
+  //    开局提速（用户 2026-09-28 回调）：前 earlyBuildTurns 个 tick 内不贴敌
+  //    即开工，不让「大后方 100 的档位」拖慢第一座建造——开局就用得上、用得早。
   let foundSite = -1, newSite = -1;
   for (let i = 0; i < size; i++) {
     if (!own(i) || count(i) < 50) continue;
