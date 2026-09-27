@@ -46,11 +46,7 @@ function crownTarget(land, turn, p, state) {
   let safeLand = 0, surplus = 0;
   for (let i = 0; i < ctx.size; i++) {
     if (!ctx.own(i)) continue;
-    // maze 等窄图里 enemyDistance>=5 的格子几乎没有，余兵全锁在少数大堆上，
-    // 旧公式会永远算不出「还建得起」（EBS5 锚点锁死 19 座 vs 对手 68 座的根因）。
-    // 放宽到 >=4，并把大堆上超出守备需要的存量也计入建造潜力。
-    const dist = ctx.enemyDistance[i];
-    const far = dist < 0 || dist >= 4;
+    const far = ctx.enemyDistance[i] < 0 || ctx.enemyDistance[i] >= 5;
     if (!far) continue;
     safeLand++;
     surplus += Math.max(0, ctx.army[i] - 4);
@@ -90,8 +86,7 @@ function chooseBuild(state, move, params = {}) {
     land++;
     if (grid[i] === me + 100) crowns++;
     if (grid[i] === me + 50) cities++;
-    // 触发线 51（引擎硬门槛 50 + 至少留 1 兵），满足即进候选，不再等增援凑余量。
-    if ((grid[i] === me || grid[i] === me + 50) && count(i) >= 51) candidates.push(i);
+    if ((grid[i] === me || grid[i] === me + 50) && count(i) >= (race.behind ? 40 : 50)) candidates.push(i);
   }
   const target = crownTarget(land, turn, p, state);
   const unfinished = [];

@@ -53,16 +53,9 @@ function buildArchitecture(state, params = {}) {
     const weight = p.threatWeight / defending;
     const reserve = safety + spot.total * weight;
     const afterUpgrade = count(i) - 50;
-    // 触发线 = 引擎真实门槛 + 留 1 兵：建造/升级花费 50（reference/src/game-engine.ts
-    // chkBuildCity/chkUpgradeCrown 要求执行时兵力 >= 50），51 兵即可开工，花完至少留 1 兵，
-    // 新建的 0 兵建筑下一 tick 会被顺手拆掉。**不再叠加 reserve / foundationPremium 等
-    // 策略余量**——那会让 52 兵的格子继续等增援，白耽误一个回合。
-    const affordable = count(i) >= 51;
-    // 防守性检查（保留，不是经济余量）：建完只剩 afterUpgrade 兵，若贴脸敌军本 tick
-    // 就能反超夺回，这 50 兵等于白送，不建。远处衰减威胁只进评分、不做门槛。
-    const crownSafe = !uncertain && affordable && afterUpgrade >= spot.adj;
-    // 新建与升级同一条触发线：满足即建，不再要求 50+premium+reserve 的额外余量。
-    const foundationSafe = crownSafe;
+    const crownSafe = !uncertain && afterUpgrade >= reserve;
+    const premium = race.behind ? 0 : p.foundationPremium;
+    const foundationSafe = crownSafe && count(i) >= 50 + premium + reserve;
     // 减损塔：只有切断候选格会分裂出第二个带建筑的连通块时才有独立价值。
     const seen = new Uint8Array(size); seen[i] = 1;
     let anchorGroups = 0;

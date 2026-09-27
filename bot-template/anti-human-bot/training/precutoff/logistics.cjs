@@ -104,19 +104,12 @@ function chooseLogistics(state, move, build, params = {}) {
     let best = null, rear = 0;
     for (const from of lands) {
       if (d[from] <= 0 || neighbors[from].some(enemy)) continue;
-      // 工地只保留「开工额度」（51，到位即建），超出的存量照常供军事运输——
-      // 整格豁免曾让 187 兵的大堆自证为工地后趴窝 35 回合（uzsTrD 复盘根因）。
-      const earmark = !funding && economySiteTarget === from ? economyGoal(from) : 0;
-      if (count(from) - 1 <= earmark) continue;
-      rear += Math.max(0, count(from) - 1 - earmark);
+      if (!funding && economySiteTarget === from) continue;   // 工地自己不吃自己的存量
+      rear += Math.max(0, count(from) - 1);
       for (const to of neighbors[from]) {
         if (!own(to) || d[to] !== d[from] - 1 || params.blockedEdges?.has(`${from}:${to}`)) continue;
         let amount = pushed(from, to), mode = 0;
         if (amount <= 0) continue;
-        if (earmark) {
-          amount = Math.min(amount, count(from) - earmark);
-          if (amount <= 0) continue;
-        }
         if (grid[from] === me + 100) {
           const keep = safe(from) && from !== economySiteTarget
             ? Math.max(4, Math.round(safety / 2))
@@ -146,18 +139,16 @@ function chooseLogistics(state, move, build, params = {}) {
     if (crowns >= targetCrowns) { memo.economySite = -1; return -1; }
     const candidates = lands.filter((i) => safe(i) && economicSite(i) &&
       (grid[i] === me + 50 || (grid[i] === me && crowns + cities < targetCrowns)));
-    // 驻军只按封顶 60 计入：选址看的是位置，不是「这格已经堆了多少兵」——
-    // 全额计入会让大兵堆自证为工地，再把整格 earmark 成禁地（uzsTrD 复盘根因）。
-    const clusterScore = (i) => clusterValue(state, i) + Math.min(count(i), 60) +
+    const clusterScore = (i) => clusterValue(state, i) + count(i) +
       neighbors[i].reduce((s, j) => s + (own(j) && (grid[j] === me + 100 || grid[j] === me + 50) ? 12 : 0), 0);
     candidates.sort((a, b) => (grid[b] === me + 50) - (grid[a] === me + 50) || clusterScore(b) - clusterScore(a) || a - b);
     memo.economySite = candidates.length ? candidates[0] : -1;
     return memo.economySite;
   }
   function economyGoal(target) {
-    // 筹资目标 = 触发线 51：到位后 chooseBuild 立即开工，不再为 reserve/premium 余量多筹。
-    // 工地的选址安全由 economicSite/assess 的贴脸防守检查负责，与筹资目标无关。
-    return 51;
+    const risk = architecturePlan.assess(target);
+    const base = grid[target] === me + 50 ? 50 : 50 + (race.behind ? 0 : p.foundationPremium);
+    return base + (Number.isFinite(risk.reserve) ? risk.reserve : safety);
   }
   function economyAction() {
     const buildNow = chooseBuild(state, null, p);

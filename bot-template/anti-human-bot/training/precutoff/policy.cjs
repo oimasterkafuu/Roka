@@ -11,7 +11,7 @@ const { chooseCampaign } = require('./campaign.cjs');
 const { chooseRescue } = require('./rescue.cjs');
 const { createMovementGuard } = require('./movement-guard.cjs');
 const { createFrontline } = require('./frontline.cjs');
-const { chooseCutoff, chooseNeckGuard } = require('./cutoff.cjs');
+const { chooseCutoff } = require('./cutoff.cjs');
 const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
 
@@ -142,17 +142,7 @@ function decide(state, params, guard) {
   const cutoffAction = cutoff ? { kind: 'attack', ...cutoff.move } : null;
   const advanceWinsBuilding = advance && state.grid[advance.dx * state.m + advance.dy] > 50 &&
     state.grid[advance.dx * state.m + advance.dy] < 150;
-  // 截断的优先级仅次于「本 tick 能拆敌方皇冠/指挥所」的推进：
-  // urgent（偷家贴脸或冻住规模很大）时无条件抢占；
-  // 防守场景（对手正在威胁我方皇冠/生命，defense 有动作）下，截断也压过普通推进与调兵。
-  const defenseScenario = Boolean(defense?.move);
-  if (cutoff && !advanceWinsBuilding && (cutoff.urgent || defenseScenario) &&
-      allowed(cutoffAction)) return take(cutoffAction, 'cutoff');
-  // 脖子纪律：我方割点本 tick 就能被敌方大堆打穿（一整段兵力将变孤军）时，
-  // 补兵/回缩优先于普通推进与调兵——连通被切和皇冠被端一样是生存问题。
-  const neck = chooseNeckGuard(state, constrained);
-  const neckAction = neck ? { kind: 'attack', ...neck.move } : null;
-  if (neck && !advanceWinsBuilding && allowed(neckAction)) return take(neckAction, 'neck-guard');
+  if (cutoff?.urgent && !advanceWinsBuilding && allowed(cutoffAction)) return take(cutoffAction, 'cutoff');
   // 攻冠的推进永远最优先；但普通推进不能让位于「家里皇冠正被吃掉」。
   const advanceTakesCrown = advanceWinsBuilding;
   if (tuning.defensePriority >= 1 && defense && !advanceTakesCrown && !defense.urgent) {
