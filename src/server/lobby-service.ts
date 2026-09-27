@@ -75,6 +75,13 @@ class LobbyService {
   /** 对局全部结束时触发（例如让推迟中的自动更新继续执行）。 */
   onGameEnded?: () => void;
 
+  /**
+   * 部署更新排队状态：webhook 已触发自动更新但还有对局在跑。
+   * 排队期间禁止开新局（room_update 携带 update_queued，前端禁用开始按钮），
+   * 进行中的对局页面显示「系统即将更新」横幅。
+   */
+  private updateQueued = false;
+
   constructor(
     private readonly replayStore: ReplayStore,
     private readonly userStore: UserStore,
@@ -112,6 +119,48 @@ class LobbyService {
 
   hasActiveGames(): boolean {
     return this.gameInstances.size > 0;
+  }
+
+  isUpdateQueued(): boolean {
+    return this.updateQueued;
+  }
+
+  /**
+   * 切换部署更新排队状态：广播 deploy_queued 事件（对局页显示「系统即将更新」
+   * 横幅）并向所有房间重发 room_update（携带 update_queued，前端禁用开始按钮）。
+   * 进入排队时向有对局的房间发送提示消息，说明宽限期清算规则。
+   */
+  setUpdateQueued(io: SocketIOServer, queued: boolean, graceMs?: number): void {
+    if (this.updateQueued === queued) {
+      return;
+    }
+    this.updateQueued = queued;
+    io.emit('deploy_queued', { queued });
+    for (const [gid, players] of this.lobbyPlayers.entries()) {
+      if (players.length === 0) {
+        continue;
+      }
+      if (queued && this.isLobbyGameRunning(gid)) {
+        const graceSeconds = Math.round((graceMs ?? 120_000) / 1000);
+        this.sendLobbySystemMessage(
+          io,
+          this.getLobbyVal(gid),
+          `系统即将更新，${graceSeconds} 秒内未结束的对局将按当前名次结算。`,
+        );
+      }
+      this.emitRoomUpdate(io, gid);
+    }
+  }
+
+  /**
+   * 部署更新宽限期到期（webhook-updater 回调）：清算所有残余对局——按当前
+   * 排行榜名次走正常终局路径结算（回放存档 + rating + 房间清理由各对局的
+   * endGame 回调完成），随后 notifyGameEnded 接力开始更新重启。
+   */
+  settleActiveGamesForUpdate(endMessage: string): void {
+    for (const game of this.gameInstances.values()) {
+      void game.forceFinish(endMessage).catch(() => undefined);
+    }
   }
 
   getLobbyVal(gid: string): string {
@@ -311,6 +360,7 @@ class LobbyService {
       map_mode: conf.map_mode,
       map_size: conf.map_size === 'large' ? 'large' : 'normal',
       in_game: this.isLobbyGameRunning(gid),
+      update_queued: this.updateQueued,
       players: roomPlayers,
       ready,
       need,
@@ -436,6 +486,10 @@ class LobbyService {
   }
 
   async startGame(io: SocketIOServer, lobbyId: string): Promise<void> {
+    // 部署更新排队期间禁止开新局（含宽限期内）。
+    if (this.updateQueued) {
+      return;
+    }
     const conf = this.lobbyConfig.get(lobbyId);
     const players = this.lobbyPlayers.get(lobbyId);
     if (!conf || !players || players.length === 0) {
@@ -567,6 +621,12 @@ class LobbyService {
       return;
     }
     if (this.isLobbyGameRunning(gid)) {
+      this.emitRoomUpdate(io, gid);
+      return;
+    }
+    // 部署更新排队期间禁止开新局：已就绪状态保留但不触发开局，
+    // 前端经 room_update 的 update_queued 禁用开始按钮。
+    if (this.updateQueued) {
       this.emitRoomUpdate(io, gid);
       return;
     }

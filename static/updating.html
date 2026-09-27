@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roka - 正在更新</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f3f5f9;
+        font-family: 'Quicksand', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        color: #253042;
+      }
+      .box {
+        text-align: center;
+        padding: 40px;
+      }
+      h1 {
+        font-size: 28px;
+        margin: 0 0 12px;
+      }
+      p {
+        font-size: 15px;
+        color: #6b7686;
+        margin: 6px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h1>正在更新</h1>
+      <p>系统正在部署新版本，请稍等。</p>
+      <p>服务恢复后页面会自动刷新，无需手动操作。</p>
+    </div>
+    <script>
+      // 轮询首页探测服务是否恢复；恢复后刷新当前地址（SW 会把导航交回真实页面）。
+      setInterval(function () {
+        fetch('/', { cache: 'no-store' })
+          .then(function (response) {
+            if (response.ok) {
+              location.reload();
+            }
+          })
+          .catch(function () {
+            // 服务尚未恢复，继续等待下一轮轮询。
+          });
+      }, 3000);
+    </script>
+  </body>
+</html>
