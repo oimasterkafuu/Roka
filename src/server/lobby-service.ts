@@ -260,6 +260,7 @@ class LobbyService {
     const roomVal = this.getLobbyVal(lobbyId);
     io.sockets.sockets.get(sid)?.leave(`game_${roomVal}`);
     const uid = this.leaveLobby(sid, lobbyId);
+    this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     io.to(`sid_${sid}`).emit('room_kick', {});
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
@@ -541,6 +542,8 @@ class LobbyService {
               member.ready = false;
             }
           }
+          // 对局结束回到准备阶段后，若宽限期清理使房间只剩 bot，同样重置设置。
+          this.resetLobbyConfigIfOnlyBots(io, lobby);
           this.emitRoomUpdate(io, lobby);
         }
 
@@ -651,6 +654,7 @@ class LobbyService {
     leaveRoom(`game_${roomVal}`);
 
     const uid = this.leaveLobby(sid, lobbyId);
+    this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
       this.sendLobbySystemMessage(io, roomVal, `${uid} 离开了自定义房间。`);
@@ -736,6 +740,9 @@ class LobbyService {
       return;
     }
     const uid = this.leaveLobby(sid, lobbyId);
+    // 宽限期在对局进行中到期时 resetLobbyConfigIfOnlyBots 内部会按
+    // isLobbyGameRunning 跳过，对局结束后再由 endGame 路径判定。
+    this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
       this.sendLobbySystemMessage(io, gameId, `${uid} 离开了自定义房间。`);
@@ -765,6 +772,30 @@ class LobbyService {
       this.emitRoomUpdate(io, lobbyId);
     }
     return true;
+  }
+
+  /**
+   * 机器人房间只剩 bot 时自动重置房间设置（issue 见 spec-lobby-reset）：
+   * 准备阶段（对局未开始）的房间人员变化后调用。剩余成员全部带 bot 标记
+   * （含观战席——观战的人类仍算人类占用，不触发重置）且至少有一人时，
+   * 把可编辑设置整体重置为新建房间的默认值（复用 defaultLobbyConfig，
+   * 与建房同一默认值来源，含重新随机地图种子）；bot 留在房内继续待命。
+   * 普通房间人走光后成员列表为空，不触发本逻辑（下次进房时 joinLobby
+   * 本就会按新房间重建默认配置）；对局进行中由调用方保证不触发。
+   */
+  private resetLobbyConfigIfOnlyBots(io: SocketIOServer, lobbyId: string): void {
+    if (this.isLobbyGameRunning(lobbyId)) {
+      return;
+    }
+    const players = this.lobbyPlayers.get(lobbyId);
+    if (!players || players.length === 0) {
+      return;
+    }
+    if (players.some((player) => player.bot !== true)) {
+      return;
+    }
+    this.lobbyConfig.set(lobbyId, this.defaultLobbyConfig());
+    this.sendLobbySystemMessage(io, this.getLobbyVal(lobbyId), '房间内只剩机器人，房间设置已重置为默认值。');
   }
 
   private defaultLobbyConfig(): LobbyConfig {
