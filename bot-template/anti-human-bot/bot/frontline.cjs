@@ -148,11 +148,16 @@ function createFrontline(state, params = {}) {
     // 对方完全无威胁：源点两跳内没有能反打的敌兵，且可见敌军总量还不及这一路源头——
     // 没有什么要守的，深入也直接全兵。
     const noThreat = src.total === 0 && ctx.race.enemyArmy < A;
+    // 浓缩突击豁免（学自 _E_ 的单堆全冲）：决定性大堆（≥megaStackMin 且压过目标局部
+    // 防守 assaultMargin 倍）深入敌境时仍维持全兵优先——每步只派一半会让大堆在抵达
+    // 皇冠前自剥殆尽。全冲仍受 allInSafe 闸门（新占格兵力须压得住源点旁敌军）约束，
+    // 全冲后走廊脖子的截断风险由 neck-guard 模块兜底；普通深入推进的半兵方针不变。
+    const decisiveStack = A >= p.megaStackMin && A >= p.assaultMargin * (defense + tgt.adj);
     // 深入且有威胁时能半兵就半兵（像正常扩散铺路一样，半兵够拿下目标格就只派一半，
     // 留一半守原地）；半兵攻不进去时按顺序落到全兵——「半兵推不动还硬推」被 arrive
     // 闸门拦住。常规推进（非深入）维持第二轮「全兵优先」：按 [全冲, 半兵, 智能分兵]
     // 顺序取第一个通过留守/预算闸门的模式，「兵够却分多次小勺推同一目标」视为 bug。
-    const deepHalf = deepPush && !noThreat;
+    const deepHalf = deepPush && !noThreat && !decisiveStack;
     const modes = deepHalf ? [1, 2, 0] : [2, 1, 0];
     let best = null;
     for (const mode of modes) {
