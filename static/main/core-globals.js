@@ -21,6 +21,14 @@ const replay_text_decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder
 // 回放视角：0 = 全知（默认），>0 = 该队伍编号（仅迷雾对局的回放可切换）。
 var replay_view_team = 0;
 
+// 实时观战视角（仅迷雾对局）：0 = 全图（默认），>0 = 所选玩家的队伍编号，
+// 服务端按该队伍可见性下发迷雾帧（语义对齐回放视角 replay_view_team）。
+var spectate_view_team = 0;
+// 当前对局是否为迷雾局：由 update 帧是否携带 fog 字段判定（无迷雾局不显示视角选择）。
+var fog_mode = false;
+// 自己在房间里的队伍（0 = 观战席），由 room_update 维护，用于判定观战视角资格。
+var self_team = 0;
+
 function normalizeMapTokenInput(token) {
   return String(token || '').slice(0, map_token_max_length);
 }

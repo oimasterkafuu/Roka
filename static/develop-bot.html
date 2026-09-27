@@ -618,6 +618,16 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>return_room</code> / <code>leave</code></th>
             <td>退出对局返回房间。服务端会回 <code>left</code>。</td>
           </tr>
+          <tr>
+            <th><code>spectate_view</code></th>
+            <td>
+              观战视角切换（仅迷雾对局的观战者；存活参赛者请求被忽略）。<code>{ team }</code>：
+              <code>team &gt; 0</code> 时改按该队伍的可见性下发迷雾帧（与该队伍玩家所见一致），<code
+                >team &lt;= 0</code
+              >
+              恢复全图。切换后服务端立即补发一帧全量帧。
+            </td>
+          </tr>
         </table>
       </section>
 
