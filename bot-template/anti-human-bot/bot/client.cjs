@@ -2,15 +2,22 @@
 const { BoardState } = require('./state.cjs');
 const { performance } = require('node:perf_hooks');
 const { chooseAction, getDecisionDiagnostics } = require('./policy.cjs');
+const { createTrashTalk } = require('./trash-talk.cjs');
+const { createSurrenderJudge } = require('./surrender.cjs');
+// 与服务端 src/types.ts 的 MAX_TEAMS 保持一致。
+const MAX_TEAMS = 16;
 function attachBot(socket, {
   roomName = 'bot', log = console.log, now = Date.now, params = {},
-  preferredTeam = 1, autoReady: initialAutoReady = false,
+  preferredTeam = 2, autoReady: initialAutoReady = false,
   setInterval: schedule = setInterval, clearInterval: cancel = clearInterval,
 } = {}) {
   let clientId = '', room = null, board = null, sentTurn = -1, returning = false;
   let currentRoom = roomName, pendingRoom = null, running = false, closed = false;
   let autoReady = initialAutoReady === true, cancelReady = false, readyAt = Infinity, summary = '', lastLobbyCommand = -Infinity;
   let metrics = { count:0, sent:0, idle:0, ms:0, max:0, gaps:0 }, previousTurn = null;
+  let trashTalk = null, surrenderJudge = null; // 每局的人格模块（init_map 重建）
+  // 固定加入的首选队伍（默认 2 队）；非法输入回退 2。
+  const homeTeam = Number.isInteger(preferredTeam) && preferredTeam >= 1 && preferredTeam <= MAX_TEAMS ? preferredTeam : 2;
   const handlers = {};
   const on = (name, fn) => { handlers[name] = fn; socket.on(name, fn); };
   function resetIntermission() {
@@ -45,7 +52,11 @@ function attachBot(socket, {
     if (!data || !Array.isArray(data.players) || typeof data.in_game !== 'boolean') return;
     if (!data.in_game && (!room || running)) resetIntermission();
     // Retain only operational fields; never read or retain map_token/auth tokens.
-    room = { in_game: data.in_game, players: data.players.map(({ sid, uid, team, ready }) => ({ sid, uid, team, ready })), need: data.need };
+    // bot 标记来自服务端 room_update.players[]（bot: true），用于识别人类成员。
+    room = {
+      in_game: data.in_game, allow_team: data.allow_team === true, need: data.need,
+      players: data.players.map(({ sid, uid, team, ready, bot }) => ({ sid, uid, team, ready, bot: bot === true })),
+    };
     running = data.in_game;
     if (!running) { board = null; returning = false; }
     const self = room.players.find((p) => p.sid === clientId);
@@ -82,6 +93,7 @@ function attachBot(socket, {
   on('init_map', (data) => {
     running = true; readyAt = Infinity;
     metrics = { count:0, sent:0, idle:0, ms:0, max:0, gaps:0 }; previousTurn = null;
+    trashTalk = createTrashTalk(params); surrenderJudge = createSurrenderJudge(params);
     try { board = new BoardState(data, clientId); sentTurn = -1; returning = false; log(`[对局] 初始化 ${board.n}x${board.m}，玩家 ${board.playerId}`); }
     catch { board = null; log('[对局] 地图初始化失败'); }
   });
@@ -93,6 +105,22 @@ function attachBot(socket, {
     }
     if (returning || board.playerId === 0 || board.turn <= sentTurn) return;
     sentTurn = board.turn;
+    // 绝境投降判定优先于发言与操作：四条全满足才投（详见 bot/surrender.cjs），
+    // 发一句 GG 后走协议正常投降路径。误判代价高，判定从严。
+    if (surrenderJudge) {
+      const verdict = surrenderJudge.evaluate(board);
+      if (verdict?.surrender) {
+        log(`[投降] ${verdict.reason}`);
+        socket.emit('send_message', { text: 'GG', team: false });
+        socket.emit('surrender');
+        return;
+      }
+    }
+    // 优势垃圾话：只在优势时开口，全局冷却 + 每局上限 + 概率门控。
+    if (trashTalk) {
+      const line = trashTalk.maybeSpeak(board);
+      if (line) { log(`[垃圾话] ${line}`); socket.emit('send_message', { text: line, team: false }); }
+    }
     const started = performance.now();
     const selected = chooseAction(board, params);
     const elapsed = performance.now() - started;
@@ -122,8 +150,28 @@ function attachBot(socket, {
     if (!self || now() - lastLobbyCommand < 1000) return;
     const emitLobby = (event, payload) => { lastLobbyCommand = now(); socket.emit(event, payload); };
     if (cancelReady) { cancelReady = false; emitLobby('change_ready', { ready: false }); return; }
+    // 组队模式下自主避让：本队出现人类成员时主动退出，换到无人类的队伍
+    // （首选队伍无人则回家，否则取编号最小的空队，再退而求纯 bot 队；
+    // 全部队伍都有人类时按兵不动）。人类侧不做任何限制或提示。
+    // 纯 bot 同队不触发避让，且换队目标确定性选择，两个 bot 不会互踩抖动。
+    if (room.allow_team === true) {
+      const myTeam = Number(self.team);
+      if (myTeam >= 1 && myTeam <= MAX_TEAMS) {
+        const humanInTeam = (team) => room.players.some((p) => p.sid !== clientId && Number(p.team) === team && p.bot !== true);
+        if (humanInTeam(myTeam)) {
+          let target = 0;
+          if (myTeam !== homeTeam && !humanInTeam(homeTeam)) target = homeTeam;
+          if (!target) {
+            const occupied = new Set(room.players.filter((p) => p.sid !== clientId).map((p) => Number(p.team)));
+            for (let team = 1; team <= MAX_TEAMS && !target; team++) if (!occupied.has(team)) target = team;
+            for (let team = 1; team <= MAX_TEAMS && !target; team++) if (!humanInTeam(team)) target = team;
+          }
+          if (target > 0) { log(`[房间] 本队有人类加入，避让到 ${target} 队`); emitLobby('change_team', { team: target }); return; }
+        }
+      }
+    }
     if (!autoReady) return;
-    if (Number(self.team) === 0) { emitLobby('change_team', { team: preferredTeam }); return; }
+    if (Number(self.team) === 0) { emitLobby('change_team', { team: homeTeam }); return; }
     if (now() >= readyAt && Number(room.need) > 1 && !self.ready) emitLobby('change_ready', { ready: true });
   };
   const timer = schedule(tick, 100);

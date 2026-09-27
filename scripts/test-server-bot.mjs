@@ -416,51 +416,60 @@ async function main() {
     );
     log('anti-human 校验通过：bot 无需聊天命令即自动准备');
 
-    // 房主（普通用户）开启组队不应被拒绝（allowTeam=true 的托管 bot 房间不受限），
-    // 同一条 room_update 中机器人与人类应已分属不同队伍。
+    // 房主（普通用户）开启组队不应被拒绝（allowTeam=true 的托管 bot 房间不受限）。
+    // 服务端不再分池：开启后双方暂时同队，由 bot 自主避让到固定的 2 队。
     const teamOn = waitRoomUpdate(antiSocket, (d) => d.allow_team === true, 10_000, 'allow_team 开启');
     antiSocket.emit('change_game_conf', { allow_team: true });
-    const teamOnData = await teamOn;
+    await teamOn;
     log('anti-human 校验通过：allowTeam=true 的房间允许房主开启组队');
 
-    const humanPlayer = teamOnData.players.find((p) => p.uid === NORMAL_USER);
-    const botPlayer = teamOnData.players.find((p) => p.uid === ANTI_USER);
-    if (
-      !humanPlayer ||
-      !botPlayer ||
-      humanPlayer.team === 0 ||
-      botPlayer.team === 0 ||
-      humanPlayer.team === botPlayer.team
-    ) {
+    const botAtHome = await waitRoomUpdate(
+      antiSocket,
+      (d) => {
+        const bot = d.players.find((p) => p.uid === ANTI_USER);
+        return bot?.team === 2;
+      },
+      15_000,
+      'anti-human bot 自主避让到 2 队',
+    );
+    const humanPlayer = botAtHome.players.find((p) => p.uid === NORMAL_USER);
+    if (!humanPlayer || humanPlayer.team === 0 || humanPlayer.team === 2) {
       return finish(
         1,
-        `anti-human 校验失败：开启组队后机器人与人类未分属不同队伍 ${JSON.stringify(teamOnData.players)}`,
+        `anti-human 校验失败：bot 避让后人类不应仍在 2 队 ${JSON.stringify(botAtHome.players)}`,
       );
     }
-    const humanTeamBefore = humanPlayer.team;
-    log(
-      `anti-human 校验通过：开启组队后机器人与人类分属不同队伍（人类 ${humanPlayer.team} 队、机器人 ${botPlayer.team} 队）`,
-    );
+    log(`anti-human 校验通过：bot 固定加入 2 队并自主避让人类（人类 ${humanPlayer.team} 队、机器人 2 队）`);
 
-    // 人类尝试换到机器人队伍应被修正回人类队伍。
-    const observedTeams = [];
+    // 人类换到 bot 所在的 2 队：服务端不做分池修正（人类留在 2 队），
+    // 由 bot 检测到人类同队后主动换到其他队伍。
+    const observedHumanTeams = [];
     const collectTeams = (d) => {
       const human = d.players.find((p) => p.uid === NORMAL_USER);
       if (human) {
-        observedTeams.push(human.team);
+        observedHumanTeams.push(human.team);
       }
     };
     antiSocket.on('room_update', collectTeams);
-    antiSocket.emit('change_team', { team: botPlayer.team });
-    await sleep(1000);
+    antiSocket.emit('change_team', { team: 2 });
+    const botMoved = await waitRoomUpdate(
+      antiSocket,
+      (d) => {
+        const bot = d.players.find((p) => p.uid === ANTI_USER);
+        const human = d.players.find((p) => p.uid === NORMAL_USER);
+        return human?.team === 2 && bot && bot.team !== 0 && bot.team !== 2;
+      },
+      15_000,
+      '人类加入 2 队后 bot 再次避让',
+    ).catch((err) => err);
     antiSocket.off('room_update', collectTeams);
-    if (!observedTeams.includes(humanTeamBefore) || observedTeams.includes(botPlayer.team)) {
+    if (botMoved instanceof Error || !observedHumanTeams.includes(2)) {
       return finish(
         1,
-        `anti-human 校验失败：人类换到机器人队伍未被修正（观察到队伍 ${JSON.stringify(observedTeams)}）`,
+        `anti-human 校验失败：人类加入 bot 队伍后 bot 未避让（人类队伍 ${JSON.stringify(observedHumanTeams)}）`,
       );
     }
-    log('anti-human 校验通过：人类尝试加入机器人队伍后被修正到人类队伍');
+    log('anti-human 校验通过：人类换队不被服务端修正，bot 检测后主动避让');
 
     antiSocket.emit('change_ready', { ready: true });
     const antiInitDeadline = Date.now() + 20_000;
