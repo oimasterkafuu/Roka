@@ -68,6 +68,30 @@ const DEFAULT_PARAMS = Object.freeze({
   // 上限 lateMaxCrowns）。
   fortressPhaseTurn: 60, lateTerritoryPerCrown: 9, lateMaxCrowns: 12,
   lateSkinMin: 10, lateAnchorRadius: 2,
+  // 推进方向纪律（用户 2026-09-27 硬方针）：不大范围涂色——目标评分向敌方
+  // 皇冠/核心方向强倾斜（每靠近核心 1 格 +pushDirectionWeight）；与进攻主线
+  // 无关的侧翼中立涂色格按距敌核心远近降权（paintDiscardDist 格以外满额
+  // flankPaintPenalty，以内线性衰减到 0）：离我家远、离敌家也远的中间地带
+  // 最不值钱，兵力向敌人家附近逼近而不是横向摊面积。
+  pushDirectionWeight: 15, flankPaintPenalty: 40, paintDiscardDist: 8,
+  // 建造阈值分级（用户 2026-09-27 硬方针，保留「综合研判」机制，按位置分档）：
+  // 位置判断不按出生点，按「距最近敌方压力的跳数 + 局部威胁场」现场评估。
+  // 大后方 rearBuildFund=100（一次集满约 100 再造，可连续建造两次：指挥所+升级）；
+  // 前线 frontBuildFund=150（前线建造风险高，留足防守/思考余量）；中间档按危险度
+  // 线性过渡：敌距 ≤buildFrontDist 记满分前线、≥buildRearDist 记大后方，威胁场
+  // 满档 buildFundThreat；威胁极大（≥buildDesperateThreat，敌人已打穿到腹地）时
+  // 回落大后方阈值——都打到大后方了没别的选择，必须尽快建造。
+  rearBuildFund: 100, frontBuildFund: 150, buildFrontDist: 5, buildRearDist: 12,
+  buildFundThreat: 60, buildDesperateThreat: 200,
+  // 前线迁都（用户 2026-09-27 硬方针）：前线区域（敌距 <buildRearDist）内威胁场
+  // ≤frontStableThreat 且我方局部兵力 ≥frontStableMargin 倍于威胁的格子算「稳定
+  // 前线」——稳定下来后更积极地建造（可作经济工地并获 frontBaseBonus 选址加成，
+  // 越靠前加成越多），把主要兵源/新皇冠聚集到前线。
+  frontStableThreat: 12, frontStableMargin: 2, frontBaseBonus: 30,
+  // 集兵树形化（用户 2026-09-27 硬方针）：缺口 ≥bulkPullMin 时进入树形汇聚调度——
+  // 最远的子树先动（逐级向目标汇聚，远端与近端同时在路上，避免一条链式长跑）；
+  // 深后方（≥supplyTreeDepth 跳）大堆一次性整批拉出，不被近源小股插队。
+  supplyTreeDepth: 4, bulkPullMin: 100,
 
 });
 const PARAM_RANGES = Object.freeze({
@@ -104,6 +128,11 @@ const PARAM_RANGES = Object.freeze({
   campaignResolveTicks: [0, 40], campaignResolveMargin: [0, 20],
   fortressPhaseTurn: [40, 600], lateTerritoryPerCrown: [4, 30], lateMaxCrowns: [3, 40],
   lateSkinMin: [2, 60], lateAnchorRadius: [1, 4],
+  pushDirectionWeight: [0, 60], flankPaintPenalty: [0, 200], paintDiscardDist: [2, 30],
+  rearBuildFund: [51, 300], frontBuildFund: [51, 400], buildFrontDist: [2, 12], buildRearDist: [4, 30],
+  buildFundThreat: [10, 400], buildDesperateThreat: [50, 2000],
+  frontStableThreat: [0, 200], frontStableMargin: [0, 6], frontBaseBonus: [0, 200],
+  supplyTreeDepth: [2, 12], bulkPullMin: [20, 1000],
 
 });
 function resolveParams(params = {}) {

@@ -118,10 +118,11 @@ function chooseLogistics(state, move, build, params = {}) {
       if (d[j] >= 0 || !own(j) || params.blockedEdges?.has(`${j}:${queue[h]}`)) continue;
       d[j] = d[queue[h]] + 1; queue.push(j);
     }
-    let best = null, rear = 0;
+    let rear = 0;
+    const jobs = [];
     for (const from of lands) {
       if (d[from] <= 0 || neighbors[from].some(enemy)) continue;
-      // 工地只保留「开工额度」（51，到位即建），超出的存量照常供军事运输——
+      // 工地只保留「开工额度」（分档筹资目标，到位即建），超出的存量照常供军事运输——
       // 整格豁免曾让 187 兵的大堆自证为工地后趴窝 35 回合（uzsTrD 复盘根因）。
       const earmark = !funding && economySiteTarget === from ? economyGoal(from) : 0;
       if (count(from) - 1 <= earmark) continue;
@@ -150,13 +151,33 @@ function chooseLogistics(state, move, build, params = {}) {
           if (amount <= 0 || (!safeHome && count(from) - amount < keep)) continue;
           if (amount < p.minTransport && amount < need) continue;
         }
-        const gain = amount / Math.max(1, d[from]);
-        // 「近源优先」只在运输量对缺口有意义时成立：缺口大时近处小股不能抢占
-        // 远处大堆——近源是效率偏好，不是让 10 兵小股反复插队的理由。
-        const local = d[from] <= 3 && amount >= Math.max(p.minTransport, need * 0.25);
-        if (!best || (!funding && local && !best.local) || ((funding || local === best.local) && gain > best.gain))
-          best = { from, to, amount, gain, distance: d[from], local, mode };
+        jobs.push({ from, to, amount, distance: d[from], mode });
       }
+    }
+    for (const job of jobs) {
+      job.gain = job.amount / Math.max(1, job.distance);
+      // 「近源优先」只在运输量对缺口有意义时成立：缺口大时近处小股不能抢占
+      // 远处大堆——近源是效率偏好，不是让 10 兵小股反复插队的理由。
+      job.local = job.distance <= 3 && job.amount >= Math.max(p.minTransport, need * 0.25);
+    }
+    let best = null;
+    if (need >= p.bulkPullMin) {
+      // ── 集兵树形化（用户 2026-09-27 硬方针）──────────────────────────────
+      // 大缺口需要多源协同时，调度按树形汇聚：最远的子树先动（深度降序，平级比
+      // 运量），逐级向目标汇聚——远端与近端同时在路上，避免每次一条链式长跑、
+      // 单格长途跋涉。优先池只收「整批大堆」（≥bulkPullMin，深后方一次性拉出）
+      // 与「占缺口一定份额的深源」（≥supplyTreeDepth 跳），远端小勺不白跑；
+      // 没有合格深源/大堆时退回全体候选。
+      const deep = jobs.filter((j) => j.amount >= p.bulkPullMin ||
+        (j.distance >= p.supplyTreeDepth && j.amount >= Math.max(p.minTransport, need * 0.25)));
+      const pool = deep.length ? deep : jobs;
+      for (const job of pool)
+        if (!best || job.distance > best.distance ||
+          (job.distance === best.distance && job.amount > best.amount)) best = job;
+    } else {
+      for (const job of jobs)
+        if (!best || (!funding && job.local && !best.local) ||
+          ((funding || job.local === best.local) && job.gain > best.gain)) best = job;
     }
     return { best, rear, ratio: rear / Math.max(1, available) };
   }
@@ -172,12 +193,19 @@ function chooseLogistics(state, move, build, params = {}) {
   function pickEconomySite() {
     if (memo.economySite !== null) return memo.economySite;
     if (crowns >= targetCrowns) { memo.economySite = -1; return -1; }
-    const candidates = lands.filter((i) => safe(i) && economicSite(i) &&
+    // 前线迁都（用户 2026-09-27 硬方针）：除大后方安全格外，「稳定前线」格
+    // （威胁场低、我方局部兵力占优，见 architecture.frontStable）也可作工地——
+    // 位置相对稳定下来后就该更积极地建造，把主要兵源、新皇冠聚集到前线。
+    // 位置判断不按出生点，按当前敌我分布（frontStable 用的是现场威胁场/敌距）。
+    const candidates = lands.filter((i) => (safe(i) || architecturePlan.frontStable(i)) && economicSite(i) &&
       (grid[i] === me + 50 || (grid[i] === me && crowns + cities < targetCrowns)));
     // 驻军只按封顶 60 计入：选址看的是位置，不是「这格已经堆了多少兵」——
     // 全额计入会让大兵堆自证为工地，再把整格 earmark 成禁地（uzsTrD 复盘根因）。
+    // 迁都加成：稳定前线格按靠前程度加分（敌距越小加分越多），产能主动前移。
     const clusterScore = (i) => clusterValue(state, i) + Math.min(count(i), 60) +
-      neighbors[i].reduce((s, j) => s + (own(j) && (grid[j] === me + 100 || grid[j] === me + 50) ? 12 : 0), 0);
+      neighbors[i].reduce((s, j) => s + (own(j) && (grid[j] === me + 100 || grid[j] === me + 50) ? 12 : 0), 0) +
+      (architecturePlan.frontStable(i) && !safe(i)
+        ? p.frontBaseBonus + Math.max(0, p.buildRearDist - ctx.enemyDistance[i]) * 2 : 0);
     candidates.sort((a, b) => (grid[b] === me + 50) - (grid[a] === me + 50) || clusterScore(b) - clusterScore(a) || a - b);
     let chosen = candidates.length ? candidates[0] : -1;
     // 滞回（用户硬性方针：防抖/目标锁定）：上一个工地仍合法时继续往它送，
@@ -194,9 +222,13 @@ function chooseLogistics(state, move, build, params = {}) {
     return memo.economySite;
   }
   function economyGoal(target) {
-    // 筹资目标 = 触发线 51：到位后 chooseBuild 立即开工，不再为 reserve/premium 余量多筹。
+    // 筹资目标 = 建造触发线分档（用户 2026-09-27「一次性集满再造」硬方针）：
+    // 平地工地按位置综合研判分档（architecture.buildFund：大后方约 100、
+    // 前线约 150、中间按危险度过渡、被打穿的绝境回落 100），一次集满再开工，
+    // 避免「花 50 集一次、再花 50 又集一次」的来回折腾；已是指挥所的升级工地
+    // 仍按 51（钱已投在工地上，到位即升）。
     // 工地的选址安全由 economicSite/assess 的贴脸防守检查负责，与筹资目标无关。
-    return 51;
+    return grid[target] === me + 50 ? 51 : Math.max(51, architecturePlan.buildFund(target));
   }
   function economyAction() {
     const buildNow = chooseBuild(state, null, p);
