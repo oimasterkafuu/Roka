@@ -49,13 +49,27 @@ pnpm train --resume=training/results/experiment.json --suite=new-seeds
 
 ## 文件
 
-- `bot/client.cjs`：房间、命令与生命周期。
+- `bot/client.cjs`：房间、命令与生命周期；队伍自我管理（固定首选 2 队、人类同队自主避让）。
 - `bot/state.cjs`：全量/差分状态校验。
 - `bot/planner.cjs`、`bot/building.cjs`、`bot/policy.cjs`：策略。
+- `bot/trash-talk.cjs`：优势垃圾话（帝国时代 2 嘲讽风格，多触发器独立冷却 + 每局上限 + 概率门控，wololo 彩蛋）。
+- `bot/surrender.cjs`：绝境投降判定（四条全满足才发 GG 投降，独立可测）。
 - `training/arena.cjs`：真实引擎无等待对局。
 - `training/train.cjs`、`training/worker.cjs`：并行进化和留出评估。
 - `training/baseline/`：冻结的上一版独立策略，非参考项目旧机器人。
 - `training/results/`：可复现配置、参数、分地图评估与对局摘要。
+
+## 人格行为（2026-09-27）
+
+- **队伍自我管理**：组队模式下服务端不再分池，bot 固定首选 2 队；检测到人类加入本队时
+  主动避让到无人类队伍（2 队 → 最小编号空队 → 纯 bot 队，全满按兵不动），人类侧不受限制。
+- **优势垃圾话**：全面领先时按综合局势触发（领土比/兵力差/连续拆建筑/累计踩冠/对手停滞），
+  文案四档本局不重复，引用真实兵力比/领土比；全局冷却 + 每局上限 4 次 + 概率门控，劣势不说。
+  对方领土单 tick 暴跌（被截断/隔离）时触发写死的 `wololo` 彩蛋（每局 1 次、不占额度）。
+- **绝境投降 GG**：严重劣势（敌兵力 ≥8 倍、领土 ≥4 倍、皇冠差 ≥3）+ 绝无胜算
+  （敌兵力 ≥10 倍、产能见底、无斩首机会）+ 对方活跃（地盘近期有变化、未被标记 AFK）
+  + 对方调戏（劣势持续 ≥250 tick 且 ≥30 次能收尾不收）四条全满足才发 `GG` 投降；
+  宁可少投不误投。阈值见 `bot/params.cjs` 的 `trash*`/`surrender*` 参数。
 
 ## 持续集结与短程对抗
 

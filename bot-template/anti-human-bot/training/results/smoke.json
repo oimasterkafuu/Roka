@@ -1,0 +1,4388 @@
+{
+  "createdAt": "2026-09-27T03:46:20.012Z",
+  "suite": "smoke",
+  "resume": null,
+  "sources": {
+    "bot/planner.cjs": "ea34ed65ed0598cb10b83ddae0fde157f2c122c41ad0dc025387eb745fd14c54",
+    "bot/building.cjs": "660e5386734f093abe369f80463fa9642428ffa039e738617f71379b9484d455",
+    "bot/params.cjs": "66c93b64aacabd7c3ac43e27575496ada7e9afd4d307a4eecfff07c8b8cfd7f5",
+    "training/arena.cjs": "2232ae5ce3b2cbf63e540534cf1cc96a015bbfd7a2015490b78420d06a8069df",
+    "training/baseline/planner.cjs": "a8d77ab4abea18e91ef8a067b2e92725aab7465c87e95e46c5752b33909e9a0c",
+    "training/baseline/building.cjs": "a2a41fa4a94f975d94b8fa820836600c30cf6629aba865de46dd6a77dccf65f0",
+    "reference/src/game-engine.ts": "9b9ce54f94d8a8c7e0201835c71e64878f5347c157518cb0d680c5cf3cfe33bb"
+  },
+  "seed": 20260925,
+  "config": {
+    "rounds": 1,
+    "seeds": 1,
+    "maxTurns": 800,
+    "workerCount": 6,
+    "mapSize": 0.5
+  },
+  "params": {
+    "buildSafety": 8,
+    "enemyDistance": 3,
+    "threatWeight": 1.2,
+    "supportWeight": 0.35,
+    "territoryPerCrown": 18,
+    "maxCrowns": 100,
+    "earlyInvestment": 1.4,
+    "investmentHorizon": 160,
+    "paybackWeight": 0.7,
+    "buildThreshold": 18,
+    "upgradeBonus": 25,
+    "moveDepthCost": 80,
+    "expansionWeight": 1,
+    "explorationWeight": 1,
+    "threatRadius": 2,
+    "pressureDecay": 0.45,
+    "counterWeight": 0.75,
+    "sourceKeep": 0.85,
+    "unknownMargin": 8,
+    "exchangeRatio": 1.6,
+    "buildThreatRadius": 5,
+    "buildPressureDecay": 0.4,
+    "foundationPremium": 14,
+    "raceAggression": 1.35,
+    "raceLead": 2,
+    "economyFloor": 0,
+    "defenseHorizon": 5,
+    "economyShareTicks": 3,
+    "defensePriority": 0,
+    "minArrive": 1,
+    "wideKeepWeight": 0,
+    "consolidateLoss": 3,
+    "consolidateTicks": 15,
+    "grindMin": 40,
+    "grindAdvantage": 0.8,
+    "grindKeep": 0.2,
+    "stallTicks": 40,
+    "stallRatio": 0.35,
+    "cutoffRange": 9,
+    "cutoffScan": 120,
+    "cutoffMaxSteps": 4,
+    "cutoffMinIsolate": 8,
+    "cutoffMaxDefense": 4000,
+    "cutoffUrgentRange": 8
+  },
+  "history": [
+    {
+      "round": 0,
+      "params": {
+        "buildSafety": 8,
+        "enemyDistance": 3,
+        "threatWeight": 1.2,
+        "supportWeight": 0.35,
+        "territoryPerCrown": 18,
+        "maxCrowns": 100,
+        "earlyInvestment": 1.4,
+        "investmentHorizon": 160,
+        "paybackWeight": 0.7,
+        "buildThreshold": 18,
+        "upgradeBonus": 22,
+        "moveDepthCost": 80,
+        "expansionWeight": 1,
+        "explorationWeight": 1,
+        "threatRadius": 2,
+        "pressureDecay": 0.45,
+        "counterWeight": 0.75,
+        "sourceKeep": 0.824759011673741,
+        "unknownMargin": 8,
+        "exchangeRatio": 1.6,
+        "buildThreatRadius": 5,
+        "buildPressureDecay": 0.4,
+        "foundationPremium": 14,
+        "raceAggression": 1.35,
+        "raceLead": 2,
+        "economyFloor": 0,
+        "defenseHorizon": 5,
+        "economyShareTicks": 3,
+        "defensePriority": 0,
+        "minArrive": 1,
+        "wideKeepWeight": 0,
+        "consolidateLoss": 3,
+        "consolidateTicks": 15,
+        "grindMin": 24,
+        "grindAdvantage": 0.8,
+        "grindKeep": 0.2,
+        "stallTicks": 40,
+        "stallRatio": 0.35,
+        "cutoffRange": 9,
+        "cutoffScan": 120,
+        "cutoffMaxSteps": 4,
+        "cutoffMinIsolate": 8,
+        "cutoffMaxDefense": 4000,
+        "cutoffUrgentRange": 8
+      },
+      "accepted": false,
+      "stats": {
+        "games": 8,
+        "wins": 0,
+        "losses": 0,
+        "draws": 8,
+        "score": 0.5,
+        "byMap": {
+          "random": {
+            "games": 2,
+            "wins": 0,
+            "losses": 0,
+            "draws": 2,
+            "score": 0.5
+          },
+          "maze": {
+            "games": 2,
+            "wins": 0,
+            "losses": 0,
+            "draws": 2,
+            "score": 0.5
+          },
+          "archipelago": {
+            "games": 2,
+            "wins": 0,
+            "losses": 0,
+            "draws": 2,
+            "score": 0.5
+          },
+          "mediterranean": {
+            "games": 2,
+            "wins": 0,
+            "losses": 0,
+            "draws": 2,
+            "score": 0.5
+          }
+        },
+        "builds": 223,
+        "elapsedMs": 45123.869753000006
+      },
+      "gate": null
+    }
+  ],
+  "validation": {
+    "games": 16,
+    "wins": 0,
+    "losses": 0,
+    "draws": 16,
+    "score": 0.5,
+    "byMap": {
+      "random": {
+        "games": 4,
+        "wins": 0,
+        "losses": 0,
+        "draws": 4,
+        "score": 0.5
+      },
+      "maze": {
+        "games": 4,
+        "wins": 0,
+        "losses": 0,
+        "draws": 4,
+        "score": 0.5
+      },
+      "archipelago": {
+        "games": 4,
+        "wins": 0,
+        "losses": 0,
+        "draws": 4,
+        "score": 0.5
+      },
+      "mediterranean": {
+        "games": 4,
+        "wins": 0,
+        "losses": 0,
+        "draws": 4,
+        "score": 0.5
+      }
+    },
+    "builds": 415,
+    "elapsedMs": 62693.763918000004
+  },
+  "defaultsValidation": {
+    "games": 16,
+    "wins": 0,
+    "losses": 0,
+    "draws": 16,
+    "score": 0.5,
+    "byMap": {
+      "random": {
+        "games": 4,
+        "wins": 0,
+        "losses": 0,
+        "draws": 4,
+        "score": 0.5
+      },
+      "maze": {
+        "games": 4,
+        "wins": 0,
+        "losses": 0,
+        "draws": 4,
+        "score": 0.5
+      },
+      "archipelago": {
+        "games": 4,
+        "wins": 0,
+        "losses": 0,
+        "draws": 4,
+        "score": 0.5
+      },
+      "mediterranean": {
+        "games": 4,
+        "wins": 0,
+        "losses": 0,
+        "draws": 4,
+        "score": 0.5
+      }
+    },
+    "builds": 415,
+    "elapsedMs": 56443.311529
+  },
+  "matches": [
+    {
+      "mapMode": "random",
+      "seed": "heldout-smoke-99-0",
+      "seat": 0,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 780,
+            "builds": 9,
+            "upgrades": 8,
+            "rejected": 3,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 4511,
+            "land": 261,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 795,
+            "builds": 2,
+            "upgrades": 1,
+            "rejected": 1,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 1559,
+            "land": 152,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 5986.777466,
+        "builds": [
+          {
+            "player": 0,
+            "turn": 172,
+            "x": 21,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 173,
+            "x": 21,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 175,
+            "x": 20,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 176,
+            "x": 20,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 179,
+            "x": 20,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 181,
+            "x": 20,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 185,
+            "x": 22,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 189,
+            "x": 22,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 195,
+            "x": 21,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 386,
+            "x": 21,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 498,
+            "x": 19,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 583,
+            "x": 1,
+            "y": 14,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 584,
+            "x": 1,
+            "y": 14,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 597,
+            "x": 19,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 605,
+            "x": 18,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 681,
+            "x": 18,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 685,
+            "x": 18,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 689,
+            "x": 18,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 693,
+            "x": 17,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 795,
+            "x": 1,
+            "y": 13,
+            "op": "b"
+          }
+        ],
+        "materialScore": [
+          4772,
+          1711
+        ]
+      }
+    },
+    {
+      "mapMode": "random",
+      "seed": "heldout-smoke-99-0",
+      "seat": 1,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 796,
+            "builds": 1,
+            "upgrades": 1,
+            "rejected": 1,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 2964,
+            "land": 240,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 743,
+            "builds": 29,
+            "upgrades": 28,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 5572,
+            "land": 161,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 5468.931270000001,
+        "builds": [
+          {
+            "player": 1,
+            "turn": 454,
+            "x": 1,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 455,
+            "x": 1,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 457,
+            "x": 1,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 458,
+            "x": 1,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 460,
+            "x": 1,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 461,
+            "x": 1,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 463,
+            "x": 1,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 464,
+            "x": 1,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 467,
+            "x": 2,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 469,
+            "x": 2,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 485,
+            "x": 1,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 486,
+            "x": 1,
+            "y": 16,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 494,
+            "x": 2,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 495,
+            "x": 2,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 500,
+            "x": 0,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 501,
+            "x": 0,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 509,
+            "x": 0,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 510,
+            "x": 0,
+            "y": 16,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 515,
+            "x": 1,
+            "y": 14,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 519,
+            "x": 1,
+            "y": 14,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 529,
+            "x": 7,
+            "y": 14,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 530,
+            "x": 7,
+            "y": 14,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 535,
+            "x": 1,
+            "y": 15,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 543,
+            "x": 1,
+            "y": 15,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 547,
+            "x": 3,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 554,
+            "x": 3,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 556,
+            "x": 4,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 557,
+            "x": 4,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 559,
+            "x": 4,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 560,
+            "x": 4,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 562,
+            "x": 5,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 573,
+            "x": 5,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 575,
+            "x": 5,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 576,
+            "x": 5,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 579,
+            "x": 6,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 585,
+            "x": 6,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 616,
+            "x": 3,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 617,
+            "x": 3,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 623,
+            "x": 6,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 642,
+            "x": 6,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 644,
+            "x": 0,
+            "y": 14,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 645,
+            "x": 0,
+            "y": 14,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 661,
+            "x": 0,
+            "y": 13,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 662,
+            "x": 0,
+            "y": 13,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 670,
+            "x": 1,
+            "y": 13,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 671,
+            "x": 1,
+            "y": 13,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 674,
+            "x": 1,
+            "y": 12,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 675,
+            "x": 1,
+            "y": 12,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 683,
+            "x": 0,
+            "y": 12,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 684,
+            "x": 6,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 684,
+            "x": 0,
+            "y": 12,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 685,
+            "x": 6,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 686,
+            "x": 0,
+            "y": 11,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 687,
+            "x": 0,
+            "y": 11,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 689,
+            "x": 1,
+            "y": 11,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 712,
+            "x": 1,
+            "y": 11,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 737,
+            "x": 0,
+            "y": 10,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 761,
+            "x": 0,
+            "y": 10,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 769,
+            "x": 2,
+            "y": 18,
+            "op": "b"
+          }
+        ],
+        "materialScore": [
+          3204,
+          5733
+        ]
+      }
+    },
+    {
+      "mapMode": "random",
+      "seed": "heldout-smoke-99-1",
+      "seat": 0,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 763,
+            "builds": 18,
+            "upgrades": 17,
+            "rejected": 2,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 7329,
+            "land": 274,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 796,
+            "builds": 1,
+            "upgrades": 1,
+            "rejected": 1,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 1352,
+            "land": 140,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 5867.812436,
+        "builds": [
+          {
+            "player": 0,
+            "turn": 175,
+            "x": 21,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 176,
+            "x": 21,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 178,
+            "x": 20,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 179,
+            "x": 20,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 183,
+            "x": 19,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 186,
+            "x": 19,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 193,
+            "x": 18,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 199,
+            "x": 18,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 209,
+            "x": 17,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 215,
+            "x": 17,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 222,
+            "x": 18,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 227,
+            "x": 18,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 230,
+            "x": 17,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 236,
+            "x": 17,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 362,
+            "x": 16,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 363,
+            "x": 16,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 366,
+            "x": 16,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 367,
+            "x": 16,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 371,
+            "x": 15,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 372,
+            "x": 15,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 374,
+            "x": 15,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 375,
+            "x": 15,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 378,
+            "x": 14,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 379,
+            "x": 14,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 387,
+            "x": 14,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 388,
+            "x": 14,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 391,
+            "x": 14,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 392,
+            "x": 14,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 394,
+            "x": 14,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 416,
+            "x": 14,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 435,
+            "x": 13,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 437,
+            "x": 13,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 457,
+            "x": 12,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 476,
+            "x": 12,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 565,
+            "x": 11,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 739,
+            "x": 2,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 740,
+            "x": 2,
+            "y": 18,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          7603,
+          1492
+        ]
+      }
+    },
+    {
+      "mapMode": "random",
+      "seed": "heldout-smoke-99-1",
+      "seat": 1,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 792,
+            "builds": 3,
+            "upgrades": 3,
+            "rejected": 1,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 1519,
+            "land": 114,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 779,
+            "builds": 11,
+            "upgrades": 10,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 5893,
+            "land": 298,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 6295.095823,
+        "builds": [
+          {
+            "player": 1,
+            "turn": 175,
+            "x": 2,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 187,
+            "x": 2,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 190,
+            "x": 1,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 193,
+            "x": 1,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 196,
+            "x": 1,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 198,
+            "x": 1,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 221,
+            "x": 2,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 223,
+            "x": 2,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 227,
+            "x": 1,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 232,
+            "x": 1,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 236,
+            "x": 3,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 239,
+            "x": 3,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 245,
+            "x": 3,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 247,
+            "x": 3,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 258,
+            "x": 3,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 260,
+            "x": 3,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 264,
+            "x": 0,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 267,
+            "x": 0,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 274,
+            "x": 0,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 280,
+            "x": 0,
+            "y": 16,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 283,
+            "x": 4,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 468,
+            "x": 21,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 469,
+            "x": 21,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 536,
+            "x": 20,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 537,
+            "x": 20,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 595,
+            "x": 19,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 596,
+            "x": 19,
+            "y": 0,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          1633,
+          6191
+        ]
+      }
+    },
+    {
+      "mapMode": "maze",
+      "seed": "heldout-smoke-99-0",
+      "seat": 0,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 762,
+            "builds": 19,
+            "upgrades": 19,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 7383,
+            "land": 112,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 793,
+            "builds": 3,
+            "upgrades": 3,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 1733,
+            "land": 85,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 2062.642636999999,
+        "builds": [
+          {
+            "player": 0,
+            "turn": 65,
+            "x": 7,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 68,
+            "x": 7,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 77,
+            "x": 6,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 81,
+            "x": 6,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 87,
+            "x": 5,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 88,
+            "x": 5,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 101,
+            "x": 5,
+            "y": 22,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 107,
+            "x": 5,
+            "y": 22,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 114,
+            "x": 4,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 123,
+            "x": 4,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 132,
+            "x": 3,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 138,
+            "x": 3,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 153,
+            "x": 7,
+            "y": 23,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 154,
+            "x": 7,
+            "y": 23,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 161,
+            "x": 1,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 165,
+            "x": 18,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 166,
+            "x": 18,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 170,
+            "x": 1,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 180,
+            "x": 5,
+            "y": 23,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 184,
+            "x": 5,
+            "y": 23,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 194,
+            "x": 17,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 195,
+            "x": 17,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 206,
+            "x": 3,
+            "y": 23,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 207,
+            "x": 3,
+            "y": 23,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 209,
+            "x": 2,
+            "y": 23,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 210,
+            "x": 2,
+            "y": 23,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 212,
+            "x": 1,
+            "y": 23,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 213,
+            "x": 1,
+            "y": 23,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 223,
+            "x": 1,
+            "y": 22,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 224,
+            "x": 1,
+            "y": 22,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 227,
+            "x": 1,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 228,
+            "x": 1,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 230,
+            "x": 1,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 239,
+            "x": 17,
+            "y": 15,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 240,
+            "x": 17,
+            "y": 15,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 256,
+            "x": 1,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 258,
+            "x": 1,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 259,
+            "x": 1,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 261,
+            "x": 1,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 262,
+            "x": 1,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 264,
+            "x": 1,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 265,
+            "x": 1,
+            "y": 16,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 268,
+            "x": 2,
+            "y": 15,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 269,
+            "x": 2,
+            "y": 15,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          7495,
+          1818
+        ]
+      }
+    },
+    {
+      "mapMode": "maze",
+      "seed": "heldout-smoke-99-0",
+      "seat": 1,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 793,
+            "builds": 3,
+            "upgrades": 3,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 2501,
+            "land": 109,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 790,
+            "builds": 5,
+            "upgrades": 5,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 2058,
+            "land": 85,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 2349.2080419999984,
+        "builds": [
+          {
+            "player": 1,
+            "turn": 64,
+            "x": 18,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 67,
+            "x": 18,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 71,
+            "x": 19,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 77,
+            "x": 19,
+            "y": 16,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 276,
+            "x": 7,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 277,
+            "x": 7,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 279,
+            "x": 6,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 280,
+            "x": 6,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 282,
+            "x": 5,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 283,
+            "x": 5,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 403,
+            "x": 17,
+            "y": 8,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 406,
+            "x": 17,
+            "y": 8,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 526,
+            "x": 17,
+            "y": 7,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 527,
+            "x": 17,
+            "y": 7,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 529,
+            "x": 16,
+            "y": 7,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 530,
+            "x": 16,
+            "y": 7,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          2610,
+          2143
+        ]
+      }
+    },
+    {
+      "mapMode": "maze",
+      "seed": "heldout-smoke-99-1",
+      "seat": 0,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 788,
+            "builds": 6,
+            "upgrades": 6,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 5010,
+            "land": 115,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 792,
+            "builds": 3,
+            "upgrades": 3,
+            "rejected": 1,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 2334,
+            "land": 64,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 2045.2584549999992,
+        "builds": [
+          {
+            "player": 0,
+            "turn": 74,
+            "x": 2,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 77,
+            "x": 2,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 81,
+            "x": 4,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 87,
+            "x": 4,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 96,
+            "x": 1,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 97,
+            "x": 1,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 106,
+            "x": 1,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 113,
+            "x": 1,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 122,
+            "x": 5,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 125,
+            "x": 5,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 130,
+            "x": 1,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 137,
+            "x": 1,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 192,
+            "x": 17,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 193,
+            "x": 17,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 195,
+            "x": 17,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 196,
+            "x": 17,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 367,
+            "x": 18,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 368,
+            "x": 18,
+            "y": 17,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          5125,
+          2398
+        ]
+      }
+    },
+    {
+      "mapMode": "maze",
+      "seed": "heldout-smoke-99-1",
+      "seat": 1,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 793,
+            "builds": 3,
+            "upgrades": 3,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 1686,
+            "land": 76,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 764,
+            "builds": 18,
+            "upgrades": 18,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 2964,
+            "land": 78,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 2208.8440710000013,
+        "builds": [
+          {
+            "player": 1,
+            "turn": 172,
+            "x": 17,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 207,
+            "x": 17,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 226,
+            "x": 1,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 227,
+            "x": 1,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 263,
+            "x": 17,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 264,
+            "x": 17,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 267,
+            "x": 18,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 281,
+            "x": 1,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 282,
+            "x": 1,
+            "y": 16,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 284,
+            "x": 1,
+            "y": 15,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 285,
+            "x": 1,
+            "y": 15,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 308,
+            "x": 18,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 312,
+            "x": 19,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 507,
+            "x": 19,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 561,
+            "x": 19,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 562,
+            "x": 19,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 564,
+            "x": 19,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 565,
+            "x": 19,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 567,
+            "x": 19,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 568,
+            "x": 19,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 570,
+            "x": 18,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 571,
+            "x": 18,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 573,
+            "x": 17,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 574,
+            "x": 17,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 576,
+            "x": 16,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 577,
+            "x": 16,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 579,
+            "x": 15,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 580,
+            "x": 15,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 582,
+            "x": 14,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 583,
+            "x": 14,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 585,
+            "x": 13,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 586,
+            "x": 13,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 588,
+            "x": 12,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 589,
+            "x": 12,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 591,
+            "x": 11,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 592,
+            "x": 11,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 594,
+            "x": 10,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 595,
+            "x": 10,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 602,
+            "x": 9,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 608,
+            "x": 9,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 618,
+            "x": 11,
+            "y": 22,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 623,
+            "x": 11,
+            "y": 22,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          1762,
+          3042
+        ]
+      }
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "heldout-smoke-99-0",
+      "seat": 0,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 789,
+            "builds": 6,
+            "upgrades": 5,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 1808,
+            "land": 263,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 795,
+            "builds": 1,
+            "upgrades": 1,
+            "rejected": 2,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 615,
+            "land": 108,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 3918.195781999999,
+        "builds": [
+          {
+            "player": 0,
+            "turn": 295,
+            "x": 6,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 296,
+            "x": 6,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 298,
+            "x": 6,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 301,
+            "x": 6,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 331,
+            "x": 2,
+            "y": 13,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 425,
+            "x": 2,
+            "y": 13,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 427,
+            "x": 5,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 428,
+            "x": 5,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 430,
+            "x": 5,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 433,
+            "x": 5,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 435,
+            "x": 4,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 581,
+            "x": 13,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 582,
+            "x": 13,
+            "y": 16,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          2071,
+          723
+        ]
+      }
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "heldout-smoke-99-0",
+      "seat": 1,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 792,
+            "builds": 3,
+            "upgrades": 3,
+            "rejected": 1,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 1581,
+            "land": 206,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 763,
+            "builds": 9,
+            "upgrades": 9,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 264,
+            "land": 8,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 3382.8556119999994,
+        "builds": [
+          {
+            "player": 1,
+            "turn": 130,
+            "x": 18,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 131,
+            "x": 18,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 137,
+            "x": 19,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 153,
+            "x": 19,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 160,
+            "x": 19,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 167,
+            "x": 19,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 172,
+            "x": 20,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 184,
+            "x": 20,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 192,
+            "x": 19,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 205,
+            "x": 19,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 208,
+            "x": 19,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 211,
+            "x": 19,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 229,
+            "x": 18,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 233,
+            "x": 18,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 241,
+            "x": 17,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 242,
+            "x": 17,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 374,
+            "x": 6,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 375,
+            "x": 6,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 382,
+            "x": 6,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 383,
+            "x": 6,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 387,
+            "x": 6,
+            "y": 4,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 388,
+            "x": 6,
+            "y": 4,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 757,
+            "x": 19,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 758,
+            "x": 19,
+            "y": 21,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          1787,
+          272
+        ]
+      }
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "heldout-smoke-99-1",
+      "seat": 0,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 771,
+            "builds": 14,
+            "upgrades": 14,
+            "rejected": 1,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 2991,
+            "land": 252,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 797,
+            "builds": 1,
+            "upgrades": 1,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 1325,
+            "land": 160,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 3680.533503999999,
+        "builds": [
+          {
+            "player": 0,
+            "turn": 193,
+            "x": 16,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 206,
+            "x": 1,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 207,
+            "x": 1,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 355,
+            "x": 16,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 357,
+            "x": 15,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 358,
+            "x": 15,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 360,
+            "x": 14,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 361,
+            "x": 14,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 374,
+            "x": 9,
+            "y": 11,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 375,
+            "x": 9,
+            "y": 11,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 383,
+            "x": 14,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 407,
+            "x": 14,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 418,
+            "x": 17,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 419,
+            "x": 17,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 428,
+            "x": 14,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 438,
+            "x": 14,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 447,
+            "x": 14,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 453,
+            "x": 14,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 464,
+            "x": 13,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 475,
+            "x": 13,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 478,
+            "x": 14,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 480,
+            "x": 14,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 488,
+            "x": 15,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 494,
+            "x": 15,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 502,
+            "x": 17,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 506,
+            "x": 17,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 513,
+            "x": 17,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 519,
+            "x": 17,
+            "y": 21,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 525,
+            "x": 16,
+            "y": 21,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 529,
+            "x": 16,
+            "y": 21,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          3243,
+          1485
+        ]
+      }
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": "heldout-smoke-99-1",
+      "seat": 1,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 793,
+            "builds": 3,
+            "upgrades": 3,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 2651,
+            "land": 429,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 730,
+            "builds": 4,
+            "upgrades": 4,
+            "rejected": 1,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 551,
+            "land": 26,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 3460.922356000001,
+        "builds": [
+          {
+            "player": 0,
+            "turn": 125,
+            "x": 16,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 126,
+            "x": 16,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 353,
+            "x": 1,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 354,
+            "x": 1,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 359,
+            "x": 1,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 363,
+            "x": 1,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 370,
+            "x": 3,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 376,
+            "x": 3,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 386,
+            "x": 15,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 387,
+            "x": 15,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 394,
+            "x": 1,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 395,
+            "x": 1,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 798,
+            "x": 17,
+            "y": 12,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 799,
+            "x": 17,
+            "y": 12,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          3080,
+          577
+        ]
+      }
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "heldout-smoke-99-0",
+      "seat": 0,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 729,
+            "builds": 38,
+            "upgrades": 33,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 1661,
+            "land": 164,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 792,
+            "builds": 3,
+            "upgrades": 3,
+            "rejected": 1,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 3162,
+            "land": 298,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 4603.9981739999985,
+        "builds": [
+          {
+            "player": 1,
+            "turn": 233,
+            "x": 13,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 234,
+            "x": 13,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 355,
+            "x": 18,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 356,
+            "x": 18,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 358,
+            "x": 1,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 359,
+            "x": 1,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 361,
+            "x": 0,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 362,
+            "x": 0,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 365,
+            "x": 17,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 366,
+            "x": 17,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 476,
+            "x": 0,
+            "y": 13,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 477,
+            "x": 0,
+            "y": 13,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 479,
+            "x": 0,
+            "y": 14,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 480,
+            "x": 0,
+            "y": 14,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 482,
+            "x": 0,
+            "y": 15,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 519,
+            "x": 0,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 522,
+            "x": 0,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 524,
+            "x": 0,
+            "y": 4,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 525,
+            "x": 0,
+            "y": 4,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 528,
+            "x": 0,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 529,
+            "x": 0,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 531,
+            "x": 0,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 536,
+            "x": 0,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 540,
+            "x": 1,
+            "y": 5,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 544,
+            "x": 1,
+            "y": 5,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 557,
+            "x": 0,
+            "y": 5,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 561,
+            "x": 0,
+            "y": 5,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 596,
+            "x": 1,
+            "y": 10,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 604,
+            "x": 1,
+            "y": 11,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 605,
+            "x": 3,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 606,
+            "x": 3,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 608,
+            "x": 3,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 609,
+            "x": 3,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 624,
+            "x": 4,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 625,
+            "x": 4,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 628,
+            "x": 4,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 631,
+            "x": 4,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 636,
+            "x": 1,
+            "y": 9,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 644,
+            "x": 1,
+            "y": 9,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 652,
+            "x": 2,
+            "y": 5,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 653,
+            "x": 2,
+            "y": 5,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 661,
+            "x": 4,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 672,
+            "x": 4,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 673,
+            "x": 1,
+            "y": 11,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 682,
+            "x": 5,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 683,
+            "x": 5,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 694,
+            "x": 5,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 699,
+            "x": 5,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 703,
+            "x": 3,
+            "y": 5,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 704,
+            "x": 3,
+            "y": 5,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 709,
+            "x": 1,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 713,
+            "x": 1,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 722,
+            "x": 2,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 723,
+            "x": 2,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 728,
+            "x": 1,
+            "y": 6,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 736,
+            "x": 1,
+            "y": 6,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 738,
+            "x": 2,
+            "y": 6,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 741,
+            "x": 2,
+            "y": 6,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 745,
+            "x": 4,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 746,
+            "x": 4,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 753,
+            "x": 2,
+            "y": 4,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 754,
+            "x": 2,
+            "y": 4,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 758,
+            "x": 3,
+            "y": 6,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 759,
+            "x": 3,
+            "y": 6,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 762,
+            "x": 5,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 764,
+            "x": 5,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 770,
+            "x": 6,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 771,
+            "x": 6,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 775,
+            "x": 0,
+            "y": 6,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 776,
+            "x": 0,
+            "y": 6,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 782,
+            "x": 6,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 783,
+            "x": 6,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 785,
+            "x": 7,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 791,
+            "x": 7,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 797,
+            "x": 3,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 798,
+            "x": 3,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 800,
+            "x": 8,
+            "y": 2,
+            "op": "b"
+          }
+        ],
+        "materialScore": [
+          1825,
+          3460
+        ]
+      }
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "heldout-smoke-99-0",
+      "seat": 1,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 794,
+            "builds": 3,
+            "upgrades": 2,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 1281,
+            "land": 163,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 788,
+            "builds": 6,
+            "upgrades": 6,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 3808,
+            "land": 315,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 4503.007743000002,
+        "builds": [
+          {
+            "player": 1,
+            "turn": 171,
+            "x": 18,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 172,
+            "x": 18,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 174,
+            "x": 17,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 176,
+            "x": 17,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 181,
+            "x": 17,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 183,
+            "x": 17,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 186,
+            "x": 20,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 214,
+            "x": 20,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 216,
+            "x": 19,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 219,
+            "x": 19,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 224,
+            "x": 20,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 433,
+            "x": 20,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 714,
+            "x": 1,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 715,
+            "x": 1,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 723,
+            "x": 2,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 726,
+            "x": 2,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 733,
+            "x": 2,
+            "y": 3,
+            "op": "b"
+          }
+        ],
+        "materialScore": [
+          1444,
+          4123
+        ]
+      }
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "heldout-smoke-99-1",
+      "seat": 0,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 785,
+            "builds": 8,
+            "upgrades": 7,
+            "rejected": 0,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 3533,
+            "land": 279,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 794,
+            "builds": 2,
+            "upgrades": 2,
+            "rejected": 1,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 1413,
+            "land": 142,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 3433.9183110000013,
+        "builds": [
+          {
+            "player": 0,
+            "turn": 152,
+            "x": 3,
+            "y": 2,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 153,
+            "x": 3,
+            "y": 2,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 156,
+            "x": 3,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 158,
+            "x": 3,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 162,
+            "x": 4,
+            "y": 1,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 163,
+            "x": 4,
+            "y": 1,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 206,
+            "x": 3,
+            "y": 3,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 371,
+            "x": 3,
+            "y": 3,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 373,
+            "x": 3,
+            "y": 4,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 431,
+            "x": 3,
+            "y": 4,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 521,
+            "x": 3,
+            "y": 5,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 522,
+            "x": 3,
+            "y": 5,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 524,
+            "x": 3,
+            "y": 6,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 525,
+            "x": 3,
+            "y": 6,
+            "op": "c"
+          },
+          {
+            "player": 0,
+            "turn": 546,
+            "x": 3,
+            "y": 7,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 668,
+            "x": 23,
+            "y": 13,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 669,
+            "x": 23,
+            "y": 13,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 672,
+            "x": 22,
+            "y": 13,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 673,
+            "x": 22,
+            "y": 13,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          3812,
+          1555
+        ]
+      }
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": "heldout-smoke-99-1",
+      "seat": 1,
+      "result": {
+        "winner": null,
+        "turns": 800,
+        "ended": false,
+        "stats": [
+          {
+            "player": 0,
+            "attacks": 793,
+            "builds": 1,
+            "upgrades": 1,
+            "rejected": 4,
+            "team": 1,
+            "uid": "arena-0",
+            "army": 1617,
+            "land": 130,
+            "class_": "",
+            "dead": 0,
+            "id": 1
+          },
+          {
+            "player": 1,
+            "attacks": 774,
+            "builds": 13,
+            "upgrades": 13,
+            "rejected": 0,
+            "team": 2,
+            "uid": "arena-1",
+            "army": 5833,
+            "land": 324,
+            "class_": "",
+            "dead": 0,
+            "id": 2
+          }
+        ],
+        "elapsedMs": 3425.7622360000023,
+        "builds": [
+          {
+            "player": 1,
+            "turn": 216,
+            "x": 22,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 217,
+            "x": 22,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 219,
+            "x": 22,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 220,
+            "x": 22,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 223,
+            "x": 23,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 225,
+            "x": 23,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 232,
+            "x": 22,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 236,
+            "x": 22,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 240,
+            "x": 24,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 243,
+            "x": 24,
+            "y": 16,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 252,
+            "x": 23,
+            "y": 16,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 254,
+            "x": 23,
+            "y": 16,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 268,
+            "x": 10,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 269,
+            "x": 10,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 272,
+            "x": 21,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 274,
+            "x": 21,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 279,
+            "x": 24,
+            "y": 17,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 282,
+            "x": 24,
+            "y": 17,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 286,
+            "x": 21,
+            "y": 18,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 291,
+            "x": 21,
+            "y": 18,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 297,
+            "x": 21,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 310,
+            "x": 21,
+            "y": 20,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 315,
+            "x": 20,
+            "y": 19,
+            "op": "b"
+          },
+          {
+            "player": 1,
+            "turn": 322,
+            "x": 20,
+            "y": 19,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 451,
+            "x": 20,
+            "y": 20,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 615,
+            "x": 5,
+            "y": 0,
+            "op": "b"
+          },
+          {
+            "player": 0,
+            "turn": 616,
+            "x": 5,
+            "y": 0,
+            "op": "c"
+          },
+          {
+            "player": 1,
+            "turn": 629,
+            "x": 20,
+            "y": 20,
+            "op": "c"
+          }
+        ],
+        "materialScore": [
+          1747,
+          6157
+        ]
+      }
+    }
+  ],
+  "wallMs": 30239
+}
