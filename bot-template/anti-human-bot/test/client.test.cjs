@@ -101,7 +101,7 @@ test('无效房间命令忽略，当前房间命令取消待切换', t => {
 });
 test('自动准备开启后观战席先参赛，节流且不更改房间配置，重连重新等待', t => {
   const [s, b] = setup(t); s.receive('room_update', lobby({ players: [{ sid: 'me', team: 0 }] }));
-  command(s, '/ready'); b.tick(); b.tick(); assert.deepEqual(s.sent, [['change_team', { team: 1 }]]);
+  command(s, '/ready'); b.tick(); b.tick(); assert.deepEqual(s.sent, [['change_team', { team: 2 }]]);
   s.receive('room_update', lobby()); s.advance(5000); b.tick(); b.tick();
   assert.equal(events(s, 'change_ready').length, 1);
   s.disconnect(); s.connect(); s.receive('room_update', lobby());
@@ -138,4 +138,111 @@ test('每帧计算并发送，20turn只限详情打印；汇总可见空动作�
  const summary=logs.find(x=>x.startsWith('[决策统计]'));assert.ok(summary);
  assert.match(summary,/计算=20 发送=20 空动作=0/);assert.match(summary,/更新跳号=0/);
  assert.ok(logs.filter(x=>x.startsWith('[决策]')).length<20);
+});
+test('组队模式人类加入本队时主动避让到无人类队伍，且不再重复换队', t => {
+  const [s, b] = setup(t);
+  s.receive('room_update', lobby({ allow_team: true, players: [{ sid: 'me', uid: 'bot', team: 2, ready: false, bot: true }] }));
+  b.tick(); assert.equal(events(s, 'change_team').length, 0);
+  s.receive('room_update', lobby({ allow_team: true, players: [
+    { sid: 'me', uid: 'bot', team: 2, ready: false, bot: true },
+    { sid: 'h1', uid: 'human', team: 2, ready: false },
+  ] }));
+  b.tick(); assert.deepEqual(events(s, 'change_team'), [['change_team', { team: 1 }]]);
+  // 服务器回显已换到 1 队（无人类）：不再重复发换队，无抖动。
+  s.receive('room_update', lobby({ allow_team: true, players: [
+    { sid: 'me', uid: 'bot', team: 1, ready: false, bot: true },
+    { sid: 'h1', uid: 'human', team: 2, ready: false },
+  ] }));
+  s.advance(5000); b.tick(); assert.equal(events(s, 'change_team').length, 1);
+});
+test('避让优先回到首选 2 队；2 队有人类时选最小编号空队，再退纯 bot 队', t => {
+  const [s, b] = setup(t);
+  // 首选 2 队只有 bot（无人类）：直接回 2 队。
+  s.receive('room_update', lobby({ allow_team: true, players: [
+    { sid: 'me', uid: 'bot', team: 3, ready: false, bot: true },
+    { sid: 'h1', uid: 'human', team: 3, ready: false },
+    { sid: 'b2', uid: 'otherbot', team: 2, ready: false, bot: true },
+  ] }));
+  b.tick(); assert.deepEqual(events(s, 'change_team'), [['change_team', { team: 2 }]]);
+  s.sent.length = 0; s.advance(2000);
+  // 首选 2 队也有人类：选最小编号空队（1 队）。
+  s.receive('room_update', lobby({ allow_team: true, players: [
+    { sid: 'me', uid: 'bot', team: 3, ready: false, bot: true },
+    { sid: 'h1', uid: 'human', team: 3, ready: false },
+    { sid: 'h2', uid: 'human2', team: 2, ready: false },
+  ] }));
+  b.tick(); assert.deepEqual(events(s, 'change_team'), [['change_team', { team: 1 }]]);
+  s.sent.length = 0; s.advance(2000);
+  // 16 队全部被占据、只有 4 队是纯 bot：退到纯 bot 队。
+  const crowded = [
+    { sid: 'me', uid: 'bot', team: 3, ready: false, bot: true },
+    { sid: 'h2', uid: 'human2', team: 2, ready: false },
+    { sid: 'b2', uid: 'otherbot', team: 4, ready: false, bot: true },
+  ];
+  for (let team = 1; team <= 16; team++) if (team !== 2 && team !== 4) crowded.push({ sid: `h${team}`, uid: `human${team}`, team, ready: false });
+  s.receive('room_update', lobby({ allow_team: true, players: crowded }));
+  b.tick(); assert.deepEqual(events(s, 'change_team'), [['change_team', { team: 4 }]]);
+});
+test('全部队伍都有人类时按兵不动；非组队模式不做避让', t => {
+  const [s, b] = setup(t);
+  const full = [{ sid: 'me', uid: 'bot', team: 2, ready: false, bot: true }];
+  for (let team = 1; team <= 16; team++) full.push({ sid: `h${team}`, uid: `human${team}`, team, ready: false });
+  s.receive('room_update', lobby({ allow_team: true, players: full }));
+  b.tick(); assert.equal(events(s, 'change_team').length, 0);
+  s.receive('room_update', lobby({ players: [
+    { sid: 'me', uid: 'bot', team: 1, ready: false, bot: true },
+    { sid: 'h1', uid: 'human', team: 1, ready: false },
+  ] }));
+  s.advance(2000); b.tick(); assert.equal(events(s, 'change_team').length, 0);
+});
+test('观战席参赛使用自定义 preferredTeam', t => {
+  const [s, b] = setup(t, { preferredTeam: 5 });
+  s.receive('room_update', lobby({ allow_team: true, players: [{ sid: 'me', uid: 'bot', team: 0, ready: false, bot: true }] }));
+  command(s, '/ready'); b.tick(); assert.deepEqual(s.sent, [['change_team', { team: 5 }]]);
+});
+
+// 对局内集成：构造 10x10 棋盘帧驱动 update 事件。
+// 我方玩家 1（皇冠 101/普通 1/指挥所 51），敌方玩家 2（皇冠 102/普通 2）。
+function gameBoard(t, options = {}) {
+  const [s] = setup(t, options);
+  s.receive('init_map', { n: 10, m: 10, player_ids: ['me', 'foe'] });
+  const frame = (turn, cells, lb) => {
+    const grid = Array(100).fill(0), army = Array(100).fill(0);
+    for (const [i, g, a] of cells) { grid[i] = g; army[i] = a; }
+    s.receive('update', { turn, is_diff: false, grid_type: grid, army_cnt: army, isolated: Array(100).fill(0),
+      leaderboard: lb ?? [{ id: 1, team: 1, class_: '' }, { id: 2, team: 2, class_: '' }] });
+  };
+  return [s, frame];
+}
+const cells = (start, list) => list.map(([g, a], k) => [start + k, g, a]);
+
+test('优势时经 send_message 发垃圾话，且不影响当 tick 操作', t => {
+  const [s, frame] = gameBoard(t, { params: { trashTalkChance: 1 } });
+  // 我方 40 格 20 兵（800），敌方 10 格 10 兵（100）：碾压
+  frame(60, [...cells(0, Array.from({ length: 40 }, () => [1, 20])), ...cells(50, Array.from({ length: 10 }, () => [2, 10]))]);
+  const chats = events(s, 'send_message');
+  assert.equal(chats.length, 1);
+  assert.equal(chats[0][0], 'send_message');
+  assert.equal(chats[0][1].team, false);
+  assert.ok(typeof chats[0][1].text === 'string' && chats[0][1].text.length > 0);
+});
+
+test('绝境四条全满足时先发 GG 再投降，且只投降一次', t => {
+  const params = { surrenderMinTurn: 30, surrenderTeaseTicks: 60, surrenderTeaseNearCrownTicks: 5, trashTalk: 0 };
+  const [s, frame] = gameBoard(t, { params });
+  const layout = (turn) => [
+    [11, 101, 30], ...cells(20, [[1, 5], [1, 5], [1, 5], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [1, 5]]),
+    [12, 2, 500], // 敌 500 兵贴脸我方皇冠（能收不收）
+    ...cells(60, [[102, 500], ...Array.from({ length: 9 }, () => [2, 1000])]),
+    ...cells(70, [[102, 500], ...Array.from({ length: 9 }, () => [2, 1000])]),
+    ...cells(80, [[102, 500], ...Array.from({ length: 9 }, () => [2, 1000])]),
+    ...cells(90, [[102, 500], ...Array.from({ length: 9 }, () => [2, 1000])]),
+    [99, turn % 2 ? 2 : 0, turn % 2 ? 10 : 0], // 敌地每 tick 易手 = 活跃
+  ];
+  for (let turn = 30; turn <= 89; turn++) { frame(turn, layout(turn)); assert.equal(events(s, 'surrender').length, 0); }
+  frame(90, layout(90));
+  assert.deepEqual(events(s, 'send_message'), [['send_message', { text: 'GG', team: false }]]);
+  assert.equal(events(s, 'surrender').length, 1);
+  frame(91, layout(91)); // 一击即锁，不重复投降
+  assert.equal(events(s, 'surrender').length, 1);
 });
