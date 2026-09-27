@@ -64,7 +64,6 @@ function render() {
   }
   var displayGrid = grid_type;
   var displayArmy = army_cnt;
-  var replayTeams = replayFogViewActive() ? replay_data.meta.player_teams || [] : null;
   var ownSelected =
     selx >= 0 &&
     sely >= 0 &&
@@ -78,19 +77,17 @@ function render() {
         txt = '';
       var cellType = displayGrid[i][j];
       var cellArmy = displayArmy[i][j];
-      // 迷雾格统一为「山+问号」未知占位：沼泽例外始终显示为沼泽，其余
-      // （含真实山地）一律按未知占位 201，归属与兵力一律隐藏
-      // （实时迷雾对局服务端已过滤为 201/204，此处主要服务回放视角）。
+      // 迷雾格（仿原版）：山脉（201）与沼泽（204 / 150~199）保持可见，
+      // 其余一律抹成空地（200）；归属与兵力隐藏（实时对局服务端已过滤，
+      // 此处主要服务回放视角）。
       if (fog[i][j]) {
-        if (cellType < 200) cellType = cellType >= 150 ? 204 : 201;
+        var isMountain = cellType == 201;
+        var isSwamp = cellType == 204 || (cellType >= 150 && cellType < 200);
+        if (!isMountain && !isSwamp) cellType = 200;
+        else if (isSwamp) cellType = 204;
         cellArmy = 0;
       }
-      // 回放队伍视角：视野内敌方的指挥所/主城不显示建筑身份，降级为普通领地
-      // （保留归属颜色与兵力；中立城市 50 不受影响；实时对局由服务端过滤）。
-      if (replayTeams && !fog[i][j] && cellType > 50 && cellType < 150) {
-        var structOwner = cellType % 50;
-        if (structOwner > 0 && replayTeams[structOwner - 1] != replay_view_team) cellType = structOwner;
-      }
+
       if (cellType < 200) {
         if (cellType < 50) {
           cls += ' c' + cellType;
@@ -116,11 +113,9 @@ function render() {
       } else if (cellType == 204) {
         cls += ' swamp';
       }
-      // 迷雾远征：视野外格子叠暗色遮罩（归属/兵力已由服务端隐藏）；
-      // 未知占位（201）追加问号，表示「有东西但未知」。
+      // 迷雾远征：视野外格子叠轻微暗色遮罩（归属/兵力已由服务端隐藏）。
       if (fog[i][j]) {
         cls += ' fog';
-        if (cellType == 201) txt = '?';
       }
       if (i == selx && j == sely) {
         if (selt == 1) {
@@ -158,6 +153,8 @@ function update(data) {
   if (typeof data.replay != 'undefined') replay_id = data.replay;
   if (!is_replay) {
     game_ended = Boolean(data.game_end);
+    // 迷雾对局的帧始终携带 fog 数组（全视野接收者为全 0），据此判定是否显示观战视角选择。
+    if (typeof data.fog != 'undefined') fog_mode = true;
   }
   if (data.is_diff) {
     for (var i = 0; i * 2 < data.grid_type.length; i++) {
@@ -274,24 +271,95 @@ function update(data) {
     return 0;
   });
   var th = '<tr><td>队伍</td><td>玩家</td><td>兵力</td><td>领土</td></tr>';
-  for (var i = 0; i < lb.length; i++) {
-    th +=
-      '<tr class="' +
-      lb[i].class_ +
-      '"><td>' +
-      lb[i].team +
-      '</td><td class="leaderboard-name c' +
-      lb[i].id +
-      '">' +
-      htmlescape(lb[i].uid) +
-      '</td><td>' +
-      lb[i].army +
-      '</td><td>' +
-      lb[i].land +
-      '</td></tr>';
+  // 迷雾局的观战/回放：组队局名称列显示队伍名（与视角 tabs 同一套规则，见 core-globals.js）。
+  var fogTeamGameView = fogObserverView() && fogTeamGame(lb);
+  // 组队局回放（非迷雾视角）：团队合并展示——每队一个整体条目显示团队总兵力并
+  // 按总兵力排序，队内成员按兵力排序紧随其后；迷雾组队局仍以队名显示为准，不合并。
+  var mergeTeams = is_replay && !fogTeamGameView && fogTeamGame(lb);
+  if (mergeTeams) {
+    var teamGroups = [];
+    var teamGroupIndex = {};
+    for (var i = 0; i < lb.length; i++) {
+      var t = lb[i].team;
+      if (typeof teamGroupIndex[t] == 'undefined') {
+        teamGroupIndex[t] = teamGroups.length;
+        teamGroups.push({ team: t, army: 0, land: 0, allDead: true, colorId: lb[i].id, members: [] });
+      }
+      var g = teamGroups[teamGroupIndex[t]];
+      g.army += lb[i].army;
+      g.land += lb[i].land;
+      g.colorId = Math.min(g.colorId, lb[i].id);
+      if (lb[i].class_ != 'dead') g.allDead = false;
+      g.members.push(lb[i]);
+    }
+    teamGroups.sort(function (a, b) {
+      if (a.army != b.army) return b.army - a.army;
+      if (a.land != b.land) return b.land - a.land;
+      return a.team - b.team;
+    });
+    for (var i = 0; i < teamGroups.length; i++) {
+      var g = teamGroups[i];
+      g.members.sort(function (a, b) {
+        if (a.army != b.army) return b.army - a.army;
+        if (a.land != b.land) return b.land - a.land;
+        return a.id - b.id;
+      });
+      th +=
+        '<tr class="lb-team' +
+        (g.allDead ? ' dead' : '') +
+        '"><td>' +
+        g.team +
+        '</td><td class="leaderboard-name c' +
+        g.colorId +
+        '">' +
+        fogTeamName(g.team) +
+        '</td><td>' +
+        g.army +
+        '</td><td>' +
+        g.land +
+        '</td></tr>';
+      for (var j = 0; j < g.members.length; j++) {
+        var mb = g.members[j];
+        th +=
+          '<tr class="lb-member ' +
+          mb.class_ +
+          '"><td></td><td class="leaderboard-name c' +
+          mb.id +
+          '">' +
+          htmlescape(mb.uid) +
+          '</td><td>' +
+          mb.army +
+          '</td><td>' +
+          mb.land +
+          '</td></tr>';
+      }
+    }
+  } else {
+    for (var i = 0; i < lb.length; i++) {
+      th +=
+        '<tr class="' +
+        lb[i].class_ +
+        '"><td>' +
+        lb[i].team +
+        '</td><td class="leaderboard-name c' +
+        lb[i].id +
+        '">' +
+        htmlescape(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView)) +
+        '</td><td>' +
+        lb[i].army +
+        '</td><td>' +
+        lb[i].land +
+        '</td></tr>';
+    }
   }
   $('#game-leaderboard').html(th);
   $('#game-leaderboard').css('display', '');
+  // 回放统计图：逐帧刷新进度游标并把面板贴到排行榜正下方（见 replay-stats.js）。
+  if (typeof refreshReplayStatsFrame == 'function') {
+    refreshReplayStatsFrame();
+  }
+  // 迷雾对局的观战者：按排行榜维护「视角」选择 tabs（全图 + 各参赛玩家）。
+  refreshSpectateViewTabs(data.leaderboard);
   $('#turn-counter').html('回合 ' + Math.floor(data.turn / 2) + (data.turn % 2 == 1 ? '.' : ''));
   $('#turn-counter').css('display', '');
   if (data.turn >= 26 && data.turn <= 50) {

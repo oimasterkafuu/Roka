@@ -44,3 +44,7 @@ temp/
 
 # macOS metadata
 ._*
+
+bot-template/anti-human-bot/training/results/
+bot-template/anti-human-bot/data/
+data/scratch/

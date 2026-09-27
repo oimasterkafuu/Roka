@@ -35,6 +35,8 @@ export interface LobbyPlayer {
   ready: boolean;
   /** 服务端托管策略 Bot（管理后台启动）：进房时排在普通成员之后，不当房主。 */
   serverBot?: boolean;
+  /** 托管 Bot 启动时的组队许可：false 的房间禁止开启组队（change_game_conf 校验）。 */
+  serverBotAllowTeam?: boolean;
   /** 任意 Bot 成员（第三方 bot 令牌或服务端托管）：bot 房禁用迷雾远征（issue #51）。 */
   bot?: boolean;
 }
@@ -48,6 +50,8 @@ export interface RoomPlayerView {
   server_bot?: boolean;
   /** Bot 成员标记（仅在为 true 时下发）：前端据此禁用迷雾开关。 */
   bot?: boolean;
+  /** 服务端托管策略 Bot 的组队许可（仅在为 true 时下发）：前端据此判断房主是否可开关组队。 */
+  server_bot_allow_team?: boolean;
 }
 
 export interface RoomUpdatePayload {
@@ -60,6 +64,8 @@ export interface RoomUpdatePayload {
   /** 地图大小（房间设置同步给前端展示）。 */
   map_size: 'normal' | 'large';
   in_game: boolean;
+  /** 部署更新排队中（禁止开新局，前端据此禁用开始按钮并显示提示）。 */
+  update_queued: boolean;
   players: RoomPlayerView[];
   ready: number;
   need: number;

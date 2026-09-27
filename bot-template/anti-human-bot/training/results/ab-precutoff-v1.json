@@ -1,0 +1,237 @@
+{
+  "createdAt": "2026-09-27T05:03:20.728Z",
+  "config": {
+    "count": 3,
+    "size": 0.8,
+    "turns": 1500,
+    "modes": [
+      "random",
+      "maze",
+      "archipelago",
+      "mediterranean"
+    ]
+  },
+  "summary": {
+    "games": 24,
+    "wins": 0,
+    "losses": 0,
+    "unresolved": 24,
+    "byMap": {
+      "random": {
+        "wins": 0,
+        "losses": 0,
+        "unresolved": 6
+      },
+      "maze": {
+        "wins": 0,
+        "losses": 0,
+        "unresolved": 6
+      },
+      "archipelago": {
+        "wins": 0,
+        "losses": 0,
+        "unresolved": 6
+      },
+      "mediterranean": {
+        "wins": 0,
+        "losses": 0,
+        "unresolved": 6
+      }
+    }
+  },
+  "wallMs": 344102,
+  "matches": [
+    {
+      "mapMode": "random",
+      "seed": 0,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "random",
+      "seed": 0,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "random",
+      "seed": 1,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "random",
+      "seed": 1,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "random",
+      "seed": 2,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "random",
+      "seed": 2,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "maze",
+      "seed": 0,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "maze",
+      "seed": 0,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "maze",
+      "seed": 1,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "maze",
+      "seed": 1,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "maze",
+      "seed": 2,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "maze",
+      "seed": 2,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": 0,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": 0,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": 1,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": 1,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": 2,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "archipelago",
+      "seed": 2,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": 0,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": 0,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": 1,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": 1,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": 2,
+      "seat": 0,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    },
+    {
+      "mapMode": "mediterranean",
+      "seed": 2,
+      "seat": 1,
+      "winner": null,
+      "turns": 1500,
+      "ended": false
+    }
+  ]
+}
