@@ -27,17 +27,21 @@ function buildArchitecture(state, params = {}) {
   const rejected = Object.freeze({ crownSafe: false, foundationSafe: false, towerSafe: false,
     tactical: false, complete: false, reserve: Infinity, incoming: Infinity, distance: 0, funding: 0, anchorGroups: 0 });
 
-  // ── 建造位置分档（用户 2026-09-27 硬方针）────────────────────────────────
+  // ── 建造位置分档（用户 2026-09-27 硬方针 + 2026-09-28 回调）───────────────
   // 位置判断不按出生点（迁都很常见，出生点早就不是参照系），按现场因素：
   // 「该格距最近敌方压力的跳数」与「局部威胁场」综合评估这是大后方还是前线。
   // locationRisk ∈ [0,1]：0 = 大后方，1 = 前线。威胁极大（≥buildDesperateThreat，
   // 敌人已打穿到腹地）时回落 0——退无可退，按大后方阈值尽快建造。
+  // 开局提速（earlyBuildTurns 内）：距离档整体后移（前后界按 earlyDistScale
+  // 收缩）——开局的「中间档」不抬高到拖慢建造，保证首座建造/调兵不慢一拍。
+  const early = ctx.turn < p.earlyBuildTurns;
+  const distLo = early ? Math.max(1, Math.round(p.buildFrontDist * p.earlyDistScale)) : p.buildFrontDist;
+  const distHi = Math.max(distLo + 1, early ? Math.round(p.buildRearDist * p.earlyDistScale) : p.buildRearDist);
   const riskCache = new Map();
   function locationRisk(i) {
     if (riskCache.has(i)) return riskCache.get(i);
     const dist = ctx.enemyDistance[i];
-    const lo = p.buildFrontDist, hi = Math.max(lo + 1, p.buildRearDist);
-    const distRisk = dist < 0 ? 0 : dist <= lo ? 1 : dist >= hi ? 0 : (hi - dist) / (hi - lo);
+    const distRisk = dist < 0 ? 0 : dist <= distLo ? 1 : dist >= distHi ? 0 : (distHi - dist) / (distHi - distLo);
     const spot = ctx.pressure(i, { radius: p.buildThreatRadius, decay: p.buildPressureDecay, ticks: p.buildThreatRadius });
     const risk = spot.total >= p.buildDesperateThreat ? 0
       : Math.max(distRisk, Math.min(1, spot.total / Math.max(1, p.buildFundThreat)));
@@ -46,9 +50,14 @@ function buildArchitecture(state, params = {}) {
   }
   // 建造资金阈值分档：大后方 rearBuildFund（约 100，一次集满可连续建造两次），
   // 前线 frontBuildFund（约 150，风险高留足余量），中间按危险度线性过渡。
-  // 下限 51 是引擎硬门槛（建造花 50 且至少留 1 兵）。
+  // 下限 51 是引擎硬门槛（建造花 50 且至少留 1 兵）。开局提速：前线档按
+  // earlyFrontFundScale 下调（默认 100）——早期前线建造也要「用得上、用得早」。
+  // 四舍五入后与 rearBuildFund 相等时直接返回，避免威胁场把 risk 推到 1 后
+  // 按 max(51, round(100.3)) 抬到 101。
   function buildFund(i) {
-    return Math.max(51, Math.round(p.rearBuildFund + (p.frontBuildFund - p.rearBuildFund) * locationRisk(i)));
+    const front = early ? Math.round(p.frontBuildFund * p.earlyFrontFundScale) : p.frontBuildFund;
+    if (front <= p.rearBuildFund) return p.rearBuildFund;
+    return Math.max(51, Math.round(p.rearBuildFund + (front - p.rearBuildFund) * locationRisk(i)));
   }
   // 前线稳定格：前线区域内（贴脸不算、纯后方不算）但威胁场低、我方局部兵力
   // 占优——「相对稳定下来」的前线位置，应更积极地建造（前线迁都：兵源/产能前移）。
