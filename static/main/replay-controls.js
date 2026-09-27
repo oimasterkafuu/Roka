@@ -57,6 +57,20 @@ function jumpToTurn() {
   if (targetFrame < 0) {
     return;
   }
+  jumpToFrame(targetFrame);
+}
+
+// 跳转到指定帧下标（0 = 初始帧，k = 应用第 k 个 forward patch 之后），
+// 统计图游标点击/拖动经此跳转（见 replay-stats.js）。
+function jumpToFrame(targetFrame) {
+  if (!replay_data || !replay_data.patches || !replay_data.initial) {
+    return;
+  }
+  targetFrame = Math.max(0, Math.min(replay_data.patches.length, Math.floor(targetFrame)));
+  if (targetFrame == cur_turn) {
+    return;
+  }
+  if (is_autoplaying) switchAutoplay();
   while (cur_turn < targetFrame) {
     if (!nextTurn(true)) break;
   }
