@@ -27,8 +27,8 @@ interface StoredUser {
   // 到期不解数据，读取时惰性判定为已解除（见 getBanStatus）。
   bannedUntil?: number;
   ratingHistory?: RatingHistoryPoint[];
-  // 最后在线时间：建立 socket 连接时刷新为「上线」，最后一个连接断开时为「下线」。
-  // 旧数据无此字段，读取时按 undefined 处理（向后兼容）。
+  // 最后在线时间：用户最近一次有效请求/动作的时间，由 presence-service 统一维护
+  // （本字段只是它的持久化落盘）。旧数据无此字段，读取时按 undefined 处理（向后兼容）。
   lastSeenAt?: number;
 }
 
@@ -47,11 +47,6 @@ export interface TopRatedEntry {
   rating: number;
   ratingGames: number;
   provisional: boolean;
-}
-
-export interface RecentlySeenEntry {
-  username: string;
-  lastSeenAt: number;
 }
 
 export interface AdminUserEntry {
@@ -517,35 +512,30 @@ export class UserStore {
   }
 
   /**
-   * 刷新用户最后在线时间（上线/下线时机由调用方判断）。
+   * 写入用户「最后在线」时间（presence-service 的落盘回调；值由它统一计算与节流）。
    * 不写 updatedAt：它只是账号字段变更时间，与在线状态无关。
    */
-  async markLastSeen(usernameInput: string): Promise<void> {
+  async setLastSeenAt(usernameInput: string, lastSeenAt: number): Promise<void> {
     const user = this.usersByKey.get(this.normalize(usernameInput));
-    if (!user) {
+    if (!user || !Number.isFinite(lastSeenAt)) {
       return;
     }
-    user.lastSeenAt = Date.now();
+    user.lastSeenAt = lastSeenAt;
     await this.persist();
   }
 
   /**
-   * 最近在线（下线时间）倒序列表；isOnline 传入时跳过当前仍在线的用户。
+   * 全部用户的「最后在线」落盘记录，供 presence-service 启动时 seed 恢复内存表。
    */
-  listRecentlySeen(limit: number, isOnline?: (username: string) => boolean): RecentlySeenEntry[] {
-    const capped = Math.max(1, Math.min(100, Math.floor(limit) || 10));
-    const entries: RecentlySeenEntry[] = [];
+  listLastSeen(): { username: string; lastSeenAt: number }[] {
+    const entries: { username: string; lastSeenAt: number }[] = [];
     for (const user of this.usersByKey.values()) {
       if (typeof user.lastSeenAt !== 'number' || !Number.isFinite(user.lastSeenAt)) {
         continue;
       }
-      if (isOnline && isOnline(user.username)) {
-        continue;
-      }
       entries.push({ username: user.username, lastSeenAt: user.lastSeenAt });
     }
-    entries.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
-    return entries.slice(0, capped);
+    return entries;
   }
 
   /**
