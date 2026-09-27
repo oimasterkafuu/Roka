@@ -157,9 +157,10 @@ function updateSpectateMode() {
   socket.emit('change_team', { team: getTabVal('spectate-mode') == '观战' ? 0 : 1 });
 }
 
-// 观战视角选择（迷雾对局，看齐回放的视角切换）：默认「全图」；选中玩家后
-// 服务端按该玩家队伍的可见性下发迷雾帧。tabs 按排行榜玩家动态生成。
-var spectate_view_uids = [];
+// 观战视角选择（迷雾对局，看齐回放的视角切换）：默认「全图」；组队局 tab 显示
+// 队伍名（每队一个「队伍 N」）、非组队局显示各玩家用户名（与回放视角同一套规则，
+// 见 core-globals.js），选中后服务端按该队伍的可见性下发迷雾帧。tabs 按排行榜动态生成。
+var spectate_view_labels = [];
 var spectate_view_teams = {};
 
 // 观战视角资格：迷雾对局中的纯观战者（中途进房/观战席/已战败/终局前），
@@ -180,37 +181,40 @@ function refreshSpectateViewTabs(lb) {
   if (!section.length) return;
   if (!spectateViewEligible() || !Array.isArray(lb)) {
     section.css('display', 'none');
-    spectate_view_uids = [];
+    spectate_view_labels = [];
     return;
   }
   section.css('display', '');
-  var uids = [];
+  var teamGame = fogTeamGame(lb);
+  var labels = [];
   var teams = {};
   for (var i = 0; i < lb.length; i++) {
-    uids.push(lb[i].uid);
-    teams[lb[i].uid] = lb[i].team;
+    var label = fogDisplayName(lb[i].uid, lb[i].team, teamGame);
+    if (typeof teams[label] != 'undefined') continue;
+    labels.push(label);
+    teams[label] = lb[i].team;
   }
-  var key = uids.slice().sort().join('|');
-  if (key == spectate_view_uids.slice().sort().join('|')) return;
-  spectate_view_uids = uids;
+  var key = labels.slice().sort().join('|');
+  if (key == spectate_view_labels.slice().sort().join('|')) return;
+  spectate_view_labels = labels;
   spectate_view_teams = teams;
   var tabs = $('#tabs-spectate-view')[0];
   if (!tabs) return;
   while (tabs.children.length > 2) {
     tabs.removeChild(tabs.lastChild);
   }
-  for (var i = 0; i < uids.length; i++) {
-    $(tabs).append($('<div class="inline-button"></div>').text(uids[i]));
+  for (var i = 0; i < labels.length; i++) {
+    $(tabs).append($('<div class="inline-button"></div>').text(labels[i]));
   }
   for (var i = 2; i < tabs.children.length; i++) {
     initTab(tabs, tabs.children[i], onSpectateViewTab);
   }
-  // 恢复选中态：优先找回同队伍的玩家 tab；找不到则回退全图并通知服务端。
+  // 恢复选中态：优先找回同队伍的 tab；找不到则回退全图并通知服务端。
   var selected = '全图';
   if (spectate_view_team > 0) {
-    for (var i = 0; i < uids.length; i++) {
-      if (teams[uids[i]] == spectate_view_team) {
-        selected = uids[i];
+    for (var i = 0; i < labels.length; i++) {
+      if (teams[labels[i]] == spectate_view_team) {
+        selected = labels[i];
         break;
       }
     }

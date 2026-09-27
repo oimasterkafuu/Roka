@@ -209,19 +209,19 @@ _一句话：对局/回放页骨架与脚本加载顺序。_
 回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）并启动房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；`room_update` 对比成员 uid 快照检测新玩家进房、`starting` 表示开局，两者在页面后台时经 `notify.js` 弹浏览器通知；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/R/F/T/Enter/Esc/空格（X/Q 建指挥所、C/E 升级主城、R 清空队列、F 撤销队尾）。
 _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 
-**static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3/4、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`、`replay_view_team`（回放视角：0 全知 / 队伍编号）、`spectate_view_team`/`fog_mode`/`self_team`（实时观战视角状态：所选队伍、是否迷雾局、自己房间队伍）。
+**static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3/4、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`、`replay_view_team`（回放视角：0 全知 / 队伍编号）、`spectate_view_team`/`fog_mode`/`self_team`（实时观战视角状态：所选队伍、是否迷雾局、自己房间队伍）、迷雾局观战/回放共享名称显示助手（`fogTeamGame` 组队局判定——任一队伍 ≥2 人；`fogTeamName`/`fogDisplayName` 组队显队名「队伍 N」、非组队显用户名；`fogObserverView` 判定当前是否迷雾局观战/回放视角，回放与观战两条链路共用）。
 _一句话：共享常量：方向表、回放魔数、转义工具。_
 
-**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头、建造角标；迷雾格渲染「山+问号」未知占位、沼泽例外、隐藏兵力，回放队伍视角额外把视野内敌方指挥所/主城降级为普通领地），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。回放模式每帧经 `applyReplayFogView` 按 `replay_view_team` 重算迷雾遮罩（回放不含历史视野，按当前帧局面以对局相同的半径 1 规则重算）；实时模式由 update 帧是否携带 `fog` 字段置 `fog_mode`，并每帧 `refreshSpectateViewTabs(data.leaderboard)` 维护观战视角 tabs。
+**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头、建造角标；迷雾格渲染「山+问号」未知占位、沼泽例外、隐藏兵力，回放队伍视角额外把视野内敌方指挥所/主城降级为普通领地），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。回放模式每帧经 `applyReplayFogView` 按 `replay_view_team` 重算迷雾遮罩（回放不含历史视野，按当前帧局面以对局相同的半径 1 规则重算）；实时模式由 update 帧是否携带 `fog` 字段置 `fog_mode`，并每帧 `refreshSpectateViewTabs(data.leaderboard)` 维护观战视角 tabs。迷雾局观战/回放的排行榜名称列按 core-globals 共享规则显示（组队局显「队伍 N」、非组队局显用户名，参赛存活玩家视角不受影响）。
 _一句话：帧渲染器：update 帧合并 + 地图/榜单更新。_
 
 **static/main/replay-binary.js** — RPB1/2/3/4 回放二进制解码器，产出 `{n,m,initial,patches[],meta}`（RPB4 起 meta 含 fog 标志）；帧结构与 socket `update` 同构，直接喂 render-update.js。**格式变更须与 `src/replay-patch-binary.ts` 同步。**
 _一句话：RPB1/2/3/4 回放二进制解码为 update 帧。_
 
-**static/main/replay-controls.js** — 回放步进/跳转/自动播放（`backTurn/nextTurn/jumpToTurn/switchAutoplay`）、迷雾对局回放的视角选择器（`initReplayViewTabs` 按 meta.fog 与参赛队伍动态生成「全知/队伍 N」tabs，`setReplayViewTeam` 切换即时重绘）与投降弹窗显隐。
+**static/main/replay-controls.js** — 回放步进/跳转/自动播放（`backTurn/nextTurn/jumpToTurn/switchAutoplay`）、迷雾对局回放的视角选择器（`initReplayViewTabs` 按 meta.fog 与参赛队伍动态生成「全知 + 各视角」tabs——组队局每队一个「队伍 N」、非组队局各玩家用户名，标签经 `replay_view_teams` 映射队伍编号，与观战视角同一套共享规则；`setReplayViewTeam` 切换即时重绘）与投降弹窗显隐。
 _一句话：回放步进/跳转/自动播放、视角选择与投降弹窗。_
 
-**static/main/room-controls.js** — 房间大厅 UI：链接复制、设置 tabs 三件套（`getTabVal/setTabVal/initTab`）、地图类型/组队/迷雾等开关编解码（`getMapModeCode/setFogModeByCode` 等）、队伍切换（`change_team`）、房主配置 emit `change_game_conf`（种子失焦上传）、聊天队伍前缀、观战视角选择（`refreshSpectateViewTabs` 按排行榜动态生成「全图 + 各参赛玩家」tabs，`onSpectateViewTab` emit `spectate_view` 切换，仅迷雾对局观战者可见，玩家集合不变不重建以保留选中态）。
+**static/main/room-controls.js** — 房间大厅 UI：链接复制、设置 tabs 三件套（`getTabVal/setTabVal/initTab`）、地图类型/组队/迷雾等开关编解码（`getMapModeCode/setFogModeByCode` 等）、队伍切换（`change_team`）、房主配置 emit `change_game_conf`（种子失焦上传）、聊天队伍前缀、观战视角选择（`refreshSpectateViewTabs` 按排行榜动态生成「全图 + 各视角」tabs——组队局每队一个「队伍 N」、非组队局各玩家用户名，与回放视角同一套共享规则；`onSpectateViewTab` emit `spectate_view` 切换，仅迷雾对局观战者可见，玩家集合不变不重建以保留选中态）。
 _一句话：房间设置 tabs、链接复制、队伍与聊天前缀。_
 
 **static/main/blink-clock.js** — 全局闪烁时钟：在 `#map` 容器上周期切换 `blink-slow`（1s 衰减期）/`blink-fast`（0.4s 宽限期）/`pulse-soft`（1.2s 教程目标），单元格只挂声明 class，相位统一驱动。

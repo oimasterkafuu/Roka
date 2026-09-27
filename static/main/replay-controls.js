@@ -92,9 +92,12 @@ function setAutoplayRate() {
   autoplay_speed = parseFloat(tmp.substr(0, tmp.length - 1));
 }
 
+// 回放视角 tab 标签 → 队伍编号（组队局标签为「队伍 N」，非组队局为玩家用户名）。
+var replay_view_teams = {};
+
 function onReplayViewTab() {
   var val = getTabVal('replay-view');
-  setReplayViewTeam(val == '全知' ? 0 : parseInt(val.substr(3), 10));
+  setReplayViewTeam(val == '全知' ? 0 : replay_view_teams[val] || 0);
 }
 
 // 切换回放视角（0 = 全知，>0 = 队伍编号）：重算迷雾遮罩并立即重绘当前帧。
@@ -105,6 +108,8 @@ function setReplayViewTeam(team) {
 }
 
 // 迷雾对局的回放提供视角选择器（全知 + 各参赛队伍）；未开启迷雾的回放不显示。
+// 组队局 tab 显示队伍名（每队一个「队伍 N」），非组队局显示各玩家用户名
+// （与观战视角同一套规则，见 core-globals.js）。
 function initReplayViewTabs() {
   var section = $('#replay-view-section');
   var tabs = $('#tabs-replay-view')[0];
@@ -114,26 +119,33 @@ function initReplayViewTabs() {
     tabs.removeChild(tabs.lastChild);
   }
   replay_view_team = 0;
+  replay_view_teams = {};
   setTabVal('replay-view', '全知');
   var meta = replay_data && replay_data.meta;
   if (!meta || !meta.fog || !Array.isArray(meta.player_teams)) {
     section.css('display', 'none');
     return;
   }
-  var teams = [];
+  var teamGame = fogTeamGame(meta.player_teams);
+  var entries = [];
   for (var i = 0; i < meta.player_teams.length; i++) {
     var t = Number(meta.player_teams[i]);
-    if (t > 0 && teams.indexOf(t) < 0) teams.push(t);
+    if (!(t > 0)) continue;
+    var name = meta.player_names && meta.player_names[i] ? String(meta.player_names[i]) : fogTeamName(t);
+    var label = fogDisplayName(name, t, teamGame);
+    if (typeof replay_view_teams[label] != 'undefined') continue;
+    replay_view_teams[label] = t;
+    entries.push({ label: label, team: t });
   }
-  teams.sort(function (a, b) {
-    return a - b;
+  entries.sort(function (a, b) {
+    return a.team - b.team;
   });
-  if (!teams.length) {
+  if (!entries.length) {
     section.css('display', 'none');
     return;
   }
-  for (var k = 0; k < teams.length; k++) {
-    $(tabs).append($('<div class="inline-button">队伍 ' + teams[k] + '</div>'));
+  for (var k = 0; k < entries.length; k++) {
+    $(tabs).append($('<div class="inline-button"></div>').text(entries[k].label));
   }
   for (var i = 1; i < tabs.children.length; i++) {
     initTab(tabs, tabs.children[i], onReplayViewTab);
