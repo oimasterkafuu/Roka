@@ -134,9 +134,26 @@ function createFrontline(state, params = {}) {
       // 合力也不够 → 落到通用路径（大堆对皇冠仍可能触发消耗冲击）。
     }
     // 源点留守规则照旧（否则一兵建筑下一 tick 就被顺手拆掉，净亏产能）。
-    // 进攻一律全兵优先：按 [全冲, 半兵, 智能分兵] 顺序取第一个通过留守/预算闸门的模式，
-    // 「兵够却分多次小勺推同一目标」视为 bug（用户 2026-09-27 方针）。
-    const modes = [2, 1, 0];
+    // ── 深入敌境判定（用户 2026-09-27 方针，细化第二轮「进攻一律全兵」）──────
+    // 看源点与我方领土/前线的关系：源点的可通行邻格（不含目标）里敌占格明显多于
+    // 我方格，说明我军只是经窄走廊/突出部插进敌方腹地——侧翼全是敌人，全兵压上
+    // 等于把后方据点放空。源点背后是我方连片领土的贴界常规推进不算深入。
+    let foeCells = 0, ownCells = 0;
+    for (const j of ctx.neighbors[a]) {
+      if (j === b || !passable(j)) continue;
+      if (owners[j] > 0 && !allied(owners[j], me)) foeCells++;
+      else if (known[j] && allied(owners[j], me)) ownCells++;
+    }
+    const deepPush = (kind === 'enemy' || kind === 'city') && foeCells >= 2 && foeCells > ownCells;
+    // 对方完全无威胁：源点两跳内没有能反打的敌兵，且可见敌军总量还不及这一路源头——
+    // 没有什么要守的，深入也直接全兵。
+    const noThreat = src.total === 0 && ctx.race.enemyArmy < A;
+    // 深入且有威胁时能半兵就半兵（像正常扩散铺路一样，半兵够拿下目标格就只派一半，
+    // 留一半守原地）；半兵攻不进去时按顺序落到全兵——「半兵推不动还硬推」被 arrive
+    // 闸门拦住。常规推进（非深入）维持第二轮「全兵优先」：按 [全冲, 半兵, 智能分兵]
+    // 顺序取第一个通过留守/预算闸门的模式，「兵够却分多次小勺推同一目标」视为 bug。
+    const deepHalf = deepPush && !noThreat;
+    const modes = deepHalf ? [1, 2, 0] : [2, 1, 0];
     let best = null;
     for (const mode of modes) {
       const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
@@ -177,8 +194,9 @@ function createFrontline(state, params = {}) {
       const reason = isCrown ? `攻冠：出兵${push}，留守${left}`
         : isCity ? `攻指挥所：出兵${push}，留守${left}`
           : exchange ? `边界交换：出兵${push}，留守${left}`
-            : `边界推进：${mode === 1 ? '半兵' : mode === 2 ? '全冲' : '智能分兵'}，留守${left}，占领后${arrive}`;
-      // 全兵优先：modes 已按 [全冲, 半兵, 智能分兵] 排序，第一个被闸门放行的就是答案。
+            : `边界推进：${mode === 1 ? (deepHalf ? '深入半兵' : '半兵') : mode === 2 ? '全冲' : '智能分兵'}，留守${left}，占领后${arrive}`;
+      // modes 已按当前方针排序（深入有威胁 [半兵, 全冲, 智能分兵]，其余 [全冲, 半兵, 智能分兵]），
+      // 第一个被闸门放行的就是答案。
       best = { move: { ...move, mode, half: false, reason }, score, kind };
       break;
     }
