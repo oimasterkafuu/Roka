@@ -85,3 +85,15 @@ test('不修改输入局面', () => {
   chooseLogistics(s, null, null, {});
   assert.equal(JSON.stringify(s), before);
 });
+
+test('经济工地只保留开工额度，超额存量照常供军事运输', () => {
+  // (1,5) 的 200 兵大堆会被选为经济工地；旧逻辑整格豁免，军用补给永远抽不到它，
+  // 实测 uzsTrD 里 187 兵因此趴窝 35 回合。现在只保留 51 的开工额度。
+  const s = field();
+  s.grid[4 * 10 + 5] = 1; s.army[4 * 10 + 5] = 5;   // 前线前哨
+  s.army[5 * 10 + 5] = 30;                           // 前哨对面的敌军
+  s.army[at(1, 5)] = 200;                            // 安全后方大堆（将成为工地）
+  const military = chooseLogistics(s, null, null, { militaryOnly: true });
+  assert.ok(military, '前线有缺口时必须给出补给');
+  assert.equal(military.x * 10 + military.y, at(1, 5), `应抽大堆的超额存量，实际源点 (${military.x},${military.y})`);
+});

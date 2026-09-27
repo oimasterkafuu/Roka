@@ -18,6 +18,7 @@ const CURRENT = {
   prevconservative: () => require('./prevconservative/policy.cjs').chooseAction,
   precampaign: () => require('./precampaign/policy.cjs').chooseAction,
   preresilience: () => require('./preresilience/policy.cjs').chooseAction,
+  precutoff: () => require('./precutoff/policy.cjs').chooseAction,
 };
 if (!CURRENT[currentName]) throw new Error(`未知 current: ${currentName}`);
 const current = CURRENT[currentName]();
@@ -27,6 +28,7 @@ const OPPONENTS = {
   preresilience: () => require('./preresilience/policy.cjs').chooseAction,
   preburst: () => require('./preburst/policy.cjs').chooseAction,
   prearchitecture: () => require('./prearchitecture/policy.cjs').chooseAction,
+  precutoff: () => require('./precutoff/policy.cjs').chooseAction,
   self: () => current,
 };
 if (!OPPONENTS[opponentName]) throw new Error(`未知对手: ${opponentName}`);

@@ -115,9 +115,7 @@ function createFrontline(state, params = {}) {
       let accepted = exposure > 0;
       let exchange = false;
       // 正在被反推：只接高价值目标，先把地守住再谈扩张。
-      // 但 exposure>0 的稳赢收割（例如 1800 兵打 105 守军的隔壁格）不该被「转守」拦下——
-      // 实地回放里这条无条件否决把 17 倍兵力差的收割锁了 80 个 tick。
-      if (params.consolidate === true && !buildingTarget && !accepted) continue;
+      if (params.consolidate === true && !buildingTarget) continue;
       if (!accepted) {
         if (buildingTarget) accepted = true;                               // 拆建筑：损失可接受
         else if (!behindArmy && localRatio >= exchangeNeed && left > src.adj) { accepted = true; exchange = true; }
