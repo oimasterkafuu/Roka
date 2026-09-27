@@ -55,3 +55,17 @@ test('保底不会用来白送主城：源点留守规则仍然生效', () => {
   const a = chooseAction(s);
   assert.ok(!a || a.kind !== 'attack' || a.y !== 0, '主城 1 兵不打仗');
 });
+
+test('背水一战压过补给与经济：补不齐缺口时全部动作让位于最强增援', () => {
+  // 复刻 _E_ 胜局形态：300 兵堆 5 tick 抵达皇冠，旧策略只会走普通补给批次，
+  // 甚至继续筹资建设；现在必须直接进入背水一战。
+  const s = { n: 1, m: 7, playerId: 1, turn: 200,
+    grid: [101, 1, 1, 1, 1, 2, 102], army: [40, 80, 1, 1, 30, 300, 10],
+    isolated: Array(7).fill(0), fog: Array(7).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  const a = chooseAction(s);
+  assert.ok(a, '不允许空动作');
+  assert.equal(a.kind, 'attack');
+  assert.match(String(a.reason), /背水一战/);
+  assert.equal(a.y, 1, '从最强的后方兵堆出兵');
+  assert.ok(a.dy > a.y, '朝威胁方向');
+});

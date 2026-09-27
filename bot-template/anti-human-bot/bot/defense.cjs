@@ -110,6 +110,8 @@ function chooseDefense(state, params = {}) {
     return Math.min(Math.max(0, amount - 1), Math.max(0, amount - reserve - 1));
   }
   const candidates = [];
+  // 补不齐缺口时的最强部分增援（按威胁收集，全或无筛选之后再兜底）。
+  const fallbacks = [];
   for (const threat of threats) {
     // 优先能够赶上的前线，不将城市/塔误当成终极救援目标。
     for (let k = 0; k < threat.path.length; k++) {
@@ -163,6 +165,13 @@ function chooseDefense(state, params = {}) {
       if (chosen) {
         const urgent = threat.time <= URGENT_TICKS, counter = hostile;
         candidates.push({ ...chosen, target, threat, duration, frontline: k, urgent, counter });
+      } else if (routes.length) {
+        // 全或无的陷阱（_E_ 胜局复盘根因）：400+ 兵堆压向皇冠时，没有任何一路
+        // 能补齐缺口，旧实现直接当「无防御动作」返回 null，bot 随后几 tick
+        // 照常筹资/建设，皇冠零增援陷落。这里记下最强的一路部分增援兜底——
+        // 皇冠被端就是终局，每拖一 tick 都可能有新的援军进入窗口。
+        const top = routes.reduce((a, b) => (b.amount > a.amount ? b : a));
+        fallbacks.push({ ...top, target, threat, need, duration: top.distance, frontline: k });
       }
     }
   }
@@ -170,7 +179,23 @@ function chooseDefense(state, params = {}) {
   candidates.sort((a, b) => Number(b.counter) - Number(a.counter) || a.threat.time - b.threat.time ||
     a.duration - b.duration || a.frontline - b.frontline || b.amount - a.amount);
   const best = candidates[0];
-  if (!best) return null;
+  if (!best) {
+    // 背水一战：所有路线都补不齐缺口时，仍返回最强的一路部分增援（lastStand），
+    // 绝不零反应。零星碎兵（贡献不足缺口 10% 且不到 10 兵）不送——那是白给。
+    // 只兜底反应窗口（defenseHorizon）内的贴脸威胁；窗口外的远威胁交给
+    // 补给/物流管线预置兵力，不提前锁死全部动作。
+    const viable = fallbacks.filter((fb) => fb.threat.deficit > 0 && fb.threat.time <= rallyWindow &&
+      fb.amount >= Math.max(10, Math.ceil(fb.need * 0.1)));
+    if (!viable.length) return null;
+    viable.sort((a, b) => a.threat.time - b.threat.time || b.amount - a.amount);
+    const fb = viable[0];
+    const reason = `皇冠防守：背水一战，缺口约${Math.round(fb.need)}补不齐，先送最强一路约${Math.round(fb.amount)}兵，敌军约${fb.threat.time}tick抵达皇冠`;
+    return { move: { x: Math.floor(fb.s / m), y: fb.s % m, dx: Math.floor(fb.dest / m), dy: fb.dest % m,
+      half: false, mode: 0, reason }, threatOwners,
+      urgent: fb.threat.time <= URGENT_TICKS && fb.threat.deficit > 0,
+      imminent: fb.threat.time <= 1 && fb.threat.deficit > 0,
+      lastStand: true, deficit: Math.round(fb.threat.deficit), reason };
+  }
   const urgent = best.threat.time <= URGENT_TICKS && best.threat.deficit > 0;
   // 只有贴脸救城（1 tick 内）或前线截击才允许越过移动护栏的反向禁行：
   // 提前汇兵（威胁还有 2+ tick）若与刚执行的运输方向相反而硬拉回去，
