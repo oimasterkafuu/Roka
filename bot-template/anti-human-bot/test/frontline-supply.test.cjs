@@ -71,9 +71,21 @@ test('本来就能进攻时不新开预算拖住进攻', () => {
 test('主城不会被抽空去填前线', () => {
   const s = board();
   s.army[0] = 100;   // 后方主城有 100 兵
+  s.grid[2] = 2; s.army[2] = 50;   // 敌兵逼近到 2 格内：主城不再安全，必须留守
   const a = supply(s);
   assert.ok(a);
-  assert.ok(a.reason.amount <= 96, `主城必须留守，实际出兵 ${a.reason.amount}`);
+  assert.ok(a.reason.amount <= 96, `受威胁的主城必须留守，实际出兵 ${a.reason.amount}`);
+});
+
+test('安全主城全兵外运，不再几何级减半成小勺', () => {
+  const s = board();
+  s.army[0] = 100;   // 敌人在 7 格外的远处：主城安全
+  const a = supply(s);
+  assert.ok(a);
+  // 用户 2026-09-27 方针：一律全兵推进。减半外运会让兵堆按 1/2、1/4、1/8
+  // 几何级变成无数小勺（实测 386 次减半运输中 299 次不足 20 兵），视为 bug。
+  assert.notEqual(a.mode, 1, '安全主城不得减半外运');
+  assert.ok(a.reason.amount >= 96, `安全主城应全兵外运，实际出兵 ${a.reason.amount}`);
 });
 
 test('拆建筑的机会不会被已开始的前线补给批次顶掉', () => {

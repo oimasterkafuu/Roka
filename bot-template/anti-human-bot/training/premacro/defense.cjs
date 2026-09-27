@@ -172,12 +172,8 @@ function chooseDefense(state, params = {}) {
   const best = candidates[0];
   if (!best) return null;
   const urgent = best.threat.time <= URGENT_TICKS && best.threat.deficit > 0;
-  // 只有贴脸救城（1 tick 内）或前线截击才允许越过移动护栏的反向禁行：
-  // 提前汇兵（威胁还有 2+ tick）若与刚执行的运输方向相反而硬拉回去，
-  // 就会和经济/物流运输在同一堆兵上互相倒兵（RMtDIbE7rDS6 t526⇄t527⇄t533⇄t534 绕圈根因）。
-  const imminent = (best.threat.time <= 1 || best.counter) && best.threat.deficit > 0;
   const reason = `皇冠防守：${best.target === best.threat.e ? '前线截击' : '提前汇兵'}，敌军约${best.threat.time}tick抵达皇冠`;
   return { move: { x: Math.floor(best.s / m), y: best.s % m, dx: Math.floor(best.dest / m), dy: best.dest % m,
-    half: false, mode: 0, reason }, threatOwners, urgent, imminent, reason };
+    half: false, mode: 0, reason }, threatOwners, urgent, reason };
 }
 module.exports = { chooseDefense };

@@ -8,21 +8,6 @@ const { createContext } = require('./threat.cjs');
 // 「哪个格子该补兵、补到多少、这一 tick 从哪搬到哪」。
 // 唯一的缓存是同一 tick 内 getSupplyBatch 需要读取的计算结果（当前回合的函数值）。
 const currentBatch = new WeakMap();
-// 跨回合的只有「防抖/滞回」（用户 2026-09-27 硬性方针，不是复活旧版计划状态）：
-//   - 工地/集结点滞回：旧目标仍有效时继续用它，除非挑战者明显更好——每 tick 重选
-//     会让运输方向反复横跳、同一堆兵来回倒（RMtDIbE7rDS6 t107–t302 工地目标连跳）；
-//   - 僵持放弃：持续向同一集结点喂兵但缺口长期不收敛 = 无目的僵持堆兵，
-//     停止输送一段时间，让兵力转投别的方向（找弱点）。
-const planning = new WeakMap();
-function planFor(state, turn, me) {
-  let mem = planning.get(state);
-  if (!mem || turn < mem.turn || mem.me !== me) {
-    mem = { turn, me, site: null, rally: null, feed: null, abandoned: new Map() };
-    planning.set(state, mem);
-  }
-  mem.turn = turn;
-  return mem;
-}
 // 同一 tick 内 policy 会调用本模块 2–3 次（军用/经济/常规），
 // 这里缓存「本回合算出来的函数值」，换回合即失效并整份重算。
 const turnMemo = new WeakMap();
@@ -55,7 +40,7 @@ function chooseLogistics(state, move, build, params = {}) {
       grid.length !== size || army.length !== size) return null;
   const turn = Number.isFinite(state.turn) ? state.turn : 0;
   currentBatch.set(state, { turn, batch: null });
-  const macro = planFor(state, turn, me);
+  const memoKey = '';   // 占位，真正的键在模式判定之后构建
   let memo = null;
   const ctx = createContext(state, params);
   if (!ctx) return null;
@@ -101,18 +86,16 @@ function chooseLogistics(state, move, build, params = {}) {
   const safe = (i) => own(i) && (ctx.enemyDistance[i] < 0 || ctx.enemyDistance[i] > Math.max(3, p.enemyDistance));
   const safety = Math.max(2, Math.ceil(p.buildSafety));
 
-  /** 反向有向 BFS：只把兵往目标方向搬，天然不会来回倒兵。
-   *  need 是目标还缺多少兵：低于 minTransport 且填不满缺口的「小勺」运输直接跳过——
-   *  蚂蚁搬家式分兵永远集不齐数量（实测 57% 的补给运输不足 20 兵）。 */
-  function transport(target, funding = false, need = Infinity) {
-    // 关键：把「当前经济工地」与缺口档位纳入缓存键，否则同一 tick 内不同模式会读到彼此的结果。
-    const memoKey = `${target}:${funding ? 1 : 0}:${economySiteTarget}:${Number.isFinite(need) ? Math.ceil(need) : 'inf'}`;
+  /** 反向有向 BFS：只把兵往目标方向搬，天然不会来回倒兵。 */
+  function transport(target, funding = false) {
+    // 关键：把「当前经济工地」纳入缓存键，否则同一 tick 内不同模式会读到彼此的结果。
+    const memoKey = `${target}:${funding ? 1 : 0}:${economySiteTarget}`;
     if (memo.transport.has(memoKey)) return memo.transport.get(memoKey);
-    const result = computeTransport(target, funding, need);
+    const result = computeTransport(target, funding);
     memo.transport.set(memoKey, result);
     return result;
   }
-  function computeTransport(target, funding = false, need = Infinity) {
+  function computeTransport(target, funding = false) {
     const d = new Int32Array(size).fill(-1), queue = [target]; d[target] = 0;
     for (let h = 0; h < queue.length; h++) for (const j of neighbors[queue[h]]) {
       if (d[j] >= 0 || !own(j) || params.blockedEdges?.has(`${j}:${queue[h]}`)) continue;
@@ -134,26 +117,15 @@ function chooseLogistics(state, move, build, params = {}) {
           amount = Math.min(amount, count(from) - earmark);
           if (amount <= 0) continue;
         }
-        // 小勺过滤：低于绝对下限且填不满缺口的运输不执行（缺口本身就这么大时照常收尾）。
-        // 大缺口下的相对劣势不硬拦（那会把「全部家当只有 100 兵」也饿死），而是交给
-        // 下面的 gain 竞争与 need 加权的 local 门槛——有大股可运时小股自然输。
-        if (amount < p.minTransport && amount < need) continue;
         if (grid[from] === me + 100) {
-          const safeHome = safe(from) && from !== economySiteTarget;
-          const keep = safeHome
+          const keep = safe(from) && from !== economySiteTarget
             ? Math.max(4, Math.round(safety / 2))
             : Math.max(safety, pressureAt(from) + 1);
-          if (count(from) - amount < keep && !safeHome) { amount = Math.floor(amount / 2); mode = 1; }
-          // 安全主城不再减半外运：减半会让兵堆按 1/2、1/4、1/8 几何级变成无数小勺
-          //（实测 386 次减半运输中 299 次不足 20 兵），违反「一律全兵推进」方针。
-          // safe() 已保证敌军距离足够远，留 1 兵可接受；逼近的威胁由 defense 分支反应。
-          if (amount <= 0 || (!safeHome && count(from) - amount < keep)) continue;
-          if (amount < p.minTransport && amount < need) continue;
+          if (count(from) - amount < keep) { amount = Math.floor(amount / 2); mode = 1; }
+          if (amount <= 0 || count(from) - amount < keep) continue;
         }
         const gain = amount / Math.max(1, d[from]);
-        // 「近源优先」只在运输量对缺口有意义时成立：缺口大时近处小股不能抢占
-        // 远处大堆——近源是效率偏好，不是让 10 兵小股反复插队的理由。
-        const local = d[from] <= 3 && amount >= Math.max(p.minTransport, need * 0.25);
+        const local = d[from] <= 3 && amount >= 5;
         if (!best || (!funding && local && !best.local) || ((funding || local === best.local) && gain > best.gain))
           best = { from, to, amount, gain, distance: d[from], local, mode };
       }
@@ -179,18 +151,7 @@ function chooseLogistics(state, move, build, params = {}) {
     const clusterScore = (i) => clusterValue(state, i) + Math.min(count(i), 60) +
       neighbors[i].reduce((s, j) => s + (own(j) && (grid[j] === me + 100 || grid[j] === me + 50) ? 12 : 0), 0);
     candidates.sort((a, b) => (grid[b] === me + 50) - (grid[a] === me + 50) || clusterScore(b) - clusterScore(a) || a - b);
-    let chosen = candidates.length ? candidates[0] : -1;
-    // 滞回（用户硬性方针：防抖/目标锁定）：上一个工地仍合法时继续往它送，
-    // 除非挑战者是「指挥所 vs 平地」的类型跃迁或评分明显更高——每 tick 重选
-    // 会让同一堆兵在不同候选工地之间来回倒（RMtDIbE7rDS6 t107–t302 目标连跳）。
-    const prev = macro.site;
-    if (prev && prev.i !== chosen && candidates.includes(prev.i)) {
-      const typeJump = chosen >= 0 && grid[chosen] === me + 50 && grid[prev.i] !== me + 50;
-      if (!typeJump && (chosen < 0 || clusterScore(prev.i) * p.siteHysteresis >= clusterScore(chosen)))
-        chosen = prev.i;
-    }
-    macro.site = chosen >= 0 ? { i: chosen } : null;
-    memo.economySite = chosen;
+    memo.economySite = candidates.length ? candidates[0] : -1;
     return memo.economySite;
   }
   function economyGoal(target) {
@@ -205,7 +166,7 @@ function chooseLogistics(state, move, build, params = {}) {
     if (economySiteTarget < 0) return null;
     const goal = economyGoal(economySiteTarget);
     if (count(economySiteTarget) >= goal) return null;
-    const flow = transport(economySiteTarget, true, goal - count(economySiteTarget)), job = flow.best;
+    const flow = transport(economySiteTarget, true), job = flow.best;
     if (!job) return null;
     return { kind: 'attack', x: Math.floor(job.from / m), y: job.from % m,
       dx: Math.floor(job.to / m), dy: job.to % m, half: job.mode === 1, mode: job.mode ?? 0,
@@ -230,51 +191,16 @@ function chooseLogistics(state, move, build, params = {}) {
         return { target, key: near + foe * 0.5 - (ctx.frontDistance[target] || 0) * 2 };
       }).sort((a, b) => b.key - a.key).slice(0, 8);
       let selected = -1, bestScore = -Infinity;
-      const scores = new Map();
       for (const { target } of ranked) {
-        // 僵持放弃的集结点在冷静期内不再入选：持续喂兵却没推进 = 无目的堆兵。
-        if ((macro.abandoned.get(target) ?? -1) >= turn) continue;
-        const flow = transport(target, false, forecast(target)?.needed ?? Infinity);
+        const flow = transport(target);
         if (!flow.best) continue;
         const score = flow.best.gain + Math.min(flow.rear, 200) * 0.1;
-        scores.set(target, score);
         if (score > bestScore) { bestScore = score; selected = target; }
       }
-      // 滞回：上一个集结点仍可打时继续喂它，除非挑战者明显更好——
-      // 集结点每 tick 跳变等于把兵在几个前线之间来回搬，永远集不齐。
-      const prev = macro.rally;
-      if (prev && scores.has(prev.i) && prev.i !== selected &&
-          scores.get(prev.i) * p.siteHysteresis >= bestScore) {
-        selected = prev.i;
-        bestScore = scores.get(prev.i);
-      }
-      if (selected >= 0) {
-        macro.rally = { i: selected, score: bestScore };
-        memo.rally = selected;
-        return selected;
-      }
+      if (selected >= 0) { memo.rally = selected; return selected; }
     }
-    macro.rally = null;
     memo.rally = -1;
     return -1;
-  }
-  // 僵持检测（用户硬性方针：禁止无目的僵持堆兵）：持续向同一集结点喂兵，
-  // 但缺口在 rallyStallTicks 内没有明显收敛（敌增长吃掉我们的输送）→
-  // 放弃该集结点一段时间，兵力转投别的方向（找弱点），不再蚂蚁搬家。
-  function trackFeed(target, needed) {
-    const feed = macro.feed;
-    if (!feed || feed.target !== target || needed <= feed.initial * 0.7) {
-      macro.feed = { target, initial: needed, last: needed, since: turn };
-      return false;
-    }
-    if (needed < feed.last) { feed.last = needed; feed.since = turn; return false; }
-    if (turn - feed.since >= p.rallyStallTicks) {
-      macro.abandoned.set(target, turn + p.rallyAbandonTicks);
-      macro.feed = null;
-      if (macro.rally?.i === target) macro.rally = null;
-      return true;
-    }
-    return false;
   }
   function forecast(target) {
     if (memo.forecast.has(target)) return memo.forecast.get(target);
@@ -298,9 +224,7 @@ function chooseLogistics(state, move, build, params = {}) {
     if (rally < 0) return null;
     const prediction = forecast(rally);
     if (!prediction || prediction.needed <= 0) return null;
-    // 僵持放弃：本 tick 起停止向该集结点输送（下 tick 起它会被排除出候选）。
-    if (trackFeed(rally, prediction.needed)) return null;
-    const flow = transport(rally, false, prediction.needed), job = flow.best;
+    const flow = transport(rally), job = flow.best;
     if (!job) return null;
     // 本 tick 的缺口（纯计算结果，不跨回合保存）
     currentBatch.set(state, { turn, batch: { target: rally, required: prediction.required, active: true } });
@@ -329,16 +253,11 @@ function chooseLogistics(state, move, build, params = {}) {
     }
   }
   if (plan < 0) return null;
-  let need = Infinity;
   if (phase === 'reinforce') {
     const prediction = forecast(plan);
     if (!prediction || prediction.needed <= 0) return null;
-    if (trackFeed(plan, prediction.needed)) return null;
-    need = prediction.needed;
-  } else {
-    need = Math.max(0, economyGoal(plan) - count(plan));
   }
-  const flow = transport(plan, phase === 'fund', need), job = flow.best;
+  const flow = transport(plan, phase === 'fund'), job = flow.best;
   if (!job) return null;
   return { kind: 'attack', x: Math.floor(job.from / m), y: job.from % m,
     dx: Math.floor(job.to / m), dy: job.to % m, half: job.mode === 1, mode: job.mode ?? 0,

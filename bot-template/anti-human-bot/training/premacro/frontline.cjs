@@ -10,10 +10,6 @@
 const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
 
-// 斩首锁定（跨回合）：合力推皇冠是多 tick 连续攻击——第一击打残、第二击收割。
-// 锁定期间 choose() 优先继续打同一皇冠，不被别的候选抢走 tick；目标被推掉、
-// 合力不再足够或超时即解除。这是用户明确要求的「目标锁定」，不是复活旧版计划状态。
-const strikeLocks = new WeakMap();
 
 function createFrontline(state, params = {}) {
   const ctx = createContext(state, params);
@@ -70,12 +66,10 @@ function createFrontline(state, params = {}) {
     const tgt = ctx.pressure(b, { exclude: a });
     const mates = ctx.friendlyAdjacent(b, a);
     const reinforce = ctx.reinforcement(b, a, p);
+    const defense = D + reinforce;
     const kind = classify(a, b);
     const isCrown = kind === 'crown';
     const isCity = kind === 'city';
-    // 斩首方针（用户 2026-09-27 硬性规则）：推皇冠不评估对方防守强弱——
-    // 不把旁边敌大堆的同 tick 增援算进守军，只看目标格当前守军（含下一 tick 增长）。
-    const defense = isCrown ? D : D + reinforce;
     const unknownNear = ctx.unknownNear(a) || ctx.unknownNear(b);
     // 源点留守：贴着源点的敌人必须留够（下一 tick 就可能反打），两跳外的按折扣计。
     // 周围完全干净时保留 1 兵即可，全冲（mode 2）才有意义。
@@ -96,47 +90,10 @@ function createFrontline(state, params = {}) {
     // 唯一例外：不能拿我们自己的建筑去换（那等于互删，净亏产能）。
     const buildingTarget = isCrown || isCity;
     const ownBuilding = grid[a] === me + 100 || grid[a] === me + 50;
-    // ── 斩首：能推就直接全兵推，不评估对方防守强弱 ──────────────────────
-    // 单格本回合推得下 → 全兵推（自家建筑源点仍留驻守军，防守逻辑保留）；
-    // 单格推不下但相邻我方多格合力足够（第一击后守军 = 守军 − 第一击出兵，下回合收割）
-    // → 立即打出第一击并标记锁定（choose 据此连续攻击）。反击、交换、整合期、
-    // 全局兵力落后一律不参与斩首决策。
-    if (isCrown) {
-      const crownModes = ownBuilding ? [0, 1, 2] : [2, 0, 1];
-      for (const mode of crownModes) {
-        const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
-        if (push <= 0) continue;
-        if (ownBuilding && A - push < keepSource) continue;
-        if (push - defense >= p.minArrive) {
-          return { move: { ...move, mode, half: false,
-            reason: `斩首：${ownBuilding ? '留守后' : '全兵'}推皇冠，出兵${push}，留守${A - push}` },
-            score: 950, kind };
-        }
-      }
-      // 多路合力：相邻我方格的可用兵力求和（自家建筑不当合力源——留守估计只对本源点算过，
-      // 保守起见不抽空别的建筑）。总和必须压过守军至少 2 兵——否则最后一击与剩余守军
-      // 相等，收割格推不下 0 守军的皇冠（引擎：兵力相等不占格），白送第一击。
-      let combined = 0;
-      for (const j of ctx.neighbors[b]) {
-        if (!friendly(j) || grid[j] === me + 100 || grid[j] === me + 50) continue;
-        combined += Math.max(0, count(j) - 1);
-      }
-      if (combined > defense + 1) {
-        for (const mode of crownModes) {
-          const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
-          if (push <= 0) continue;
-          if (ownBuilding && A - push < keepSource) continue;
-          return { move: { ...move, mode, half: false,
-            reason: `合力斩首：第一击出兵${push}（合力${Math.round(combined)}对守军${Math.round(defense)}），连续攻击直到推掉` },
-            score: 900, kind, strike: { target: b } };
-        }
-      }
-      // 合力也不够 → 落到通用路径（大堆对皇冠仍可能触发消耗冲击）。
-    }
+    // 拆建筑愿意付出的是「占领后守不住」的代价，不是把自家源点抽空：
     // 源点留守规则照旧（否则一兵建筑下一 tick 就被顺手拆掉，净亏产能）。
-    // 进攻一律全兵优先：按 [全冲, 半兵, 智能分兵] 顺序取第一个通过留守/预算闸门的模式，
-    // 「兵够却分多次小勺推同一目标」视为 bug（用户 2026-09-27 方针）。
-    const modes = [2, 1, 0];
+    const buildingKeep = keepSource;
+    const modes = [1, 2, 0];
     let best = null;
     for (const mode of modes) {
       const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
@@ -178,9 +135,7 @@ function createFrontline(state, params = {}) {
         : isCity ? `攻指挥所：出兵${push}，留守${left}`
           : exchange ? `边界交换：出兵${push}，留守${left}`
             : `边界推进：${mode === 1 ? '半兵' : mode === 2 ? '全冲' : '智能分兵'}，留守${left}，占领后${arrive}`;
-      // 全兵优先：modes 已按 [全冲, 半兵, 智能分兵] 排序，第一个被闸门放行的就是答案。
-      best = { move: { ...move, mode, half: false, reason }, score, kind };
-      break;
+      if (!best || score > best.score) best = { move: { ...move, mode, half: false, reason }, score, kind };
     }
     if (!best) {
       // ── 消耗冲击：打破「两堆兵隔着一条线无限积累」的对峙死锁 ──────────────
@@ -229,33 +184,6 @@ function createFrontline(state, params = {}) {
     context: ctx,
     assess: (move) => evaluate(move)?.move ?? null,
     choose() {
-      // ── 斩首锁定：合力推皇冠的连续攻击优先于一切新候选 ──────────────
-      // 目标仍是敌皇冠、相邻合力仍压过守军时，从最强邻格继续打（推不掉就打残，
-      // 下回合守军 = 守军 − 本击出兵，直到推掉）；否则解除锁定。
-      const lock = strikeLocks.get(state);
-      if (lock && Number.isInteger(ctx.turn)) {
-        if (ctx.turn < lock.since || ctx.turn > lock.until) strikeLocks.delete(state);
-        else {
-          const b = lock.target;
-          const foe = owners[b] && !allied(owners[b], me) && allowed(owners[b]);
-          if (!(known[b] && foe && grid[b] === owners[b] + 100)) strikeLocks.delete(state);
-          else {
-            const D = count(b, 1);
-            let combined = 0, cell = -1, cellForce = 0;
-            for (const j of ctx.neighbors[b]) {
-              if (!friendly(j) || grid[j] === me + 100 || grid[j] === me + 50) continue;
-              const force = Math.max(0, count(j) - 1);
-              combined += force;
-              if (force > cellForce && !blocked(j, b)) { cellForce = force; cell = j; }
-            }
-            if (cell >= 0 && combined > D + 1) {
-              const next = evaluate({ x: Math.floor(cell / m), y: cell % m,
-                dx: Math.floor(b / m), dy: b % m, mode: 2 });
-              if (next) return next.move;
-            } else strikeLocks.delete(state);
-          }
-        }
-      }
       const candidates = [];
       for (let a = 0; a < size; a++) {
         if (owners[a] !== me || !own(a) || count(a) <= 2) continue;
@@ -277,9 +205,6 @@ function createFrontline(state, params = {}) {
         const value = evaluate({ x: Math.floor(a / m), y: a % m, dx: Math.floor(b / m), dy: b % m, mode: 1 });
         if (value && (!best || value.score > best.score)) best = value;
       }
-      // 合力第一击落地 → 登记斩首锁定，下回合起 choose 优先连续攻击同一皇冠。
-      if (best?.strike && Number.isInteger(ctx.turn))
-        strikeLocks.set(state, { target: best.strike.target, since: ctx.turn, until: ctx.turn + 12 });
       return best?.move ?? null;
     },
   };

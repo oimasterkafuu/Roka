@@ -38,12 +38,12 @@ function chooseCutoff(state, params = {}) {
   }
 
   // 紧邻瓶颈能一次拿下就直接打；否则从我方境内集兵送往瓶颈。
-  // 截断决策不建模敌军反扑（用户 2026-09-27 硬性方针）：被截断隔离的兵力记为 0
-  // （孤军无法操作、自行衰减），本回合能占下瓶颈就打，不因「可能被反夺」放弃。
-  // 在满足占下的打法里选最省兵的。
+  // holdForce：占下后必须留下的「守得住」兵力（锚侧反夺力）。
+  // 在满足守得住的打法里选最省兵的；都不满足时选到达兵力最大的，交给外层校验拒绝。
   function planAttack(choke, defense, trapped, strikeReason, gatherReason, extra = {}) {
     const { m } = ctx;
-    let strike = null;
+    const holdForce = extra.holdForce || 0;
+    let strike = null, fallback = null;
     for (const s of ctx.neighbors[choke]) {
       if (!ctx.own(s) || ctx.isolated(s)) continue;
       const cap = ctx.count(s) - 1;
@@ -52,9 +52,11 @@ function chooseCutoff(state, params = {}) {
       for (const [mode, push] of [[1, half], [0, theoretical], [2, cap]]) {
         if (push <= defense || ctx.count(s) - push < 1) continue;
         const arrive = push - defense;
-        if (!strike || push < strike.push) strike = { s, mode, push, arrive };
+        if (!fallback || arrive > fallback.arrive) fallback = { s, mode, push, arrive };
+        if (arrive >= holdForce && (!strike || push < strike.push)) strike = { s, mode, push, arrive };
       }
     }
+    if (!strike) strike = fallback;
     if (strike) {
       return { strike: true, trapped, defense, arrive: strike.arrive, ...extra,
         move: { x: Math.floor(strike.s / m), y: strike.s % m,
@@ -73,6 +75,9 @@ function chooseCutoff(state, params = {}) {
       }
     }
     let job = null;
+    // 集兵潜力估算：瓶颈旁现有可动兵 + 前两大可集来源，用于「占下后守不守得住」。
+    let potential = 0, top1 = 0, top2 = 0;
+    for (const s of ctx.neighbors[choke]) if (ctx.own(s) && !ctx.isolated(s)) potential = Math.max(potential, ctx.count(s) - 1);
     for (const s of queue) {
       if (distance[s] < 1) continue;
       const dest = toward[s];
@@ -82,11 +87,13 @@ function chooseCutoff(state, params = {}) {
       if (ctx.neighbors[s].some(ctx.hostile) && amount < 10) continue;
       // 主城至少留 4 兵。
       if (ctx.grid[s] === ctx.me + 100 && ctx.count(s) - amount < 4) continue;
+      if (amount > top1) { top2 = top1; top1 = amount; } else if (amount > top2) top2 = amount;
       const score = amount / distance[s];
       if (!job || score > job.score) job = { s, dest, amount, score, distance: distance[s] };
     }
     if (!job) return null;
-    return { strike: false, trapped, defense, arrive: job.amount - defense, ...extra,
+    potential += top1 + top2;
+    return { strike: false, trapped, defense, arrive: potential - defense, ...extra,
       move: { x: Math.floor(job.s / m), y: job.s % m,
         dx: Math.floor(job.dest / m), dy: job.dest % m, mode: 0, half: false,
         reason: `${gatherReason}：把${job.amount}兵送往瓶颈，目标冻住约${Math.round(trapped)}敌兵` } };
@@ -231,8 +238,9 @@ function dispersedCutoff(ctx, p, planAttack) {
   }
   if (!teams.size) return null;
 
-  // 从 anchors 同时 BFS（移除 cutSet 中的格子），返回「会被孤立的非孤立格」兵力。
-  // visited 上限防止超大分量拖慢单 tick；超预算视为无法确认，放弃该候选。
+  // 从 anchors 同时 BFS（移除 cutSet 中的格子），返回「会被孤立的非孤立格」兵力
+  // 与锚侧可达集（供反夺力计算）。visited 上限防止超大分量拖慢单 tick；
+  // 超预算视为无法确认，放弃该候选。
   function strandedMass(anchors, tileSet, cutSet) {
     const seen = new Set(cutSet);
     const q = [];
@@ -250,14 +258,31 @@ function dispersedCutoff(ctx, p, planAttack) {
       if (seen.has(i) || cutSet.has(i) || ctx.isolated(i)) continue;
       mass += Math.max(0, army[i]);
     }
-    return mass;
+    return { mass, reached: seen };
+  }
+
+  // 反夺力：割断后仍然连着锚点的敌军（含别队敌人）紧邻瓶颈的可动兵。
+  // 被冻住的段已经不能移动，不计入。占下瓶颈却守不住 = 白送兵，必须事先排除。
+  function counterForce(chokes, reached) {
+    let force = 0;
+    const chokeSet = new Set(chokes);
+    for (const c of chokes) {
+      for (const j of neighbors[c]) {
+        if (chokeSet.has(j)) continue;
+        const o = owners[j];
+        if (!(o > 0) || allied(o, me) || !knownAt(j)) continue;
+        if (!reached.has(j)) continue; // 被冻住侧，不能反扑
+        force += Math.max(0, ctx.count(j) - 1);
+      }
+    }
+    return force;
   }
 
   const viable = [];
-  const consider = (chokes, defense, trapped) => {
+  const consider = (chokes, defense, trapped, reached) => {
     const score = trapped * 1.2 - defense * 1.5;
     if (score <= 0) return;
-    viable.push({ chokes, defense, trapped, score });
+    viable.push({ chokes, defense, trapped, reached, score });
   };
   for (const { tiles, anchors } of teams.values()) {
     if (!anchors.length) continue; // 没有锚点的队伍已经全部孤立，没有可新冻住的
@@ -276,9 +301,9 @@ function dispersedCutoff(ctx, p, planAttack) {
     for (const choke of single) {
       const defense = ctx.count(choke, 1);
       if (defense > p.cutoffMaxDefense) continue;
-      const mass = strandedMass(anchors, tileSet, new Set([choke]));
-      if (mass === null || mass < p.cutoffMinIsolate) continue;
-      consider([choke], defense, mass);
+      const result = strandedMass(anchors, tileSet, new Set([choke]));
+      if (result === null || result.mass < p.cutoffMinIsolate) continue;
+      consider([choke], defense, result.mass, result.reached);
     }
     // 两格组合：单格切不断时，相邻两个候选一起占住才能切断（窄走廊并排脖子）。
     // 本回合先打较弱的一格，另一格在后续 tick 自然成为单格割点。
@@ -290,25 +315,27 @@ function dispersedCutoff(ctx, p, planAttack) {
         pairs++;
         const d1 = ctx.count(c1, 1), d2 = ctx.count(c2, 1);
         if (d1 + d2 > p.cutoffMaxDefense) continue;
-        const mass = strandedMass(anchors, tileSet, new Set([c1, c2]));
-        if (mass === null || mass < p.cutoffMinIsolate) continue;
+        const result = strandedMass(anchors, tileSet, new Set([c1, c2]));
+        if (result === null || result.mass < p.cutoffMinIsolate) continue;
         const first = d1 <= d2 ? c1 : c2;
-        consider([first, first === c1 ? c2 : c1], d1 + d2, mass);
+        consider([first, first === c1 ? c2 : c1], d1 + d2, result.mass, result.reached);
       }
     }
   }
   if (!viable.length) return null;
   viable.sort((a, b) => b.score - a.score);
-  // 按收益从高到低逐个制定出兵方案。不做「守得住」反夺校验（用户 2026-09-27 硬性方针）：
-  // 被截断隔离的兵力记为 0，截断决策不建模敌军反扑，本回合能占下瓶颈就打。
+  // 按收益从高到低逐个制定出兵方案并做「守得住」校验：占下瓶颈后我方到达兵力
+  // 必须压得住锚侧反夺力，否则这次截断下一 tick 就被夺回，纯属送兵。
   for (const cut of viable.slice(0, 10)) {
+    const counter = counterForce(cut.chokes, cut.reached);
     const pair = cut.chokes.length > 1;
     // 注意：出手只针对本回合要占的第一格，防御值用第一格自身的守军，
     // 两格守军之和只用于上面的收益评分。
     const plan = planAttack(cut.chokes[0], ctx.count(cut.chokes[0], 1), cut.trapped,
       pair ? '截断散兵（两格脖子，先打其一）' : '截断散兵',
-      pair ? '截断集兵（两格脖子，先送其一）' : '截断集兵');
+      pair ? '截断集兵（两格脖子，先送其一）' : '截断集兵', { holdForce: counter });
     if (!plan) continue;
+    if (plan.arrive < counter) continue;
     // 冻住规模明显时视同紧急：值得为它放弃普通调兵。
     const urgent = cut.trapped >= Math.max(p.cutoffMinIsolate * 4, 30);
     return { ...plan, urgent, score: cut.score };
