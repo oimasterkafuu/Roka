@@ -60,10 +60,16 @@ test('minArrive 控制占领后必须留下的兵力，禁止1兵蚕食', () => 
 });
 
 test('正在被反推（consolidate）时只接高价值目标', () => {
+  // 稳赢收割（exposure>0）即使 consolidate 也必须放行——无条件否决曾把
+  // 17 倍兵力差的收割锁死 80 个 tick（EBS5 复盘根因）。
   const s = board(); s.turn = 600;
   put(s, 16, 101, 500); put(s, 17, 2, 3);
   assert.ok(createFrontline(s).assess(move));
-  assert.equal(createFrontline(s, { consolidate: true }).assess(move), null);
+  assert.ok(createFrontline(s, { consolidate: true }).assess(move), '稳赢收割不该被转守拦下');
+  // 真正打不穿的进攻在 consolidate 下仍然拒绝。
+  const sBad = board(); sBad.turn = 600;
+  put(sBad, 16, 101, 10); put(sBad, 17, 2, 400);
+  assert.equal(createFrontline(sBad, { consolidate: true }).assess(move), null);
   const s2 = board(); s2.turn = 600;
   put(s2, 16, 101, 500); put(s2, 17, 102, 3); // 敌皇冠仍然要打
   assert.ok(createFrontline(s2, { consolidate: true }).assess(move));

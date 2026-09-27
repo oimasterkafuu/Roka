@@ -90,3 +90,51 @@ test('贴着重兵的格子会让位给后方工地', () => {
   assert.ok(build, '后方应有工地');
   assert.ok(build.x < 3, `应选后方而不是门口，实际 (${build.x},${build.y})`);
 });
+
+// ── 建造精确性：触发线 51/101，满足即建，不再叠加策略余量 ────────────────
+
+test('兵力恰好51立即建造，不等任何增援', () => {
+  const s = home();
+  s.army[at(1, 5)] = 51;
+  const build = chooseBuild(s, null, {});
+  assert.ok(build, '51 兵已满足门槛，应当即开工');
+  assert.equal(build.op, 'b');
+  assert.deepEqual([build.x, build.y], [1, 5]);
+});
+
+test('兵力52不再等额外增援（旧逻辑会要求 50+premium+reserve）', () => {
+  const s = home();
+  s.army[at(1, 5)] = 52;
+  s.army[at(1, 6)] = 30; // 附近有可调的增援，但不应该等它到位
+  const build = chooseBuild(s, null, {});
+  assert.ok(build, '52 兵不应再等增援');
+  assert.equal(build.op, 'b');
+});
+
+test('指挥所兵力恰好101立即升级主城', () => {
+  const s = home();
+  s.grid[at(1, 5)] = s.playerId + 50;
+  s.army[at(1, 5)] = 101;
+  const build = chooseBuild(s, null, {});
+  assert.ok(build, '101 兵已满足升级门槛');
+  assert.equal(build.op, 'c');
+  assert.deepEqual([build.x, build.y], [1, 5]);
+});
+
+test('50兵不建：花完50至少留1兵（引擎硬门槛50，0兵建筑下tick白送）', () => {
+  const s = home();
+  s.army[at(1, 5)] = 50;
+  assert.equal(chooseBuild(s, null, {}), null);
+});
+
+test('贴脸敌军能立即反超时不建（防守检查，不是经济余量）', () => {
+  const s = home();
+  s.grid[3 * 10 + 5] = s.playerId; // 打开山墙
+  s.army[3 * 10 + 5] = 60;         // 门口 60 兵：建完只剩 10
+  s.grid[4 * 10 + 5] = 2;
+  s.army[4 * 10 + 5] = 50;         // 贴脸敌 50 兵能立刻夺回
+  s.army[at(1, 5)] = 51;           // 后方安全格刚好够
+  const build = chooseBuild(s, null, {});
+  assert.ok(build, '后方安全格应建');
+  assert.ok(build.x < 3, `应选后方安全格，实际 (${build.x},${build.y})`);
+});
