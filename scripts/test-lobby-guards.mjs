@@ -6,6 +6,9 @@
 //   同时校验 bot 自身断线重连与同名人类正常断线重连仍可换绑恢复。
 // 场景 3（大地图选项）：房主 change_game_conf {map_size:'large'} 后开局的
 //   地图面积应约为同人数、同种子标准地图的 4 倍。
+// 场景 4（只剩 bot 重置房间设置）：准备阶段人类全部离开（观战席人类仍算
+//   人类占用）、房间只剩 bot 时设置重置为默认值；对局进行中人类离开不触发，
+//   对局结束回到准备阶段后才重置。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 120 秒。
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -29,6 +32,9 @@ const ROOM_TEAM = 'guardteam';
 const ROOM_DUP = 'guarddup';
 const ROOM_SIZE_NORMAL = 'gsznorm';
 const ROOM_SIZE_LARGE = 'gszbig';
+const ROOM_RESET = 'guardrst';
+const ROOM_RESET_GAME = 'guardrstg';
+const MAP_RESET_TOKEN = 'guard-reset-token';
 const MAP_SIZE_TOKEN = 'guard-size-token';
 const DUP_USER = 'guard_dup';
 const USER_A = 'guard_a';
@@ -169,6 +175,7 @@ function createRoomClient(baseUrl, { cookie, token, room, autoReady = true, name
     updates: 0,
     chats: [],
     kicks: 0,
+    roomUpdates: [],
   };
 
   socket.on('set_id', (id) => {
@@ -188,6 +195,7 @@ function createRoomClient(baseUrl, { cookie, token, room, autoReady = true, name
     client.kicks += 1;
   });
   socket.on('room_update', (data) => {
+    client.roomUpdates.push(data);
     if (!autoReady || !client.clientId || !Array.isArray(data?.players) || data?.in_game) {
       return;
     }
@@ -345,6 +353,112 @@ async function scenarioMapSize(baseUrl, tokenA, tokenB) {
   }
 }
 
+function lastRoomUpdate(client) {
+  return client.roomUpdates[client.roomUpdates.length - 1];
+}
+
+async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
+  log('场景 4：只剩 bot 时房间设置重置为默认值');
+  // 人类先进房占据房主位（第三方 bot 令牌先进房时房主是 bot，
+  // 只有服务端托管 bot 才永远排在普通成员之后）。
+  const a = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_RESET, autoReady: false, name: 'rst-A' });
+  await waitFor(() => a.clientId !== '', 5000, 'A 进房');
+  const bot = createRoomClient(baseUrl, { token: BOT_TOKEN, room: ROOM_RESET, autoReady: false, name: 'rst-bot' });
+  await waitFor(() => bot.clientId !== '', 5000, 'bot 进房');
+
+  // A 是房主：改一组非默认设置（bot 房迷雾强制关闭，不在此列）。
+  a.socket.emit('change_game_conf', {
+    speed: 2,
+    allow_team: true,
+    map_mode: 'maze',
+    map_size: 'large',
+    map_token: MAP_RESET_TOKEN,
+  });
+  await waitFor(() => {
+    const update = lastRoomUpdate(a);
+    return update && update.speed === 2 && update.map_mode === 'maze' && update.map_size === 'large';
+  }, 5000, '自定义设置生效');
+  log('自定义设置已生效（speed=2 / maze / large / allow_team）');
+
+  // 边界：观战席的人类仍算人类占用——A 离开后 B 还在，不触发重置。
+  const b = createRoomClient(baseUrl, { cookie: tokenB, room: ROOM_RESET, autoReady: false, name: 'rst-B' });
+  await waitFor(() => b.clientId !== '', 5000, 'B 进房');
+  b.socket.emit('change_team', { team: 0 });
+  await waitFor(() => {
+    const update = lastRoomUpdate(b);
+    const self = update?.players?.find((player) => String(player?.sid || '') === b.clientId);
+    return self && Number(self.team) === 0;
+  }, 5000, 'B 切换到观战席');
+  a.socket.disconnect();
+  await sleep(1000);
+  const afterHostLeft = lastRoomUpdate(bot);
+  if (!afterHostLeft || afterHostLeft.speed !== 2 || afterHostLeft.map_mode !== 'maze') {
+    throw new Error('房主离开但观战人类仍在时设置被重置（应保留自定义设置）');
+  }
+  log('场景 4a 通过：观战人类仍在房时不触发重置');
+
+  // B 也离开：房间只剩 bot，设置应重置为新建房间默认值。
+  b.socket.disconnect();
+  await waitFor(() => {
+    const update = lastRoomUpdate(bot);
+    return update && update.speed === 1 && update.players?.length === 1;
+  }, 5000, '只剩 bot 后设置重置');
+  const reset = lastRoomUpdate(bot);
+  if (
+    reset.map_mode !== 'random' ||
+    reset.map_size !== 'normal' ||
+    reset.allow_team !== false ||
+    reset.fog !== false ||
+    reset.map_token === MAP_RESET_TOKEN
+  ) {
+    throw new Error(`重置后的设置不是默认值：${JSON.stringify(reset)}`);
+  }
+  if (reset.players[0]?.bot !== true) {
+    throw new Error('重置后房间内应只剩 bot 成员');
+  }
+  log('场景 4b 通过：只剩 bot 时设置重置为默认值（含重新随机种子）');
+  bot.socket.disconnect();
+}
+
+async function scenarioNoResetDuringGame(baseUrl, tokenA) {
+  log('场景 5：对局进行中人类离开不触发重置，对局结束后才重置');
+  const a = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_RESET_GAME, autoReady: false, name: 'rstg-A' });
+  await waitFor(() => a.clientId !== '', 5000, 'A 进房');
+  const bot = createRoomClient(baseUrl, { token: BOT_TOKEN, room: ROOM_RESET_GAME, name: 'rstg-bot' });
+  await waitFor(() => bot.clientId !== '', 5000, 'bot 进房');
+
+  a.socket.emit('change_game_conf', { speed: 2, map_mode: 'maze' });
+  await waitFor(() => {
+    const update = lastRoomUpdate(a);
+    return update && update.speed === 2 && update.map_mode === 'maze';
+  }, 5000, '自定义设置生效');
+  a.socket.emit('change_ready', { ready: true });
+  await waitFor(() => bot.inits.length > 0 && a.inits.length > 0, 10_000, '双人对局开局');
+
+  // 对局进行中人类断开：走 10 秒宽限期，期间不触发重置（对局中本来就不会有
+  // 人员移出；宽限到期移出成员时 resetLobbyConfigIfOnlyBots 也会因对局未结束而跳过）。
+  a.socket.disconnect();
+  await sleep(2000);
+  const duringGame = lastRoomUpdate(bot);
+  if (!duringGame || duringGame.speed !== 2 || duringGame.map_mode !== 'maze') {
+    throw new Error('对局进行中人类离开后设置被重置（应保持不变）');
+  }
+  log('场景 5a 通过：对局进行中不触发重置');
+
+  // 人类宽限期到期按挂机投降后 bot 获胜，对局结束回到准备阶段：
+  // 房间只剩 bot，此时设置应被重置。
+  await waitFor(() => {
+    const update = lastRoomUpdate(bot);
+    return update && update.in_game === false && update.speed === 1 && update.players?.length === 1;
+  }, 30_000, '对局结束后设置重置');
+  const ended = lastRoomUpdate(bot);
+  if (ended.map_mode !== 'random') {
+    throw new Error(`对局结束后重置不彻底：${JSON.stringify(ended)}`);
+  }
+  log('场景 5b 通过：对局结束回到准备阶段后设置重置为默认值');
+  bot.socket.disconnect();
+}
+
 async function main() {
   ensureBuild();
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roka-test-lobby-guards-'));
@@ -371,6 +485,8 @@ async function main() {
   await scenarioSameTeam(baseUrl, tokenA, tokenB);
   await scenarioDuplicateName(baseUrl, dupToken, tokenB);
   await scenarioMapSize(baseUrl, tokenA, tokenB);
+  await scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB);
+  await scenarioNoResetDuringGame(baseUrl, tokenA);
 
   finish(0, '全部回归场景通过');
 }
