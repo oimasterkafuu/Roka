@@ -153,6 +153,8 @@ function update(data) {
   if (typeof data.replay != 'undefined') replay_id = data.replay;
   if (!is_replay) {
     game_ended = Boolean(data.game_end);
+    // 迷雾对局的帧始终携带 fog 数组（全视野接收者为全 0），据此判定是否显示观战视角选择。
+    if (typeof data.fog != 'undefined') fog_mode = true;
   }
   if (data.is_diff) {
     for (var i = 0; i * 2 < data.grid_type.length; i++) {
@@ -287,6 +289,8 @@ function update(data) {
   }
   $('#game-leaderboard').html(th);
   $('#game-leaderboard').css('display', '');
+  // 迷雾对局的观战者：按排行榜维护「视角」选择 tabs（全图 + 各参赛玩家）。
+  refreshSpectateViewTabs(data.leaderboard);
   $('#turn-counter').html('回合 ' + Math.floor(data.turn / 2) + (data.turn % 2 == 1 ? '.' : ''));
   $('#turn-counter').css('display', '');
   if (data.turn >= 26 && data.turn <= 50) {
