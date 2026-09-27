@@ -25,8 +25,6 @@ const DEFAULT_PARAMS = Object.freeze({
   // 入侵截断（偷家防御）
   cutoffRange: 9, cutoffScan: 120, cutoffMaxSteps: 4, cutoffMinIsolate: 8,
   cutoffMaxDefense: 4000, cutoffUrgentRange: 8,
-  // 宏观方针（2026-09-27 第二轮）：运输小勺下限、集结点僵持放弃、工地/集结点滞回
-  minTransport: 8, rallyStallTicks: 24, rallyAbandonTicks: 40, siteHysteresis: 1.5,
 });
 const PARAM_RANGES = Object.freeze({
   buildSafety: [0, 30], enemyDistance: [1, 8], threatWeight: [0.5, 3],
@@ -44,7 +42,6 @@ const PARAM_RANGES = Object.freeze({
   stallTicks: [0, 200], stallRatio: [0.1, 1.5],
   cutoffRange: [3, 20], cutoffScan: [20, 600], cutoffMaxSteps: [1, 8], cutoffMinIsolate: [0, 500],
   cutoffMaxDefense: [0, 100000], cutoffUrgentRange: [0, 20],
-  minTransport: [0, 200], rallyStallTicks: [0, 300], rallyAbandonTicks: [0, 600], siteHysteresis: [1, 4],
 });
 function resolveParams(params = {}) {
   const result = {};

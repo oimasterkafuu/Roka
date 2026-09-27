@@ -131,10 +131,8 @@ function decide(state, params, guard) {
   let proposed, interception;
   const emergency = attack(analysis.emergencyMove, true);
   if (allowed(emergency, true)) return take(emergency, 'ffa-emergency');
-  // 提前汇兵（威胁 2+ tick）不绕过移动护栏——否则与经济/物流运输互相倒兵绕圈；
-  // 只有贴脸救城/前线截击（imminent）保持紧急放行。
-  const reinforcement = attack(defense?.move, Boolean(defense?.imminent));
-  if (defense?.urgent && allowed(reinforcement, Boolean(defense?.imminent))) return take(reinforcement, 'defense-urgent');
+  const reinforcement = attack(defense?.move, Boolean(defense?.urgent));
+  if (defense?.urgent && allowed(reinforcement, true)) return take(reinforcement, 'defense-urgent');
   // 可立即执行的有效进攻优先于普通救援、集兵和建设，不能被远后方任务饿死。
   const advance = attack(front?.choose());
   const canAdvance = allowed(advance);
