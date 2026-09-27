@@ -153,6 +153,17 @@ function decide(state, params, guard) {
     const stand = attack(defense.move, true);
     if (allowed(stand, true)) return take(stand, 'defense-last-stand');
   }
+  // 攻城评估提前算一次（下方各 campaign 分支复用）：浓缩突击/画圈推进/锚点建造的提议。
+  const campaignRaw = chooseCampaign(state, constrained, {
+    targetOwner: analysis.targetOwner, threatened: Boolean(defense?.urgent || emergency),
+    boundaryAdvance: true, ratio: race?.behind ? 1.12 : 1.3,
+  });
+  // 同 tick 预锚 / 腾出格补锚（2026-09-27 第二轮，用户硬方针）：走廊可能被 1 tick
+  // 切断时大堆原地起锚、推进后腾出的格立即补锚——紧急建造，压过本 tick 的移动
+  // 决策（含脖子纪律的增援/回缩与入侵截断），不受锚点链节奏限制；仍让位于上面
+  // 的背水一战与「本 tick 能拆敌方皇冠/指挥所」的斩首推进。
+  if (campaignRaw?.kind === 'build' && campaignRaw.reason?.phase !== 'anchor' &&
+      !advanceWinsBuilding && allowed(campaignRaw)) return take(campaignRaw, 'campaign-preempt-anchor');
   // 截断的优先级仅次于「本 tick 能拆敌方皇冠/指挥所」的推进：
   // urgent（偷家贴脸或冻住规模很大）时无条件抢占；
   // 防守场景（对手正在威胁我方皇冠/生命，defense 有动作）下，截断也压过普通推进与调兵。
@@ -164,11 +175,6 @@ function decide(state, params, guard) {
   const neck = chooseNeckGuard(state, constrained);
   const neckAction = neck ? { kind: 'attack', ...neck.move } : null;
   if (neck && !advanceWinsBuilding && allowed(neckAction)) return take(neckAction, 'neck-guard');
-  // 攻城评估提前算一次（下方 campaign 分支复用）：浓缩突击/画圈推进的提议。
-  const campaignRaw = chooseCampaign(state, constrained, {
-    targetOwner: analysis.targetOwner, threatened: Boolean(defense?.urgent || emergency),
-    boundaryAdvance: true, ratio: race?.behind ? 1.12 : 1.3,
-  });
   // 锚点链（画圈推进的建造节奏，学自 _E_）：推进走廊有截断风险、或到达节奏 tick
   // 且走廊上有攒够兵的锚点候选时，落指挥所保连通压过普通推进——E 的节奏就是
   // 「走几步、停一 tick 建站」。让位于「本 tick 能拆敌方皇冠/指挥所」的推进

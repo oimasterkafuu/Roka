@@ -5,9 +5,18 @@ const { resolveParams } = require('./params.cjs');
 const { createContext } = require('./threat.cjs');
 const { ownStrandedMass } = require('./cutoff.cjs');
 
+// 深入决心（跨回合，用户 2026-09-27 方针「决心要狠」）：已出击的大堆在窗口期内
+// 锁定同一个皇冠方向——除非另一方向的集结点评分好出 campaignResolveMargin 以上、
+// 目标皇冠消失或形势剧变（reset 路径，含家里告急 threatened）才解锁，否则不每
+// tick 换目标、不原地摇摆。与 frontline 斩首锁定同款的有限防抖，非旧版计划状态。
+const campaignResolve = new WeakMap();
+// 预锚凑兵等待（跨回合）：1-tick 切断风险下大堆兵力不足 51 时允许原地等
+// preemptAnchorWaitTicks tick 凑兵，等不到就放弃预锚、恢复正常推进。
+const preemptWaits = new WeakMap();
+
 function chooseCampaign(state, params = {}, options = {}) {
   if (!state || typeof state !== 'object') return null;
-  const reset = () => null;
+  const reset = () => { campaignResolve.delete(state); preemptWaits.delete(state); return null; };
   const { n, m, grid, army, playerId: me } = state;
   const size = n * m, turn = state.turn ?? 0;
   if (state.dead || state.ended || options.threatened || !Number.isInteger(n) || !Number.isInteger(m) ||
@@ -59,6 +68,13 @@ function chooseCampaign(state, params = {}, options = {}) {
   }
   if (!crowns.length || power <= (Number.isFinite(options.ratio) ? options.ratio : 1.4) * enemyPower) return reset();
   const mem = { target: null, rally: null };
+  // 深入决心：窗口期内目标皇冠仍可见可打，则继续锁定该方向（见文件头注释）。
+  let resolveTarget = null;
+  const resolve = campaignResolve.get(state);
+  if (resolve) {
+    if (turn <= resolve.until && crowns.includes(resolve.target)) resolveTarget = resolve.target;
+    else campaignResolve.delete(state);
+  }
   // 反向 BFS 同时寻找皇冠路径和最接近的己方前线，每格只访问一次。
   const toward = new Int32Array(size).fill(-1), root = new Int32Array(size).fill(-1);
   const q = crowns.slice();
@@ -73,15 +89,22 @@ function chooseCampaign(state, params = {}, options = {}) {
     }
   }
   // 兵源、树和前线终点每 tick 重算。
-  // 选择当下的前线出发点，兼顾接敌距离与现有大军，给旧点微小迟滞而非锁死。
+  // 选择当下的前线出发点，兼顾接敌距离与现有大军；决心窗口内额外跟踪「朝锁定
+  // 皇冠方向」的最佳集结点，只要不被甩开 campaignResolveMargin 以上就继续用它——
+  // 已投入深入的大堆不因每 tick 的微小评分波动换方向、原地摇摆。
   let bestRally=-1,bestRallyScore=-Infinity;
+  let resolveRally=-1,resolveRallyScore=-Infinity;
   const fronts = options.boundaryAdvance ? new Set(Array.from({length:size}, (_,i)=>i)
     .filter(i=>own(i)&&toward[i]>=0&&ns(i).some(j=>targetSide(j)))) : null;
   for(let i=0;i<size;i++)if(own(i)&&toward[i]>=0&&root[i]===root[i]){
     if (fronts?.size && !fronts.has(i)) continue;
     const d=approachDistance[i];
-    const score=Math.log2(1+count(i))*2-(options.boundaryAdvance ? Math.min(d, 3) : d)+(i===mem.rally?1:0);
+    const score=Math.log2(1+count(i))*2-(options.boundaryAdvance ? Math.min(d, 3) : d);
     if(score>bestRallyScore){bestRallyScore=score;bestRally=i;}
+    if(root[i]===resolveTarget&&score>resolveRallyScore){resolveRallyScore=score;resolveRally=i;}
+  }
+  if(resolveRally>=0&&(bestRally<0||resolveRallyScore+p.campaignResolveMargin>=bestRallyScore)){
+    bestRally=resolveRally;bestRallyScore=resolveRallyScore;
   }
   mem.rally=bestRally<0?null:bestRally;
   if(mem.rally!==null)mem.target=root[mem.rally];
@@ -232,14 +255,20 @@ function chooseCampaign(state, params = {}, options = {}) {
       }
     }
   }
-  // ── 锚点链：推进走廊上按节奏落指挥所，用建筑当连通锚点防断联 ──────────────
+  // ── 锚点链 + 同 tick 预锚 + 腾出格补锚（2026-09-27 第二轮，用户硬方针）──────
   // E 推进窗口内指挥所建造间隔中位 4 tick、建造点距大堆/路径中位 2 格（近半数
-  // 直接落在大堆脚下）。走廊 = rally 沿 anchorDist 严格下降走回锚点的路；候选
-  // 为走廊上离最近建筑 ≥anchorChainGap、攒够 51 兵、建成后余兵不被贴脸敌兵吃掉的
-  // 平地格。连通判定与 cutoff.cjs 共用同一份 BFS（ownStrandedMass，引擎
-  // applyConnectivity 同款规则）：走廊存在 1 格脖子（移除后大堆段断锚）且走廊贴敌
-  // = 有截断风险 → 锚点建造优先于本 tick 的移动；无风险时按 anchorBuildEvery 的
-  // 节奏建造（大堆脚下的建造仍受节奏限制，避免每 tick 停工建站把推进拖死）。
+  // 直接落在大堆脚下）。走廊 = rally 沿 anchorDist 严格下降走回锚点的路。连通
+  // 判定与 cutoff.cjs 共用同一份 BFS（ownStrandedMass，引擎 applyConnectivity
+  // 同款规则）：走廊存在 1 格脖子（移除后 ≥cutoffMinIsolate 兵力断锚）且走廊贴敌
+  // = 有截断风险（risky）；脖子格贴着「本 tick 就能打下它」的敌军 = 敌方下一 tick
+  // 即可切断（imminent，与 neck-guard 同一口径的 1-tick 切断判定）。
+  //   ① 同 tick 预锚：imminent 且大堆 ≥preemptAnchorMinArmy 时，本 tick 大堆不动、
+  //      原地起指挥所——服务端同 tick 语义下被切断的同一 tick 里落成的指挥所照样
+  //      生效，切断落空。紧急动作，不受 anchorChainGap/anchorBuildEvery 节奏限制。
+  //   ② 腾出格补锚：大堆上一步腾出的格够 51 兵且安全时立刻补一座，锚链贴着大堆
+  //      脚跟向前延伸——与预锚交替即「建一个 → 走一步 → 再建一个」的极限节奏。
+  //   ③ 锚点链：无紧急风险时按 anchorBuildEvery 节奏在走廊候选落锚；risky 时非
+  //      rally 候选抢节奏（大堆脚下的建造仍受节奏限制，脚下紧急保护归预锚管）。
   if (approachDistance[rally] > 2) {
     const anchorDist = new Int32Array(size).fill(-1);
     {
@@ -248,33 +277,76 @@ function chooseCampaign(state, params = {}, options = {}) {
       for (let h = 0; h < q.length; h++) for (const j of ns(q[h]))
         if (anchorDist[j] < 0 && own(j) && !blocked(j, q[h])) { anchorDist[j] = anchorDist[q[h]] + 1; q.push(j); }
     }
-    if (anchorDist[rally] >= p.anchorChainGap) {
-      const corridor = [rally];
-      while (corridor.length < 12) {
-        const cur = corridor[corridor.length - 1];
-        let next = -1;
-        for (const j of ns(cur)) if (own(j) && anchorDist[j] >= 0 && anchorDist[j] < anchorDist[cur] &&
-          (next < 0 || anchorDist[j] < anchorDist[next])) next = j;
-        if (next < 0) break;
-        corridor.push(next);
+    if (anchorDist[rally] >= 1) {
+    const corridor = [rally];
+    while (corridor.length < 12) {
+      const cur = corridor[corridor.length - 1];
+      let next = -1;
+      for (const j of ns(cur)) if (own(j) && anchorDist[j] >= 0 && anchorDist[j] < anchorDist[cur] &&
+        (next < 0 || anchorDist[j] < anchorDist[next])) next = j;
+      if (next < 0) break;
+      corridor.push(next);
+    }
+    let risky = false, imminent = false;
+    const corridorHostile = corridor.some((c) => ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j]));
+    if (corridorHostile) {
+      const ctx = createContext(state, params); // policy 流程里命中同 tick 缓存
+      if (ctx) for (const c of corridor.slice(0, 8)) {
+        const stranded = ownStrandedMass(ctx, c, p.cutoffScan);
+        if (stranded === null || stranded < p.cutoffMinIsolate) continue;
+        risky = true;
+        if (grid[c] !== me + 50 && grid[c] !== me + 100 &&
+            ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j] && count(j) - 1 > count(c))) {
+          imminent = true; break;
+        }
       }
+    }
+    // 建成后余兵必须压得住贴脸敌兵（否则指挥所落地即被顺手拆掉，白送 50）。
+    const safeRemainder = (c) => !ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j] &&
+      count(j) - 1 > count(c) - 50);
+    // ① 同 tick 原地预锚（优先级：policy 调度中仍让位背水一战与「本 tick 能拆
+    //    敌方建筑」的斩首推进）。
+    if (imminent && stack >= p.preemptAnchorMinArmy) {
+      if (grid[rally] === me && count(rally) >= 51 && safeRemainder(rally)) {
+        preemptWaits.delete(state);
+        campaignResolve.set(state, { target: mem.target, until: turn + p.campaignResolveTicks });
+        return { kind: 'build', x: Math.floor(rally / m), y: rally % m, op: 'b',
+          reason: { code: 'campaign', phase: 'preempt-anchor', target: mem.target, rally, site: rally,
+            risky, imminent,
+            detail: '同 tick 预锚：走廊可能被 1 tick 切断，大堆原地起指挥所护住连通，停下等下一步' } };
+      }
+      // 钱不够 51：允许原地等 preemptAnchorWaitTicks tick 凑兵，等不到放弃预锚改正常推进。
+      if (count(rally) < 51) {
+        const wait = preemptWaits.get(state);
+        if (wait && wait.rally === rally && turn - wait.since >= p.preemptAnchorWaitTicks) preemptWaits.delete(state);
+        else {
+          if (!wait || wait.rally !== rally) preemptWaits.set(state, { rally, since: turn });
+          return null;
+        }
+      }
+    }
+    // ② 腾出格补锚：上一步大堆从 from 走进 rally（lastMove 回执），原位置空出来后
+    //    仍是我方平地、够 51 兵、建成后压得住贴脸敌兵，立刻在腾出的格上补一座。
+    const last = state.lastMove;
+    if ((imminent || risky) && last?.op === 'm' && last.turn >= turn - 1) {
+      const from = last.x * m + last.y, dest = last.dx * m + last.dy;
+      if (dest === rally && own(from) && grid[from] === me && count(from) >= 51 &&
+          anchorDist[from] >= p.anchorChainGap && anchorDist[from] < anchorDist[rally] && safeRemainder(from)) {
+        return { kind: 'build', x: Math.floor(from / m), y: from % m, op: 'b',
+          reason: { code: 'campaign', phase: 'backfill-anchor', target: mem.target, rally, site: from,
+            risky, imminent,
+            detail: '腾出格补锚：大堆推进后立即在原位置补指挥所，锚链贴着脚跟向前延伸' } };
+      }
+    }
+    // ③ 锚点链节奏建造。
+    if (anchorDist[rally] >= p.anchorChainGap) {
       let site = -1;
       for (const c of corridor) {
         if (anchorDist[c] < p.anchorChainGap || grid[c] !== me || count(c) < 51) continue;
-        // 建成后余兵必须压得住贴脸敌兵（否则指挥所落地即被顺手拆掉，白送 50）。
-        if (ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j] && count(j) - 1 > count(c) - 50)) continue;
+        if (!safeRemainder(c)) continue;
         if (site < 0 || anchorDist[c] > anchorDist[site]) site = c; // 离锚点最远者优先：链向前延伸
       }
       if (site >= 0) {
-        const corridorHostile = corridor.some((c) => ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j]));
-        let risky = false;
-        if (corridorHostile) {
-          const ctx = createContext(state, params); // policy 流程里命中同 tick 缓存
-          if (ctx) for (const c of corridor.slice(0, 8)) {
-            const stranded = ownStrandedMass(ctx, c, p.cutoffScan);
-            if (stranded !== null && stranded >= p.cutoffMinIsolate) { risky = true; break; }
-          }
-        }
         const rhythm = turn % Math.max(2, Math.round(p.anchorBuildEvery)) === 0;
         if ((risky && site !== rally) || rhythm) {
           return { kind: 'build', x: Math.floor(site / m), y: site % m, op: 'b',
@@ -282,6 +354,7 @@ function chooseCampaign(state, params = {}, options = {}) {
               detail: risky ? '锚点链：走廊有截断风险，优先落指挥所保连通' : '锚点链：按节奏在推进走廊落指挥所' } };
         }
       }
+    }
     }
   }
   // 只有真实 rally 兵足够才出击；不把尚未到达的树上兵计入 available。
@@ -294,6 +367,8 @@ function chooseCampaign(state, params = {}, options = {}) {
   if (last?.op === 'm' && last.turn >= turn - 1 && last.x * m + last.y === to && last.dx * m + last.dy === from) return null;
   mem.pending = { turn, from, to, before: army[from], destination: army[to], phase };
   const striking = phase === 'advance';
+  // 出击即下定决心：窗口期内锁定该皇冠方向，不每 tick 换目标（用户「决心要狠」）。
+  if (striking) campaignResolve.set(state, { target: mem.target, until: turn + p.campaignResolveTicks });
   return { x: Math.floor(from / m), y: from % m, dx: Math.floor(to / m), dy: to % m,
     mode: striking && assault ? 2 : 0, half: false, reason: { code: 'campaign',
       detail: phase === 'gather' ? '攻城树先叶后根汇兵'
