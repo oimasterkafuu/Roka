@@ -164,6 +164,17 @@ function decide(state, params, guard) {
   const neck = chooseNeckGuard(state, constrained);
   const neckAction = neck ? { kind: 'attack', ...neck.move } : null;
   if (neck && !advanceWinsBuilding && allowed(neckAction)) return take(neckAction, 'neck-guard');
+  // 攻城评估提前算一次（下方 campaign 分支复用）：浓缩突击/画圈推进的提议。
+  const campaignRaw = chooseCampaign(state, constrained, {
+    targetOwner: analysis.targetOwner, threatened: Boolean(defense?.urgent || emergency),
+    boundaryAdvance: true, ratio: race?.behind ? 1.12 : 1.3,
+  });
+  // 锚点链（画圈推进的建造节奏，学自 _E_）：推进走廊有截断风险、或到达节奏 tick
+  // 且走廊上有攒够兵的锚点候选时，落指挥所保连通压过普通推进——E 的节奏就是
+  // 「走几步、停一 tick 建站」。让位于「本 tick 能拆敌方皇冠/指挥所」的推进
+  // （斩首/拆建筑优先级不变），也让位于上面的背水/截断/脖子纪律。
+  if (campaignRaw?.kind === 'build' && !advanceWinsBuilding && allowed(campaignRaw))
+    return take(campaignRaw, 'campaign-anchor');
   // 攻冠的推进永远最优先；但普通推进不能让位于「家里皇冠正被吃掉」。
   const advanceTakesCrown = advanceWinsBuilding;
   if (tuning.defensePriority >= 1 && defense && !advanceTakesCrown && !defense.urgent) {
@@ -224,12 +235,11 @@ function decide(state, params, guard) {
   if (Number.isInteger(state.turn) && state.turn >= 0 && state.turn < 50)
     return allowed(attack(move)) ? take(attack(move), 'early') : null;
   const build = chooseBuild(state, move, constrained);
-  const campaign = attack(chooseCampaign(state, constrained, {
-    targetOwner: analysis.targetOwner, threatened: Boolean(defense?.urgent || emergency),
-    boundaryAdvance: true, ratio: race?.behind ? 1.12 : 1.3,
-  }));
+  // 锚点链建造（kind:'build'）不经 frontline 移动审查，与 logistics 的建造同例直通。
+  const campaign = campaignRaw?.kind === 'build' ? campaignRaw : attack(campaignRaw);
   // 攻城树独占调兵方向；每四tick允许一次经济投资，不让建设或微操反向拆散集结。
   if (allowed(campaign)) {
+    if (campaign.kind === 'build') return take(campaign, 'campaign-anchor');
     if (build && state.turn % 4 === 0) return take({ kind: 'build', ...build }, 'campaign-build');
     return take(campaign, 'campaign');
   }

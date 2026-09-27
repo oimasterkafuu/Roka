@@ -2,6 +2,8 @@
 
 // 无跨回合计划：每次调用都按当前棋盘重算目标、集结点与攻城树。
 const { resolveParams } = require('./params.cjs');
+const { createContext } = require('./threat.cjs');
+const { ownStrandedMass } = require('./cutoff.cjs');
 
 function chooseCampaign(state, params = {}, options = {}) {
   if (!state || typeof state !== 'object') return null;
@@ -206,9 +208,85 @@ function chooseCampaign(state, params = {}, options = {}) {
   const neckRisk = stackReady && !ns(path[0]).some((j) => j !== rally && own(j)) &&
     ns(rally).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j] && count(j) > 2);
   const assault = stackReady && !neckRisk;
+  // ── 画圈推进（2026-09-27，学自 _E_ 锋面量化）────────────────────────────
+  // E 的推进锋面不是 1 格宽单列：推进期 5×5 窗口内己方格中位 7、垂直截面宽中位 4
+  // （对手广正面为 13/6），是宽 2–3 的连通小块，一边画小圈一边往里推。实现：
+  // 锋面头部不足 pushFrontWidth 宽时，大堆先侧向扫一格（与锋面平齐、不越过头部、
+  // 下一步不会立刻回头的侧翼格），把推进带涂成两格宽；下一 tick 头部已是宽块，
+  // 再沿路径前压——连通性优先于推进速度。
+  let sweepTo = -1;
+  if (assault && available >= required && approachDistance[rally] > 2) {
+    // 只在「窄突出部」画圈：rally 自身只有 ≤1 个己方邻格（唯一的己方连接就是身后
+    // 走廊）时才需要把锋面涂宽；rally 还坐在我方连片领土里时块本来就是宽的。
+    const rallyOwn = ns(rally).filter((j) => own(j)).length;
+    const headOwn = ns(path[0]).filter((j) => j !== rally && own(j)).length;
+    if (rallyOwn <= 1 && headOwn + 1 < p.pushFrontWidth) {
+      let latKey = Infinity;
+      for (const j of ns(rally)) {
+        if (j === path[0] || own(j) || !pass(j) || blocked(rally, j)) continue;
+        if (toward[j] < 0 || toward[j] === rally) continue; // 不连皇冠方向/下一步即回头的不要
+        if (approachDistance[j] < approachDistance[path[0]] - 1) continue; // 不越过锋面乱窜
+        if (count(rally) - 1 - count(j, 1) < 1) continue; // 打不下来不扫
+        const key = approachDistance[j] * 100000 + count(j, 1); // 与锋面平齐者优先
+        if (key < latKey) { latKey = key; sweepTo = j; }
+      }
+    }
+  }
+  // ── 锚点链：推进走廊上按节奏落指挥所，用建筑当连通锚点防断联 ──────────────
+  // E 推进窗口内指挥所建造间隔中位 4 tick、建造点距大堆/路径中位 2 格（近半数
+  // 直接落在大堆脚下）。走廊 = rally 沿 anchorDist 严格下降走回锚点的路；候选
+  // 为走廊上离最近建筑 ≥anchorChainGap、攒够 51 兵、建成后余兵不被贴脸敌兵吃掉的
+  // 平地格。连通判定与 cutoff.cjs 共用同一份 BFS（ownStrandedMass，引擎
+  // applyConnectivity 同款规则）：走廊存在 1 格脖子（移除后大堆段断锚）且走廊贴敌
+  // = 有截断风险 → 锚点建造优先于本 tick 的移动；无风险时按 anchorBuildEvery 的
+  // 节奏建造（大堆脚下的建造仍受节奏限制，避免每 tick 停工建站把推进拖死）。
+  if (approachDistance[rally] > 2) {
+    const anchorDist = new Int32Array(size).fill(-1);
+    {
+      const q = [];
+      for (let i = 0; i < size; i++) if (own(i) && (grid[i] === me + 100 || grid[i] === me + 50)) { anchorDist[i] = 0; q.push(i); }
+      for (let h = 0; h < q.length; h++) for (const j of ns(q[h]))
+        if (anchorDist[j] < 0 && own(j) && !blocked(j, q[h])) { anchorDist[j] = anchorDist[q[h]] + 1; q.push(j); }
+    }
+    if (anchorDist[rally] >= p.anchorChainGap) {
+      const corridor = [rally];
+      while (corridor.length < 12) {
+        const cur = corridor[corridor.length - 1];
+        let next = -1;
+        for (const j of ns(cur)) if (own(j) && anchorDist[j] >= 0 && anchorDist[j] < anchorDist[cur] &&
+          (next < 0 || anchorDist[j] < anchorDist[next])) next = j;
+        if (next < 0) break;
+        corridor.push(next);
+      }
+      let site = -1;
+      for (const c of corridor) {
+        if (anchorDist[c] < p.anchorChainGap || grid[c] !== me || count(c) < 51) continue;
+        // 建成后余兵必须压得住贴脸敌兵（否则指挥所落地即被顺手拆掉，白送 50）。
+        if (ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j] && count(j) - 1 > count(c) - 50)) continue;
+        if (site < 0 || anchorDist[c] > anchorDist[site]) site = c; // 离锚点最远者优先：链向前延伸
+      }
+      if (site >= 0) {
+        const corridorHostile = corridor.some((c) => ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j]));
+        let risky = false;
+        if (corridorHostile) {
+          const ctx = createContext(state, params); // policy 流程里命中同 tick 缓存
+          if (ctx) for (const c of corridor.slice(0, 8)) {
+            const stranded = ownStrandedMass(ctx, c, p.cutoffScan);
+            if (stranded !== null && stranded >= p.cutoffMinIsolate) { risky = true; break; }
+          }
+        }
+        const rhythm = turn % Math.max(2, Math.round(p.anchorBuildEvery)) === 0;
+        if ((risky && site !== rally) || rhythm) {
+          return { kind: 'build', x: Math.floor(site / m), y: site % m, op: 'b',
+            reason: { code: 'campaign', phase: 'anchor', target: mem.target, rally, site, risky,
+              detail: risky ? '锚点链：走廊有截断风险，优先落指挥所保连通' : '锚点链：按节奏在推进走廊落指挥所' } };
+        }
+      }
+    }
+  }
   // 只有真实 rally 兵足够才出击；不把尚未到达的树上兵计入 available。
   let phase, from, to, amount;
-  if (available >= required) { phase = 'advance'; from = rally; to = path[0]; amount = available; }
+  if (available >= required) { phase = 'advance'; from = rally; to = sweepTo >= 0 ? sweepTo : path[0]; amount = available; }
   else if (job) { phase = 'gather'; ({ from, to, amount } = job); }
   else return null;
   // 本模块目标持续锁定且汇兵边只向根；额外避免直接反转普通物流刚执行的搬运。
@@ -219,6 +297,7 @@ function chooseCampaign(state, params = {}, options = {}) {
   return { x: Math.floor(from / m), y: from % m, dx: Math.floor(to / m), dy: to % m,
     mode: striking && assault ? 2 : 0, half: false, reason: { code: 'campaign',
       detail: phase === 'gather' ? '攻城树先叶后根汇兵'
+        : assault && to === sweepTo ? '画圈推进：侧向扫一格，锋面涂成连通宽块'
         : assault ? '浓缩突击：决定性大堆全冲压向皇冠，沿途只留1兵' : '全程军力预算充足，进攻目标皇冠',
       phase, assault: striking ? assault : undefined, target: mem.target, rally, amount,
       distanceBefore: depth[from], distanceAfter: depth[to], forecast } };
