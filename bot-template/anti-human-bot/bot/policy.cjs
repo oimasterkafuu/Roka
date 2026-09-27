@@ -12,6 +12,7 @@ const { chooseRescue } = require('./rescue.cjs');
 const { createMovementGuard } = require('./movement-guard.cjs');
 const { createFrontline } = require('./frontline.cjs');
 const { chooseCutoff, chooseNeckGuard } = require('./cutoff.cjs');
+const { chooseColumnStrike } = require('./column.cjs');
 const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
 
@@ -154,6 +155,23 @@ function decide(state, params, guard) {
   if (defense?.lastStand && !advanceWinsBuilding) {
     const stand = attack(defense.move, true);
     if (allowed(stand, true)) return take(stand, 'defense-last-stand');
+  }
+  // 敌方跳板纵队拦截（2026-09-28 用户硬方针，主动防御层）：敌方深入我方腹地且
+  // 仍在推进的跳板/兵柱纵队，优先掐链、其次侧击腰部，不坐等它走到皇冠再背水。
+  // 优先级：背水一战（上面）之下、自家预锚/截断/脖子纪律/推进之上；「本 tick 能
+  // 拆敌方皇冠/指挥所」的斩首推进仍例外。皇冠告急（urgent/lastStand）或家里
+  // 多路告急（≥2 个敌阵营同时在威胁）时不为拦纵队抽空防守；defense.imminent
+  // 的「提前截击」不算告急——那正是该掐链而不是被动等的场面。
+  const columnCrisis = defense && (defense.urgent || defense.lastStand || defense.threatOwners?.size >= 2);
+  if (!advanceWinsBuilding && !columnCrisis) {
+    const column = chooseColumnStrike(state, constrained);
+    if (column) {
+      const strike = attack(column.move, Boolean(column.urgent));
+      // frontline 审查会把 mode/reason 改写成全冲口径；保留拦截语义 reason，
+      // 让日志/复盘能看到「掐链/迎头/打头」这一层主动防御动作。
+      if (strike) strike.reason = column.move.reason;
+      if (allowed(strike, Boolean(column.urgent))) return take(strike, 'column-strike');
+    }
   }
   // 攻城评估提前算一次（下方各 campaign 分支复用）：浓缩突击/画圈推进/锚点建造的提议。
   const campaignRaw = chooseCampaign(state, constrained, {

@@ -57,6 +57,20 @@ const DEFAULT_PARAMS = Object.freeze({
   // campaignResolveMargin 换方向所需的评分差距（另一方向好出这么多才解锁）。
   preemptAnchorMinArmy: 120, preemptAnchorWaitTicks: 2,
   campaignResolveTicks: 8, campaignResolveMargin: 3,
+  // 跳板推进常态化（2026-09-28 用户硬方针）：深入长线推进的大堆把「走一步 → 身后
+  // 腾出格补一座指挥所」作为默认节奏，不再只在切断风险时触发。
+  // leapfrogMinDepth 深入门槛：rally 距最近己方皇冠（走己方格，跳板指挥所不计——
+  // 否则锚链一成型就把自己关掉）达到该跳数才算「深入敌境/长线推进」，家门口短距离
+  // 推进不每步一锚；leapfrogChainGap 常态化锚链间距（1 = 走一步搭一个）；
+  // leapfrogWaitTicks 腾出格兵不够 51 时原地等凑钱的上限，等不到放弃这一格继续走。
+  // 常态化期间大堆不用浓缩突击 mode2（全冲只留 1 兵，永远凑不出建锚的 51），
+  // 改走 mode0 智能分兵让身后留下余兵补锚。
+  leapfrogMinDepth: 4, leapfrogChainGap: 1, leapfrogWaitTicks: 2,
+  // 敌方跳板纵队拦截（2026-09-28 用户硬方针）：敌格连通块深入我控区（2 跳内我方格
+  // 明显占优、离我方锚点 columnRange 跳内）≥columnMinDepth 格且头部近 tick 仍在
+  // 推进时，主动攻击——优先掐链（占住纵队与敌主力间的脖子，冻住深入段 ≥columnMinMass
+  // 敌兵才出手，连通口径与 cutoff 相同），掐不动侧击纵队腰部。
+  columnMinDepth: 4, columnMinMass: 30, columnRange: 10,
   // maze 拓展纪律（用户 2026-09-27 硬方针）：已知格中山体占比达到该阈值判为迷宫图
   // （maze 生成器约 0.45–0.55，random ≤0.24，群岛/地中海以沼泽为主）。
   mazeMountainRatio: 0.3,
@@ -133,6 +147,8 @@ const PARAM_RANGES = Object.freeze({
   pushFrontWidth: [1, 4], anchorChainGap: [2, 8], anchorBuildEvery: [2, 12], mazeMountainRatio: [0.15, 0.6],
   preemptAnchorMinArmy: [40, 2000], preemptAnchorWaitTicks: [0, 8],
   campaignResolveTicks: [0, 40], campaignResolveMargin: [0, 20],
+  leapfrogMinDepth: [2, 30], leapfrogChainGap: [1, 8], leapfrogWaitTicks: [0, 8],
+  columnMinDepth: [2, 12], columnMinMass: [0, 2000], columnRange: [4, 30],
   fortressPhaseTurn: [40, 600], lateTerritoryPerCrown: [4, 30], lateMaxCrowns: [3, 40],
   lateSkinMin: [2, 60], lateAnchorRadius: [1, 4],
   pushDirectionWeight: [0, 60], flankPaintPenalty: [0, 200], paintDiscardDist: [2, 30],
