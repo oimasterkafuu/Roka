@@ -160,6 +160,7 @@ _一句话：中央海椭圆 + 环陆出生点分散选址。_
 
 **src/auth-store.ts** — 用户/会话/Rating 存储（`data/users.bin`，v8 serialize + brotli）。
 密码 scrypt 加盐 + `timingSafeEqual`；角色模型：首个注册用户 = 超级管理员（`isSuperAdmin`，唯一、不可剥夺、不可封禁，同时拥有 admin），普通 admin（`isAdmin`）由超管授予/撤销（`setAdmin`），旧数据启动时由 `migrateRoles` 把首个用户升级为超管（向后兼容）；封禁字段 `bannedUntil`（毫秒时间戳，-1=永久，缺省=未封禁），到期由 `getBanStatus` 惰性判定自动解除，`banUser`/`unbanUser` 操作，`listUsersForAdmin` 出后台用户列表；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点）。可选字段 `lastSeenAt` 记录「最后在线」（= 用户最近一次有效请求/动作时间，由 presence-service 统一计算并节流落盘；旧数据无此字段按 undefined 兼容），`setLastSeenAt` 写入（presence 的落盘回调），`listLastSeen` 出全量落盘记录供 presence 启动 seed。
+排行榜 `listTopRated` 只出最近 7 天内有活动的用户：最后活动时间取 `max(lastSeenAt, updatedAt)`（对局结算、登录轮换会话等刷 `updatedAt`，presence 统一刷 `lastSeenAt`），距今 ≥ `LEADERBOARD_INACTIVITY_MS`（7×24×3600×1000）即暂时下榜（rating 数据不动，重新活跃即回榜；bot 账号同一规则）。
 _一句话：用户/会话/Rating 存储，brotli 压缩 users.bin。_
 
 **src/feed-store.ts** — 动态存储（`data/feeds.bin`，同 v8+brotli）。
@@ -306,6 +307,7 @@ _一句话：Notification 权限引导 + 后台去重弹通知。_
 - **scripts/test-presence.mjs** — `pnpm run test:presence`：统一在线状态测试。单元部分用假时钟驱动 dist 的 presence-service（活动刷新、过期判离线、去重计数、离线↔在线转换、节流/兜底落盘、「刚刚在线」、seed 恢复）；集成部分临时数据目录起 dist 服务（注入 `ROKA_BOT_TOKENS`），验证任意 API 请求刷新「最后在线」、`/api/online` 自身不计活动、多连接按用户去重、bot 连接不计入在线、重启后从落盘恢复。不跑对局，硬上限 60 秒。
 - **scripts/test-fog.mjs** — `pnpm run test:fog`：迷雾远征冒烟——房主 `change_game_conf {fog:true}` 开局后，校验客户端合并局面满足迷雾不变量（帧带 `fog` 数组、迷雾格只泄地形且兵力归零、己方主城可见、视野内无敌方主城），对照默认房间不带 `fog` 字段；观战视角场景：中途进房观战者默认全图（fog 全 0、双方主城可见），`spectate_view {team}` 切换后按该队伍迷雾过滤（复用同一套不变量断言）、存活参赛者请求被忽略、切回 0 恢复全图；另覆盖 issue #51：bot 进房后迷雾被强制关闭、房主再次开启请求被拒绝、纯人类房间不受影响。
 - **scripts/test-strategy-logic.mjs** — `pnpm run test:strategy`：策略逻辑单元测试——合成 1×m 走廊棋盘直接驱动 `bot/` 纯函数模块（buildContext + planOffense），回归四类行为：优势即打（触发即攻）、集结期入口不出兵切断（防入口易位致纵队折返）、僵死对峙超时解散 + 重集结闸门 + 改善后开打、爆发期路径敌格自然增兵不误判增援弃打。
+- **scripts/test-leaderboard-activity.mjs** — `pnpm run test:leaderboard`：排行榜不活跃下榜过滤单元测试——临时数据目录起 `dist/auth-store.js` 的 UserStore，固定 now mock 时间，回归：活跃 6 天在榜、8 天下榜、恰好 7 天下榜、重新登录（rotateSession + markLastSeen）后立即回榜、无对局（ratingGames=0）不在榜、仅靠对局结算（updatedAt）无 lastSeenAt 仍算活跃；需先 `pnpm run build`。
 - **scripts/observe-bot-match.mjs** — `pnpm run observe:bot`：对局观测/病理分析——临时数据目录起 dist 服务 + 进程内观战 recorder 逐 turn 录完整盘面（`frames.jsonl`），按 `OBS_BOTS` 启动 bot 组合（`strategy:`/`random:`/`legacy:` 前缀，`legacy` 从 git main 导出旧版做 A/B 基准），赛后生成 `report.txt`（往返抖动/送兵/前线停滞/切断无救援/主城沦陷时闲散兵力）；环境变量 `OBS_SPEED`/`OBS_MAP_TOKEN`/`OBS_MAP_MODE`/`OBS_OUT`/`OBS_MAX_MS`，输出默认 `data/observe-*/`（gitignored）。
 - **scripts/replay-bot-decisions.mjs** — bot 决策离线复盘：假 socket 驱动真实 `strategy.js` 逐 turn 重放观测目录的 `frames.jsonl`（队列执行按服务端 `chkMove`/`chkBuild` 语义模拟），完整复现跨 tick 决策状态；支持 `--validate`（与 bot 日志逐 op 比对）、`--from/--to`、`--board`、`--cell` 盘面解释；配 `BOT_TRACE=1/2` 输出进攻评估/焦点/候选榜。
 - **scripts/extract-replay-frames.mjs** — 回放转帧：从 `data/replays/<id>.rpl`（ops-v1）经 dist 引擎重放提取逐 turn 全量帧，输出 `data/observe-<id>/frames.jsonl` + `meta.json`，供 replay-bot-decisions.mjs 与分析脚本使用。
