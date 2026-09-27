@@ -157,6 +157,71 @@ function updateSpectateMode() {
   socket.emit('change_team', { team: getTabVal('spectate-mode') == '观战' ? 0 : 1 });
 }
 
+// 观战视角选择（迷雾对局，看齐回放的视角切换）：默认「全图」；选中玩家后
+// 服务端按该玩家队伍的可见性下发迷雾帧。tabs 按排行榜玩家动态生成。
+var spectate_view_uids = [];
+var spectate_view_teams = {};
+
+// 观战视角资格：迷雾对局中的纯观战者（中途进房/观战席/已战败/终局前），
+// 存活参赛者不可切换（服务端同样拒绝，防止借视角窥探他队视野）。
+function spectateViewEligible() {
+  return !is_replay && in_game && !game_ended && fog_mode && (player == 0 || self_team == 0);
+}
+
+function onSpectateViewTab() {
+  var val = getTabVal('spectate-view');
+  spectate_view_team = val == '全图' ? 0 : spectate_view_teams[val] || 0;
+  socket.emit('spectate_view', { team: spectate_view_team });
+}
+
+// 按当前排行榜重建视角 tabs（全图 + 各参赛玩家）；仅玩家集合变化时重建以保留选中态。
+function refreshSpectateViewTabs(lb) {
+  var section = $('#spectate-view-section');
+  if (!section.length) return;
+  if (!spectateViewEligible() || !Array.isArray(lb)) {
+    section.css('display', 'none');
+    spectate_view_uids = [];
+    return;
+  }
+  section.css('display', '');
+  var uids = [];
+  var teams = {};
+  for (var i = 0; i < lb.length; i++) {
+    uids.push(lb[i].uid);
+    teams[lb[i].uid] = lb[i].team;
+  }
+  var key = uids.slice().sort().join('|');
+  if (key == spectate_view_uids.slice().sort().join('|')) return;
+  spectate_view_uids = uids;
+  spectate_view_teams = teams;
+  var tabs = $('#tabs-spectate-view')[0];
+  if (!tabs) return;
+  while (tabs.children.length > 2) {
+    tabs.removeChild(tabs.lastChild);
+  }
+  for (var i = 0; i < uids.length; i++) {
+    $(tabs).append($('<div class="inline-button"></div>').text(uids[i]));
+  }
+  for (var i = 2; i < tabs.children.length; i++) {
+    initTab(tabs, tabs.children[i], onSpectateViewTab);
+  }
+  // 恢复选中态：优先找回同队伍的玩家 tab；找不到则回退全图并通知服务端。
+  var selected = '全图';
+  if (spectate_view_team > 0) {
+    for (var i = 0; i < uids.length; i++) {
+      if (teams[uids[i]] == spectate_view_team) {
+        selected = uids[i];
+        break;
+      }
+    }
+  }
+  if (selected == '全图' && spectate_view_team != 0) {
+    spectate_view_team = 0;
+    socket.emit('spectate_view', { team: 0 });
+  }
+  setTabVal('spectate-view', selected);
+}
+
 function getTabVal(x) {
   return $($('#tabs-' + x)[0].children[0]).val();
 }
