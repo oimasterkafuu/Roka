@@ -1355,6 +1355,21 @@ const boot = async (): Promise<void> => {
       lobbyService.gameInstances.get(gid)?.popQueue(socket.id);
     });
 
+    // 观战视角切换（迷雾对局）：观战者请求按某队伍的迷雾视野观战，team<=0 恢复全图。
+    // 存活参赛者的请求由 game.setSpectatorView 内部拒绝，不影响对局内迷雾计算。
+    socket.on('spectate_view', (data: { team?: unknown }) => {
+      const gid = lobbyService.lobbyOfSid.get(socket.id);
+      if (!gid) {
+        return;
+      }
+      const game = lobbyService.gameInstances.get(lobbyService.getLobbyVal(gid));
+      if (!game) {
+        return;
+      }
+      const team = Number.parseInt(String(data?.team ?? 0), 10);
+      game.setSpectatorView(socket.id, Number.isNaN(team) ? 0 : team);
+    });
+
     socket.on('join_game_room', (data: { room?: string }) => {
       const room = String(data.room ?? '').trim();
       if (room.length === 0 || room.length > 15) {

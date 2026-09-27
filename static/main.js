@@ -539,9 +539,13 @@ function setRoomTopLeftVisible(show) {
 
 // 观战中（含战败后、终局复盘时）显示「下局模式」选择器：
 // 纯观战用户可提前选好下一局只看不打，避免对局结束后被瞬间重开的下一局拉进场。
+// 迷雾对局中的观战者（含观战席成员）额外显示「视角」选择器（看齐回放视角切换）。
 function refreshSpectateMode() {
   var spectating = !is_replay && in_game && player == 0;
-  $('#spectate-mode').css('display', spectating ? '' : 'none');
+  var viewEligible = typeof spectateViewEligible == 'function' && spectateViewEligible();
+  $('#spectate-mode').css('display', spectating || viewEligible ? '' : 'none');
+  $('#spectate-mode-box').css('display', spectating ? '' : 'none');
+  $('#spectate-view-section').css('display', viewEligible ? '' : 'none');
 }
 
 $(document).ready(function () {
@@ -611,6 +615,9 @@ async function loadAccountProfile() {
 socket.on('update', update);
 
 socket.on('starting', function () {
+  // 新对局开始：观战视角复位为全图（新引擎实例不携带旧的视角偏好）。
+  spectate_view_team = 0;
+  spectate_view_uids = [];
   setRoomTopLeftVisible(false);
   $('#status-alert').css('display', 'none');
   $($('#status-alert').children()[0].children[6]).css('display', 'none');
@@ -661,6 +668,12 @@ socket.on('init_map', function (data) {
   game_ended = false;
   lost = false;
   player = 0;
+  fog_mode = false;
+  spectate_view_uids = [];
+  // 断线重连补发 init_map 的场景（无 starting 前置）：恢复此前选择的观战视角。
+  if (spectate_view_team > 0) {
+    socket.emit('spectate_view', { team: spectate_view_team });
+  }
   $('#status-alert').css('display', 'none');
   hideSurrenderAlert();
   console.log(data);
@@ -843,6 +856,7 @@ socket.on('room_update', function (data) {
   }
 
   var canSelectPlayer = selfTeam != 0 || playingCount < max_teams;
+  self_team = selfTeam;
   $('#team-select-section').css('display', !roomRunning && canSelectPlayer ? '' : 'none');
   setTabGroupReadonly('tabs-custom-team', roomRunning || !canSelectPlayer);
   refreshCustomTeamTabs(allowTeam);
@@ -957,6 +971,10 @@ $(document).ready(function () {
     for (var i = 1; i < this.children.length; i++) {
       initTab(this, this.children[i], updateSpectateMode);
     }
+  });
+  // 「全图」tab 常驻 DOM 只绑一次；玩家 tab 由 refreshSpectateViewTabs 生成时绑定。
+  $('#tabs-spectate-view').each(function () {
+    initTab(this, this.children[1], onSpectateViewTab);
   });
   $('#force-start').on('click', function () {
     ready_state ^= 1;
