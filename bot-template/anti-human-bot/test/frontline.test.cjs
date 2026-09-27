@@ -118,13 +118,19 @@ test('相邻敌皇冠在目标周围干净时全冲拿下', () => {
   const f = createFrontline(s);
   const result = f.assess(move);
   assert.ok(result);
-  assert.match(result.reason, /攻冠/);
+  assert.match(result.reason, /斩首|攻冠/);
+  assert.equal(result.mode, 2); // 全兵推
 });
 
-test('目标旁边有巨量敌军时不再为攻冠送兵', () => {
+test('目标旁边有巨量敌军照样推皇冠（2026-09-27 斩首方针）', () => {
+  // 旧版把旁边 10000 敌大堆的同 tick 增援算进守军而拒攻；新方针：
+  // 推皇冠不评估对方防守强弱——当前回合推得下来就直接全兵推。
   const s = board(); s.turn = 600;
   put(s, 16, 1, 2000); put(s, 17, 102, 300); put(s, 18, 2, 10000); // 10000 贴着目标
-  assert.equal(createFrontline(s).assess(move), null);
+  const result = createFrontline(s).assess(move);
+  assert.ok(result, '能推就必须推，不管旁边有什么敌大堆');
+  assert.equal(result.mode, 2);
+  assert.match(result.reason, /斩首/);
 });
 
 test('攻冠仍然优先于普通地，choose 会挑皇冠', () => {
