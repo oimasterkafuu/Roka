@@ -18,6 +18,9 @@ function raid() {
   for (const y of [3, 4, 5, 6]) { grid[at(5, y)] = 2; army[at(5, y)] = 40; }
   for (let y = 1; y <= 7; y++) { grid[at(6, y)] = 2; army[at(6, y)] = 60; }
   grid[at(6, 1)] = 102; army[at(6, 1)] = 200;
+  // 第二个敌方锚点：没有它时皇冠 (6,1) 只靠 (6,2) 连出，(6,2) 会成为
+  // 「冻住全部敌军」的最优散兵割点，抢走本组用例想测的 (4,4) 脖子。
+  grid[at(6, 7)] = 52; army[at(6, 7)] = 5;
   return { n, m, turn: 500, playerId: 1, grid, army, isolated: Array(n * m).fill(0), teams: new Map([[1, 1], [2, 2]]) };
 }
 
@@ -152,13 +155,18 @@ test('被切断段含敌方皇冠时截断无效，不盲目出手', () => {
   assert.equal(chooseCutoff(s), null, '含皇冠的段永远连得回锚点，不存在有效截断');
 });
 
-test('占下瓶颈但守不住（锚侧反夺力过大）时不送兵', () => {
-  // raid() 里敌方皇冠 (6,1) 紧邻 (6,2)：占 (6,2) 能冻住全部敌兵，
-  // 但皇冠 200 兵下一 tick 就夺回，这种「截断」纯属送死。
+test('截断不看反扑：锚侧大兵堆不否决本回合可执行的截断（2026-09-27 方针）', () => {
+  // 皇冠 (6,1) 只靠 (6,2) 连出：占 (6,2) 能冻住几乎全部敌兵。
+  // 旧版会因「皇冠 200 兵下一 tick 可能反夺」放弃；新方针：被截断隔离的兵力记为 0，
+  // 截断决策不建模敌军反扑，本回合能占下就打。
   const s = raid();
-  s.army[at(5, 2)] = 150; // 足以打下 (6,2)，但守不住
+  s.grid[at(6, 7)] = 2; s.army[at(6, 7)] = 60; // 撤掉第二锚点，恢复 (6,2) 单格脖子
+  s.army[at(5, 2)] = 150;                        // 足以打下 (6,2)
   const result = chooseCutoff(s);
-  if (result) assert.notEqual(result.move.dx * m + result.move.dy, at(6, 2), '守不住的瓶颈不能打');
+  assert.ok(result, '可执行的截断必须出手');
+  assert.equal(result.strike, true);
+  assert.equal(result.move.dx * m + result.move.dy, at(6, 2), '冻住全军的脖子必须打');
+  assert.ok(result.trapped >= 400, `应冻住敌方主体，实际 ${result.trapped}`);
 });
 
 // 防守场景：敌方 60 兵 4 回合后可到我方皇冠（defense 有动作但不 urgent），
