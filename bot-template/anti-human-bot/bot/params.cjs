@@ -49,6 +49,14 @@ const DEFAULT_PARAMS = Object.freeze({
   // 至少这么远才落新指挥所）；anchorBuildEvery 锚点建造节奏（每 N tick 一次，
   // 有截断风险时不受节奏限制）。
   pushFrontWidth: 2, anchorChainGap: 3, anchorBuildEvery: 4,
+  // 同 tick 预锚 + 腾出格补锚 + 深入决心（2026-09-27 第二轮，用户硬方针）：
+  // preemptAnchorMinArmy 触发预锚的大堆最小兵力（走廊可能被 1 tick 切断且大堆达到
+  // 该规模时，本 tick 大堆不动、原地起指挥所，不受锚点链节奏/间距限制）；
+  // preemptAnchorWaitTicks 钱不够 51 时原地等凑兵的上限（等不到放弃预锚改正常推进）；
+  // campaignResolveTicks 深入决心保持窗口（已出击大堆锁定同一皇冠方向的 tick 数）；
+  // campaignResolveMargin 换方向所需的评分差距（另一方向好出这么多才解锁）。
+  preemptAnchorMinArmy: 120, preemptAnchorWaitTicks: 2,
+  campaignResolveTicks: 8, campaignResolveMargin: 3,
   // maze 拓展纪律（用户 2026-09-27 硬方针）：已知格中山体占比达到该阈值判为迷宫图
   // （maze 生成器约 0.45–0.55，random ≤0.24，群岛/地中海以沼泽为主）。
   mazeMountainRatio: 0.3,
@@ -92,6 +100,8 @@ const PARAM_RANGES = Object.freeze({
   surrenderHopelessArmyRatio: [3, 60],
   surrenderTeaseTicks: [60, 3000], surrenderTeaseNearCrownTicks: [5, 500], surrenderEnemyActiveTicks: [20, 500],
   pushFrontWidth: [1, 4], anchorChainGap: [2, 8], anchorBuildEvery: [2, 12], mazeMountainRatio: [0.15, 0.6],
+  preemptAnchorMinArmy: [40, 2000], preemptAnchorWaitTicks: [0, 8],
+  campaignResolveTicks: [0, 40], campaignResolveMargin: [0, 20],
   fortressPhaseTurn: [40, 600], lateTerritoryPerCrown: [4, 30], lateMaxCrowns: [3, 40],
   lateSkinMin: [2, 60], lateAnchorRadius: [1, 4],
 
