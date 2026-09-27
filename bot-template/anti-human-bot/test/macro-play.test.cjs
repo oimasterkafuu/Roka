@@ -1,6 +1,7 @@
 'use strict';
 // 第二轮宏观方针（2026-09-27）回归测试：
-//   斩首全兵推 / 多路合力连续攻击 + 目标锁定 / 进攻全兵优先 /
+//   斩首三级递升（2026-09-28 方针「三」：半兵 → 智能全兵 → 真全兵）/
+//   多路合力连续攻击 + 目标锁定 / 进攻全兵优先 /
 //   运输小勺过滤 / 工地与集结点滞回 / 僵持放弃 / 防守提前汇兵不越护栏。
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -22,7 +23,7 @@ test('贴脸皇冠必攻：旁边敌大堆不参与斩首决策（t417 回归）
   const move = { x: 2, y: 2, dx: 2, dy: 3, mode: 1 };
   const result = createFrontline(s).assess(move);
   assert.ok(result, '旧版被 reinforce≈363 的「守军」吓退，新版必须直接推');
-  assert.equal(result.mode, 2, '斩首全兵推');
+  assert.equal(result.mode, 1, '半兵 15 对守军 8 推得下就只出半兵（三级递升）');
   assert.match(result.reason, /斩首/);
   // 整合期（被反推）也不拦斩首
   assert.ok(createFrontline(s, { consolidate: true }).assess(move));
@@ -34,7 +35,7 @@ test('自家建筑当源点推皇冠仍按留守规则（防守逻辑保留）',
   put(s, 16, 101, 100); put(s, 17, 102, 30); put(s, 15, 2, 500);
   const move = { x: 2, y: 2, dx: 2, dy: 3, mode: 1 };
   assert.equal(createFrontline(s).assess(move), null, '自家建筑不能被斩首抽空');
-  // 敌压移走后照常全兵推（建筑源点也优先最大出兵）
+  // 敌压移走后照常推（建筑源点三级递升，半兵 49 对 30 推得下出半兵）
   const s2 = board();
   put(s2, 16, 101, 100); put(s2, 17, 102, 30);
   const ok = createFrontline(s2).assess(move);
@@ -50,7 +51,7 @@ test('多路合力推皇冠：单格不够、合力够就打第一击并锁定�
   const first = createFrontline(s).choose();
   assert.ok(first, '合力足够必须立即开打');
   assert.equal(first.dx * 7 + first.dy, 17);
-  assert.equal(first.mode, 2, '第一击全兵（打残，不留着过年）');
+  assert.equal(first.mode, 0, '智能合力够 → 智能全兵第一击，不退真全兵（三级递升）');
   assert.match(first.reason, /合力斩首/);
   // 模拟第一击落地：出兵格空了，皇冠守军被打残
   const from = first.x * 7 + first.y;

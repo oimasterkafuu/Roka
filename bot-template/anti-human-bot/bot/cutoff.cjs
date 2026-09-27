@@ -16,6 +16,71 @@
 const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
 
+// 出兵量估算（引擎智能分兵：扣掉周边非盟友格的守军预留）。
+function pushed(ctx, from, to) {
+  let reserve = 0;
+  for (const k of ctx.neighbors[from]) {
+    if (k === to || ctx.grid[k] === 201 || ctx.grid[k] === 203 || ctx.allied(ctx.owners[k], ctx.me)) continue;
+    reserve += ctx.count(k) - 1;
+  }
+  return Math.min(ctx.count(from) - 1, Math.max(0, ctx.count(from) - reserve - 1));
+}
+
+// 紧邻瓶颈能一次拿下就直接打；否则从我方境内集兵送往瓶颈。
+// 截断决策不建模敌军反扑（用户 2026-09-27 硬性方针）：被截断隔离的兵力记为 0
+// （孤军无法操作、自行衰减），本回合能占下瓶颈就打，不因「可能被反夺」放弃。
+// 在满足占下的打法里选最省兵的。column.cjs 的敌纵队掐链/侧击共用这份出兵方案。
+function planChokeAttack(ctx, p, choke, defense, trapped, strikeReason, gatherReason, extra = {}) {
+  const { m } = ctx;
+  let strike = null;
+  for (const s of ctx.neighbors[choke]) {
+    if (!ctx.own(s) || ctx.isolated(s)) continue;
+    const cap = ctx.count(s) - 1;
+    const theoretical = pushed(ctx, s, choke);
+    const half = Math.floor(theoretical / 2);
+    for (const [mode, push] of [[1, half], [0, theoretical], [2, cap]]) {
+      if (push <= defense || ctx.count(s) - push < 1) continue;
+      const arrive = push - defense;
+      if (!strike || push < strike.push) strike = { s, mode, push, arrive };
+    }
+  }
+  if (strike) {
+    return { strike: true, trapped, defense, arrive: strike.arrive, ...extra,
+      move: { x: Math.floor(strike.s / m), y: strike.s % m,
+        dx: Math.floor(choke / m), dy: choke % m, mode: strike.mode, half: false,
+        reason: `${strikeReason}：出兵${strike.push}掐断走廊，冻住约${Math.round(trapped)}敌兵` } };
+  }
+  // 凑不出来就地集兵：从我方境内按距离收集兵力，沿严格下降路径往瓶颈送。
+  const distance = new Int32Array(ctx.size).fill(-1), toward = new Int32Array(ctx.size).fill(-1);
+  const queue = [choke]; distance[choke] = 0;
+  for (let h = 0; h < queue.length; h++) {
+    const i = queue[h];
+    if (distance[i] >= p.cutoffMaxSteps) continue;
+    for (const j of ctx.neighbors[i]) {
+      if (distance[j] >= 0 || !ctx.own(j) || ctx.isolated(j)) continue;
+      distance[j] = distance[i] + 1; toward[j] = i; queue.push(j);
+    }
+  }
+  let job = null;
+  for (const s of queue) {
+    if (distance[s] < 1) continue;
+    const dest = toward[s];
+    const amount = pushed(ctx, s, dest);
+    if (amount <= 0) continue;
+    // 贴敌前线格只在大股时才抽，避免为了截断而漏掉正面。
+    if (ctx.neighbors[s].some(ctx.hostile) && amount < 10) continue;
+    // 主城至少留 4 兵。
+    if (ctx.grid[s] === ctx.me + 100 && ctx.count(s) - amount < 4) continue;
+    const score = amount / distance[s];
+    if (!job || score > job.score) job = { s, dest, amount, score, distance: distance[s] };
+  }
+  if (!job) return null;
+  return { strike: false, trapped, defense, arrive: job.amount - defense, ...extra,
+    move: { x: Math.floor(job.s / m), y: job.s % m,
+      dx: Math.floor(job.dest / m), dy: job.dest % m, mode: 0, half: false,
+      reason: `${gatherReason}：把${job.amount}兵送往瓶颈，目标冻住约${Math.round(trapped)}敌兵` } };
+}
+
 function chooseCutoff(state, params = {}) {
   const ctx = createContext(state, params);
   if (!ctx) return null;
@@ -27,70 +92,8 @@ function chooseCutoff(state, params = {}) {
   const myAnchors = [];
   for (let i = 0; i < ctx.size; i++) if (ctx.own(i) && (ctx.grid[i] === ctx.me + 100 || ctx.grid[i] === ctx.me + 50)) myAnchors.push(i);
 
-  // 出兵量估算（引擎智能分兵：扣掉周边非盟友格的守军预留）。
-  function pushed(from, to) {
-    let reserve = 0;
-    for (const k of ctx.neighbors[from]) {
-      if (k === to || ctx.grid[k] === 201 || ctx.grid[k] === 203 || ctx.allied(ctx.owners[k], ctx.me)) continue;
-      reserve += ctx.count(k) - 1;
-    }
-    return Math.min(ctx.count(from) - 1, Math.max(0, ctx.count(from) - reserve - 1));
-  }
-
-  // 紧邻瓶颈能一次拿下就直接打；否则从我方境内集兵送往瓶颈。
-  // 截断决策不建模敌军反扑（用户 2026-09-27 硬性方针）：被截断隔离的兵力记为 0
-  // （孤军无法操作、自行衰减），本回合能占下瓶颈就打，不因「可能被反夺」放弃。
-  // 在满足占下的打法里选最省兵的。
-  function planAttack(choke, defense, trapped, strikeReason, gatherReason, extra = {}) {
-    const { m } = ctx;
-    let strike = null;
-    for (const s of ctx.neighbors[choke]) {
-      if (!ctx.own(s) || ctx.isolated(s)) continue;
-      const cap = ctx.count(s) - 1;
-      const theoretical = pushed(s, choke);
-      const half = Math.floor(theoretical / 2);
-      for (const [mode, push] of [[1, half], [0, theoretical], [2, cap]]) {
-        if (push <= defense || ctx.count(s) - push < 1) continue;
-        const arrive = push - defense;
-        if (!strike || push < strike.push) strike = { s, mode, push, arrive };
-      }
-    }
-    if (strike) {
-      return { strike: true, trapped, defense, arrive: strike.arrive, ...extra,
-        move: { x: Math.floor(strike.s / m), y: strike.s % m,
-          dx: Math.floor(choke / m), dy: choke % m, mode: strike.mode, half: false,
-          reason: `${strikeReason}：出兵${strike.push}掐断走廊，冻住约${Math.round(trapped)}敌兵` } };
-    }
-    // 凑不出来就地集兵：从我方境内按距离收集兵力，沿严格下降路径往瓶颈送。
-    const distance = new Int32Array(ctx.size).fill(-1), toward = new Int32Array(ctx.size).fill(-1);
-    const queue = [choke]; distance[choke] = 0;
-    for (let h = 0; h < queue.length; h++) {
-      const i = queue[h];
-      if (distance[i] >= p.cutoffMaxSteps) continue;
-      for (const j of ctx.neighbors[i]) {
-        if (distance[j] >= 0 || !ctx.own(j) || ctx.isolated(j)) continue;
-        distance[j] = distance[i] + 1; toward[j] = i; queue.push(j);
-      }
-    }
-    let job = null;
-    for (const s of queue) {
-      if (distance[s] < 1) continue;
-      const dest = toward[s];
-      const amount = pushed(s, dest);
-      if (amount <= 0) continue;
-      // 贴敌前线格只在大股时才抽，避免为了截断而漏掉正面。
-      if (ctx.neighbors[s].some(ctx.hostile) && amount < 10) continue;
-      // 主城至少留 4 兵。
-      if (ctx.grid[s] === ctx.me + 100 && ctx.count(s) - amount < 4) continue;
-      const score = amount / distance[s];
-      if (!job || score > job.score) job = { s, dest, amount, score, distance: distance[s] };
-    }
-    if (!job) return null;
-    return { strike: false, trapped, defense, arrive: job.amount - defense, ...extra,
-      move: { x: Math.floor(job.s / m), y: job.s % m,
-        dx: Math.floor(job.dest / m), dy: job.dest % m, mode: 0, half: false,
-        reason: `${gatherReason}：把${job.amount}兵送往瓶颈，目标冻住约${Math.round(trapped)}敌兵` } };
-  }
+  const planAttack = (choke, defense, trapped, strikeReason, gatherReason, extra) =>
+    planChokeAttack(ctx, p, choke, defense, trapped, strikeReason, gatherReason, extra);
 
   const invasion = myAnchors.length ? invasionCutoff(ctx, p, myAnchors, planAttack) : null;
   const dispersed = dispersedCutoff(ctx, p, planAttack);
@@ -424,4 +427,4 @@ function chooseNeckGuard(state, params = {}) {
       reason: `脖子${holdable ? '驻守' : '回缩'}：${job.amount}兵补向割点，防${Math.round(threat)}敌兵切断约${Math.round(stranded)}兵` } };
 }
 
-module.exports = { chooseCutoff, chooseNeckGuard, ownStrandedMass };
+module.exports = { chooseCutoff, chooseNeckGuard, ownStrandedMass, planChokeAttack };
