@@ -25,7 +25,7 @@ const FIXED_MOUNTAIN_RATIO = 0.5;
 const FIXED_SWAMP_RATIO = 0.5;
 export { FIXED_SWAMP_RATIO };
 const MAP_TOKEN_MAX_LENGTH = 32;
-const RATING_K = 24;
+const RATING_K = 128;
 /** 房间准备阶段的心跳超时：超过 600 秒无心跳的成员被自动移出房间。 */
 const LOBBY_HEARTBEAT_TIMEOUT_MS = 600_000;
 /** 心跳扫描周期：每分钟检查一次全部房间成员的最后心跳时间。 */
@@ -75,6 +75,13 @@ class LobbyService {
   /** 对局全部结束时触发（例如让推迟中的自动更新继续执行）。 */
   onGameEnded?: () => void;
 
+  /**
+   * 部署更新排队状态：webhook 已触发自动更新但还有对局在跑。
+   * 排队期间禁止开新局（room_update 携带 update_queued，前端禁用开始按钮），
+   * 进行中的对局页面显示「系统即将更新」横幅。
+   */
+  private updateQueued = false;
+
   constructor(
     private readonly replayStore: ReplayStore,
     private readonly userStore: UserStore,
@@ -114,6 +121,48 @@ class LobbyService {
     return this.gameInstances.size > 0;
   }
 
+  isUpdateQueued(): boolean {
+    return this.updateQueued;
+  }
+
+  /**
+   * 切换部署更新排队状态：广播 deploy_queued 事件（对局页显示「系统即将更新」
+   * 横幅）并向所有房间重发 room_update（携带 update_queued，前端禁用开始按钮）。
+   * 进入排队时向有对局的房间发送提示消息，说明宽限期清算规则。
+   */
+  setUpdateQueued(io: SocketIOServer, queued: boolean, graceMs?: number): void {
+    if (this.updateQueued === queued) {
+      return;
+    }
+    this.updateQueued = queued;
+    io.emit('deploy_queued', { queued });
+    for (const [gid, players] of this.lobbyPlayers.entries()) {
+      if (players.length === 0) {
+        continue;
+      }
+      if (queued && this.isLobbyGameRunning(gid)) {
+        const graceSeconds = Math.round((graceMs ?? 120_000) / 1000);
+        this.sendLobbySystemMessage(
+          io,
+          this.getLobbyVal(gid),
+          `系统即将更新，${graceSeconds} 秒内未结束的对局将按当前名次结算。`,
+        );
+      }
+      this.emitRoomUpdate(io, gid);
+    }
+  }
+
+  /**
+   * 部署更新宽限期到期（webhook-updater 回调）：清算所有残余对局——按当前
+   * 排行榜名次走正常终局路径结算（回放存档 + rating + 房间清理由各对局的
+   * endGame 回调完成），随后 notifyGameEnded 接力开始更新重启。
+   */
+  settleActiveGamesForUpdate(endMessage: string): void {
+    for (const game of this.gameInstances.values()) {
+      void game.forceFinish(endMessage).catch(() => undefined);
+    }
+  }
+
   getLobbyVal(gid: string): string {
     let value = this.lobbyRoomValue.get(gid);
     if (!value) {
@@ -123,7 +172,12 @@ class LobbyService {
     return value;
   }
 
-  joinLobby(sid: string, uid: string, gid: string, options?: { serverBot?: boolean; bot?: boolean }): void {
+  joinLobby(
+    sid: string,
+    uid: string,
+    gid: string,
+    options?: { serverBot?: boolean; serverBotAllowTeam?: boolean; bot?: boolean },
+  ): void {
     this.lobbyOfSid.set(sid, gid);
     // 进房本身即是「标签页开启」的证明，作为心跳基线。
     this.lobbyHeartbeats.set(sid, Date.now());
@@ -143,6 +197,7 @@ class LobbyService {
       return;
     }
 
+    const isBot = options?.serverBot === true || options?.bot === true;
     const playingCount = players.filter((player) => player.team !== 0).length;
     let targetTeam = 0;
 
@@ -150,24 +205,14 @@ class LobbyService {
       if (!conf.allow_team) {
         targetTeam = 1;
       } else {
-        const teamCount = Array.from({ length: MAX_TEAMS + 1 }, () => 0);
-        for (const player of players) {
-          teamCount[player.team] += 1;
-        }
-
-        let minCount = Number.POSITIVE_INFINITY;
-        targetTeam = 1;
-        for (let i = 1; i <= MAX_TEAMS; i += 1) {
-          if (teamCount[i] < minCount) {
-            minCount = teamCount[i];
-            targetTeam = i;
-          }
-        }
+        // 服务端不再按 bot/人类分池：进房默认分配到人数最少的队伍，
+        // 想换队由成员自己发 change_team（bot 自行管理避让，见 bot 模板）。
+        targetTeam = this.pickLeastPopulatedTeam(players);
       }
     }
 
     const player: LobbyPlayer = { sid, uid, team: targetTeam, ready: false };
-    if (options?.serverBot || options?.bot) {
+    if (isBot) {
       // Bot 对局不支持迷雾远征（issue #51）：bot 进房时若迷雾已开启则强制关闭，
       // 房主后续重新开启的请求在 server.ts 的 change_game_conf 里拦截。
       player.bot = true;
@@ -176,14 +221,18 @@ class LobbyService {
       }
     }
     if (options?.serverBot) {
-      // 托管策略 Bot 所在房间不允许组队：若房间已开启组队，进房时强制关闭并规整队伍。
-      if (conf.allow_team) {
+      // 托管策略 Bot 的组队语义由启动参数决定（serverBotAllowTeam）：
+      // allowTeam=false 的房间强制关闭组队并规整队伍；allowTeam=true 时不强制
+      // 开启组队，仅移除 change_game_conf 的组队开关限制，由房主决定是否启用。
+      player.serverBot = true;
+      player.serverBotAllowTeam = options.serverBotAllowTeam === true;
+      if (options.serverBotAllowTeam !== true && conf.allow_team) {
+        // 不允许组队的托管 bot：进房强制关闭组队并规整队伍。
         conf.allow_team = false;
         this.enforceLobbyConstraints(gid);
       }
       // 服务端托管 bot 永远排在普通成员之后：房主（players[0]）保留给
       // 人类用户或第三方 bot。bot 单独在房时暂居首位，任何普通成员进房即接任。
-      player.serverBot = true;
       players.push(player);
       return;
     }
@@ -262,6 +311,7 @@ class LobbyService {
     const roomVal = this.getLobbyVal(lobbyId);
     io.sockets.sockets.get(sid)?.leave(`game_${roomVal}`);
     const uid = this.leaveLobby(sid, lobbyId);
+    this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     io.to(`sid_${sid}`).emit('room_kick', {});
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
@@ -298,6 +348,7 @@ class LobbyService {
       team: player.team,
       ready: Boolean(player.ready && player.team !== 0),
       ...(player.serverBot === true ? { server_bot: true } : {}),
+      ...(player.serverBot === true ? { server_bot_allow_team: player.serverBotAllowTeam === true } : {}),
       ...(player.bot === true ? { bot: true } : {}),
     }));
 
@@ -311,6 +362,7 @@ class LobbyService {
       map_mode: conf.map_mode,
       map_size: conf.map_size === 'large' ? 'large' : 'normal',
       in_game: this.isLobbyGameRunning(gid),
+      update_queued: this.updateQueued,
       players: roomPlayers,
       ready,
       need,
@@ -436,6 +488,10 @@ class LobbyService {
   }
 
   async startGame(io: SocketIOServer, lobbyId: string): Promise<void> {
+    // 部署更新排队期间禁止开新局（含宽限期内）。
+    if (this.updateQueued) {
+      return;
+    }
     const conf = this.lobbyConfig.get(lobbyId);
     const players = this.lobbyPlayers.get(lobbyId);
     if (!conf || !players || players.length === 0) {
@@ -542,6 +598,8 @@ class LobbyService {
               member.ready = false;
             }
           }
+          // 对局结束回到准备阶段后，若宽限期清理使房间只剩 bot，同样重置设置。
+          this.resetLobbyConfigIfOnlyBots(io, lobby);
           this.emitRoomUpdate(io, lobby);
         }
 
@@ -565,6 +623,12 @@ class LobbyService {
       return;
     }
     if (this.isLobbyGameRunning(gid)) {
+      this.emitRoomUpdate(io, gid);
+      return;
+    }
+    // 部署更新排队期间禁止开新局：已就绪状态保留但不触发开局，
+    // 前端经 room_update 的 update_queued 禁用开始按钮。
+    if (this.updateQueued) {
       this.emitRoomUpdate(io, gid);
       return;
     }
@@ -652,6 +716,7 @@ class LobbyService {
     leaveRoom(`game_${roomVal}`);
 
     const uid = this.leaveLobby(sid, lobbyId);
+    this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
       this.sendLobbySystemMessage(io, roomVal, `${uid} 离开了自定义房间。`);
@@ -737,6 +802,9 @@ class LobbyService {
       return;
     }
     const uid = this.leaveLobby(sid, lobbyId);
+    // 宽限期在对局进行中到期时 resetLobbyConfigIfOnlyBots 内部会按
+    // isLobbyGameRunning 跳过，对局结束后再由 endGame 路径判定。
+    this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
       this.sendLobbySystemMessage(io, gameId, `${uid} 离开了自定义房间。`);
@@ -766,6 +834,30 @@ class LobbyService {
       this.emitRoomUpdate(io, lobbyId);
     }
     return true;
+  }
+
+  /**
+   * 机器人房间只剩 bot 时自动重置房间设置（issue 见 spec-lobby-reset）：
+   * 准备阶段（对局未开始）的房间人员变化后调用。剩余成员全部带 bot 标记
+   * （含观战席——观战的人类仍算人类占用，不触发重置）且至少有一人时，
+   * 把可编辑设置整体重置为新建房间的默认值（复用 defaultLobbyConfig，
+   * 与建房同一默认值来源，含重新随机地图种子）；bot 留在房内继续待命。
+   * 普通房间人走光后成员列表为空，不触发本逻辑（下次进房时 joinLobby
+   * 本就会按新房间重建默认配置）；对局进行中由调用方保证不触发。
+   */
+  private resetLobbyConfigIfOnlyBots(io: SocketIOServer, lobbyId: string): void {
+    if (this.isLobbyGameRunning(lobbyId)) {
+      return;
+    }
+    const players = this.lobbyPlayers.get(lobbyId);
+    if (!players || players.length === 0) {
+      return;
+    }
+    if (players.some((player) => player.bot !== true)) {
+      return;
+    }
+    this.lobbyConfig.set(lobbyId, this.defaultLobbyConfig());
+    this.sendLobbySystemMessage(io, this.getLobbyVal(lobbyId), '房间内只剩机器人，房间设置已重置为默认值。');
   }
 
   private defaultLobbyConfig(): LobbyConfig {
@@ -806,6 +898,28 @@ class LobbyService {
       }
       playingCount += 1;
     }
+  }
+
+  /**
+   * 组队房间中为新进房成员挑选默认队伍：人数最少的非空队伍，全空时取 1 队。
+   * 不做 bot/人类分池——队伍归属完全由成员自行决定（change_team）。
+   */
+  private pickLeastPopulatedTeam(players: LobbyPlayer[]): number {
+    const teamCount = Array.from({ length: MAX_TEAMS + 1 }, () => 0);
+    for (const player of players) {
+      if (player.team > 0 && player.team <= MAX_TEAMS) {
+        teamCount[player.team] += 1;
+      }
+    }
+    let bestTeam = 0;
+    let minCount = Number.POSITIVE_INFINITY;
+    for (let team = 1; team <= MAX_TEAMS; team += 1) {
+      if (teamCount[team] > 0 && teamCount[team] < minCount) {
+        minCount = teamCount[team];
+        bestTeam = team;
+      }
+    }
+    return bestTeam === 0 ? 1 : bestTeam;
   }
 
   private getReqReady(x: number): number {
