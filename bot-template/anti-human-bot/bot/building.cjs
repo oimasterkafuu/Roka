@@ -57,6 +57,11 @@ function crownTarget(land, turn, p, state) {
   }
   const potential = Math.min(safeLand + race.myCrowns + race.myCities, Math.max(base, race.myCrowns + Math.floor(surplus / 110)));
   target = Math.max(target, potential);
+  // 阶段化方针（追加二定稿）：中后期转向「少量精要扩张 + 大量建要塞」，
+  // 皇冠目标按更密的 lateTerritoryPerCrown 提速（E 后期 ~0.35-0.4 座/格含缴获，
+  // 自建密度更高）。前期不变，扩张仍是主线。
+  if (turn >= p.fortressPhaseTurn)
+    target = Math.max(target, Math.min(Math.floor(land / p.lateTerritoryPerCrown), p.lateMaxCrowns));
   if (race.behind) target = Math.max(target, race.bestCrowns + 1);
   return Math.max(1, Math.min(target, Math.max(1, Math.floor(land / 3))));
 }

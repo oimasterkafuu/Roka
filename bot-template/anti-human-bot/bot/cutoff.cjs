@@ -316,6 +316,31 @@ function dispersedCutoff(ctx, p, planAttack) {
   return null;
 }
 
+// ── 连通判定共享件（引擎 applyConnectivity 同款规则）────────────────────────
+// 从本队所有锚点（城市/皇冠）同时 BFS、经本队非山格；返回移除 cut 后断锚的我方
+// 兵力总量（cut 本身被吃掉不计入）；扫描超预算返回 null（视为无法确认，调用方放弃）。
+// 本模块的脖子纪律与 campaign 的锚点链节奏、frontline 的 maze 关卡评估共用这一份
+// 判定——「会不会断」全项目一个口径。
+function ownStrandedMass(ctx, cut, scanBudget = 120) {
+  const { size, grid, me, own, neighbors } = ctx;
+  const seen = new Set([cut]);
+  const q = [];
+  for (let i = 0; i < size; i++) {
+    if (i !== cut && own(i) && (grid[i] === me + 100 || grid[i] === me + 50)) { seen.add(i); q.push(i); }
+  }
+  let visited = 0;
+  for (let h = 0; h < q.length; h++) {
+    if (++visited > scanBudget * 4) return null;
+    for (const v of neighbors[q[h]]) {
+      if (seen.has(v) || !own(v)) continue;
+      seen.add(v); q.push(v);
+    }
+  }
+  let mass = 0;
+  for (let i = 0; i < size; i++) if (own(i) && !seen.has(i)) mass += Math.max(0, ctx.army[i]);
+  return mass;
+}
+
 // ── 脖子纪律：我方割点驻守/回缩 ──────────────────────────────────────────
 // 回放里三次决定性败因是同一个形状：我方一段兵力只靠一个 1 格宽、守兵个位数的
 // 脖子连回皇冠，旁边贴着敌方大堆——敌人一刀切断，整段变孤军（WwOS (11,2)=24 vs 308、
@@ -337,25 +362,9 @@ function chooseNeckGuard(state, params = {}) {
     if (grid[i] === me + 100 || grid[i] === me + 50) anchors.push(i);
   }
   if (anchors.length < 1 || myTiles.length < 3) return null;
-  const tileSet = new Set(myTiles);
 
-  // 移除 neck 后，从我方锚点走不到的我方兵力（= 会被冻住的量）。
-  function strandedMass(neck) {
-    const seen = new Set([neck]);
-    const q = [];
-    for (const a of anchors) if (a !== neck) { seen.add(a); q.push(a); }
-    let visited = 0;
-    for (let h = 0; h < q.length; h++) {
-      if (++visited > p.cutoffScan * 4) return null;
-      for (const v of neighbors[q[h]]) {
-        if (seen.has(v) || !tileSet.has(v)) continue;
-        seen.add(v); q.push(v);
-      }
-    }
-    let mass = 0;
-    for (const i of myTiles) if (!seen.has(i)) mass += Math.max(0, ctx.army[i]);
-    return mass;
-  }
+  // 移除 neck 后，从我方锚点走不到的我方兵力（= 会被冻住的量），共享判定见上。
+  const strandedMass = (neck) => ownStrandedMass(ctx, neck, p.cutoffScan);
 
   let best = null;
   for (const c of myTiles) {
@@ -415,4 +424,4 @@ function chooseNeckGuard(state, params = {}) {
       reason: `脖子${holdable ? '驻守' : '回缩'}：${job.amount}兵补向割点，防${Math.round(threat)}敌兵切断约${Math.round(stranded)}兵` } };
 }
 
-module.exports = { chooseCutoff, chooseNeckGuard };
+module.exports = { chooseCutoff, chooseNeckGuard, ownStrandedMass };

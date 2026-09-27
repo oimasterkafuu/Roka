@@ -508,3 +508,62 @@ training/results/（mega-stack-after-* 与 _premegastack/before-*）。
 另：修复 `training/conservatism-benchmark.cjs` 分片统计的既有 bug（用已筛选的
 jobs.length 取模导致每个分片最多只跑 1 局），并新增 `dir:<目录>` 策略加载，
 用于对改动前冻结副本做同种子 A/B。
+
+### 画圈推进：宽锋面连通块 + 锚点链（2026-09-27）
+
+修正浓缩突击的推进形态。E 的锋面量化（28 局复盘，E 胜 15，推进 tick n=1163）：
+大堆 5×5 窗口内己方格中位 7（对手广正面 13）、锋面垂直截面宽中位 4
+（p25=2，对手 5–6）、推进块连通分量约 58 格、非割点格兵力占比中位 0.82——
+推进块是宽 2–3 的连通小块，不是一根筋单列。建造节奏：推进窗口内指挥所
+建造间隔中位 4 tick（p25=3，p75=8）、每前进一步对应建造中位 0.22（重局
+~1.1）、建造点距大堆/路径中位 2 格（近半数直接落在大堆脚下）。
+
+- **画圈侧扫**（`bot/campaign.cjs`）：浓缩突击成立且 rally 是窄突出部
+  （唯一己方连接是身后走廊）、锋面头部不足 `pushFrontWidth` 宽时，大堆先
+  侧向扫一格（与锋面平齐、不越过头部、下一步不会立刻回头的侧翼格），把
+  推进带涂成两格宽再前压——连通性优先于推进速度。锋面已是宽块时不扫，
+  直走廊的防切交给锚点链与脖子纪律（有意的分工）。
+- **锚点链**：rally 距皇冠 >2 且推进走廊离最近建筑 ≥`anchorChainGap` 时，
+  按 `anchorBuildEvery` 的节奏（默认每 4 tick）在走廊上攒够 51 兵、建成后
+  余兵压得住贴脸敌兵的格子落指挥所（离锚点最远者优先，链向前延伸）；
+  走廊贴敌且存在 1 格脖子（移除后 ≥`cutoffMinIsolate` 兵力断锚）时有截断
+  风险，非 rally 候选抢节奏优先落锚。连通判定与 `bot/cutoff.cjs` 共用导出
+  的 `ownStrandedMass`（引擎 applyConnectivity 同款锚点 BFS，「会不会断」
+  全项目一个口径）。policy 调度中锚点建造压过普通推进/调兵，仍让位于
+  背水一战、入侵截断、脖子纪律与「本 tick 能拆敌方建筑」的推进（止损/斩首
+  优先级不变）。
+- **深入敌境宽块**（`bot/frontline.cjs`）：深入推进的目标占领后连同源点有
+  ≥2 个己方邻格时加分（widenBonus），锋面加厚成块、侧翼不露单格突出。
+
+**maze 拓展纪律**（用户硬方针）：`bot/threat.cjs` 以已知格山体占比
+≥`mazeMountainRatio` 判迷宫图（maze 生成器约 0.45–0.55，random ≤0.24）。
+迷宫里：① 拓展（打中立格）模式排序换为 [半兵, 智能分兵]——只派必要兵力，
+大部队留在原地镇关卡；② 源点是「移除后冻住 ≥`cutoffMinIsolate` 兵力」的
+关卡且贴脸有敌时（敌方一 tick 就能切断走廊），不为拓展削弱咽喉——先打
+先守，不拓；攻击对方土块不受此限（优先攻击由既有估值顺序 62>26 保证）；
+③ 中立拓展不做交换（占下也站不住的拓展不拓）。
+
+**阶段化扩张-要塞方针**（用户定稿，E 原局校准）：E 的净扩张速率在
+turn 60–75 坍缩（+18/25t → +1/25t）、皇冠建设从 75–100 起跳；中期边境
+薄皮 64%/中位 2.4 兵是 E 赢棋的正常形态——关键不是「没有薄土」而是
+「不再新增薄土」。因此 turn ≥`fortressPhaseTurn`（默认 60）起：无要塞
+撑腰（源点不在己方建筑 `lateAnchorRadius` 辐射圈内）的中立扩张，占领后
+驻军须 ≥`lateSkinMin`（够厚）才拓，否则兵留下养厚/转投要塞建设；同时
+`bot/building.cjs` 皇冠目标按 `lateTerritoryPerCrown` 提速（上限
+`lateMaxCrowns`）。前期（<60）不挡扩张——抢地盘积累不动。敌方目标与
+拆建筑不算「扩张」，不受闸门限制。
+
+参数：`pushFrontWidth`（2）、`anchorChainGap`（3）、`anchorBuildEvery`（4）、
+`mazeMountainRatio`（0.3）、`fortressPhaseTurn`（60）、`lateTerritoryPerCrown`
+（9）、`lateMaxCrowns`（12）、`lateSkinMin`（10）、`lateAnchorRadius`（2）。
+
+329 项测试通过（313 既有 + 16 新增：`test/circle-push.test.cjs` 7 条——
+侧扫/宽块不扫/锚点节奏/非节奏不建/终段不建/截断风险抢节奏/policy 优先级；
+`test/maze-discipline.test.cjs` 9 条——maze 半兵/非迷宫对照/关卡贴敌不拓/
+优先攻敌/薄皮闸住/够厚放行/要塞撑腰放行/前期不挡/皇冠目标提速）。16 局
+A/B（4 图 × 2 种子 × 双方各坐先手，对改动前冻结副本 `_precirclepush`）：
+8 dominant / 4 even / 4 dominated，胜率 0.5、平均物资比 1.21，maze 3-1-0
+无败（maze 纪律的直接收益）；形态抽查（实局挂表统计）：maze 局锚点链落
+12 座指挥所（8 次截断风险抢先）并 2253 tick 歼灭基线；画圈侧扫是窄突出部
+专用校正，开阔地锋面本已是宽块时不触发（实局 0 次属预期）。结果见
+training/results/circlepush-ab.json。
