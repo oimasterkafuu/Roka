@@ -271,6 +271,8 @@ function update(data) {
     return 0;
   });
   var th = '<tr><td>队伍</td><td>玩家</td><td>兵力</td><td>领土</td></tr>';
+  // 迷雾局的观战/回放：组队局名称列显示队伍名（与视角 tabs 同一套规则，见 core-globals.js）。
+  var fogTeamGameView = fogObserverView() && fogTeamGame(lb);
   for (var i = 0; i < lb.length; i++) {
     th +=
       '<tr class="' +
@@ -280,7 +282,7 @@ function update(data) {
       '</td><td class="leaderboard-name c' +
       lb[i].id +
       '">' +
-      htmlescape(lb[i].uid) +
+      htmlescape(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView)) +
       '</td><td>' +
       lb[i].army +
       '</td><td>' +
