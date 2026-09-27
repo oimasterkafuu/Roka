@@ -105,6 +105,21 @@ export const isProvisionalRating = (rating: number, ratingGames: number): boolea
 
 const RATING_HISTORY_MAX = 1000;
 
+/**
+ * 排行榜不活跃下榜阈值：≥7 天没有任何活动即从榜单隐藏（rating 数据保留，
+ * 重新活跃后立即回榜）。活动 = socket 上线/下线（lastSeenAt）或账号字段变更
+ * （updatedAt，对局结算、登录轮换会话等都会刷新）。
+ */
+export const LEADERBOARD_INACTIVITY_MS = 7 * 24 * 3600 * 1000;
+
+/**
+ * 用户最后活动时间：取 lastSeenAt（socket 上线/下线）与 updatedAt（对局结算、
+ * 登录等账号变更）的较大者。bot 账号同样适用——天天对局的 bot 经结算刷新
+ * updatedAt 保持活跃；停用超过阈值的 bot 也会下榜（与人类账号同一语义）。
+ */
+export const getLastActiveAt = (user: { lastSeenAt?: number; updatedAt: number }): number =>
+  Math.max(user.updatedAt, user.lastSeenAt ?? 0);
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -492,12 +507,16 @@ export class UserStore {
     };
   }
 
-  listTopRated(limit: number): TopRatedEntry[] {
+  listTopRated(limit: number, now: number = Date.now()): TopRatedEntry[] {
     const capped = Math.max(1, Math.min(100, Math.floor(limit) || 10));
     const entries: TopRatedEntry[] = [];
     for (const user of this.usersByKey.values()) {
       const ratingGames = user.ratingGames ?? 0;
       if (ratingGames <= 0) {
+        continue;
+      }
+      // 不活跃下榜：≥7 天无任何活动（对局/上线等）即隐藏，重新活跃后回榜。
+      if (now - getLastActiveAt(user) >= LEADERBOARD_INACTIVITY_MS) {
         continue;
       }
       entries.push({
