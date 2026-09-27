@@ -37,6 +37,10 @@ class AuthService {
     if (normalizedPathname === '/login' || normalizedPathname === '/login.html') {
       return true;
     }
+    // 部署更新兜底页：Service Worker 离线缓存与直接访问均不需登录。
+    if (normalizedPathname === '/updating.html') {
+      return true;
+    }
     if (normalizedPathname === '/postreceive') {
       return true;
     }
