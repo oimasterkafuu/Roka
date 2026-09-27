@@ -197,15 +197,24 @@ function chooseLogistics(state, move, build, params = {}) {
     // （威胁场低、我方局部兵力占优，见 architecture.frontStable）也可作工地——
     // 位置相对稳定下来后就该更积极地建造，把主要兵源、新皇冠聚集到前线。
     // 位置判断不按出生点，按当前敌我分布（frontStable 用的是现场威胁场/敌距）。
-    const candidates = lands.filter((i) => (safe(i) || architecturePlan.frontStable(i)) && economicSite(i) &&
+    // 后方优先（用户 2026-09-28 回调）：先在后方大量部署皇冠（稳定产兵基地群），
+    // 再缓缓往前线推进建造——前线选址仅在产能富余（后方皇冠群成型，
+    // crowns ≥ frontBaseMinCrowns）后才启用；产能不足时工地权重回到后方安全区。
+    const frontSiteEnabled = crowns >= p.frontBaseMinCrowns;
+    const candidates = lands.filter((i) => (safe(i) || (frontSiteEnabled && architecturePlan.frontStable(i))) && economicSite(i) &&
       (grid[i] === me + 50 || (grid[i] === me && crowns + cities < targetCrowns)));
     // 驻军只按封顶 60 计入：选址看的是位置，不是「这格已经堆了多少兵」——
     // 全额计入会让大兵堆自证为工地，再把整格 earmark 成禁地（uzsTrD 复盘根因）。
-    // 迁都加成：稳定前线格按靠前程度加分（敌距越小加分越多），产能主动前移。
+    // 迁都加成（大幅下调）：稳定前线格按靠前程度加分（敌距越小加分越多），
+    // 产能富余后缓缓前移，不是开局就往火线扎。加成含驻军与邻接皇冠集群——
+    // 前线工地必须「自带资金/有皇冠群撑腰」才压过后方候选，防止前线工地
+    // 永远集不齐资金（实战病症：太靠近前线、没有稳定兵源，很快被挤掉）。
+    const frontBonus = (i) => p.frontBaseBonus + Math.max(0, p.buildRearDist - ctx.enemyDistance[i]) * 2 +
+      Math.min(count(i), 60) * 2 +
+      neighbors[i].reduce((s, j) => s + (own(j) && (grid[j] === me + 100 || grid[j] === me + 50) ? 12 : 0), 0) * 2;
     const clusterScore = (i) => clusterValue(state, i) + Math.min(count(i), 60) +
       neighbors[i].reduce((s, j) => s + (own(j) && (grid[j] === me + 100 || grid[j] === me + 50) ? 12 : 0), 0) +
-      (architecturePlan.frontStable(i) && !safe(i)
-        ? p.frontBaseBonus + Math.max(0, p.buildRearDist - ctx.enemyDistance[i]) * 2 : 0);
+      (frontSiteEnabled && architecturePlan.frontStable(i) && !safe(i) ? frontBonus(i) : 0);
     candidates.sort((a, b) => (grid[b] === me + 50) - (grid[a] === me + 50) || clusterScore(b) - clusterScore(a) || a - b);
     let chosen = candidates.length ? candidates[0] : -1;
     // 滞回（用户硬性方针：防抖/目标锁定）：上一个工地仍合法时继续往它送，

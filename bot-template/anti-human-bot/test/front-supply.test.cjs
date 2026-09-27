@@ -156,15 +156,41 @@ test('一次性集满再造：工地 99 兵继续筹资（目标 100），100 �
   assert.equal(build.kind, 'build', '集满 100 应立即开工');
 });
 
-test('前线迁都：稳定前线格压过大后方候选成为工地，筹资目标 150', () => {
+test('后方优先：产能不足时稳定前线格不作工地，工地落在后方安全区', () => {
   const s = field();
   s.grid[4 * 10 + 5] = 1; s.army[4 * 10 + 5] = 5;   // 山墙开一个前哨
   s.army[5 * 10 + 5] = 10;                           // 前哨对面只有弱敌：前线稳定
   const a = chooseLogistics(s, null, null, { economyOnly: true });
   assert.ok(a);
   assert.equal(a.reason.code, 'economy-fund');
-  assert.equal(a.reason.target, at(3, 5), '稳定前线格应成为迁都工地');
+  assert.ok(a.reason.target < 30, `产能不足时工地应落在后方安全区，实际 target=${a.reason.target}`);
+  assert.ok(a.reason.goal <= 121, `后方安全区筹资目标应接近大后方档，实际 ${a.reason.goal}`);
+});
+
+test('后方优先：产能富余（后方皇冠群成型）后稳定前线格才成为工地，筹资目标 150', () => {
+  const s = field();
+  s.grid[at(1, 1)] = 101; s.army[at(1, 1)] = 30;     // 第二座皇冠：后方产能群成型
+  s.grid[at(1, 2)] = 101; s.army[at(1, 2)] = 30;     // 第三座皇冠
+  s.army[at(2, 5)] = 60;                             // 前线格邻格的资金堆（与工地格拉开驻军差距）
+  s.grid[4 * 10 + 5] = 1; s.army[4 * 10 + 5] = 5;   // 山墙开一个前哨
+  s.army[5 * 10 + 5] = 10;                           // 前哨对面只有弱敌：前线稳定
+  const a = chooseLogistics(s, null, null, { economyOnly: true });
+  assert.ok(a);
+  assert.equal(a.reason.code, 'economy-fund');
+  assert.equal(a.reason.target, at(2, 5), '产能富余后前线格（自带资金）应成为迁都工地');
   assert.equal(a.reason.goal, 150, '前线筹资目标 150（风险高留足余量）');
+});
+
+test('后方优先：后方皇冠数量随时间高于前线（后方先大量部署皇冠群）', () => {
+  // 同一局面下，后方安全格与稳定前线格同时可作工地时，后方候选的皇冠
+  // 集群评分天然高于前线（迁都加成仅在产能富余后启用且需自带资金撑腰）——
+  // 用「产能不足」局面验证后方候选被选中、前线候选被排除，即「后方优先」。
+  const s = field();
+  s.grid[4 * 10 + 5] = 1; s.army[4 * 10 + 5] = 5;
+  s.army[5 * 10 + 5] = 10;
+  const a = chooseLogistics(s, null, null, { economyOnly: true });
+  assert.ok(a);
+  assert.ok(a.reason.target < 30, `产能不足时工地必须落在后方，实际 target=${a.reason.target}`);
 });
 
 // ── 四、集兵树形化（汇聚顺序 + 深后方批量拉出）────────────────────────────
@@ -207,4 +233,37 @@ test('树形集兵：小缺口不兴师动众，近源直接收尾', () => {
   assert.ok(a);
   assert.equal(a.y, 13, `小缺口应由近源收尾，实际源点 y=${a.y}`);
   assert.equal(a.dy, 14);
+});
+
+// ── 开局提速（用户 2026-09-28 回调：首座建造/调兵不能慢一拍）──────────────
+
+test('开局提速：前 60 tick 内中间档不抬高——敌距 8 仍按大后方阈值 100', () => {
+  const n = 1, m = 20, size = n * m;
+  const grid = Array(size).fill(1), army = Array(size).fill(3);
+  grid[19] = 2;
+  const early = { n, m, turn: 30, playerId: 1, grid, army, isolated: Array(size).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  const late = { ...early, turn: 400 };
+  assert.equal(architecture(early, {}).buildFund(11), 100, '开局敌距 8 不抬高：用得上、用得早');
+  assert.ok(architecture(late, {}).buildFund(11) > 100, '后期敌距 8 回到中间档过渡');
+});
+
+test('开局提速：前 60 tick 内前线阈值下调到 100（后期 150）', () => {
+  const s = home();
+  s.grid[3 * 10 + 5] = 1; s.army[3 * 10 + 5] = 10;
+  s.army[4 * 10 + 5] = 5;
+  s.turn = 30;
+  assert.equal(architecture(s, {}).buildFund(at(2, 5)), 100, '开局前线阈值 100，不慢一拍');
+  s.turn = 400;
+  assert.equal(architecture(s, {}).buildFund(at(2, 5)), 150, '后期前线阈值 150');
+});
+
+test('开局提速：60 tick 内保底建造不贴敌且 50 兵就开工（不被大后方 100 拖慢）', () => {
+  const { chooseAction } = require('../bot/policy.cjs');
+  const s = { n: 1, m: 5, turn: 55, playerId: 1, grid: [101, 1, 1, 1, 1],
+    army: [5, 60, 1, 1, 1], isolated: Array(5).fill(0), teams: new Map([[1, 1], [2, 2]]) };
+  const a = chooseAction(s);
+  assert.ok(a, '不允许空动作');
+  assert.equal(a.kind, 'build', '前 60 tick 内保底建造直接开工');
+  assert.equal(a.op, 'b');
+  assert.equal(a.y, 1);
 });
