@@ -28,6 +28,14 @@ var spectate_view_team = 0;
 var fog_mode = false;
 // 自己在房间里的队伍（0 = 观战席），由 room_update 维护，用于判定观战视角资格。
 var self_team = 0;
+// 房间准备阶段成员队伍表（uid → team），由 room_update 维护；
+// 聊天色块门闸用它判定「在房间且参战」（team > 0）还是观战（team == 0）。
+var roomMemberTeams = {};
+// 当前对局排行榜（render-update.js 每帧更新），聊天色块门闸用它判定
+// 发消息者是否仍在参战（在榜且未淘汰 class_ != 'dead'）；null 表示不在对局中。
+var gameLeaderboard = null;
+// 当前帧排序后的排行榜（render-update.js 每帧赋值，隐式全局改为显式声明）。
+var lb = null;
 
 function normalizeMapTokenInput(token) {
   return String(token || '').slice(0, map_token_max_length);

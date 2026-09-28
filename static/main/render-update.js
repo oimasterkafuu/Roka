@@ -270,6 +270,8 @@ function update(data) {
     if (a.class_ == 'dead') return a.dead > b.dead ? -1 : 1;
     return 0;
   });
+  // 聊天色块门闸（core-globals.js 声明）按 uid 查榜：在榜且未淘汰才给色。
+  gameLeaderboard = lb;
   var th = '<tr><td>队伍</td><td>玩家</td><td>兵力</td><td>领土</td></tr>';
   // 迷雾局的观战/回放：组队局名称列显示队伍名（与视角 tabs 同一套规则，见 core-globals.js）。
   var fogTeamGameView = fogObserverView() && fogTeamGame(lb);
