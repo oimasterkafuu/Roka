@@ -112,7 +112,7 @@ _一句话：AFK/掉线/孤军等数值常量。_
 _一句话：开局主城位置选择（随机/迷宫两套）。_
 
 **src/game-engine/leaderboard.ts** — 每 tick 排行榜与终局名次。
-`buildLeaderboard` 扫图累加 army/land，`class_` 标记 `dead`/`afk`；`buildFinalRank` 存活者优先，出局者按出局先后/领土/兵力决胜。
+`buildLeaderboard` 扫图累加 army/land，`class_` 标记 `dead`/`afk`；`buildFinalRank` 存活者优先，出局者按出局先后/领土/兵力决胜（compareFinalRank 比较器）；`buildFinalRankTeams` 为个人全序的队伍分组投影（组序=队伍名次序、组内=个人名次序、color=组内最小玩家 id），归档回放时写入索引供回放列表组队合并展示。
 _一句话：每 tick 排行榜与终局名次计算。_
 
 **src/game-engine/map-encoding.ts** — 棋盘状态 → 扁平协议数组。
@@ -174,7 +174,7 @@ _一句话：动态帖子/点赞/评论存储，带发帖冷却。_
 _一句话：公告单文件 JSON 存储，原子串行写。_
 
 **src/replay-store.ts** — 回放存取、索引与观看二进制 gzip 缓存（`data/replays/`）。
-原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且解压魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB4 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
+原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`，索引项 `ReplayListItem` 含 `rank`（终局个人名次）与 `teams`（终局队伍分组 `{members, color}[]`，组序=队伍名次序，旧索引项无此字段前端回退平铺）。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且解压魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB4 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
 _一句话：回放存储与 RPB gzip 缓存，id 为内容哈希。_
 
 **src/replay-patch-binary.ts** — `ReplayData` → RPB4 观看二进制编码器（手写 LE；initial 全量帧 + 逐 patch forward/backward 差分 + 玩家 meta；RPB4 起 meta 末尾追加 fog 标志，供前端回放视角选择器）。仅编码无解码——解码在前端 `static/main/replay-binary.js`；**改格式需同步前端并升魔数**，导出 `REPLAY_BINARY_MAGIC` 供缓存陈旧性校验。
@@ -206,7 +206,7 @@ _一句话：共享类型/协议定义汇总。_
 
 ### 功能页
 
-**static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「刚刚在线」。
+**static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「刚刚在线」。回放列表名次列按队伍合并展示：索引项带 `teams`（终局队伍分组，组序=队伍名次序）时同队一组（组内 `, `、组间 ` › `、每组带 `.cN` 配色色块），旧数据无 `teams` 回退 `rank` 平铺。
 数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds/home_online` 失效通知（事件无 payload）。顶栏在线人数与右栏「刚刚在线」（排行榜下方，前 8 位最近下线用户的相对下线时间）由 `/api/online` 驱动。`home_online` 收到后对比在线人数快照，增加时经 `notify.js` 弹「有玩家上线」后台通知；`home_rooms` 收到后对比房间号快照，出现新房间时弹「有新的房间」后台通知。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态原文存 `$item.data('raw-text')`；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
@@ -216,14 +216,14 @@ _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本
 _一句话：对局/回放页骨架与脚本加载顺序。_
 
 **static/main/replay-stats.js** — 回放页增强：参赛者标题区与局势统计图（仅回放、桌面宽度显示）。
-`initReplayTitle()` 按 initial 帧 leaderboard 生成 `#replay-title`——组队局同队成员逗号分隔、队伍间「>」分隔，迷雾组队局沿用 fog-team-names 规则只显队名；`initReplayStats()` 从 initial + 各 forward patch 自带的 leaderboard 预计算各队（非组队局=各玩家）每帧兵力/领土序列（O(帧数×玩家数)，不扫棋盘），在排行榜下方 `#replay-stats` 画 canvas 曲线图：居中滑动窗口平均平滑（半径随局长缩放，上限 15）+ 原始值浅色底层、兵力/领土 tabs 切换、组配色读 map.css `.cN` 计算样式；底图离屏缓存，`refreshReplayStatsFrame()`（render-update.js 每帧调用）只 blit 底图 + 画当前帧竖线游标并把面板贴到排行榜正下方；点击/拖动图面经 `jumpToFrame` 跳转进度。
+`initReplayTitle()` 按末帧 leaderboard（最后一个 forward patch，无 patch 用 initial）经 `replayFinalRankGroups` 生成 `#replay-title`——组队局同队成员逗号分隔、队伍间「>」分隔且组序为终局名次序（非队号序），迷雾组队局沿用 fog-team-names 规则只显队名；`initReplayStats()` 从 initial + 各 forward patch 自带的 leaderboard 预计算各队（非组队局=各玩家）每帧兵力/领土序列（O(帧数×玩家数)，不扫棋盘），在排行榜下方 `#replay-stats` 画 canvas 曲线图：居中滑动窗口平均平滑（半径随局长缩放，上限 15）+ 原始值浅色底层、兵力/领土 tabs 切换、组配色读 map.css `.cN` 计算样式；底图离屏缓存，`refreshReplayStatsFrame()`（render-update.js 每帧调用）只 blit 底图 + 画当前帧竖线游标并把面板贴到排行榜正下方；点击/拖动图面经 `jumpToFrame` 跳转进度。
 _一句话：回放标题区 + 局势统计曲线图（平滑、游标、点击跳转）。_
 
 **static/main.js** — 对局/回放主控制器：socket 生命周期、键鼠触屏输入、本地操作队列、房间渲染、回放加载。
 回放模式：`/replays/local` 读 sessionStorage，否则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-text` 进度），完成后 `decodeReplayBinary` + `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）并启动房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；`room_update` 对比成员 uid 快照检测新玩家进房、`starting` 表示开局，两者在页面后台时经 `notify.js` 弹浏览器通知；操作入队 `addroute/addbuild/...` 后 emit；`keypress` 分发 WASD/Z/X/C/Q/E/R/F/T/Enter/Esc/空格（X/Q 建指挥所、C/E 升级主城、R 清空队列、F 撤销队尾）。部署更新排队：`deploy_queued` 事件与 `room_update.update_queued` 驱动——对局中显示 `#deploy-banner`（「系统即将更新」），准备阶段禁用 `#force-start` 并显示「系统即将排队更新，请稍等」（点击与服务端 `change_ready` 双重拦截）。
 _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 
-**static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3/4、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`、`replay_view_team`（回放视角：0 全知 / 队伍编号）、`spectate_view_team`/`fog_mode`/`self_team`（实时观战视角状态：所选队伍、是否迷雾局、自己房间队伍）、迷雾局观战/回放共享名称显示助手（`fogTeamGame` 组队局判定——任一队伍 ≥2 人；`fogTeamName`/`fogDisplayName` 组队显队名「队伍 N」、非组队显用户名；`fogObserverView` 判定当前是否迷雾局观战/回放视角，回放与观战两条链路共用）。
+**static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3/4、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`、`replay_view_team`（回放视角：0 全知 / 队伍编号）、`spectate_view_team`/`fog_mode`/`self_team`（实时观战视角状态：所选队伍、是否迷雾局、自己房间队伍）、迷雾局观战/回放共享名称显示助手（`fogTeamGame` 组队局判定——任一队伍 ≥2 人；`fogTeamName`/`fogDisplayName` 组队显队名「队伍 N」、非组队显用户名；`fogObserverView` 判定当前是否迷雾局观战/回放视角，回放与观战两条链路共用）、终局名次助手（`replayFinalRankCompare`/`replayFinalRankGroups`——与服务端 `compareFinalRank` 逐字一致的排序口径，末帧 leaderboard 现算队伍名次分组，回放标题区用）。
 _一句话：共享常量：方向表、回放魔数、转义工具。_
 
 **static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头、建造角标；迷雾格渲染「山+问号」未知占位、沼泽例外、隐藏兵力，回放队伍视角额外把视野内敌方指挥所/主城降级为普通领地），仅变化时写 DOM；`update(data)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），按 `lst_move.skip` 同步本地队列，渲染排行榜/回合计数/爆发期红边，处理 `kills[client_id]` 与 `game_end` 结算弹窗。回放模式每帧经 `applyReplayFogView` 按 `replay_view_team` 重算迷雾遮罩（回放不含历史视野，按当前帧局面以对局相同的半径 1 规则重算）；实时模式由 update 帧是否携带 `fog` 字段置 `fog_mode`，并每帧 `refreshSpectateViewTabs(data.leaderboard)` 维护观战视角 tabs。迷雾局观战/回放的排行榜名称列按 core-globals 共享规则显示（组队局显「队伍 N」、非组队局显用户名，参赛存活玩家视角不受影响）。组队局回放（非迷雾视角）的排行榜按团队合并：每队一个整体条目显示团队总兵力/领土并按总兵力排序，队内成员按兵力排序缩进附后；迷雾组队局保持队名显示不合并。每帧末尾调用 `refreshReplayStatsFrame()`（replay-stats.js）刷新统计图游标与面板位置。
