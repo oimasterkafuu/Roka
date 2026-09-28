@@ -20,15 +20,20 @@
 #game-leaderboard td {
   background: #ffffff;
   padding: 6px;
-  color: #253042;
   text-align: center;
   font-size: 16px;
+}
+#game-leaderboard td:not(.leaderboard-name) {
+  color: #253042;
 }
 #game-leaderboard tr.afk td {
   background: rgba(255, 255, 255, 0.75);
 }
+/*
+ * 姓名格文字色由 .cN 按底色亮度决定（map.css），此处不设 color；
+ * 注意保持选择器不覆盖 .cN 的 color 声明（特异性竞争见 map.css 注释）。
+ */
 #game-leaderboard td.leaderboard-name {
-  color: white;
   max-width: 350px;
 }
 /* 组队局回放排行榜：队条目加粗显示团队合计，成员行缩进弱化 */
@@ -38,6 +43,8 @@
 #game-leaderboard tr.lb-member td {
   font-size: 13px;
   padding: 3px 6px;
+}
+#game-leaderboard tr.lb-member td:not(.leaderboard-name) {
   color: rgba(37, 48, 66, 0.8);
 }
 #game-leaderboard tr.lb-member td.leaderboard-name {

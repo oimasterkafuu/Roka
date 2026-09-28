@@ -68,60 +68,84 @@
   background-size: 50px 50px;
 }
 
+/*
+ * 玩家配色 .c0~.c17：每个类同时声明背景色与「压在该底色上的文字色」。
+ * 文字色按 WCAG 相对亮度取黑白中对比度更高者，保证排行榜姓名格等任何
+ * 以 .cN 作背景的场景文字可读；地图格子 #map td 的白字 + text-shadow
+ * 由更高优先级的 #map td 规则维持，不受影响。
+ */
 .c0 {
   background-color: gray !important;
+  color: #000000;
 }
 .c1 {
   background-color: red !important;
+  color: #000000;
   fill: red !important;
 }
 .c2 {
   background-color: green !important;
+  color: #ffffff;
 }
 .c3 {
   background-color: blue !important;
+  color: #ffffff;
 }
 .c4 {
   background-color: purple !important;
+  color: #ffffff;
 }
 .c5 {
   background-color: teal !important;
+  color: #ffffff;
 }
 .c6 {
   background-color: #004600 !important;
+  color: #ffffff;
 }
 .c7 {
   background-color: orange !important;
+  color: #000000;
 }
 .c8 {
   background-color: brown !important;
+  color: #ffffff;
 }
 .c9 {
   background-color: maroon !important;
+  color: #ffffff;
 }
 .c10 {
   background-color: #ec7063 !important;
+  color: #000000;
 }
 .c11 {
   background-color: #935116 !important;
+  color: #ffffff;
 }
 .c12 {
   background-color: #1a5276 !important;
+  color: #ffffff;
 }
 .c13 {
   background-color: #2ecc71 !important;
+  color: #000000;
 }
 .c14 {
   background-color: #641e16 !important;
+  color: #ffffff;
 }
 .c15 {
   background-color: #b7950b !important;
+  color: #000000;
 }
 .c16 {
   background-color: #ff5733 !important;
+  color: #000000;
 }
 .c17 {
   background-color: #f321dd !important;
+  color: #000000;
 }
 
 #map {
