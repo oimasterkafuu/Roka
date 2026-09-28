@@ -125,6 +125,12 @@ const DEFAULT_PARAMS = Object.freeze({
   // 扣到负分的候选在 frontline.choose() 里直接跳过（1-2 兵的边缘格守不住、
   // 一割就没，期望收益为负，不执行）。
   paintValue: 12, paintThinArrive: 4, paintThinPenalty: 6,
+  // 身后下刀（用户 2026-09-29 追加方针）：敌方单纯插入我方腹地（非跳板链）时，
+  // 优先从敌块「身后」（朝向其老家/主力的连通方向）截断，让插入段孤死，而不是
+  // 迎头硬拼。入侵截断与纵队掐链的脖子候选按「比深入块更靠敌锚点一侧」每格
+  // +cutoffBehindBonus 加权（压过 danger 的 12/格，确保同样切得断时选身后刀）；
+  // 迎头撞（column 短促自耗分支）只在确实没有后方切断点时才用（policy 层让位）。
+  cutoffBehindBonus: 14,
 
 });
 const PARAM_RANGES = Object.freeze({
@@ -172,6 +178,7 @@ const PARAM_RANGES = Object.freeze({
   earlyBuildTurns: [0, 200], earlyDistScale: [0.2, 1], earlyFrontFundScale: [0.2, 1],
   supplyTreeDepth: [2, 12], bulkPullMin: [20, 1000],
   paintValue: [0, 100], paintThinArrive: [0, 60], paintThinPenalty: [0, 100],
+  cutoffBehindBonus: [0, 60],
 
 });
 function resolveParams(params = {}) {

@@ -170,6 +170,10 @@ function decide(state, params, guard) {
   if (!advanceWinsBuilding && !columnCrisis) {
     const column = chooseColumnStrike(state, constrained);
     if (column) {
+      // 身后下刀优先（2026-09-29 用户追加方针）：迎头撞（短促自耗型）只在确实
+      // 没有后方切断点时才用——截断模块能从敌块身后（朝向其老家的连通方向）
+      // 下刀时，先截断让插入段孤死，不以兵换兵硬拼。
+      if (column.headOn && cutoff && allowed(cutoffAction)) return take(cutoffAction, 'cutoff');
       const strike = attack(column.move, Boolean(column.urgent));
       // frontline 审查会把 mode/reason 改写成全冲口径；保留拦截语义 reason，
       // 让日志/复盘能看到「掐链/迎头/打头」这一层主动防御动作。

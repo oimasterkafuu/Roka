@@ -127,6 +127,20 @@ function chooseColumnStrike(state, params = {}) {
     // 掐链（仅长纵队且头部非建筑）：候选脖子 = 贴我方格、非敌锚的敌格；占住后深入
     // 段断锚的才有效。短促自耗型跳板（一两个格、走一步身后自弃）没有脖子可截，
     // 不硬找切断点。
+    // 「身后刀」加权（2026-09-29 用户追加方针）：候选脖子比深入块更靠敌锚点一侧
+    // （enemyDistance 更小）按差值加分——在纵队与敌主力之间尽量靠后下刀。
+    const enemyDistance = new Int32Array(size).fill(-1);
+    {
+      const q = [];
+      for (const a of entry.anchors) { enemyDistance[a] = 0; q.push(a); }
+      for (let h = 0; h < q.length; h++) {
+        const i = q[h];
+        if (enemyDistance[i] >= p.columnRange + p.cutoffRange) continue;
+        for (const j of neighbors[i]) if (enemyDistance[j] < 0 && passable(j)) { enemyDistance[j] = enemyDistance[i] + 1; q.push(j); }
+      }
+    }
+    let compDepth = Infinity;
+    for (const c of component) if (enemyDistance[c] >= 0 && enemyDistance[c] < compDepth) compDepth = enemyDistance[c];
     const tileSet = new Set(entry.tiles);
     const anchorSet = new Set(entry.anchors);
     const compSet = new Set(component);
@@ -157,7 +171,9 @@ function chooseColumnStrike(state, params = {}) {
         // 必须真的冻住纵队主体（深入块至少一半断锚）且冻住量够本。
         if (trappedDeep < Math.ceil(component.length / 2) || trapped < p.columnMinMass) continue;
         const danger = Math.max(0, p.columnRange - homeDistance[choke]);
-        const score = trapped * 1.2 - defense * 1.5 + danger * 12;
+        const behind = enemyDistance[choke] >= 0 && compDepth < Infinity ?
+          Math.max(0, compDepth - enemyDistance[choke]) : 0;
+        const score = trapped * 1.2 - defense * 1.5 + danger * 12 + behind * p.cutoffBehindBonus;
         necks.push({ choke, defense, trapped, score });
       }
       necks.sort((a, b) => b.score - a.score);
@@ -184,8 +200,10 @@ function chooseColumnStrike(state, params = {}) {
     if (!plan && !longColumn) {
       // ② 短促自耗型（用户 2026-09-28 补充方针）：没有脖子可截，直接用我方兵力
       //    迎头撞头部格——以兵换兵顶回去/磨掉，不硬找切断点。
+      //    headOn 标记（2026-09-29 追加方针）：policy 层发现截断模块有后方切断点时，
+      //    迎头撞让位给截断——能从身后下刀就不硬拼。
       plan = planChokeAttack(ctx, p, head, ctx.count(head, 1), 0,
-        '迎头撞敌短跳板', '迎头撞敌短跳板（集兵）', { column: true });
+        '迎头撞敌短跳板', '迎头撞敌短跳板（集兵）', { column: true, headOn: true });
     }
     if (!plan && longColumn && !headIsAnchor) {
       // ③ 侧击腰部：深入块里守军最薄、贴我方格的格子，削掉纵队一段。
