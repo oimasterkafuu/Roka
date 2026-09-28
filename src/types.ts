@@ -168,6 +168,13 @@ export interface ReplayListItem {
   id: string;
   rank: string[];
   turn: number;
+  /**
+   * 终局名次的队伍分组（组序 = 队伍名次序，组内 = 个人名次序），
+   * 由 buildFinalRankTeams 在归档时写入，供回放列表组队合并展示。
+   * color 为组内最小玩家 id（与回放页标题的 inline-color-block 配色一致）。
+   * 旧索引项无此字段，前端回退为 rank 平铺。
+   */
+  teams?: { members: string[]; color: number }[];
 }
 
 export type ReplayMoveDirection = 0 | 1 | 2 | 3;

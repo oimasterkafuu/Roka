@@ -23,6 +23,7 @@ interface ReplayStoreOptions {
 
 interface ReplaySaveSummary {
   rank: string[];
+  teams: { members: string[]; color: number }[];
   turn: number;
 }
 
@@ -109,6 +110,7 @@ export class ReplayStore {
         time: Math.floor(Date.now() / 1000),
         id: replayId,
         rank: [...summary.rank],
+        teams: summary.teams.map((team) => ({ members: [...team.members], color: team.color })),
         turn: summary.turn,
       };
 

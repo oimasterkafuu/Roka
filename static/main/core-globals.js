@@ -54,6 +54,38 @@ function fogTeamName(team) {
   return '队伍 ' + team;
 }
 
+// 终局名次比较器：与服务端 src/game-engine/leaderboard.ts 的 compareFinalRank
+// 逐字一致（存活者优先；出局者按 dead 降序——死得晚名次高；再按 land、army 降序决胜）。
+// leaderboard 条目的 dead 为出局序号（0 = 存活）。
+function replayFinalRankCompare(a, b) {
+  var aliveA = a.dead === 0 ? 1 : 0;
+  var aliveB = b.dead === 0 ? 1 : 0;
+  if (aliveA !== aliveB) return aliveB - aliveA;
+  if (a.dead !== b.dead) return b.dead - a.dead;
+  if (a.land !== b.land) return b.land - a.land;
+  return b.army - a.army;
+}
+
+// 终局名次的队伍分组投影：按 replayFinalRankCompare 排出个人全序后按 team 分组
+// （保持全序相对顺序）。返回 [{team, members}]，组序即队伍名次序——整队存活者在前，
+// 全灭队以队内最后死亡成员为准；组内成员顺序即个人名次序。非组队局每队一人，
+// 天然退化为个人名次序。
+function replayFinalRankGroups(entries) {
+  var sorted = entries.slice().sort(replayFinalRankCompare);
+  var groups = [];
+  var groupIndex = {};
+  for (var i = 0; i < sorted.length; i++) {
+    var e = sorted[i];
+    if (typeof groupIndex[e.team] == 'undefined') {
+      groupIndex[e.team] = groups.length;
+      groups.push({ team: e.team, members: [e] });
+    } else {
+      groups[groupIndex[e.team]].members.push(e);
+    }
+  }
+  return groups;
+}
+
 // 统一显示名：组队局取队伍名，非组队局取用户名。
 function fogDisplayName(uid, team, teamGame) {
   return teamGame ? fogTeamName(team) : uid;

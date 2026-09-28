@@ -22,7 +22,7 @@ import {
   LEFT_GAME,
 } from './game-engine/constants';
 import { selectMazeGenerals, selectRandomGenerals } from './game-engine/general-selection';
-import { buildFinalRank, buildLeaderboard } from './game-engine/leaderboard';
+import { buildFinalRank, buildFinalRankTeams, buildLeaderboard } from './game-engine/leaderboard';
 import { buildFullVisionArrays } from './game-engine/map-encoding';
 import { buildFoggedVisionArrays, computeTeamVisibility } from './game-engine/fog-vision';
 import { buildReplayPatch, getDiff } from './game-engine/replay-helpers';
@@ -672,6 +672,10 @@ export class GameEngine {
 
   private buildFinalRank(): string[] {
     return buildFinalRank(this.buildLeaderboard());
+  }
+
+  private buildFinalRankTeams(): { members: string[]; color: number }[] {
+    return buildFinalRankTeams(this.buildLeaderboard());
   }
 
   private buildGameResult(): GameResultEntry[] {
@@ -1664,6 +1668,7 @@ export class GameEngine {
       },
       {
         rank: this.buildFinalRank(),
+        teams: this.buildFinalRankTeams(),
         turn: Math.floor(this.turn / 2),
       },
     );

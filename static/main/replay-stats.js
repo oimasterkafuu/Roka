@@ -22,25 +22,21 @@ function replayPlayerColor(id) {
 }
 
 // 回放页标题区：同队成员逗号分隔、队伍之间「>」分隔（如 alice, bob > carol）。
-// 迷雾组队局沿用 fog-team-names 规则：只显示队名「队伍 N」，不列成员用户名。
+// 组间顺序为终局名次序（replayFinalRankGroups，口径与服务端 buildFinalRank 一致），
+// 不再按队号排序。迷雾组队局沿用 fog-team-names 规则：只显示队名「队伍 N」，不列成员用户名。
 function initReplayTitle() {
   var lb0 = replay_data && replay_data.initial && replay_data.initial.leaderboard;
   if (!is_replay || !lb0 || !lb0.length || window.innerWidth <= 1000) return;
   var teamGame = fogTeamGame(lb0);
   var fogView = Boolean(replay_data.meta && replay_data.meta.fog);
-  var groups = [];
-  var groupIndex = {};
-  for (var i = 0; i < lb0.length; i++) {
-    var key = teamGame ? lb0[i].team : lb0[i].id;
-    if (typeof groupIndex[key] == 'undefined') {
-      groupIndex[key] = groups.length;
-      groups.push({ team: lb0[i].team, members: [] });
-    }
-    groups[groupIndex[key]].members.push(lb0[i]);
+  // 终局名次取自末帧 leaderboard（最后一个 forward patch；无 patch 时用 initial），
+  // 其 dead 字段为出局序号、team 为队伍归属，足以现算与 rating 清算一致的名次。
+  var lastLb = lb0;
+  var patches = replay_data.patches || [];
+  if (patches.length && patches[patches.length - 1].forward.leaderboard) {
+    lastLb = patches[patches.length - 1].forward.leaderboard;
   }
-  groups.sort(function (a, b) {
-    return a.team - b.team;
-  });
+  var groups = replayFinalRankGroups(lastLb);
   var parts = [];
   for (var i = 0; i < groups.length; i++) {
     var g = groups[i];
