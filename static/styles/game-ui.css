@@ -30,19 +30,17 @@
   background: rgba(255, 255, 255, 0.75);
 }
 /*
- * 姓名格文字色由 .cN 按底色亮度决定（map.css），此处不设 color；
- * 注意保持选择器不覆盖 .cN 的 color 声明（特异性竞争见 map.css 注释）。
+ * 姓名格文字色统一白色 + 与地图格子（#map td，见 map.css）同款的
+ * text-shadow 黑色描边：浅色玩家底色（黄/浅绿等）上白字偏淡，描边保证可读；
+ * 不按底色切换黑白。死/afk 行整体降透明度，描边在白字淡出时仍保住笔画。
+ * 覆盖两类内容：username.js 组件的 a.rt-* 链接（rt-* 的 !important 需以
+ * !important 压回）与迷雾局队名等纯文本节点（td 自身）。
  */
 #game-leaderboard td.leaderboard-name {
   max-width: 350px;
+  color: #ffffff;
+  text-shadow: 0 0 2px black;
 }
-/*
- * 局内排行榜姓名格的用户名链接（username.js 组件）：该格底色是玩家局内分配色
- * .cN（红/绿/蓝/深等），.cN 已按底色亮度选定可读的黑/白文字色；rt-* 的
- * !important 会压掉它（rt-blue 压蓝底、rt-violet 压深底均不可读），
- * 故本格内链接颜色强制继承 .cN 的选定色，rt-* 不在此格生效；链接跳转保留。
- * 其他中性背景位置（feeds/回放列表/聊天/个人主页/回放标题区）rt-* 照常。
- */
 #game-leaderboard td.leaderboard-name a.rt-unrated,
 #game-leaderboard td.leaderboard-name a.rt-gray,
 #game-leaderboard td.leaderboard-name a.rt-green,
@@ -59,7 +57,8 @@
 #game-leaderboard td.leaderboard-name a.rt-violet:hover,
 #game-leaderboard td.leaderboard-name a.rt-orange:hover,
 #game-leaderboard td.leaderboard-name a.rt-red:hover {
-  color: inherit !important;
+  color: #ffffff !important;
+  text-shadow: 0 0 2px black;
 }
 /* 组队局回放排行榜：队条目加粗显示团队合计，成员行缩进弱化 */
 #game-leaderboard tr.lb-team td {
