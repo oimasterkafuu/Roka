@@ -465,9 +465,19 @@
               .attr('title', fullTime(item.time * 1000))
               .appendTo($tr);
             $('<td></td>').text(item.turn).appendTo($tr);
-            $('<td></td>')
-              .text((item.rank || []).join(' › '))
-              .appendTo($tr);
+            // 名次列：有队伍分组（组队局归档写入 teams）时同队合并成一组——
+            // 组内 ', '、组间 ' › '、组序为终局队伍名次序，每组带队伍配色色块；
+            // 旧数据无 teams 字段时回退为 rank 平铺（每人一组，天然兼容非组队局）。
+            var $rankTd = $('<td></td>').appendTo($tr);
+            if (Array.isArray(item.teams) && item.teams.length) {
+              item.teams.forEach(function (team, index) {
+                if (index > 0) $rankTd.append(' › ');
+                $('<span class="inline-color-block c' + (team.color || 0) + '"></span>').appendTo($rankTd);
+                $rankTd.append((team.members || []).join(', '));
+              });
+            } else {
+              $rankTd.text((item.rank || []).join(' › '));
+            }
             $body.append($tr);
           });
           $('#replays-prev').prop('disabled', offset <= 0);
