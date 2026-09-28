@@ -299,18 +299,73 @@ function dispersedCutoff(ctx, p, planAttack) {
         consider([first, first === c1 ? c2 : c1], d1 + d2, mass);
       }
     }
+    // 三格组合（2026-09-29：敌宽锋面纵队深入的截断缺口——画圈推进把脖子涂成
+    // 3 格宽后，单格/两格组合全部失效，chooseCutoff 对整个深入纵队返回 null）。
+    // 只在单格/两格都没有有效方案时评估，限最弱 8 个候选、24 组，控制每 tick 预算。
+    // 宽脖子正中间的格不贴我方格、进不了候选：除「三格全候选」外，还按
+    // 「候选 a、c 夹着同一个敌格 m」的 {a, m, c} 评估——本回合先打 a/c 中较弱一格，
+    // 占住后 m 在后续 tick 自然成为两格脖子的一部分。
+    if (!viable.length) {
+      const pool = single.slice(0, 8);
+      let triples = 0;
+      const tryTrio = (t1, t2, t3) => {
+        if (triples >= 24) return;
+        triples++;
+        const d = ctx.count(t1, 1) + ctx.count(t2, 1) + ctx.count(t3, 1);
+        if (d > p.cutoffMaxDefense) return;
+        const mass = strandedMass(anchors, tileSet, new Set([t1, t2, t3]));
+        if (mass === null || mass < p.cutoffMinIsolate) return;
+        // 贴我方格的格排在前面（本回合打得到的才算），同条件守军最弱者优先。
+        const inPool = (x) => single.includes(x);
+        const order = [t1, t2, t3].sort((x, y) => (inPool(y) - inPool(x)) || (ctx.count(x, 1) - ctx.count(y, 1)));
+        consider(order, d, mass);
+      };
+      // 三格全候选：链式或 L 型连通（至少两条邻接边），否则不是同一处脖子。
+      for (let a = 0; a < pool.length && triples < 24; a++) {
+        for (let b = a + 1; b < pool.length && triples < 24; b++) {
+          const e01 = neighbors[pool[a]].includes(pool[b]);
+          for (let c = b + 1; c < pool.length && triples < 24; c++) {
+            const e02 = neighbors[pool[a]].includes(pool[c]);
+            const e12 = neighbors[pool[b]].includes(pool[c]);
+            if ((e01 && e02) || (e01 && e12) || (e02 && e12)) tryTrio(pool[a], pool[b], pool[c]);
+          }
+        }
+      }
+      // 夹心三格：候选 a、c 同贴一个不贴我方格的敌格 m。从 single（前 12）取
+      // 候选——pool（前 8）是给全候选三格的预算切片，夹心两端不该被它裁掉。
+      for (const mid of tiles) {
+        if (triples >= 24) break;
+        if (anchorSet.has(mid) || ctx.isolated(mid)) continue;
+        const around = single.filter((x) => neighbors[mid].includes(x));
+        for (let a = 0; a < around.length && triples < 24; a++) {
+          for (let c = a + 1; c < around.length && triples < 24; c++) {
+            if (neighbors[around[a]].includes(around[c])) continue; // 互相相邻的两格已被两格组合覆盖
+            tryTrio(around[a], mid, around[c]);
+          }
+        }
+      }
+    }
   }
   if (!viable.length) return null;
   viable.sort((a, b) => b.score - a.score);
   // 按收益从高到低逐个制定出兵方案。不做「守得住」反夺校验（用户 2026-09-27 硬性方针）：
   // 被截断隔离的兵力记为 0，截断决策不建模敌军反扑，本回合能占下瓶颈就打。
   for (const cut of viable.slice(0, 10)) {
-    const pair = cut.chokes.length > 1;
-    // 注意：出手只针对本回合要占的第一格，防御值用第一格自身的守军，
-    // 两格守军之和只用于上面的收益评分。
-    const plan = planAttack(cut.chokes[0], ctx.count(cut.chokes[0], 1), cut.trapped,
-      pair ? '截断散兵（两格脖子，先打其一）' : '截断散兵',
-      pair ? '截断集兵（两格脖子，先送其一）' : '截断集兵');
+    const multi = cut.chokes.length > 1;
+    const label = cut.chokes.length > 2 ? '三格脖子' : '两格脖子';
+    // 出手只针对本回合要占的第一格（贴我方格才打得到），防御值用第一格自身守军；
+    // 多格守军之和只用于上面的收益评分。第一格打不动时试其余贴我方格的格。
+    const firsts = cut.chokes
+      .filter((x) => neighbors[x].some((v) => own(v)))
+      .sort((x, y) => ctx.count(x, 1) - ctx.count(y, 1));
+    let plan = null;
+    for (const first of firsts) {
+      const candidate = planAttack(first, ctx.count(first, 1), cut.trapped,
+        multi ? `截断散兵（${label}，先打其一）` : '截断散兵',
+        multi ? `截断集兵（${label}，先送其一）` : '截断集兵');
+      if (candidate?.strike) { plan = candidate; break; } // 本回合能直接占下的优先
+      if (candidate && !plan) plan = candidate;
+    }
     if (!plan) continue;
     // 冻住规模明显时视同紧急：值得为它放弃普通调兵。
     const urgent = cut.trapped >= Math.max(p.cutoffMinIsolate * 4, 30);
