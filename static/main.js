@@ -617,8 +617,12 @@ async function loadAccountProfile() {
 }
 
 // 部署更新横幅：仅对局进行中（含观战）显示；准备阶段由禁用的开始按钮传达。
+// 横幅全宽置顶（z-index 99）会遮住右上角排行榜，显示时把排行榜整体下移
+// 到横幅下方（按实测高度），#replay-stats 面板逐帧按排行榜高度自动跟随。
 function refreshDeployBanner() {
-  $('#deploy-banner').css('display', deploy_queued && in_game && !game_ended ? '' : 'none');
+  var show = deploy_queued && in_game && !game_ended;
+  $('#deploy-banner').css('display', show ? '' : 'none');
+  $('#game-leaderboard').css('top', show ? $('#deploy-banner').outerHeight() + 'px' : '');
 }
 
 socket.on('update', update);
