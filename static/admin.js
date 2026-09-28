@@ -89,9 +89,8 @@ async function loadViewer() {
       return false;
     }
     currentUsername = data.username;
-    $('#account-name')
-      .text(data.username)
-      .attr('href', '/u/' + encodeURIComponent(data.username));
+    $('#account-name').replaceWith(usernameLink(currentUsername));
+    usernameEnsureColors([currentUsername]);
     return true;
   } catch (e) {
     return false;
@@ -176,11 +175,8 @@ function renderUsers() {
     }
 
     var $name = $('<td></td>');
-    $('<a></a>')
-      .attr('href', '/u/' + encodeURIComponent(user.username))
-      .addClass(user.colorClass || 'rt-unrated')
-      .text(user.username)
-      .appendTo($name);
+    // 用户名：统一用户名组件（/api/admin/users 已附 colorClass/title）。
+    usernameLink(user.username, { colorClass: user.colorClass, title: user.title }).appendTo($name);
     $tr.append($name);
 
     $('<td></td>').text(Math.round(user.rating)).appendTo($tr);
@@ -384,7 +380,8 @@ function renderBots() {
   $('#bots-empty').toggle(botsCache.length === 0);
   botsCache.forEach(function (bot) {
     var $tr = $('<tr></tr>');
-    $('<td></td>').text(bot.username).appendTo($tr);
+    usernameLink(bot.username).appendTo($('<td></td>').appendTo($tr));
+    usernameEnsureColors([bot.username]);
     $('<td></td>').text(bot.room).appendTo($tr);
     $('<td></td>').text(bot.template).appendTo($tr);
     $('<td></td>')

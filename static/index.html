@@ -19,6 +19,7 @@
     ></script>
     <script src="/notify.js"></script>
     <script src="/sw-register.js"></script>
+    <script src="/username.js"></script>
     <link rel="stylesheet" href="/main.css" />
     <link rel="stylesheet" href="/styles/rating.css" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css" />
@@ -258,16 +259,9 @@
         );
       }
 
-      // 带 rating 颜色的用户名链接；用户名一律走文本插入防 XSS。
+      // 带 rating 颜色的用户名链接：统一走 /username.js 组件（全局缓存 + 批量补色）。
       function userLink(username, colorClass, title) {
-        var $a = $('<a></a>')
-          .attr('href', '/u/' + encodeURIComponent(username))
-          .addClass(colorClass || 'rt-unrated')
-          .text(username);
-        if (title) {
-          $a.attr('title', title);
-        }
-        return $a;
+        return usernameLink(username, colorClass ? { colorClass: colorClass, title: title } : null);
       }
 
       async function apiPost(url, payload) {
@@ -312,7 +306,9 @@
         var data = await res.json();
         currentUsername = data.username;
         currentIsAdmin = data.isAdmin === true;
-        $('#account-name').text(data.username);
+        // 顶栏当前用户：统一用户名组件（rating 颜色 + 点击跳主页），颜色经缓存批量补色。
+        $('#account-name').replaceWith(usernameLink(currentUsername));
+        usernameEnsureColors([currentUsername]);
         $('#admin-entry').toggle(currentIsAdmin);
         return true;
       }
@@ -324,9 +320,10 @@
             return;
           }
           var p = await res.json();
-          $('#account-name')
-            .attr('href', '/u/' + encodeURIComponent(p.username))
-            .addClass(p.colorClass || 'rt-unrated');
+          var seed = {};
+          seed[p.username] = { colorClass: p.colorClass, title: p.title };
+          usernameCacheSeed(seed);
+          // 顶栏链接已在 loadUser 经组件渲染；seed 缓存后由 usernameRefreshRendered 统一刷新颜色。
           $('#me-name')
             .text(p.username)
             .addClass(p.colorClass || 'rt-unrated')
@@ -387,6 +384,12 @@
           }
           var rooms = await res.json();
           if (Array.isArray(rooms)) {
+            // 房主名接口不带 rating 颜色：批量补色（全局缓存，链接渲染后自动刷新）。
+            usernameEnsureColors(
+              rooms.map(function (item) {
+                return item.host;
+              }),
+            );
             var ids = rooms.map(function (item) {
               return item.room;
             });
@@ -412,9 +415,17 @@
               location.href = '/games/' + encodeURIComponent(item.room);
             });
             $('<td></td>').text(item.room).appendTo($tr);
-            $('<td></td>')
-              .text(item.host || '-')
-              .appendTo($tr);
+            var $hostTd = $('<td></td>').appendTo($tr);
+            if (item.host) {
+              // 房主名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进房。
+              usernameLink(item.host)
+                .on('click', function (e) {
+                  e.stopPropagation();
+                })
+                .appendTo($hostTd);
+            } else {
+              $hostTd.text('-');
+            }
             $('<td></td>')
               .text((item.playing || 0) + (item.spectators || 0))
               .appendTo($tr);
@@ -459,6 +470,8 @@
               .on('click', function () {
                 location.href = '/replays/' + encodeURIComponent(item.id);
               });
+            // 参赛者名字接口不带 rating 颜色：先按 rt-unrated 渲染，批量补色后自动刷新。
+            usernameEnsureColors(item.rank || []);
             // item.time 为 Unix 秒：相对时间展示，完整时间放 title。
             $('<td></td>')
               .text(relativeTime(item.time * 1000))
@@ -469,14 +482,22 @@
             // 组内 ', '、组间 ' › '、组序为终局队伍名次序，每组带队伍配色色块；
             // 旧数据无 teams 字段时回退为 rank 平铺（每人一组，天然兼容非组队局）。
             var $rankTd = $('<td></td>').appendTo($tr);
+            // 名次列成员名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进回放。
+            var linkOpts = { stopPropagation: true };
             if (Array.isArray(item.teams) && item.teams.length) {
               item.teams.forEach(function (team, index) {
                 if (index > 0) $rankTd.append(' › ');
                 $('<span class="inline-color-block c' + (team.color || 0) + '"></span>').appendTo($rankTd);
-                $rankTd.append((team.members || []).join(', '));
+                (team.members || []).forEach(function (member, mi) {
+                  if (mi > 0) $rankTd.append(', ');
+                  usernameLink(member, null, null, linkOpts).appendTo($rankTd);
+                });
               });
             } else {
-              $rankTd.text((item.rank || []).join(' › '));
+              (item.rank || []).forEach(function (member, mi) {
+                if (mi > 0) $rankTd.append(' › ');
+                usernameLink(member, null, null, linkOpts).appendTo($rankTd);
+              });
             }
             $body.append($tr);
           });
@@ -676,12 +697,8 @@
 
       function createCommentElement(comment) {
         var $item = $('<div class="comment-item"></div>');
-        var $author = $('<a class="comment-author"></a>')
-          .attr('href', '/u/' + encodeURIComponent(comment.author))
-          .text(comment.author);
-        if (comment.authorInfo && comment.authorInfo.colorClass) {
-          $author.addClass(comment.authorInfo.colorClass);
-        }
+        // 评论作者：统一用户名组件（服务端已附 authorInfo：colorClass/title）。
+        var $author = usernameLink(comment.author, comment.authorInfo || null, 'comment-author');
         $item.append($author);
         // html 字段由服务端渲染并消毒；新评论响应没有 html 字段时退化为纯文本。
         var $text = $('<span class="comment-text"></span>');

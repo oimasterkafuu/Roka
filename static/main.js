@@ -871,14 +871,24 @@ socket.on('room_update', function (data) {
       }
     }
     tmp[groupId] += '<p>';
-    if (data.players[i].ready) tmp[groupId] += '<u>';
     if (i == 0) tmp[groupId] += '<b>';
-    tmp[groupId] += htmlescape(data.players[i].uid);
+    // 成员名：统一用户名组件（rating 颜色 + 点击跳主页），接口不带颜色时先 rt-unrated 渲染。
+    // ready（已准备）用内联 underline 表达：rt-* 的 text-decoration:none 会盖掉 <u> 继承的下划线。
+    var memberLink = usernameLinkHtml(data.players[i].uid);
+    if (data.players[i].ready) {
+      memberLink = memberLink.replace('<a ', '<a style="text-decoration: underline" ');
+    }
+    tmp[groupId] += memberLink;
     if (i == 0) tmp[groupId] += '</b>';
-    if (data.players[i].ready) tmp[groupId] += '</u>';
     tmp[groupId] += '</p>';
     tmp[groupId] += '</div>';
   }
+  // 房间成员名批量补 rating 颜色（带缓存与去重；补色后自动刷新已渲染链接）。
+  usernameEnsureColors(
+    data.players.map(function (p) {
+      return p.uid;
+    }),
+  );
 
   var canSelectPlayer = selfTeam != 0 || playingCount < max_teams;
   self_team = selfTeam;
@@ -1053,12 +1063,12 @@ $(document).ready(function () {
     $('#chatroom-input').attr('class', collapsed ? 'minimized' : '');
   });
   socket.on('chat_message', function (data) {
-    var th = '';
     // 用户名色块三门闸：「在房间且参战」才给色——
     // 1) 跨房转发的消息（带 room 字段）是房外的人，不显示色块；
     // 2) 对局中：以排行榜为准，在榜且未淘汰（class_ != 'dead'）的参赛者显示其分配颜色；
     // 3) 房间准备阶段：以 room_update 的成员队伍表为准，参赛席（team > 0）显示座位色，
     //    观战席或不在房间不显示。
+    // 注意：色块是局内分配色（.cN），与用户名链接本身的 rating 颜色（rt-*）职责分开。
     var chatColor = 0;
     if (data.color && !data.room) {
       if (gameLeaderboard) {
@@ -1072,31 +1082,22 @@ $(document).ready(function () {
         chatColor = data.color;
       }
     }
-    if (chatColor) {
-      th =
-        '<span class="inline-color-block c' +
-        chatColor +
-        '"></span><span class="username">' +
-        htmlescape(data.sender) +
-        '</span>: ' +
-        htmlescape(data.text) +
-        '</p>';
-      if (data.team) {
-        th = '<span style="font-family:Quicksand-Bold,HYMaQiDuo-Bold">' + teamPrefix + '</span>' + th;
-      }
-      th = '<p class="chat-message">' + th;
-    } else if (data.color || data.sender) {
-      // 有发送者但不满足给色条件（房外/观战/已淘汰）：保留用户名，只去掉色块。
-      th =
-        '<p class="chat-message"><span class="username">' +
-        htmlescape(data.sender) +
-        '</span>: ' +
-        htmlescape(data.text) +
-        '</p>';
-    } else {
-      th = '<p class="chat-message server-chat-message">' + htmlescape(data.text) + '</p>';
+    var $p = $('<p class="chat-message"></p>');
+    if (data.team) {
+      $p.append($('<span style="font-family:Quicksand-Bold,HYMaQiDuo-Bold"></span>').text(teamPrefix));
     }
-    $('#chat-messages-container')[0].innerHTML += th;
+    if (chatColor) {
+      $p.append($('<span class="inline-color-block c' + chatColor + '"></span>'));
+    }
+    if (data.color || data.sender) {
+      // 有发送者但不满足给色条件（房外/观战/已淘汰）：保留用户名，只去掉色块。
+      // 用户名：统一用户名组件（rating 颜色 + 点击跳主页），接口不带颜色时先 rt-unrated 渲染。
+      $p.append(usernameLink(data.sender, null, 'username'), $('<span></span>').text(': ' + data.text));
+      usernameEnsureColors([data.sender]);
+    } else {
+      $p.addClass('server-chat-message').text(data.text);
+    }
+    $('#chat-messages-container').append($p);
     $('#chat-messages-container').scrollTop(233333);
   });
   $('#chatroom-input').on('keydown', function (data) {
