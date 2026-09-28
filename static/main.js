@@ -844,7 +844,9 @@ socket.on('room_update', function (data) {
   var playingCount = 0;
   var selfTeam = 0;
   var selfReady = false;
+  roomMemberTeams = {};
   for (var i = 0; i < data.players.length; i++) {
+    roomMemberTeams[data.players[i].uid] = data.players[i].team;
     if (data.players[i].team) playingCount += 1;
     if (data.players[i].sid == client_id) {
       selfTeam = data.players[i].team;
@@ -1035,6 +1037,8 @@ socket.on('left', function () {
   in_game = false;
   game_ended = false;
   replay_id = false;
+  // 离开对局：清空聊天色块门闸用的对局排行榜，回到房间准备阶段口径。
+  gameLeaderboard = null;
   refreshDeployBanner();
   refreshSpectateMode();
 });
@@ -1050,10 +1054,28 @@ $(document).ready(function () {
   });
   socket.on('chat_message', function (data) {
     var th = '';
-    if (data.color) {
+    // 用户名色块三门闸：「在房间且参战」才给色——
+    // 1) 跨房转发的消息（带 room 字段）是房外的人，不显示色块；
+    // 2) 对局中：以排行榜为准，在榜且未淘汰（class_ != 'dead'）的参赛者显示其分配颜色；
+    // 3) 房间准备阶段：以 room_update 的成员队伍表为准，参赛席（team > 0）显示座位色，
+    //    观战席或不在房间不显示。
+    var chatColor = 0;
+    if (data.color && !data.room) {
+      if (gameLeaderboard) {
+        for (var i = 0; i < gameLeaderboard.length; i++) {
+          if (gameLeaderboard[i].uid === data.sender && gameLeaderboard[i].class_ != 'dead') {
+            chatColor = gameLeaderboard[i].id;
+            break;
+          }
+        }
+      } else if (roomMemberTeams[data.sender] > 0) {
+        chatColor = data.color;
+      }
+    }
+    if (chatColor) {
       th =
         '<span class="inline-color-block c' +
-        data.color +
+        chatColor +
         '"></span><span class="username">' +
         htmlescape(data.sender) +
         '</span>: ' +
@@ -1063,6 +1085,14 @@ $(document).ready(function () {
         th = '<span style="font-family:Quicksand-Bold,HYMaQiDuo-Bold">' + teamPrefix + '</span>' + th;
       }
       th = '<p class="chat-message">' + th;
+    } else if (data.color || data.sender) {
+      // 有发送者但不满足给色条件（房外/观战/已淘汰）：保留用户名，只去掉色块。
+      th =
+        '<p class="chat-message"><span class="username">' +
+        htmlescape(data.sender) +
+        '</span>: ' +
+        htmlescape(data.text) +
+        '</p>';
     } else {
       th = '<p class="chat-message server-chat-message">' + htmlescape(data.text) + '</p>';
     }
