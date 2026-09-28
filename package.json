@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.42.1",
+  "version": "1.42.2",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -41,7 +41,7 @@
     "katex": "^0.18.9",
     "marked": "^18.0.14",
     "sanitize-html": "^2.17.7",
-    "socket.io": "^4.8.3",
+    "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
