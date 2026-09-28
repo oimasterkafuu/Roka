@@ -150,6 +150,22 @@ function invasionCutoff(ctx, p, myAnchors, planAttack) {
   }
   if (!raiders.length) return null;
 
+  // 敌锚点距离场（2026-09-29 用户追加方针「身后下刀」）：单纯插入的敌块，
+  // 切断点要落在敌块与其老家之间的连通线上——候选脖子比深入块更靠敌锚点
+  // 一侧（enemyDistance 更小）才算「身后刀」，评分按差值加权。
+  const enemyDistance = new Int32Array(size).fill(-1);
+  {
+    const q = [];
+    for (let i = 0; i < size; i++) if (isAnchor(i)) { enemyDistance[i] = 0; q.push(i); }
+    for (let h = 0; h < q.length; h++) {
+      const i = q[h];
+      if (enemyDistance[i] >= p.cutoffRange * 2) continue;
+      for (const j of neighbors[i]) if (enemyDistance[j] < 0 && passable(j)) { enemyDistance[j] = enemyDistance[i] + 1; q.push(j); }
+    }
+  }
+  let raidDepth = Infinity; // 插入深度 = 入侵格离敌老家的最近距离
+  for (const r of raiders) if (enemyDistance[r] >= 0 && enemyDistance[r] < raidDepth) raidDepth = enemyDistance[r];
+
   // 2) 候选瓶颈：既邻接我方格（我们才打得到），又邻接入侵格集合。
   const raidSet = new Set(raiders);
   const candidates = new Set();
@@ -198,9 +214,13 @@ function invasionCutoff(ctx, p, myAnchors, planAttack) {
     if (defense > p.cutoffMaxDefense) continue;
     const trapped = cutsOff(choke);
     if (trapped === null || trapped < p.cutoffMinIsolate) continue;
-    // 评分：被冻住的敌军越多越好，攻占成本越低越好，离我家越近越紧急。
+    // 评分：被冻住的敌军越多越好，攻占成本越低越好，离我家越近越紧急；
+    // 「身后刀」加权——脖子比深入块更靠敌老家一侧（掐断后整个插入段孤死，
+    // 而不是在我家门口硬拼），每靠后一格 +cutoffBehindBonus。
     const danger = Math.max(0, p.cutoffRange - homeDistance[choke]);
-    const score = trapped * 1.2 - defense * 1.5 + danger * 12;
+    const behind = enemyDistance[choke] >= 0 && raidDepth < Infinity ?
+      Math.max(0, raidDepth - enemyDistance[choke]) : 0;
+    const score = trapped * 1.2 - defense * 1.5 + danger * 12 + behind * p.cutoffBehindBonus;
     if (!best || score > best.score) best = { choke, defense, trapped, danger, score };
   }
   if (!best) return null;
