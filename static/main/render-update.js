@@ -272,6 +272,12 @@ function update(data) {
   });
   // 聊天色块门闸（core-globals.js 声明）按 uid 查榜：在榜且未淘汰才给色。
   gameLeaderboard = lb;
+  // 排行榜名字统一走用户名组件：批量补齐参赛者 rating 颜色（带缓存与去重，热路径零请求）。
+  usernameEnsureColors(
+    lb.map(function (entry) {
+      return entry.uid;
+    }),
+  );
   var th = '<tr><td>队伍</td><td>玩家</td><td>兵力</td><td>领土</td></tr>';
   // 迷雾局的观战/回放：组队局名称列显示队伍名（与视角 tabs 同一套规则，见 core-globals.js）。
   var fogTeamGameView = fogObserverView() && fogTeamGame(lb);
@@ -322,13 +328,14 @@ function update(data) {
         '</td></tr>';
       for (var j = 0; j < g.members.length; j++) {
         var mb = g.members[j];
+        // 成员名：统一用户名组件（rating 颜色 + 点击跳主页）；td 保留 .cN 作局内配色色块。
         th +=
           '<tr class="lb-member ' +
           mb.class_ +
           '"><td></td><td class="leaderboard-name c' +
           mb.id +
           '">' +
-          htmlescape(mb.uid) +
+          usernameLinkHtml(mb.uid) +
           '</td><td>' +
           mb.army +
           '</td><td>' +
@@ -338,6 +345,11 @@ function update(data) {
     }
   } else {
     for (var i = 0; i < lb.length; i++) {
+      // 名字列：统一用户名组件（rating 颜色 + 点击跳主页）；td 保留 .cN 作局内配色色块。
+      // 迷雾组队局观战/回放视角显示队名（非用户名），保持纯文本。
+      var nameCell = fogTeamGameView
+        ? htmlescape(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView))
+        : usernameLinkHtml(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView));
       th +=
         '<tr class="' +
         lb[i].class_ +
@@ -346,7 +358,7 @@ function update(data) {
         '</td><td class="leaderboard-name c' +
         lb[i].id +
         '">' +
-        htmlescape(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView)) +
+        nameCell +
         '</td><td>' +
         lb[i].army +
         '</td><td>' +
@@ -387,10 +399,9 @@ function update(data) {
     } else if (killerCode == '系统' || killerCode == '投降') {
       lostText = '<span>你已投降。</span>';
     } else {
-      lostText =
-        '<span>你被 <span style="font-family: Quicksand-Bold, HYMaQiDuo-Bold;">' +
-        htmlescape(killerName) +
-        '</span> 击败了。</span>';
+      // 击败者名：统一用户名组件（rating 颜色 + 点击跳主页）。
+      lostText = '<span>你被 ' + usernameLinkHtml(killerName) + ' 击败了。</span>';
+      usernameEnsureColors([killerName]);
     }
     $($('#status-alert').children()[0].children[0]).html('游戏结束');
     $($('#status-alert').children()[0].children[1]).html(lostText);
