@@ -119,6 +119,12 @@ const DEFAULT_PARAMS = Object.freeze({
   // 最远的子树先动（逐级向目标汇聚，远端与近端同时在路上，避免一条链式长跑）；
   // 深后方（≥supplyTreeDepth 跳）大堆一次性整批拉出，不被近源小股插队。
   supplyTreeDepth: 4, bulkPullMin: 100,
+  // 涂色降权（用户 2026-09-29 硬方针「薄土不值钱」）：中立涂色格基础价值
+  // （paintValue，大幅低于攻敌格 62——涂色让位建造/集结/截断）；占领驻军
+  // 低于 paintThinArrive 的薄土涂色按每差 1 兵扣 paintThinPenalty 分，
+  // 扣到负分的候选在 frontline.choose() 里直接跳过（1-2 兵的边缘格守不住、
+  // 一割就没，期望收益为负，不执行）。
+  paintValue: 12, paintThinArrive: 4, paintThinPenalty: 6,
 
 });
 const PARAM_RANGES = Object.freeze({
@@ -165,6 +171,7 @@ const PARAM_RANGES = Object.freeze({
   frontBaseMinCrowns: [0, 20],
   earlyBuildTurns: [0, 200], earlyDistScale: [0.2, 1], earlyFrontFundScale: [0.2, 1],
   supplyTreeDepth: [2, 12], bulkPullMin: [20, 1000],
+  paintValue: [0, 100], paintThinArrive: [0, 60], paintThinPenalty: [0, 100],
 
 });
 function resolveParams(params = {}) {
