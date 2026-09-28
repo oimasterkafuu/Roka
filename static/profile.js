@@ -52,16 +52,9 @@ function fullTime(time) {
   );
 }
 
-// 带 rating 颜色的用户名链接；用户名一律走文本插入防 XSS。
+// 带 rating 颜色的用户名链接：统一走 /username.js 组件（全局缓存 + 批量补色）。
 function userLink(username, colorClass, title) {
-  var $a = $('<a></a>')
-    .attr('href', '/u/' + encodeURIComponent(username))
-    .addClass(colorClass || 'rt-unrated')
-    .text(username);
-  if (title) {
-    $a.attr('title', title);
-  }
-  return $a;
+  return usernameLink(username, colorClass ? { colorClass: colorClass, title: title } : null);
 }
 
 async function apiPost(url, payload) {
@@ -96,9 +89,8 @@ async function loadViewer() {
     }
     var data = await res.json();
     currentUsername = data.username;
-    $('#account-name')
-      .text(data.username)
-      .attr('href', '/u/' + encodeURIComponent(data.username));
+    $('#account-name').replaceWith(usernameLink(currentUsername));
+    usernameEnsureColors([currentUsername]);
     return true;
   } catch (e) {
     return false;
@@ -371,12 +363,8 @@ function commentButtonText(count) {
 
 function createCommentElement(comment) {
   var $item = $('<div class="comment-item"></div>');
-  var $author = $('<a class="comment-author"></a>')
-    .attr('href', '/u/' + encodeURIComponent(comment.author))
-    .text(comment.author);
-  if (comment.authorInfo && comment.authorInfo.colorClass) {
-    $author.addClass(comment.authorInfo.colorClass);
-  }
+  // 评论作者：统一用户名组件（服务端已附 authorInfo：colorClass/title）。
+  var $author = usernameLink(comment.author, comment.authorInfo || null, 'comment-author');
   $item.append($author);
   // html 字段由服务端渲染并消毒；新评论响应没有 html 字段时退化为纯文本。
   var $text = $('<span class="comment-text"></span>');
@@ -691,9 +679,13 @@ async function loadReplays(offset) {
         .attr('title', fullTime(item.time * 1000))
         .appendTo($tr);
       $('<td></td>').text(item.turn).appendTo($tr);
-      $('<td></td>')
-        .text((item.rank || []).join(' › '))
-        .appendTo($tr);
+      // 名次列成员名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进回放。
+      var $rankTd = $('<td></td>').appendTo($tr);
+      usernameEnsureColors(item.rank || []);
+      (item.rank || []).forEach(function (member, mi) {
+        if (mi > 0) $rankTd.append(' › ');
+        usernameLink(member, null, null, { stopPropagation: true }).appendTo($rankTd);
+      });
       $body.append($tr);
     });
     $('#replays-prev').prop('disabled', offset <= 0);

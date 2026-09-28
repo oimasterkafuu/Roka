@@ -15,7 +15,7 @@ import { encodeReplayPatchBinary } from './replay-patch-binary';
 import { isReplayIdValid, ReplayStore } from './replay-store';
 import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText } from './text-render';
-import { FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
+import { FeedComment, FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { CaptchaService } from './server/captcha-service';
 import { EditableLobbyKey, FIXED_SWAMP_RATIO, LobbyService } from './server/lobby-service';
@@ -201,6 +201,7 @@ interface DecoratedFeedComment {
   text: string;
   time: number;
   html: string;
+  authorInfo: { colorClass: string; title: string };
 }
 
 interface DecoratedFeedPost {
@@ -215,12 +216,22 @@ interface DecoratedFeedPost {
   canManage: boolean;
 }
 
+const decorateFeedComment = (comment: FeedComment): DecoratedFeedComment => {
+  const { rating, ratingGames } = userStore.getDisplayRating(comment.author);
+  const tier = ratingTier(rating, ratingGames);
+  return {
+    ...comment,
+    html: renderRichText(comment.text),
+    authorInfo: { colorClass: tier.className, title: tier.title },
+  };
+};
+
 const decorateFeedPost = (post: FeedPost, viewer: string | null): DecoratedFeedPost => {
   const { rating, ratingGames } = userStore.getDisplayRating(post.author);
   const tier = ratingTier(rating, ratingGames);
   return {
     ...post,
-    comments: post.comments.map((comment) => ({ ...comment, html: renderRichText(comment.text) })),
+    comments: post.comments.map((comment) => decorateFeedComment(comment)),
     html: renderRichText(post.text),
     authorInfo: { colorClass: tier.className, title: tier.title },
     canManage: viewer !== null && (viewer === post.author || userStore.isAdminUser(viewer)),
@@ -990,6 +1001,30 @@ const boot = async (): Promise<void> => {
       return { ...entry, colorClass: tier.className, title: tier.title };
     });
     return reply.send({ items });
+  });
+
+  // 按用户名批量查询 rating 颜色（用户名 → colorClass/title），供前端统一用户名组件
+  // 为「接口原本不带颜色」的位置（回放列表、对局排行榜、聊天等）补色；一次请求批量查，
+  // 避免每个名字单独发请求。users 为逗号分隔的用户名（去重、限量防滥用）。
+  app.get('/api/user-colors', async (request, reply) => {
+    const authUser = (request as AuthRequest).authUser;
+    if (!authUser) {
+      return reply.code(401).send({ error: '未登录或登录已失效。' });
+    }
+    const query = request.query as { users?: unknown };
+    const names = String(query.users ?? '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .slice(0, 100);
+    const colors: Record<string, { colorClass: string; title: string }> = {};
+    for (const name of names) {
+      if (Object.prototype.hasOwnProperty.call(colors, name)) continue;
+      const { rating, ratingGames } = userStore.getDisplayRating(name);
+      const tier = ratingTier(rating, ratingGames);
+      colors[name] = { colorClass: tier.className, title: tier.title };
+    }
+    return reply.send({ colors });
   });
 
   app.get('/api/online', async (_request, reply) => {
