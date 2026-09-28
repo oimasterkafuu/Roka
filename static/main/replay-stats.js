@@ -52,12 +52,22 @@ function initReplayTitle() {
     }
     var names = [];
     for (var j = 0; j < g.members.length; j++) {
+      // 成员名：统一用户名组件（rating 颜色 + 点击跳主页）；色块保留 .cN 局内配色。
       names.push(
-        '<span class="inline-color-block c' + g.members[j].id + '"></span>' + htmlescape(g.members[j].uid),
+        '<span class="inline-color-block c' +
+          g.members[j].id +
+          '"></span>' +
+          usernameLinkHtml(g.members[j].uid),
       );
     }
     parts.push(names.join(', '));
   }
+  // 标题区参赛者名接口不带 rating 颜色：批量补色（全局缓存，链接渲染后自动刷新）。
+  usernameEnsureColors(
+    lastLb.map(function (entry) {
+      return entry.uid;
+    }),
+  );
   $('#replay-title').html(parts.join(' &gt; '));
   $('#replay-title').css('display', '');
 }
@@ -269,13 +279,16 @@ function initReplayStats() {
   replay_stats_groups = buildReplayStatsGroups();
   if (!replay_stats_groups.length) return;
   var legend = [];
+  var legendTeamGame = fogTeamGame(replay_data.initial.leaderboard || []);
   for (var i = 0; i < replay_stats_groups.length; i++) {
     var g = replay_stats_groups[i];
+    // 非组队局图例是用户名：统一用户名组件；组队局图例是队名「队伍 N」，保持纯文本。
+    var labelCell = legendTeamGame ? htmlescape(g.label) : usernameLinkHtml(g.label);
     legend.push(
       '<span class="replay-stats-legend-item"><span class="inline-color-block c' +
         g.colorId +
         '"></span>' +
-        htmlescape(g.label) +
+        labelCell +
         '</span>',
     );
   }
