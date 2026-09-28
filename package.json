@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.42.2",
+  "version": "1.42.3",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -42,7 +42,7 @@
     "marked": "^18.0.14",
     "sanitize-html": "^2.17.7",
     "socket.io": "^4.8.4",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
