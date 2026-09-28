@@ -233,7 +233,7 @@ function createFrontline(state, params = {}) {
         else if (!mazeExpand && !behindArmy && localRatio >= exchangeNeed && left > src.adj) { accepted = true; exchange = true; }
       }
       if (!accepted) continue;
-      const value = isCrown ? 900 : isCity ? 500 : kind === 'enemy' ? 62 : 26;
+      const value = isCrown ? 900 : isCity ? 500 : kind === 'enemy' ? 62 : p.paintValue;
       const kill = kind === 'neutral' ? 0 : Math.min(D, 90) * 1.1;
       const exposureScore = Math.max(-160, Math.min(160, exposure * 0.45));
       const rear = ctx.frontDistance[a];
@@ -252,8 +252,13 @@ function createFrontline(state, params = {}) {
       let directionScore = towardCore * p.pushDirectionWeight;
       if (kind === 'neutral' && towardCore <= 0 && coreTo >= 0)
         directionScore -= Math.ceil(p.flankPaintPenalty * Math.min(1, coreTo / Math.max(1, p.paintDiscardDist)));
-      const score = value + kill + exposureScore + supportBonus + widenBonus - lingerPenalty + directionScore +
+      let score = value + kill + exposureScore + supportBonus + widenBonus - lingerPenalty + directionScore +
         Math.min(arrive, 250) * 0.3 + Math.min(left, 400) * 0.05 - (exchange ? 30 : 0);
+      // ── 薄土不值钱（用户 2026-09-29 硬方针）──────────────────────────────
+      // 1-2 兵守不住、一割就没的边缘涂色格期望收益为负：占领驻军越薄扣分越多，
+      // 扣到负数后 choose() 会跳过该候选（操作槽位让给建造/集结/截断）。
+      if (kind === 'neutral' && arrive < p.paintThinArrive)
+        score -= Math.ceil((p.paintThinArrive - arrive) * p.paintThinPenalty);
       const reason = isCrown ? `攻冠：出兵${push}，留守${left}`
         : isCity ? `攻指挥所：出兵${push}，留守${left}`
           : exchange ? `边界交换：出兵${push}，留守${left}`
@@ -356,6 +361,9 @@ function createFrontline(state, params = {}) {
       let best = null;
       for (const { a, b } of candidates.slice(0, 128)) {
         const value = evaluate({ x: Math.floor(a / m), y: a % m, dx: Math.floor(b / m), dy: b % m, mode: 1 });
+        // 薄土涂色期望收益为负时不执行（用户 2026-09-29 硬方针「薄土不值钱」）——
+        // 操作槽位让给建造/筹资/集结/截断，而不是把 1-2 兵撒到守不住的边缘格上。
+        if (value && value.kind === 'neutral' && value.score < 0) continue;
         if (value && (!best || value.score > best.score)) best = value;
       }
       // 合力第一击落地 → 登记斩首锁定，下回合起 choose 优先连续攻击同一皇冠。

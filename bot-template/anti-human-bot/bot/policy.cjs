@@ -147,6 +147,10 @@ function decide(state, params, guard) {
   const cutoffAction = cutoff ? { kind: 'attack', ...cutoff.move } : null;
   const advanceWinsBuilding = advance && state.grid[advance.dx * state.m + advance.dy] > 50 &&
     state.grid[advance.dx * state.m + advance.dy] < 150;
+  // 纯涂色推进（目标是无主中立格）：截断/建造/筹资都压过它（用户 2026-09-29 硬方针：
+  // 资源优先供给截断、产能与集结，只有没事干时才放开涂色）。
+  const ownerOf = (v) => (v > 0 && v < 200 ? v % 50 : 0);
+  const advanceIsPaint = Boolean(advance) && ownerOf(state.grid[advance.dx * state.m + advance.dy]) === 0;
   // 背水一战最高优先（学自 _E_ 的胜局：rjWd t302 / jlms t346 / bIEK t514，
   // 400+ 兵堆压向皇冠的 5+ tick 里，旧策略因「补不齐缺口」零防守反应，
   // 照常筹资/建设/补给，皇冠被一击斩首）。补不齐也要每 tick 送最强一路——
@@ -229,13 +233,28 @@ function decide(state, params, guard) {
   // 只有当对手兵力不弱于我们（我们不是靠滚雪球赢的那一方）才值得让出进攻 tick 换产能；
   // 碾压局继续全速进攻，不做无谓的经济让位。
   const contested = race ? race.bestArmy >= 0.8 * Math.max(1, race.myArmy) : false;
+  // 「竞赛追赶做实」（用户 2026-09-29 硬方针）：产能落后时，只要本 tick 的推进
+  // 不过是中立涂色，经济就压过它——不再只让出 1/economyShareTicks 的 tick。
   const economyUrgent = Boolean(race?.behind) && state.turn >= 60 &&
-    (!canAdvance || (economyShare > 0 && contested && state.turn % economyShare === 0));
+    (!canAdvance || advanceIsPaint || (economyShare > 0 && contested && state.turn % economyShare === 0));
   if (economyUrgent && !advanceWinsBuilding) {
     const buildNow = chooseBuild(state, null, constrained);
     if (buildNow) return take({ kind: 'build', ...buildNow }, 'economy-emergency-build');
     const fund = front ? attack(chooseLogistics(state, null, null, { ...constrained, economyOnly: true })) : null;
     if (allowed(fund)) return take(fund, 'economy-emergency-fund');
+  }
+  // 涂色让位（用户 2026-09-29 硬方针）：本 tick 的推进只是中立涂色时——
+  //   1. 非紧急截断（敌深入有脖子可掐）压过涂色，「该截还是要截」；
+  //      （确证根因：旧调度里非紧急截断只在 !canAdvance 时执行，而只要有涂色可扩
+  //      canAdvance 恒真，截断方案被无限期搁置、涂色每 tick 抢先。）
+  //   2. 可负担的建造（chooseBuild 自带产能目标/评分门闸，产能富余时自然返回 null）
+  //      与经济筹资压过涂色——建造节奏对标对手，产能不落后太多才放开涂色。
+  if (canAdvance && advanceIsPaint && !batchHoldsAdvance) {
+    if (allowed(cutoffAction)) return take(cutoffAction, 'cutoff');
+    const buildNow = chooseBuild(state, null, constrained);
+    if (buildNow) return take({ kind: 'build', ...buildNow }, 'build-over-paint');
+    const fund = front ? attack(chooseLogistics(state, null, null, { ...constrained, economyOnly: true })) : null;
+    if (allowed(fund)) return take(fund, 'economy-fund-over-paint');
   }
   if (canAdvance && !batchHoldsAdvance) return take(advance, 'advance');
   const rescueMove = chooseRescue(state, constrained);
