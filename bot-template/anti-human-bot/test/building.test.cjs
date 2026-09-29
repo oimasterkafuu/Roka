@@ -18,13 +18,11 @@ function home({ mine = 1, foe = 2, foeCrowns = 1, turn = 400 } = {}) {
 const at = (x, y) => x * 10 + y;
 const land = (state) => state.grid.filter((v) => v > 0 && v < 200 && v % 50 === state.playerId).length;
 
-test('安全腹地集满建造资金（分档阈值 100）就建指挥所', () => {
+test('安全腹地攒够启动资金就建指挥所', () => {
   const s = home();
-  s.army[at(1, 5)] = 99;
-  assert.equal(chooseBuild(s, null, {}), null, '大后方阈值 100：99 兵继续集，不零敲碎打');
-  s.army[at(1, 5)] = 100;
+  s.army[at(1, 5)] = 90;
   const build = chooseBuild(s, null, {});
-  assert.ok(build, '100 兵已集满，应开工');
+  assert.ok(build, '应有建造');
   assert.equal(build.op, 'b');
   assert.deepEqual([build.x, build.y], [1, 5]);
 });
@@ -54,9 +52,9 @@ test('升级现有指挥所优先于新建', () => {
   assert.deepEqual([build.x, build.y], [1, 5]);
 });
 
-test('建造竞赛落后时允许并行开第二个工地（阈值仍按位置分档）', () => {
+test('建造竞赛落后时放宽门槛并允许并行开第二个工地', () => {
   const s = home({ foeCrowns: 4 });
-  s.army[at(1, 5)] = 110;             // 位置分档阈值 100 已集满
+  s.army[at(1, 5)] = 60;              // 正常门槛下不够（50+14+预备）
   s.grid[at(1, 6)] = s.playerId + 50; // 已有工地
   s.army[at(1, 6)] = 20;
   const build = chooseBuild(s, null, {});
@@ -87,28 +85,29 @@ test('贴着重兵的格子会让位给后方工地', () => {
   s.army[3 * 10 + 5] = 200;
   s.grid[4 * 10 + 5] = 2;          // 正对门口的敌堆
   s.army[4 * 10 + 5] = 200;
-  s.army[at(1, 5)] = 160;          // 后方资金（墙开后敌距 3 格，分档阈值 150）
+  s.army[at(1, 5)] = 120;          // 后方同样有资金
   const build = chooseBuild(s, null, {});
   assert.ok(build, '后方应有工地');
   assert.ok(build.x < 3, `应选后方而不是门口，实际 (${build.x},${build.y})`);
 });
 
-// ── 建造阈值分级（用户 2026-09-27 硬方针）：一次性集满再造，按位置分档 ──────
+// ── 建造精确性：触发线 51/101，满足即建，不再叠加策略余量 ────────────────
 
-test('兵力51不再立即建造：一次性集满约100再开工', () => {
+test('兵力恰好51立即建造，不等任何增援', () => {
   const s = home();
   s.army[at(1, 5)] = 51;
-  assert.equal(chooseBuild(s, null, {}), null, '51 只够开工一次，继续集到 100');
+  const build = chooseBuild(s, null, {});
+  assert.ok(build, '51 兵已满足门槛，应当即开工');
+  assert.equal(build.op, 'b');
+  assert.deepEqual([build.x, build.y], [1, 5]);
 });
 
-test('兵力52不等增援但也不开工：集满100即建，不多等一兵', () => {
+test('兵力52不再等额外增援（旧逻辑会要求 50+premium+reserve）', () => {
   const s = home();
   s.army[at(1, 5)] = 52;
-  assert.equal(chooseBuild(s, null, {}), null, '52 仍在大后方阈值 100 之下');
-  s.army[at(1, 5)] = 100;
   s.army[at(1, 6)] = 30; // 附近有可调的增援，但不应该等它到位
   const build = chooseBuild(s, null, {});
-  assert.ok(build, '集满 100 应立即开工（100 兵可连续建造两次）');
+  assert.ok(build, '52 兵不应再等增援');
   assert.equal(build.op, 'b');
 });
 
@@ -134,7 +133,7 @@ test('贴脸敌军能立即反超时不建（防守检查，不是经济余量�
   s.army[3 * 10 + 5] = 60;         // 门口 60 兵：建完只剩 10
   s.grid[4 * 10 + 5] = 2;
   s.army[4 * 10 + 5] = 50;         // 贴脸敌 50 兵能立刻夺回
-  s.army[at(1, 5)] = 150;          // 后方格集满分档资金（墙开后敌距 3，阈值 150）
+  s.army[at(1, 5)] = 51;           // 后方安全格刚好够
   const build = chooseBuild(s, null, {});
   assert.ok(build, '后方安全格应建');
   assert.ok(build.x < 3, `应选后方安全格，实际 (${build.x},${build.y})`);

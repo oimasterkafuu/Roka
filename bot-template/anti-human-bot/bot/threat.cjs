@@ -99,22 +99,6 @@ function createContext(state, params = {}) {
     for (let h = 0; h < queue.length; h++) for (const j of neighbors[queue[h]])
       if (enemyDistance[j] < 0 && passable(j)) { enemyDistance[j] = enemyDistance[queue[h]] + 1; queue.push(j); }
   }
-  // 距离场：到最近「敌方核心」（已知敌皇冠）的跳数，用于推进方向纪律——
-  // 涂色/推进评分以此衡量「是否朝敌人家方向」。没有已知敌皇冠时退化为
-  // 最近敌指挥所，再退化为最近敌格（enemyDistance）；全不可见时为 -1。
-  const crownDistance = new Int32Array(size).fill(-1);
-  {
-    let queue = [];
-    for (let i = 0; i < size; i++) if (hostile(i) && grid[i] === owners[i] + 100) queue.push(i);
-    if (!queue.length) for (let i = 0; i < size; i++) if (hostile(i) && grid[i] === owners[i] + 50) queue.push(i);
-    if (queue.length) {
-      for (const i of queue) crownDistance[i] = 0;
-      for (let h = 0; h < queue.length; h++) for (const j of neighbors[queue[h]])
-        if (crownDistance[j] < 0 && passable(j)) { crownDistance[j] = crownDistance[queue[h]] + 1; queue.push(j); }
-    } else {
-      for (let i = 0; i < size; i++) crownDistance[i] = enemyDistance[i];
-    }
-  }
 
   const options = (o) => ({
     radius: Number.isFinite(o?.radius) ? Math.max(0, Math.min(4, Math.floor(o.radius))) : p.threatRadius,
@@ -227,7 +211,7 @@ function createContext(state, params = {}) {
   const ctx = {
     state, n, m, size, turn, me, params: p, owners, grid, army, known, neighbors,
     ownerOf, allied, knownAt: (i) => known[i] === 1, passable, isolated, own, hostile, friendly, unknownNear,
-    count, growth, anchorDistance, frontDistance, enemyDistance, crownDistance,
+    count, growth, anchorDistance, frontDistance, enemyDistance,
     pressure, support, friendlyAdjacent, reinforcement, race, factions: all, mazeLike,
   };
   fieldCache.set(state, ctx);

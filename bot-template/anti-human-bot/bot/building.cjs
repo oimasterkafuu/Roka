@@ -95,12 +95,8 @@ function chooseBuild(state, move, params = {}) {
     land++;
     if (grid[i] === me + 100) crowns++;
     if (grid[i] === me + 50) cities++;
-    // 触发线分档（用户 2026-09-27 硬方针「建造阈值分级」）：升级指挥所维持 51
-    // （引擎硬门槛 50 + 至少留 1 兵——钱已经投在工地上，到位即升）；新建指挥所
-    // 按位置分档综合研判（architecture.buildFund：大后方约 100 一次集满、可连续
-    // 建造两次，前线约 150 留足余量，中间按危险度过渡，被打穿的绝境回落 100）。
-    if (grid[i] === me + 50 ? count(i) >= 51 : grid[i] === me && count(i) >= context.buildFund(i))
-      candidates.push(i);
+    // 触发线 51（引擎硬门槛 50 + 至少留 1 兵），满足即进候选，不再等增援凑余量。
+    if ((grid[i] === me || grid[i] === me + 50) && count(i) >= 51) candidates.push(i);
   }
   const target = crownTarget(land, turn, p, state);
   const unfinished = [];
