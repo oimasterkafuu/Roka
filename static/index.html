@@ -479,7 +479,7 @@
               .appendTo($tr);
             $('<td></td>').text(item.turn).appendTo($tr);
             // 名次列：有队伍分组（组队局归档写入 teams）时同队合并成一组——
-            // 组内 ', '、组间 ' › '、组序为终局队伍名次序，每组带队伍配色色块；
+            // 组内 ', '、组间 ' › '、组序为终局队伍名次序（不展示玩家配色色块）；
             // 旧数据无 teams 字段时回退为 rank 平铺（每人一组，天然兼容非组队局）。
             var $rankTd = $('<td></td>').appendTo($tr);
             // 名次列成员名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进回放。
@@ -487,7 +487,6 @@
             if (Array.isArray(item.teams) && item.teams.length) {
               item.teams.forEach(function (team, index) {
                 if (index > 0) $rankTd.append(' › ');
-                $('<span class="inline-color-block c' + (team.color || 0) + '"></span>').appendTo($rankTd);
                 (team.members || []).forEach(function (member, mi) {
                   if (mi > 0) $rankTd.append(', ');
                   usernameLink(member, null, null, linkOpts).appendTo($rankTd);

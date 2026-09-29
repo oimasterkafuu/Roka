@@ -279,10 +279,11 @@ function update(data) {
     }),
   );
   var th = '<tr><td>队伍</td><td>玩家</td><td>兵力</td><td>领土</td></tr>';
-  // 迷雾局的观战/回放：组队局名称列显示队伍名（与视角 tabs 同一套规则，见 core-globals.js）。
-  var fogTeamGameView = fogObserverView() && fogTeamGame(lb);
-  // 组队局回放（非迷雾视角）：团队合并展示——每队一个整体条目显示团队总兵力并
-  // 按总兵力排序，队内成员按兵力排序紧随其后；迷雾组队局仍以队名显示为准，不合并。
+  // 迷雾局的实时观战：组队局名称列显示队伍名（与视角 tabs 同一套规则，见 core-globals.js）。
+  // 回放为全知复盘，名称遮罩只作用于实时观战，回放一律显示真实用户名。
+  var fogTeamGameView = !is_replay && fogObserverView() && fogTeamGame(lb);
+  // 组队局回放：团队合并展示——每队一个整体条目显示团队总兵力并
+  // 按总兵力排序，队内成员按兵力排序紧随其后（成员行显示真实用户名）。
   var mergeTeams = is_replay && !fogTeamGameView && fogTeamGame(lb);
   if (mergeTeams) {
     var teamGroups = [];
@@ -346,10 +347,10 @@ function update(data) {
   } else {
     for (var i = 0; i < lb.length; i++) {
       // 名字列：统一用户名组件（rating 颜色 + 点击跳主页）；td 保留 .cN 作局内配色色块。
-      // 迷雾组队局观战/回放视角显示队名（非用户名），保持纯文本。
+      // 迷雾组队局的实时观战显示队名（非用户名），保持纯文本；回放一律显示真实用户名。
       var nameCell = fogTeamGameView
         ? htmlescape(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView))
-        : usernameLinkHtml(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView));
+        : usernameLinkHtml(lb[i].uid);
       th +=
         '<tr class="' +
         lb[i].class_ +
