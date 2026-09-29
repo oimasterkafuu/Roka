@@ -7,8 +7,13 @@ var replay_stats_groups = null;
 // 当前帧游标位置对应的缓存画布（坐标轴与曲线只需画一次，逐帧只补游标竖线）。
 var replay_stats_base = null;
 var replay_stats_seeking = false;
+// 颜色未就绪时的底图重绘重试计数（见 drawReplayStatsBase）。
+var replay_stats_color_retry = 0;
 
 // 读取地图格子的玩家配色（map.css 的 .c1~.c17），供 canvas 使用。
+// 注意：回放数据可能先于样式表到达（fetch 与 CSS 并行），此时 .cN 规则尚未生效，
+// getComputedStyle 返回透明色——透明结果绝不写入缓存（否则底图曲线永久不可见），
+// 由 drawReplayStatsBase 的颜色就绪检查稍后重试。
 var replay_color_cache = {};
 function replayPlayerColor(id) {
   if (replay_color_cache[id]) return replay_color_cache[id];
@@ -17,8 +22,11 @@ function replayPlayerColor(id) {
     .appendTo('body');
   var color = el.css('background-color');
   el.remove();
-  replay_color_cache[id] = color || '#253042';
-  return replay_color_cache[id];
+  if (!color || color == 'transparent' || color == 'rgba(0, 0, 0, 0)') {
+    return '#253042';
+  }
+  replay_color_cache[id] = color;
+  return color;
 }
 
 // 回放页标题区：同队成员逗号分隔、队伍之间「>」分隔（如 alice, bob > carol）。
@@ -40,25 +48,14 @@ function initReplayTitle() {
   var parts = [];
   for (var i = 0; i < groups.length; i++) {
     var g = groups[i];
-    var colorId = g.members[0].id;
-    for (var j = 1; j < g.members.length; j++) {
-      colorId = Math.min(colorId, g.members[j].id);
-    }
     if (teamGame && fogView) {
-      parts.push(
-        '<span class="inline-color-block c' + colorId + '"></span>' + htmlescape(fogTeamName(g.team)),
-      );
+      parts.push(htmlescape(fogTeamName(g.team)));
       continue;
     }
     var names = [];
     for (var j = 0; j < g.members.length; j++) {
-      // 成员名：统一用户名组件（rating 颜色 + 点击跳主页）；色块保留 .cN 局内配色。
-      names.push(
-        '<span class="inline-color-block c' +
-          g.members[j].id +
-          '"></span>' +
-          usernameLinkHtml(g.members[j].uid),
-      );
+      // 成员名：统一用户名组件（rating 颜色 + 点击跳主页），不展示玩家配色色块。
+      names.push(usernameLinkHtml(g.members[j].uid));
     }
     parts.push(names.join(', '));
   }
@@ -147,6 +144,29 @@ function drawReplayStatsBase() {
     canvas.style.width = cssW + 'px';
     canvas.style.height = cssH + 'px';
   }
+  var frames = replay_data.patches.length + 1;
+  if (frames < 2 || !replay_stats_groups.length) return;
+  var i, g;
+  // 颜色就绪检查：样式表（map.css 的 .cN）未加载完时绘制会得到全 fallback 色底图，
+  // 此时放弃本次绘制并稍后重试（replayPlayerColor 对透明结果不入缓存，重试即真色）；
+  // 检查须先于底图重建，避免未就绪时清掉旧底图。
+  for (i = 0; i < replay_stats_groups.length; i++) {
+    replayPlayerColor(replay_stats_groups[i].colorId);
+  }
+  var colorsReady = replay_stats_groups.every(function (grp) {
+    return Boolean(replay_color_cache[grp.colorId]);
+  });
+  if (!colorsReady) {
+    replay_stats_color_retry += 1;
+    if (replay_stats_color_retry <= 50) {
+      setTimeout(function () {
+        drawReplayStatsBase();
+        refreshReplayStatsFrame();
+      }, 100);
+    }
+    return;
+  }
+  replay_stats_color_retry = 0;
   if (!replay_stats_base) replay_stats_base = document.createElement('canvas');
   var base = replay_stats_base;
   base.width = canvas.width;
@@ -154,13 +174,10 @@ function drawReplayStatsBase() {
   var ctx = base.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
-  var frames = replay_data.patches.length + 1;
-  if (frames < 2 || !replay_stats_groups.length) return;
   var metric = replayStatsMetric();
   // 平滑半径随对局长度缩放（约每 120 帧 1 帧，上限 15），短局不动。
   var radius = Math.max(0, Math.min(15, Math.round(frames / 120)));
   var maxVal = 1;
-  var i, g;
   for (i = 0; i < replay_stats_groups.length; i++) {
     g = replay_stats_groups[i];
     g.smooth = smoothSeries(g[metric], radius);
