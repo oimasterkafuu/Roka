@@ -34,7 +34,7 @@
   "homepage": "https://github.com/oimasterkafuu/Roka#readme",
   "dependencies": {
     "@fastify/rate-limit": "^11.2.0",
-    "@fastify/static": "^10.1.4",
+    "@fastify/static": "^10.1.5",
     "@napi-rs/canvas": "^1.0.9",
     "fastify": "^5.12.5",
     "jsonwebtoken": "^9.0.3",
@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.3",
     "@types/sanitize-html": "^2.16.1",
     "@typescript-eslint/eslint-plugin": "^8.70.1",
     "@typescript-eslint/parser": "^8.70.1",
