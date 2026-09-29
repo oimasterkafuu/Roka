@@ -49,34 +49,6 @@ const DEFAULT_PARAMS = Object.freeze({
   // 至少这么远才落新指挥所）；anchorBuildEvery 锚点建造节奏（每 N tick 一次，
   // 有截断风险时不受节奏限制）。
   pushFrontWidth: 2, anchorChainGap: 3, anchorBuildEvery: 4,
-  // 同 tick 预锚 + 腾出格补锚 + 深入决心（2026-09-27 第二轮，用户硬方针）：
-  // preemptAnchorMinArmy 触发预锚的大堆最小兵力（走廊可能被 1 tick 切断且大堆达到
-  // 该规模时，本 tick 大堆不动、原地起指挥所，不受锚点链节奏/间距限制）；
-  // preemptAnchorWaitTicks 钱不够 51 时原地等凑兵的上限（等不到放弃预锚改正常推进）；
-  // campaignResolveTicks 深入决心保持窗口（已出击大堆锁定同一皇冠方向的 tick 数）；
-  // campaignResolveMargin 换方向所需的评分差距（另一方向好出这么多才解锁）。
-  preemptAnchorMinArmy: 120, preemptAnchorWaitTicks: 2,
-  campaignResolveTicks: 8, campaignResolveMargin: 3,
-  // 跳板推进常态化（2026-09-28 用户硬方针）：深入长线推进的大堆把「走一步 → 身后
-  // 腾出格补一座指挥所」作为默认节奏，不再只在切断风险时触发。
-  // leapfrogMinDepth 深入门槛：rally 距最近己方皇冠（走己方格，跳板指挥所不计——
-  // 否则锚链一成型就把自己关掉）达到该跳数才算「深入敌境/长线推进」，家门口短距离
-  // 推进不每步一锚；leapfrogChainGap 常态化锚链间距（1 = 走一步搭一个）；
-  // leapfrogWaitTicks 腾出格兵不够 51 时原地等凑钱的上限，等不到放弃这一格继续走。
-  // 常态化期间大堆不用浓缩突击 mode2（全冲只留 1 兵，永远凑不出建锚的 51），
-  // 改走 mode0 智能分兵让身后留下余兵补锚。
-  leapfrogMinDepth: 4, leapfrogChainGap: 1, leapfrogWaitTicks: 2,
-  // 敌方跳板纵队拦截（2026-09-28 用户硬方针）：敌格连通块深入我控区（2 跳内我方格
-  // 明显占优、离我方锚点 columnRange 跳内）≥columnMinDepth 格且头部近 tick 仍在
-  // 推进时，主动攻击——优先掐链（占住纵队与敌主力间的脖子，冻住深入段 ≥columnMinMass
-  // 敌兵才出手，连通口径与 cutoff 相同），掐不动侧击纵队腰部。
-  columnMinDepth: 4, columnMinMass: 30, columnRange: 10,
-  // 攻冠兵力三级递升（2026-09-28 用户硬方针「三」）：半兵 → 智能全兵（智能
-  // 分兵合力口径：就近合力、不从过远格硬调、留守/防御义务照算）→ 真全兵，
-  // 把「半兵/全兵」二值跳变细化成渐进加码，减少全家梭哈。
-  // crownSmartMargin / crownFullMargin：智能口径 / 真全兵口径的合力必须压过
-  // 皇冠守军的余量（引擎兵力相等不占格，至少 +1）。
-  crownSmartMargin: 1, crownFullMargin: 1,
   // maze 拓展纪律（用户 2026-09-27 硬方针）：已知格中山体占比达到该阈值判为迷宫图
   // （maze 生成器约 0.45–0.55，random ≤0.24，群岛/地中海以沼泽为主）。
   mazeMountainRatio: 0.3,
@@ -88,49 +60,6 @@ const DEFAULT_PARAMS = Object.freeze({
   // 上限 lateMaxCrowns）。
   fortressPhaseTurn: 60, lateTerritoryPerCrown: 9, lateMaxCrowns: 12,
   lateSkinMin: 10, lateAnchorRadius: 2,
-  // 推进方向纪律（用户 2026-09-27 硬方针）：不大范围涂色——目标评分向敌方
-  // 皇冠/核心方向强倾斜（每靠近核心 1 格 +pushDirectionWeight）；与进攻主线
-  // 无关的侧翼中立涂色格按距敌核心远近降权（paintDiscardDist 格以外满额
-  // flankPaintPenalty，以内线性衰减到 0）：离我家远、离敌家也远的中间地带
-  // 最不值钱，兵力向敌人家附近逼近而不是横向摊面积。
-  pushDirectionWeight: 15, flankPaintPenalty: 40, paintDiscardDist: 8,
-  // 建造阈值分级（用户 2026-09-27 硬方针，保留「综合研判」机制，按位置分档）：
-  // 位置判断不按出生点，按「距最近敌方压力的跳数 + 局部威胁场」现场评估。
-  // 大后方 rearBuildFund=100（一次集满约 100 再造，可连续建造两次：指挥所+升级）；
-  // 前线 frontBuildFund=150（前线建造风险高，留足防守/思考余量）；中间档按危险度
-  // 线性过渡：敌距 ≤buildFrontDist 记满分前线、≥buildRearDist 记大后方，威胁场
-  // 满档 buildFundThreat；威胁极大（≥buildDesperateThreat，敌人已打穿到腹地）时
-  // 回落大后方阈值——都打到大后方了没别的选择，必须尽快建造。
-  rearBuildFund: 100, frontBuildFund: 150, buildFrontDist: 5, buildRearDist: 12,
-  buildFundThreat: 60, buildDesperateThreat: 200,
-  // 前线迁都（用户 2026-09-28 回调：后方优先，缓缓前推）：前线区域（敌距
-  // <buildRearDist）内威胁场 ≤frontStableThreat 且我方局部兵力
-  // ≥frontStableMargin 倍于威胁的格子算「稳定前线」——产能富余（后方皇冠群
-  // 成型，crowns ≥ frontBaseMinCrowns）后，稳定前线格才与大后方安全格同等
-  // 可作工地并获 frontBaseBonus 选址加成（越靠前加成越多），把主要兵源、
-  // 新皇冠缓缓聚集到前线；产能不足时工地权重回到后方安全区。
-  frontStableThreat: 12, frontStableMargin: 2, frontBaseBonus: 10, frontBaseMinCrowns: 3,
-  // 开局提速（用户 2026-09-28 回调）：前 earlyBuildTurns 个 tick 内阈值分档
-  // 整体后移——buildFrontDist/buildRearDist 按 earlyDistScale 收缩（开局
-  // 「中间档」不抬高到拖慢建造）、前线阈值按 earlyFrontFundScale 下调，
-  // 保证开局就用得上、用得早；升级指挥所仍维持 51。
-  earlyBuildTurns: 60, earlyDistScale: 0.6, earlyFrontFundScale: 0.66,
-  // 集兵树形化（用户 2026-09-27 硬方针）：缺口 ≥bulkPullMin 时进入树形汇聚调度——
-  // 最远的子树先动（逐级向目标汇聚，远端与近端同时在路上，避免一条链式长跑）；
-  // 深后方（≥supplyTreeDepth 跳）大堆一次性整批拉出，不被近源小股插队。
-  supplyTreeDepth: 4, bulkPullMin: 100,
-  // 涂色降权（用户 2026-09-29 硬方针「薄土不值钱」）：中立涂色格基础价值
-  // （paintValue，大幅低于攻敌格 62——涂色让位建造/集结/截断）；占领驻军
-  // 低于 paintThinArrive 的薄土涂色按每差 1 兵扣 paintThinPenalty 分，
-  // 扣到负分的候选在 frontline.choose() 里直接跳过（1-2 兵的边缘格守不住、
-  // 一割就没，期望收益为负，不执行）。
-  paintValue: 12, paintThinArrive: 4, paintThinPenalty: 6,
-  // 身后下刀（用户 2026-09-29 追加方针）：敌方单纯插入我方腹地（非跳板链）时，
-  // 优先从敌块「身后」（朝向其老家/主力的连通方向）截断，让插入段孤死，而不是
-  // 迎头硬拼。入侵截断与纵队掐链的脖子候选按「比深入块更靠敌锚点一侧」每格
-  // +cutoffBehindBonus 加权（压过 danger 的 12/格，确保同样切得断时选身后刀）；
-  // 迎头撞（column 短促自耗分支）只在确实没有后方切断点时才用（policy 层让位）。
-  cutoffBehindBonus: 14,
 
 });
 const PARAM_RANGES = Object.freeze({
@@ -163,22 +92,8 @@ const PARAM_RANGES = Object.freeze({
   surrenderHopelessArmyRatio: [3, 60],
   surrenderTeaseTicks: [60, 3000], surrenderTeaseNearCrownTicks: [5, 500], surrenderEnemyActiveTicks: [20, 500],
   pushFrontWidth: [1, 4], anchorChainGap: [2, 8], anchorBuildEvery: [2, 12], mazeMountainRatio: [0.15, 0.6],
-  preemptAnchorMinArmy: [40, 2000], preemptAnchorWaitTicks: [0, 8],
-  campaignResolveTicks: [0, 40], campaignResolveMargin: [0, 20],
-  leapfrogMinDepth: [2, 30], leapfrogChainGap: [1, 8], leapfrogWaitTicks: [0, 8],
-  columnMinDepth: [2, 12], columnMinMass: [0, 2000], columnRange: [4, 30],
-  crownSmartMargin: [0, 40], crownFullMargin: [0, 40],
   fortressPhaseTurn: [40, 600], lateTerritoryPerCrown: [4, 30], lateMaxCrowns: [3, 40],
   lateSkinMin: [2, 60], lateAnchorRadius: [1, 4],
-  pushDirectionWeight: [0, 60], flankPaintPenalty: [0, 200], paintDiscardDist: [2, 30],
-  rearBuildFund: [51, 300], frontBuildFund: [51, 400], buildFrontDist: [2, 12], buildRearDist: [4, 30],
-  buildFundThreat: [10, 400], buildDesperateThreat: [50, 2000],
-  frontStableThreat: [0, 200], frontStableMargin: [0, 6], frontBaseBonus: [0, 200],
-  frontBaseMinCrowns: [0, 20],
-  earlyBuildTurns: [0, 200], earlyDistScale: [0.2, 1], earlyFrontFundScale: [0.2, 1],
-  supplyTreeDepth: [2, 12], bulkPullMin: [20, 1000],
-  paintValue: [0, 100], paintThinArrive: [0, 60], paintThinPenalty: [0, 100],
-  cutoffBehindBonus: [0, 60],
 
 });
 function resolveParams(params = {}) {

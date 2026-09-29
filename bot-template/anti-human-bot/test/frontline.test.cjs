@@ -112,25 +112,24 @@ test('目标不可见时拒绝，绝不凭雾中数值进攻', () => {
   assert.equal(createFrontline(s).assess(move), null);
 });
 
-test('相邻敌皇冠在目标周围干净时智能全兵拿下', () => {
+test('相邻敌皇冠在目标周围干净时全冲拿下', () => {
   const s = board(); s.turn = 600;
   put(s, 16, 1, 200); put(s, 17, 102, 100);
   const f = createFrontline(s);
   const result = f.assess(move);
   assert.ok(result);
   assert.match(result.reason, /斩首|攻冠/);
-  assert.equal(result.mode, 0); // 半兵 99 推不下 100，智能全兵 199 够（三级递升）
+  assert.equal(result.mode, 2); // 全兵推
 });
 
 test('目标旁边有巨量敌军照样推皇冠（2026-09-27 斩首方针）', () => {
   // 旧版把旁边 10000 敌大堆的同 tick 增援算进守军而拒攻；新方针：
-  // 推皇冠不评估对方防守强弱——当前回合推得下来就推。
-  // 2026-09-28 方针「三」：三级递升——半兵（999 对 300）推得动就只出半兵。
+  // 推皇冠不评估对方防守强弱——当前回合推得下来就直接全兵推。
   const s = board(); s.turn = 600;
   put(s, 16, 1, 2000); put(s, 17, 102, 300); put(s, 18, 2, 10000); // 10000 贴着目标
   const result = createFrontline(s).assess(move);
   assert.ok(result, '能推就必须推，不管旁边有什么敌大堆');
-  assert.equal(result.mode, 1, '半兵推得下就只出半兵');
+  assert.equal(result.mode, 2);
   assert.match(result.reason, /斩首/);
 });
 

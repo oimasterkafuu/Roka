@@ -12,7 +12,6 @@ const { chooseRescue } = require('./rescue.cjs');
 const { createMovementGuard } = require('./movement-guard.cjs');
 const { createFrontline } = require('./frontline.cjs');
 const { chooseCutoff, chooseNeckGuard } = require('./cutoff.cjs');
-const { chooseColumnStrike } = require('./column.cjs');
 const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
 
@@ -30,8 +29,6 @@ function guaranteedAction(state, ctx, params) {
   const blocked = (a, b) => params.blockedEdges?.has(`${a}:${b}`);
   const coord = (i) => ({ x: Math.floor(i / ctx.m), y: i % ctx.m });
   // 1) 后方建皇冠：不贴敌的安全格，攒够 50 兵就开工（指挥所先升级，其次新建）。
-  //    开局提速（用户 2026-09-28 回调）：前 earlyBuildTurns 个 tick 内不贴敌
-  //    即开工，不让「大后方 100 的档位」拖慢第一座建造——开局就用得上、用得早。
   let foundSite = -1, newSite = -1;
   for (let i = 0; i < size; i++) {
     if (!own(i) || count(i) < 50) continue;
@@ -147,10 +144,6 @@ function decide(state, params, guard) {
   const cutoffAction = cutoff ? { kind: 'attack', ...cutoff.move } : null;
   const advanceWinsBuilding = advance && state.grid[advance.dx * state.m + advance.dy] > 50 &&
     state.grid[advance.dx * state.m + advance.dy] < 150;
-  // 纯涂色推进（目标是无主中立格）：截断/建造/筹资都压过它（用户 2026-09-29 硬方针：
-  // 资源优先供给截断、产能与集结，只有没事干时才放开涂色）。
-  const ownerOf = (v) => (v > 0 && v < 200 ? v % 50 : 0);
-  const advanceIsPaint = Boolean(advance) && ownerOf(state.grid[advance.dx * state.m + advance.dy]) === 0;
   // 背水一战最高优先（学自 _E_ 的胜局：rjWd t302 / jlms t346 / bIEK t514，
   // 400+ 兵堆压向皇冠的 5+ tick 里，旧策略因「补不齐缺口」零防守反应，
   // 照常筹资/建设/补给，皇冠被一击斩首）。补不齐也要每 tick 送最强一路——
@@ -160,38 +153,6 @@ function decide(state, params, guard) {
     const stand = attack(defense.move, true);
     if (allowed(stand, true)) return take(stand, 'defense-last-stand');
   }
-  // 敌方跳板纵队拦截（2026-09-28 用户硬方针，主动防御层）：敌方深入我方腹地且
-  // 仍在推进的跳板/兵柱纵队，优先掐链、其次侧击腰部，不坐等它走到皇冠再背水。
-  // 优先级：背水一战（上面）之下、自家预锚/截断/脖子纪律/推进之上；「本 tick 能
-  // 拆敌方皇冠/指挥所」的斩首推进仍例外。皇冠告急（urgent/lastStand）或家里
-  // 多路告急（≥2 个敌阵营同时在威胁）时不为拦纵队抽空防守；defense.imminent
-  // 的「提前截击」不算告急——那正是该掐链而不是被动等的场面。
-  const columnCrisis = defense && (defense.urgent || defense.lastStand || defense.threatOwners?.size >= 2);
-  if (!advanceWinsBuilding && !columnCrisis) {
-    const column = chooseColumnStrike(state, constrained);
-    if (column) {
-      // 身后下刀优先（2026-09-29 用户追加方针）：迎头撞（短促自耗型）只在确实
-      // 没有后方切断点时才用——截断模块能从敌块身后（朝向其老家的连通方向）
-      // 下刀时，先截断让插入段孤死，不以兵换兵硬拼。
-      if (column.headOn && cutoff && allowed(cutoffAction)) return take(cutoffAction, 'cutoff');
-      const strike = attack(column.move, Boolean(column.urgent));
-      // frontline 审查会把 mode/reason 改写成全冲口径；保留拦截语义 reason，
-      // 让日志/复盘能看到「掐链/迎头/打头」这一层主动防御动作。
-      if (strike) strike.reason = column.move.reason;
-      if (allowed(strike, Boolean(column.urgent))) return take(strike, 'column-strike');
-    }
-  }
-  // 攻城评估提前算一次（下方各 campaign 分支复用）：浓缩突击/画圈推进/锚点建造的提议。
-  const campaignRaw = chooseCampaign(state, constrained, {
-    targetOwner: analysis.targetOwner, threatened: Boolean(defense?.urgent || emergency),
-    boundaryAdvance: true, ratio: race?.behind ? 1.12 : 1.3,
-  });
-  // 同 tick 预锚 / 腾出格补锚（2026-09-27 第二轮，用户硬方针）：走廊可能被 1 tick
-  // 切断时大堆原地起锚、推进后腾出的格立即补锚——紧急建造，压过本 tick 的移动
-  // 决策（含脖子纪律的增援/回缩与入侵截断），不受锚点链节奏限制；仍让位于上面
-  // 的背水一战与「本 tick 能拆敌方皇冠/指挥所」的斩首推进。
-  if (campaignRaw?.kind === 'build' && campaignRaw.reason?.phase !== 'anchor' &&
-      !advanceWinsBuilding && allowed(campaignRaw)) return take(campaignRaw, 'campaign-preempt-anchor');
   // 截断的优先级仅次于「本 tick 能拆敌方皇冠/指挥所」的推进：
   // urgent（偷家贴脸或冻住规模很大）时无条件抢占；
   // 防守场景（对手正在威胁我方皇冠/生命，defense 有动作）下，截断也压过普通推进与调兵。
@@ -203,6 +164,11 @@ function decide(state, params, guard) {
   const neck = chooseNeckGuard(state, constrained);
   const neckAction = neck ? { kind: 'attack', ...neck.move } : null;
   if (neck && !advanceWinsBuilding && allowed(neckAction)) return take(neckAction, 'neck-guard');
+  // 攻城评估提前算一次（下方 campaign 分支复用）：浓缩突击/画圈推进的提议。
+  const campaignRaw = chooseCampaign(state, constrained, {
+    targetOwner: analysis.targetOwner, threatened: Boolean(defense?.urgent || emergency),
+    boundaryAdvance: true, ratio: race?.behind ? 1.12 : 1.3,
+  });
   // 锚点链（画圈推进的建造节奏，学自 _E_）：推进走廊有截断风险、或到达节奏 tick
   // 且走廊上有攒够兵的锚点候选时，落指挥所保连通压过普通推进——E 的节奏就是
   // 「走几步、停一 tick 建站」。让位于「本 tick 能拆敌方皇冠/指挥所」的推进
@@ -237,28 +203,13 @@ function decide(state, params, guard) {
   // 只有当对手兵力不弱于我们（我们不是靠滚雪球赢的那一方）才值得让出进攻 tick 换产能；
   // 碾压局继续全速进攻，不做无谓的经济让位。
   const contested = race ? race.bestArmy >= 0.8 * Math.max(1, race.myArmy) : false;
-  // 「竞赛追赶做实」（用户 2026-09-29 硬方针）：产能落后时，只要本 tick 的推进
-  // 不过是中立涂色，经济就压过它——不再只让出 1/economyShareTicks 的 tick。
   const economyUrgent = Boolean(race?.behind) && state.turn >= 60 &&
-    (!canAdvance || advanceIsPaint || (economyShare > 0 && contested && state.turn % economyShare === 0));
+    (!canAdvance || (economyShare > 0 && contested && state.turn % economyShare === 0));
   if (economyUrgent && !advanceWinsBuilding) {
     const buildNow = chooseBuild(state, null, constrained);
     if (buildNow) return take({ kind: 'build', ...buildNow }, 'economy-emergency-build');
     const fund = front ? attack(chooseLogistics(state, null, null, { ...constrained, economyOnly: true })) : null;
     if (allowed(fund)) return take(fund, 'economy-emergency-fund');
-  }
-  // 涂色让位（用户 2026-09-29 硬方针）：本 tick 的推进只是中立涂色时——
-  //   1. 非紧急截断（敌深入有脖子可掐）压过涂色，「该截还是要截」；
-  //      （确证根因：旧调度里非紧急截断只在 !canAdvance 时执行，而只要有涂色可扩
-  //      canAdvance 恒真，截断方案被无限期搁置、涂色每 tick 抢先。）
-  //   2. 可负担的建造（chooseBuild 自带产能目标/评分门闸，产能富余时自然返回 null）
-  //      与经济筹资压过涂色——建造节奏对标对手，产能不落后太多才放开涂色。
-  if (canAdvance && advanceIsPaint && !batchHoldsAdvance) {
-    if (allowed(cutoffAction)) return take(cutoffAction, 'cutoff');
-    const buildNow = chooseBuild(state, null, constrained);
-    if (buildNow) return take({ kind: 'build', ...buildNow }, 'build-over-paint');
-    const fund = front ? attack(chooseLogistics(state, null, null, { ...constrained, economyOnly: true })) : null;
-    if (allowed(fund)) return take(fund, 'economy-fund-over-paint');
   }
   if (canAdvance && !batchHoldsAdvance) return take(advance, 'advance');
   const rescueMove = chooseRescue(state, constrained);

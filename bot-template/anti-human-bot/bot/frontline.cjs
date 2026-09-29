@@ -97,58 +97,38 @@ function createFrontline(state, params = {}) {
     // 唯一例外：不能拿我们自己的建筑去换（那等于互删，净亏产能）。
     const buildingTarget = isCrown || isCity;
     const ownBuilding = grid[a] === me + 100 || grid[a] === me + 50;
-    // ── 斩首：攻冠兵力三级递升（用户 2026-09-28 方针「三」）────────────────
-    // 从「半兵/全兵」二值跳变细化成渐进加码，减少全家梭哈：
-    //   ① 半兵推得下就只出半兵（余兵留守，源点防御义务不动）；
-    //   ② 半兵不够先试智能全兵（mode0 智能分兵口径：就近合力、不从过远格
-    //      硬调、贴脸敌军的留守/防御义务照算）；
-    //   ③ 智能全兵也不够才退真全兵（mode2 全压，只留 1 兵）。
-    // 「推皇冠不评估对方防守强弱」的方针不变（不把旁边敌大堆算进守军）；
-    // 反击、交换、整合期、全局兵力落后一律不参与斩首决策；自家建筑源点
-    // 仍按 keepSource 留守（防守逻辑保留）。
+    // ── 斩首：能推就直接全兵推，不评估对方防守强弱 ──────────────────────
+    // 单格本回合推得下 → 全兵推（自家建筑源点仍留驻守军，防守逻辑保留）；
+    // 单格推不下但相邻我方多格合力足够（第一击后守军 = 守军 − 第一击出兵，下回合收割）
+    // → 立即打出第一击并标记锁定（choose 据此连续攻击）。反击、交换、整合期、
+    // 全局兵力落后一律不参与斩首决策。
     if (isCrown) {
-      const pushOf = (mode) => mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
-      const tierName = (mode) => mode === 1 ? '半兵' : mode === 0 ? '智能全兵' : '真全兵';
-      for (const mode of [1, 0, 2]) {
-        const push = pushOf(mode);
+      const crownModes = ownBuilding ? [0, 1, 2] : [2, 0, 1];
+      for (const mode of crownModes) {
+        const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
         if (push <= 0) continue;
         if (ownBuilding && A - push < keepSource) continue;
         if (push - defense >= p.minArrive) {
           return { move: { ...move, mode, half: false,
-            reason: `斩首：${tierName(mode)}推皇冠，出兵${push}，留守${A - push}` },
+            reason: `斩首：${ownBuilding ? '留守后' : '全兵'}推皇冠，出兵${push}，留守${A - push}` },
             score: 950, kind };
         }
       }
-      // 多路合力：同样三级。智能口径按「智能分兵合力」加总——每个合力格只出
-      // smart 份（扣除它自己贴脸敌军的留守义务，与源点 smart 同一口径），只数
-      // 贴着皇冠的邻格（就近合力，不从过远格硬调）；自家建筑不当合力源（留守
-      // 估计只对本源点算过，保守起见不抽空别的建筑）。智能合力压过守军
-      // +crownSmartMargin 就用智能模式打第一击；不够再按真全兵口径（每格
-      // count-1 全压）合计，压过守军 +crownFullMargin 才允许 mode2 全压。
-      // 余量至少 +1：否则最后一击与剩余守军相等，收割格推不下 0 守军的皇冠
-      // （引擎：兵力相等不占格），白送第一击。
-      let smartCombined = 0, fullCombined = 0;
+      // 多路合力：相邻我方格的可用兵力求和（自家建筑不当合力源——留守估计只对本源点算过，
+      // 保守起见不抽空别的建筑）。总和必须压过守军至少 2 兵——否则最后一击与剩余守军
+      // 相等，收割格推不下 0 守军的皇冠（引擎：兵力相等不占格），白送第一击。
+      let combined = 0;
       for (const j of ctx.neighbors[b]) {
         if (!friendly(j) || grid[j] === me + 100 || grid[j] === me + 50) continue;
-        const force = Math.max(0, count(j) - 1);
-        fullCombined += force;
-        let jReserve = 0;
-        for (const v of ctx.neighbors[j]) {
-          if (v === b || !passable(v) || allied(owners[v], me)) continue;
-          jReserve += Math.max(0, count(v) - 1);
-        }
-        smartCombined += Math.max(0, Math.min(force, count(j) - jReserve - 1));
+        combined += Math.max(0, count(j) - 1);
       }
-      const smartEnough = smartCombined > defense + p.crownSmartMargin;
-      const fullEnough = fullCombined > defense + p.crownFullMargin;
-      if (smartEnough || fullEnough) {
-        for (const mode of smartEnough ? [0, 1, 2] : [2, 0, 1]) {
-          const push = pushOf(mode);
+      if (combined > defense + 1) {
+        for (const mode of crownModes) {
+          const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
           if (push <= 0) continue;
           if (ownBuilding && A - push < keepSource) continue;
-          const combined = smartEnough ? smartCombined : fullCombined;
           return { move: { ...move, mode, half: false,
-            reason: `合力斩首（${tierName(smartEnough ? 0 : 2)}）：第一击出兵${push}（合力${Math.round(combined)}对守军${Math.round(defense)}），连续攻击直到推掉` },
+            reason: `合力斩首：第一击出兵${push}（合力${Math.round(combined)}对守军${Math.round(defense)}），连续攻击直到推掉` },
             score: 900, kind, strike: { target: b } };
         }
       }
@@ -233,7 +213,7 @@ function createFrontline(state, params = {}) {
         else if (!mazeExpand && !behindArmy && localRatio >= exchangeNeed && left > src.adj) { accepted = true; exchange = true; }
       }
       if (!accepted) continue;
-      const value = isCrown ? 900 : isCity ? 500 : kind === 'enemy' ? 62 : p.paintValue;
+      const value = isCrown ? 900 : isCity ? 500 : kind === 'enemy' ? 62 : 26;
       const kill = kind === 'neutral' ? 0 : Math.min(D, 90) * 1.1;
       const exposureScore = Math.max(-160, Math.min(160, exposure * 0.45));
       const rear = ctx.frontDistance[a];
@@ -242,23 +222,8 @@ function createFrontline(state, params = {}) {
       // 而不是露出新的单格突出（侧翼不露单格突出，与画圈推进同向）。
       const widenBonus = deepPush && mates.tiles >= 2 ? 20 : 0;
       const lingerPenalty = (rear >= 0 ? Math.max(0, 4 - rear) : 4) * 8;
-      // ── 推进方向纪律（用户 2026-09-27 硬方针）：不要大范围涂色 ────────────
-      // 方向权重向「敌方皇冠/核心方向」强倾斜：目标格比源点更靠近敌核心
-      // （crownDistance 严格下降）加分，侧向/倒退减分；与进攻主线无关的侧翼
-      // 中立涂色格再按距敌核心远近大幅降权——离我家远、离敌家也远的中间地带
-      // 最不值钱，兵力向敌人家附近逼近、深入推进，而不是横向摊面积。
-      const coreFrom = ctx.crownDistance[a], coreTo = ctx.crownDistance[b];
-      const towardCore = coreFrom >= 0 && coreTo >= 0 ? Math.sign(coreFrom - coreTo) : 0;
-      let directionScore = towardCore * p.pushDirectionWeight;
-      if (kind === 'neutral' && towardCore <= 0 && coreTo >= 0)
-        directionScore -= Math.ceil(p.flankPaintPenalty * Math.min(1, coreTo / Math.max(1, p.paintDiscardDist)));
-      let score = value + kill + exposureScore + supportBonus + widenBonus - lingerPenalty + directionScore +
+      const score = value + kill + exposureScore + supportBonus + widenBonus - lingerPenalty +
         Math.min(arrive, 250) * 0.3 + Math.min(left, 400) * 0.05 - (exchange ? 30 : 0);
-      // ── 薄土不值钱（用户 2026-09-29 硬方针）──────────────────────────────
-      // 1-2 兵守不住、一割就没的边缘涂色格期望收益为负：占领驻军越薄扣分越多，
-      // 扣到负数后 choose() 会跳过该候选（操作槽位让给建造/集结/截断）。
-      if (kind === 'neutral' && arrive < p.paintThinArrive)
-        score -= Math.ceil((p.paintThinArrive - arrive) * p.paintThinPenalty);
       const reason = isCrown ? `攻冠：出兵${push}，留守${left}`
         : isCity ? `攻指挥所：出兵${push}，留守${left}`
           : exchange ? `边界交换：出兵${push}，留守${left}`
@@ -361,9 +326,6 @@ function createFrontline(state, params = {}) {
       let best = null;
       for (const { a, b } of candidates.slice(0, 128)) {
         const value = evaluate({ x: Math.floor(a / m), y: a % m, dx: Math.floor(b / m), dy: b % m, mode: 1 });
-        // 薄土涂色期望收益为负时不执行（用户 2026-09-29 硬方针「薄土不值钱」）——
-        // 操作槽位让给建造/筹资/集结/截断，而不是把 1-2 兵撒到守不住的边缘格上。
-        if (value && value.kind === 'neutral' && value.score < 0) continue;
         if (value && (!best || value.score > best.score)) best = value;
       }
       // 合力第一击落地 → 登记斩首锁定，下回合起 choose 优先连续攻击同一皇冠。
