@@ -1,11 +1,5 @@
 import { Tile, build2D, computeFixedMapDimensions, markLargestComponent } from './map-core';
-import {
-  HUAXIA_LAND_OUTLINE,
-  HUAXIA_PASSES,
-  HUAXIA_RIDGES,
-  HUAXIA_SEA_BAYS,
-  type HuaxiaPoint,
-} from './huaxia-terrain-data';
+import { HUAXIA_LAND_RINGS, HUAXIA_PASSES, HUAXIA_RIDGES, type HuaxiaPoint } from './huaxia-terrain-data';
 import { getHuaxiaRegion } from './huaxia-regions';
 import type { MapRegion } from '../types';
 import type { GeneratedMap, MapGenerationConfig } from './random-map-generator';
@@ -14,91 +8,75 @@ interface HuaxiaMapGenerationConfig extends MapGenerationConfig {
   mapRegion: MapRegion;
 }
 
-const pointInPolygon = (point: HuaxiaPoint, polygon: readonly HuaxiaPoint[]): boolean => {
+const rings = HUAXIA_LAND_RINGS.map((points) => ({
+  points,
+  west: Math.min(...points.map((p) => p[0])),
+  east: Math.max(...points.map((p) => p[0])),
+  south: Math.min(...points.map((p) => p[1])),
+  north: Math.max(...points.map((p) => p[1])),
+}));
+
+/** Even-odd fill across Natural Earth polygon rings (including island and lake holes). */
+const isLand = (lon: number, lat: number): boolean => {
   let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
-    const a = polygon[i];
-    const b = polygon[j];
-    const crosses = a.y > point.y !== b.y > point.y;
-    if (crosses && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside;
+  for (const ring of rings) {
+    if (lon < ring.west || lon > ring.east || lat < ring.south || lat > ring.north) continue;
+    const { points } = ring;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+      const a = points[i];
+      const b = points[j];
+      if (a[1] > lat !== b[1] > lat && lon < ((b[0] - a[0]) * (lat - a[1])) / (b[1] - a[1]) + a[0]) {
+        inside = !inside;
+      }
     }
   }
   return inside;
 };
 
 const distanceToSegment = (point: HuaxiaPoint, a: HuaxiaPoint, b: HuaxiaPoint): number => {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
+  const dx = b.lon - a.lon;
+  const dy = b.lat - a.lat;
   const lengthSquared = dx * dx + dy * dy;
-  if (lengthSquared === 0) {
-    return Math.hypot(point.x - a.x, point.y - a.y);
-  }
-  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSquared));
-  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+  const t =
+    lengthSquared === 0
+      ? 0
+      : Math.max(0, Math.min(1, ((point.lon - a.lon) * dx + (point.lat - a.lat) * dy) / lengthSquared));
+  return Math.hypot(point.lon - (a.lon + t * dx), point.lat - (a.lat + t * dy));
 };
 
-const distanceToPolyline = (point: HuaxiaPoint, line: readonly HuaxiaPoint[]): number => {
-  let distance = Number.POSITIVE_INFINITY;
-  for (let i = 1; i < line.length; i += 1) {
-    distance = Math.min(distance, distanceToSegment(point, line[i - 1], line[i]));
-  }
-  return distance;
-};
+const isMountain = (point: HuaxiaPoint, cellWidth: number): boolean =>
+  HUAXIA_RIDGES.some((ridge) => {
+    const width = Math.max(ridge.width, cellWidth * 0.28);
+    for (let i = 1; i < ridge.points.length; i += 1) {
+      if (distanceToSegment(point, ridge.points[i - 1], ridge.points[i]) <= width) return true;
+    }
+    return false;
+  }) && !HUAXIA_PASSES.some((pass) => Math.hypot(point.lon - pass.lon, point.lat - pass.lat) <= pass.radius);
 
-const isSea = (point: HuaxiaPoint): boolean =>
-  !pointInPolygon(point, HUAXIA_LAND_OUTLINE) || HUAXIA_SEA_BAYS.some((bay) => pointInPolygon(point, bay));
-
-const isPass = (point: HuaxiaPoint): boolean =>
-  HUAXIA_PASSES.some((pass) => Math.hypot(point.x - pass.x, point.y - pass.y) <= pass.radius);
-
-/**
- * 华夏地图使用固定离线折线栅格化，不读取地图种子：种子只会在引擎
- * 随后的 selectRandomGenerals 中影响出生点选择。海域是 Tile 2，平原
- * 是 Tile 0，山系来自 huaxia-terrain-data.ts 的主脉/支脉宽度。
+/** Each dynasty rectangle is a geographic viewport; land outside its historical territory stays land.
+ * Seed is unused here, and only affects the subsequent selectRandomGenerals call.
  */
 const generateHuaxiaMap = (_rng: unknown, config: HuaxiaMapGenerationConfig): GeneratedMap => {
-  const { n, m } = computeFixedMapDimensions(config.heightRatio, config.widthRatio);
   const region = getHuaxiaRegion(config.mapRegion);
+  const { west, east, south, north } = region.bounds;
+  const base = computeFixedMapDimensions(config.heightRatio, config.widthRatio);
+  const aspect = ((east - west) * Math.cos((((north + south) / 2) * Math.PI) / 180)) / (north - south);
+  const scale = Math.sqrt(aspect);
+  const odd = (value: number): number => Math.max(7, Math.floor(value) | 1);
+  const n = odd(base.n / scale);
+  const m = odd(base.m * scale);
   const owner = build2D(n, m, 0);
   const armyCnt = build2D(n, m, 0);
   const gridType = build2D<Tile>(n, m, 0);
-  const mountainScale = 0.58 + region.terrain.mountain * 0.08;
 
   for (let x = 0; x < n; x += 1) {
     for (let y = 0; y < m; y += 1) {
       const point = {
-        x: (x + 0.5) / n,
-        y: (y + 0.5) / m,
+        lon: west + ((y + 0.5) * (east - west)) / m,
+        lat: north - ((x + 0.5) * (north - south)) / n,
       };
-      if (isSea(point)) {
-        gridType[x][y] = 2;
-        continue;
-      }
-      const mountain = HUAXIA_RIDGES.some(
-        (ridge) => distanceToPolyline(point, ridge.points) <= ridge.width * mountainScale,
-      );
-      if (mountain && !isPass(point)) {
-        gridType[x][y] = 1;
-      }
-    }
-  }
-
-  // 所有资料折线都在主体陆地内；只清理确定性山口周围的格子，避免
-  // 山系把平原切成孤岛，同时保留海岸与山脉的固定轮廓。
-  for (const pass of HUAXIA_PASSES) {
-    const passPoint = { x: pass.x, y: pass.y };
-    const radiusX = Math.ceil(pass.radius * n);
-    const radiusY = Math.ceil(pass.radius * m);
-    const centerX = Math.floor(pass.x * n);
-    const centerY = Math.floor(pass.y * m);
-    for (let x = Math.max(0, centerX - radiusX); x <= Math.min(n - 1, centerX + radiusX); x += 1) {
-      for (let y = Math.max(0, centerY - radiusY); y <= Math.min(m - 1, centerY + radiusY); y += 1) {
-        const point = { x: (x + 0.5) / n, y: (y + 0.5) / m };
-        if (!isSea(point) && Math.hypot(point.x - passPoint.x, point.y - passPoint.y) <= pass.radius) {
-          gridType[x][y] = 0;
-        }
-      }
+      if (!isLand(point.lon, point.lat)) gridType[x][y] = 2;
+      else if (isMountain(point, (east - west) / m)) gridType[x][y] = 1;
     }
   }
 
@@ -107,5 +85,5 @@ const generateHuaxiaMap = (_rng: unknown, config: HuaxiaMapGenerationConfig): Ge
   return { n, m, owner, armyCnt, gridType, st };
 };
 
-export { generateHuaxiaMap };
+export { generateHuaxiaMap, isLand };
 export type { HuaxiaMapGenerationConfig };
