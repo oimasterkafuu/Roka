@@ -3,58 +3,41 @@ import type { MapRegion } from '../types';
 export interface HuaxiaRegionConfig {
   id: MapRegion;
   name: string;
-  /** Based on public terrain and historical-frontier references, simplified for playability. */
-  terrain: {
-    mountain: number;
-    swamp: number;
-    ridgeX: number;
-    ridgeY: number;
-    corridor: number;
-  };
+  /** Approximate representative-period viewing rectangle, not a historical border. */
+  bounds: { west: number; east: number; south: number; north: number };
+  /** Spherical area of the full viewport (land AND sea), not dynasty territory. */
+  viewportAreaKm2: number;
+  /** Historical territorial area is not known from these rectangles. */
+  territoryAreaKm2: null;
 }
 
-export const HUAXIA_REGIONS: readonly HuaxiaRegionConfig[] = [
-  {
-    id: 'han',
-    name: '汉',
-    terrain: { mountain: 0.82, swamp: 0.9, ridgeX: 0.42, ridgeY: 0.58, corridor: 0.16 },
-  },
-  {
-    id: 'three-kingdoms',
-    name: '三国',
-    terrain: { mountain: 1.02, swamp: 0.78, ridgeX: 0.34, ridgeY: 0.66, corridor: 0.2 },
-  },
-  {
-    id: 'northern-dynasties',
-    name: '北朝',
-    terrain: { mountain: 1.14, swamp: 0.48, ridgeX: 0.62, ridgeY: 0.32, corridor: 0.18 },
-  },
-  {
-    id: 'tang',
-    name: '唐',
-    terrain: { mountain: 0.9, swamp: 0.72, ridgeX: 0.5, ridgeY: 0.42, corridor: 0.22 },
-  },
-  {
-    id: 'song',
-    name: '宋',
-    terrain: { mountain: 0.86, swamp: 1.12, ridgeX: 0.64, ridgeY: 0.6, corridor: 0.2 },
-  },
-  {
-    id: 'yuan',
-    name: '元',
-    terrain: { mountain: 0.62, swamp: 0.56, ridgeX: 0.3, ridgeY: 0.44, corridor: 0.13 },
-  },
-  {
-    id: 'ming',
-    name: '明',
-    terrain: { mountain: 0.98, swamp: 0.86, ridgeX: 0.56, ridgeY: 0.68, corridor: 0.19 },
-  },
-  {
-    id: 'qing',
-    name: '清',
-    terrain: { mountain: 1.08, swamp: 0.62, ridgeX: 0.7, ridgeY: 0.38, corridor: 0.17 },
-  },
-] as const;
+const EARTH_RADIUS_KM = 6371.0088;
+const viewportArea = (west: number, east: number, south: number, north: number): number =>
+  Math.round(
+    EARTH_RADIUS_KM ** 2 *
+      (((east - west) * Math.PI) / 180) *
+      (Math.sin((north * Math.PI) / 180) - Math.sin((south * Math.PI) / 180)),
+  );
+
+/** Hand-estimated viewports for representative eras; these do not trace historical frontiers. */
+const regions: readonly { id: MapRegion; name: string; bounds: HuaxiaRegionConfig['bounds'] }[] = [
+  { id: 'han', name: '汉', bounds: { west: 73, east: 135, south: 18, north: 49 } },
+  { id: 'three-kingdoms', name: '三国', bounds: { west: 96, east: 124, south: 20, north: 43 } },
+  { id: 'northern-dynasties', name: '北朝', bounds: { west: 90, east: 133, south: 30, north: 54 } },
+  { id: 'tang', name: '唐', bounds: { west: 70, east: 140, south: 16, north: 55 } },
+  { id: 'song', name: '宋', bounds: { west: 97, east: 125, south: 18, north: 43 } },
+  { id: 'yuan', name: '元', bounds: { west: 70, east: 142, south: 8, north: 59 } },
+  { id: 'ming', name: '明', bounds: { west: 90, east: 135, south: 17, north: 52 } },
+  { id: 'qing', name: '清', bounds: { west: 70, east: 145, south: 17, north: 57 } },
+];
+
+export const HUAXIA_REGIONS: readonly HuaxiaRegionConfig[] = regions.map(({ id, name, bounds }) => ({
+  id,
+  name,
+  bounds,
+  viewportAreaKm2: viewportArea(bounds.west, bounds.east, bounds.south, bounds.north),
+  territoryAreaKm2: null,
+}));
 
 export const DEFAULT_MAP_REGION: MapRegion = 'han';
 

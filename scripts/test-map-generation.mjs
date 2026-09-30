@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { SeededRandom, checkConnection } from '../src/map/map-core.ts';
 import { selectRandomGenerals } from '../src/game-engine/general-selection.ts';
 import { HUAXIA_RIDGES, HUAXIA_PASSES } from '../src/map/huaxia-terrain-data.ts';
-import { generateHuaxiaMap } from '../src/map/huaxia-map-generator.ts';
+import { generateHuaxiaMap, isLand } from '../src/map/huaxia-map-generator.ts';
 import { HUAXIA_REGIONS } from '../src/map/huaxia-regions.ts';
 import { resolveMapSizeRatioByPlayers } from '../src/map/map-size.ts';
 
@@ -40,17 +40,22 @@ for (const region of HUAXIA_REGIONS) {
     },
     [0, 0, 0],
   );
-  assert.ok(counts[2] > 0, `${region.id} has a fixed eastern/southeastern sea`);
+  assert.ok(counts[2] > 0, `${region.id} has sea in its geographic viewport`);
   assert.ok(counts[0] > counts[1], `${region.id} keeps plains dominant over mountains`);
   assert.ok(counts[1] > 0, `${region.id} has fixed mountain lines`);
   assert.ok(
-    HUAXIA_RIDGES.some((ridge) => ridge.width >= 0.04),
+    HUAXIA_RIDGES.some((ridge) => ridge.width >= 1.1),
     'main ridges are wider',
   );
   assert.ok(
-    HUAXIA_RIDGES.some((ridge) => ridge.width <= 0.02),
+    HUAXIA_RIDGES.some((ridge) => ridge.width <= 0.9),
     'branch ridges are thinner',
   );
+  assert.ok(
+    isLand(region.bounds.west + 1, region.bounds.north - 1),
+    `${region.id} western viewport is not all sea`,
+  );
+  assert.equal(region.territoryAreaKm2, null, `${region.id} does not mislabel viewport as territory area`);
   assert.ok(HUAXIA_PASSES.length >= 5, 'fixed passes are part of the terrain data');
 
   for (let players = 2; players <= 16; players += 1) {
