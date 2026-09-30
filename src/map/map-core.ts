@@ -76,6 +76,16 @@ const shuffle = <T>(arr: T[], rng: SeededRandom): void => {
 const build2D = <T>(n: number, m: number, value: T): Grid<T> =>
   Array.from({ length: n }, () => Array.from({ length: m }, () => value));
 
+const toOddAtLeast = (value: number, min: number): number => {
+  const base = Math.max(min, value);
+  return base % 2 === 0 ? base + 1 : base;
+};
+
+const computeFixedMapDimensions = (heightRatio: number, widthRatio: number): { n: number; m: number } => ({
+  n: toOddAtLeast(Math.floor(DEFAULT_WIDTH * heightRatio), 7),
+  m: toOddAtLeast(Math.floor(DEFAULT_WIDTH * widthRatio), 7),
+});
+
 const computeBaseMapDimensions = (
   rng: SeededRandom,
   heightRatio: number,
@@ -83,10 +93,6 @@ const computeBaseMapDimensions = (
 ): { n: number; m: number } => {
   const ni = rng.intInclusive(DEFAULT_WIDTH - 5, DEFAULT_WIDTH + 5);
   const mi = Math.floor((DEFAULT_WIDTH * DEFAULT_WIDTH) / ni);
-  const toOddAtLeast = (value: number, min: number): number => {
-    const base = Math.max(min, value);
-    return base % 2 === 0 ? base + 1 : base;
-  };
   return {
     n: toOddAtLeast(Math.floor(ni * heightRatio), 7),
     m: toOddAtLeast(Math.floor(mi * widthRatio), 7),
@@ -170,6 +176,7 @@ export {
   build2D,
   checkConnection,
   computeBaseMapDimensions,
+  computeFixedMapDimensions,
   markLargestComponent,
   normalizeMapToken,
   resolveMapSeed,
