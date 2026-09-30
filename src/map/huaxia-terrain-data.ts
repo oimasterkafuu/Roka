@@ -108,4 +108,10 @@ export const HUAXIA_PASSES: readonly (HuaxiaPoint & { name: string; radius: numb
   { name: '雁门关', lon: 112.8, lat: 39.2, radius: 1 },
   { name: '剑门关', lon: 105.5, lat: 32.2, radius: 1 },
   { name: '梅关', lon: 114.3, lat: 25.1, radius: 1 },
+  { name: '井陉', lon: 114.1, lat: 37.9, radius: 1 },
+  { name: '武关', lon: 110.4, lat: 33.5, radius: 1 },
+  { name: '子午道', lon: 108.9, lat: 33.2, radius: 1 },
+  { name: '大散关', lon: 106.9, lat: 34.2, radius: 1 },
+  { name: '夔门', lon: 109.6, lat: 30.9, radius: 1 },
+  { name: '湘桂走廊', lon: 111.2, lat: 25.8, radius: 1 },
 ];

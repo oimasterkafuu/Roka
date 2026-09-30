@@ -534,6 +534,11 @@
         container.innerHTML = html;
       }
 
+      function syncMapExampleRegionControl() {
+        const mode = getSelectedMapMode();
+        document.getElementById('map-example-region-control').style.display = mode === 'huaxia' ? '' : 'none';
+      }
+
       function renderMapExample(data) {
         if (!data || !data.example) {
           return;
@@ -545,8 +550,7 @@
           `${example.n} x ${example.m} · ${data.players} 人`;
         document.getElementById('map-example-mode').value = String(example.map_mode || 'random');
         document.getElementById('map-example-region').value = String(example.map_region || 'han');
-        document.getElementById('map-example-region-control').style.display =
-          example.map_mode === 'huaxia' ? '' : 'none';
+        syncMapExampleRegionControl();
         document.getElementById('map-example-players').value = String(data.players);
         renderExampleBoard(document.getElementById('map-example-board'), example);
       }
@@ -590,7 +594,7 @@
       async function loadMapExample() {
         setMapExampleStatus('加载中…');
         const mode = getSelectedMapMode();
-        document.getElementById('map-example-region-control').style.display = mode === 'huaxia' ? '' : 'none';
+        syncMapExampleRegionControl();
         const params = new URLSearchParams({
           map_mode: mode,
           map_region: String(document.getElementById('map-example-region').value || 'han'),
@@ -628,6 +632,8 @@
         location.href = '/tutorial/interactive';
       });
 
+      document.getElementById('map-example-mode').addEventListener('change', syncMapExampleRegionControl);
+
       document.getElementById('generate-map-example-btn').addEventListener('click', async function () {
         try {
           await loadMapExample();
@@ -645,6 +651,7 @@
         const authed = await loadUser();
         if (!authed) return;
         initMapPlayerOptions();
+        syncMapExampleRegionControl();
         try {
           await loadMapExample();
         } catch {
