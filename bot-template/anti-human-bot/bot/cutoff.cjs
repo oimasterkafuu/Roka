@@ -379,8 +379,82 @@ function chooseNeckGuard(state, params = {}) {
     const score = stranded * 1.2 - count(c);
     if (!best || score > best.score) best = { neck: c, threat, stranded, score };
   }
+  let warning = false;
+  if (!best && ctx.mazeLike) {
+    // ── maze 割点预警（issue #70）────────────────────────────────────────
+    // 场 1 死因：228 兵堆沿走廊逼近割点 (1,5)，脖子纪律只在「本 tick 可切断」时
+    // 触发，敌堆进走廊的十几 tick 里无人驻防，一刀切断后约 150 兵集群断链蒸发。
+    // mazeLike 时把触发时机提前：敌堆距割点走廊 mazeNeckWarnRange 跳以内、且到达时
+    // 兵力压得过割点守军，就提前往割点集兵/夺备用连通格，不等贴脸。
+    for (const c of myTiles) {
+      if (grid[c] === me + 100 || grid[c] === me + 50) continue;
+      const stranded = strandedMass(c);
+      if (stranded === null || stranded < p.cutoffMinIsolate) continue;
+      // 从割点沿可通行格 BFS（走廊连通距离），找预警圈内的最强敌堆。
+      const dist = new Int32Array(size).fill(-1);
+      const q = [c]; dist[c] = 0;
+      let threat = 0;
+      for (let h = 0; h < q.length; h++) {
+        const u = q[h];
+        if (dist[u] >= p.mazeNeckWarnRange) continue;
+        for (const v of neighbors[u]) {
+          if (dist[v] >= 0 || !ctx.passable(v) || !ctx.knownAt(v)) continue;
+          dist[v] = dist[u] + 1; q.push(v);
+          if (hostile(v)) threat = Math.max(threat, count(v) - 1 - dist[v]);
+        }
+      }
+      if (threat <= count(c)) continue; // 到达时也打不穿就不预警
+      const score = stranded * 1.2 - count(c);
+      if (!best || score > best.score) best = { neck: c, threat, stranded, score };
+    }
+    if (best) warning = true;
+  }
   if (!best) return null;
   const { neck, threat, stranded } = best;
+
+  // ── 备用连通格（issue #70，场 1 的中立沼泽 (5,7) 全程无人打通）──────────────
+  // 割点受威胁时，若存在某中立格同时贴「将断锚段」与「锚点侧」，本 tick 夺下它
+  // 就等于给这段兵修了备用桥——比单纯堆守军更能根治断链。
+  {
+    const anchored = new Set(anchors);
+    const q = [...anchors];
+    for (let h = 0; h < q.length; h++) {
+      for (const v of neighbors[q[h]]) {
+        if (v === neck || anchored.has(v) || !own(v)) continue;
+        anchored.add(v); q.push(v);
+      }
+    }
+    let bridge = null;
+    for (const s of myTiles) {
+      if (anchored.has(s)) continue; // 只看将断锚段的贴邻
+      for (const z of neighbors[s]) {
+        if (!ctx.knownAt(z) || !ctx.passable(z) || owners[z] !== 0) continue;
+        if (!neighbors[z].some((v) => anchored.has(v))) continue;
+        const defense = count(z, 1);
+        if (bridge && bridge.z === z) continue;
+        // 从两侧任选能本 tick 打下 z 的来源，越省兵越好。
+        for (const src of neighbors[z]) {
+          if (!own(src) || isolated(src)) continue;
+          let reserve = 0;
+          for (const k of neighbors[src]) {
+            if (k === z || grid[k] === 201 || grid[k] === 203 || ctx.allied(owners[k], me)) continue;
+            reserve += count(k) - 1;
+          }
+          const amount = Math.min(count(src) - 1, Math.max(0, count(src) - reserve - 1));
+          if (amount <= defense) continue;
+          if (grid[src] === me + 100 && count(src) - amount < 4) continue;
+          if (!bridge || amount < bridge.amount) bridge = { z, src, amount };
+        }
+      }
+    }
+    if (bridge) {
+      const { m } = ctx;
+      return { neck, threat, stranded, holdable: true, urgent: !warning, score: best.score,
+        move: { x: Math.floor(bridge.src / m), y: bridge.src % m,
+          dx: Math.floor(bridge.z / m), dy: bridge.z % m, mode: 0, half: false,
+          reason: `脖子预警：夺备用连通格，${bridge.amount}兵抢占中立桥，防${Math.round(threat)}敌兵切断约${Math.round(stranded)}兵` } };
+    }
+  }
 
   // 从脖子两侧集兵：沿我方格 BFS（cutoffMaxSteps 内），挑 送达兵力/距离 最高的一路。
   // 前沿大堆回缩一格既补了脖子又把自己撤回来，往往就是最优解。
@@ -418,10 +492,10 @@ function chooseNeckGuard(state, params = {}) {
   // （实测对 580+ 敌堆连续 300+ tick 喂 1 兵，整局被拖垮）。此时放弃本分支，
   // 让 policy 拿这段将断的兵力去换东西（推进/攻击），而不是往割点里填。
   if (!holdable && count(neck) + job.amount * 3 <= threat) return null;
-  return { neck, threat, stranded, holdable, urgent: true, score: best.score,
+  return { neck, threat, stranded, holdable, urgent: !warning, score: best.score,
     move: { x: Math.floor(job.s / m), y: job.s % m, dx: Math.floor(job.dest / m), dy: job.dest % m,
       mode: 0, half: false,
-      reason: `脖子${holdable ? '驻守' : '回缩'}：${job.amount}兵补向割点，防${Math.round(threat)}敌兵切断约${Math.round(stranded)}兵` } };
+      reason: `脖子${warning ? '预警' : holdable ? '驻守' : '回缩'}：${job.amount}兵补向割点，防${Math.round(threat)}敌兵切断约${Math.round(stranded)}兵` } };
 }
 
 module.exports = { chooseCutoff, chooseNeckGuard, ownStrandedMass };

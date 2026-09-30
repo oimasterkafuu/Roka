@@ -176,7 +176,7 @@ function chooseLogistics(state, move, build, params = {}) {
       (grid[i] === me + 50 || (grid[i] === me && crowns + cities < targetCrowns)));
     // 驻军只按封顶 60 计入：选址看的是位置，不是「这格已经堆了多少兵」——
     // 全额计入会让大兵堆自证为工地，再把整格 earmark 成禁地（uzsTrD 复盘根因）。
-    const clusterScore = (i) => clusterValue(state, i) + Math.min(count(i), 60) +
+    const clusterScore = (i) => clusterValue(state, i, ctx.mazeLike) + Math.min(count(i), 60) +
       neighbors[i].reduce((s, j) => s + (own(j) && (grid[j] === me + 100 || grid[j] === me + 50) ? 12 : 0), 0);
     candidates.sort((a, b) => (grid[b] === me + 50) - (grid[a] === me + 50) || clusterScore(b) - clusterScore(a) || a - b);
     let chosen = candidates.length ? candidates[0] : -1;
