@@ -1,9 +1,14 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { deserialize, serialize } from 'node:v8';
-import { promisify } from 'node:util';
-import { brotliCompress, brotliDecompress, constants as zlibConstants } from 'node:zlib';
+import { serialize } from 'node:v8';
+import {
+  CoalescingFileWriter,
+  decodeBinary,
+  encodeRawBinary,
+  isMissingFileError,
+  readFileWithBackup,
+} from './binary-store';
 
 interface RatingHistoryPoint {
   t: number;
@@ -72,9 +77,6 @@ interface UserFile {
   users: StoredUser[];
 }
 
-const brotliCompressAsync = promisify(brotliCompress);
-const brotliDecompressAsync = promisify(brotliDecompress);
-
 /**
  * 统一 Rating 初始分（不区分 1v1 与 FFA）。
  */
@@ -122,14 +124,6 @@ export const getLastActiveAt = (user: { lastSeenAt?: number; updatedAt: number }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
-
-const isMissingFileError = (error: unknown): boolean =>
-  Boolean(
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    (error as NodeJS.ErrnoException).code === 'ENOENT',
-  );
 
 const toStoredUser = (value: unknown): StoredUser | null => {
   if (!isRecord(value)) {
@@ -202,30 +196,19 @@ const parseUserFile = (value: unknown): StoredUser[] => {
   return users;
 };
 
-const encodeUserFileBinary = async (value: UserFile): Promise<Buffer> => {
-  const raw = serialize(value);
-  return (await brotliCompressAsync(raw, {
-    params: {
-      [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
-    },
-  })) as Buffer;
-};
-
-const decodeUserFileBinary = async (content: Buffer): Promise<UserFile> => {
-  const raw = (await brotliDecompressAsync(content)) as Buffer;
-  return deserialize(raw) as UserFile;
-};
+const decodeUserFileBinary = async (content: Buffer): Promise<UserFile> => decodeBinary<UserFile>(content);
 
 export class UserStore {
   private readonly binaryFilePath: string;
 
   private usersByKey = new Map<string, StoredUser>();
 
-  // 写盘串行化：persist 经 promise 链排队，避免并发写交错。
-  private writeQueue: Promise<void> = Promise.resolve();
+  // 写盘合并串行化：突发连续写入只压缩落盘一次（见 binary-store）。
+  private readonly writer: CoalescingFileWriter;
 
   constructor(dataDir: string) {
     this.binaryFilePath = path.join(dataDir, 'users.bin');
+    this.writer = new CoalescingFileWriter(this.binaryFilePath);
   }
 
   async ensureReady(): Promise<void> {
@@ -601,8 +584,7 @@ export class UserStore {
   }
 
   private async loadFromBinary(): Promise<StoredUser[]> {
-    const raw = await readFile(this.binaryFilePath);
-    const parsed = await decodeUserFileBinary(raw);
+    const parsed = await readFileWithBackup(this.binaryFilePath, decodeUserFileBinary);
     return parseUserFile(parsed);
   }
 
@@ -614,15 +596,9 @@ export class UserStore {
     const data: UserFile = {
       users: [...this.usersByKey.values()],
     };
-    // serialize 同步执行，调用时即拿到状态快照；压缩与写盘排队串行执行。
-    const binaryPromise = encodeUserFileBinary(data);
-    const task = this.writeQueue.then(async () => {
-      const binary = await binaryPromise;
-      const tmpPath = `${this.binaryFilePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-      await writeFile(tmpPath, binary);
-      await rename(tmpPath, this.binaryFilePath);
-    });
-    this.writeQueue = task.catch(() => undefined);
-    return task;
+    // serialize 同步执行，调用时即拿到状态快照；brotli 压缩惰性执行，
+    // 被合并丢弃的排队写不产生压缩开销。
+    const raw = serialize(data);
+    return this.writer.write(() => encodeRawBinary(raw));
   }
 }
