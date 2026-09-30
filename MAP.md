@@ -170,8 +170,8 @@ _一句话：存储底座：统一编码、.bak 备份回退、合并写盘。_
 _一句话：用户/会话/Rating 存储，brotli 压缩 users.bin。_
 
 **src/feed-store.ts** — 动态存储（`data/feeds.bin`，同 v8+brotli）。
-分页 `listPage`/`listByAuthor`；发帖 1–300 字 + 30 秒/人冷却（`FeedCooldownException` 带 `retryAfter`）；评论 1–200 字、每帖上限 200 条；点赞切换。
-_一句话：动态帖子/点赞/评论存储，带发帖冷却。_
+分页 `listPage`/`listByAuthor`；发帖 1–300 字 + 30 秒/人冷却（`FeedCooldownException` 带 `retryAfter`）；评论 1–200 字、每帖上限 200 条，`removeComment` 删除评论（权限校验在 server.ts：作者本人或管理员）；点赞切换。
+_一句话：动态帖子/点赞/评论存储，带发帖冷却与评论删除。_
 
 **src/announcement-store.ts** — 公告单文件 JSON 存储（`data/announcement.json`），原子串行写 + `.bak` 备份回退（binary-store 底座），`ANNOUNCEMENT_TEXT_MAX=500`。文本本身不渲染，渲染由上层经 `text-render.ts` 完成。
 _一句话：公告单文件 JSON 存储，原子串行写。_

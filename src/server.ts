@@ -202,6 +202,7 @@ interface DecoratedFeedComment {
   time: number;
   html: string;
   authorInfo: { colorClass: string; title: string };
+  canManage: boolean;
 }
 
 interface DecoratedFeedPost {
@@ -216,13 +217,14 @@ interface DecoratedFeedPost {
   canManage: boolean;
 }
 
-const decorateFeedComment = (comment: FeedComment): DecoratedFeedComment => {
+const decorateFeedComment = (comment: FeedComment, viewer: string | null): DecoratedFeedComment => {
   const { rating, ratingGames } = userStore.getDisplayRating(comment.author);
   const tier = ratingTier(rating, ratingGames);
   return {
     ...comment,
     html: renderRichText(comment.text),
     authorInfo: { colorClass: tier.className, title: tier.title },
+    canManage: viewer !== null && (viewer === comment.author || userStore.isAdminUser(viewer)),
   };
 };
 
@@ -231,7 +233,7 @@ const decorateFeedPost = (post: FeedPost, viewer: string | null): DecoratedFeedP
   const tier = ratingTier(rating, ratingGames);
   return {
     ...post,
-    comments: post.comments.map((comment) => decorateFeedComment(comment)),
+    comments: post.comments.map((comment) => decorateFeedComment(comment, viewer)),
     html: renderRichText(post.text),
     authorInfo: { colorClass: tier.className, title: tier.title },
     canManage: viewer !== null && (viewer === post.author || userStore.isAdminUser(viewer)),
@@ -959,11 +961,37 @@ const boot = async (): Promise<void> => {
         return reply.code(404).send({ error: '动态不存在。' });
       }
       io.emit('home_feeds');
-      return reply.send({ comment });
+      return reply.send({ comment: decorateFeedComment(comment, authUser.username) });
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : '评论失败。' });
     }
   });
+
+  app.post(
+    '/api/feeds/comment/delete',
+    { preHandler: feedActionRateLimitPreHandler },
+    async (request, reply) => {
+      const authUser = (request as AuthRequest).authUser;
+      if (!authUser) {
+        return reply.code(401).send({ error: '未登录或登录已失效。' });
+      }
+      const body = request.body as { id?: unknown; commentId?: unknown };
+      const post = feedStore.getById(String(body?.id ?? ''));
+      if (!post) {
+        return reply.code(404).send({ error: '动态不存在。' });
+      }
+      const comment = post.comments.find((item) => item.id === String(body?.commentId ?? ''));
+      if (!comment) {
+        return reply.code(404).send({ error: '评论不存在。' });
+      }
+      if (comment.author !== authUser.username && !userStore.isAdminUser(authUser.username)) {
+        return reply.code(403).send({ error: '没有权限删除该评论。' });
+      }
+      await feedStore.removeComment(post.id, comment.id);
+      io.emit('home_feeds');
+      return reply.send({ ok: true });
+    },
+  );
 
   // 公告与动态共用同一条服务端渲染管线（Markdown + LaTeX + sanitize-html 白名单过滤 XSS）。
   const decorateAnnouncement = (announcement: Announcement): DecoratedAnnouncement => ({
