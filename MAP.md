@@ -42,6 +42,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── server/             # 服务层：auth / captcha / lobby / webhook
 │   ├── types.ts            # 全项目共享类型与协议定义
 │   ├── *-store.ts          # 四个持久化存储（公告/用户/动态/回放）
+│   ├── binary-store.ts     # 存储底座：v8+brotli 编码、原子写+.bak 备份、合并写盘
 │   ├── replay-patch-binary.ts  # RPB4 观看二进制编码器
 │   ├── text-render.ts      # Markdown+LaTeX → 消毒 HTML（公告/动态共用）
 │   ├── rating-color.ts     # Codeforces 风格段位配色
@@ -81,7 +82,6 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 **src/server/lobby-service.ts** — 房间/对局状态机 + 断线宽限期 + 房间心跳踢出 + rating 结算 + 托管 bot 房长保留。
 核心 Map：`gameUid`(sid→gameId)、`gameInstances`、`gamePlayers`、`gameLobbyId`、`lobbyOfSid`、`lobbyPlayers`、`lobbyConfig`；宽限期登记表 `pendingRejoins`（键 `${gameId}:${username}`，含旧 sid、旧连接是否 bot 与 10s 定时器）；心跳登记表 `lobbyHeartbeats`（sid→最后心跳时间）+ bot 豁免集 `heartbeatExempt`（由 server.ts 维护）。`joinLobby` 第四参数 `serverBot`/`serverBotAllowTeam`/`bot`：`serverBot` 托管策略 bot 永远排在普通成员之后（`LobbyPlayer.serverBot` 标记，其组队许可存 `LobbyPlayer.serverBotAllowTeam` 供改配置校验），房主（`players[0]`）保留给人类/第三方 bot——普通成员进房时插入到首个托管 bot 之前，无 bot 时等价末尾追加；托管 bot 的组队语义由启动参数决定——`serverBotAllowTeam=false` 的 bot 进房时强制关闭组队并规整队伍，`serverBotAllowTeam=true` 时组队开关保持默认关闭、由房主决定（server.ts 的 `change_game_conf` 只对存在 `serverBotAllowTeam!==true` 托管 bot 的房间拦截房主的开启请求并提示），`room_update.players[]` 对托管 bot 成员附带 `server_bot: true` 与 `server_bot_allow_team` 供前端判断是否锁定组队开关。组队模式不再按 bot/人类分池：`pickLeastPopulatedTeam` 为进房成员挑选人数最少的默认队伍（全空时 1 队），`change_team` 请求按原样生效不做修正，房主开启组队也不重排队伍——队伍归属完全由成员自行决定（anti-human-bot 固定首选 2 队，检测到人类同队会自主避让换队）。任意 bot 成员（第三方令牌或托管，`LobbyPlayer.bot` 标记）进房时强制关闭迷雾（issue #51），`change_game_conf` 同样拦截房主开启迷雾的请求，`room_update.players[]` 附带 `bot: true` 供前端禁用迷雾开关并显示提示。`checkLeave`：对局中断线 → `game.markDisconnected`，截断旧路由但保留席位，挂 `expireGracePeriod` 定时器，超时以「挂机」投降并完整清理；`tryRejoin`：按用户名找旧 sid（`findPlayerSidByName`）并校验身份匹配（bot 连接只能接管 bot 的旧席位、人类只能接管人类的，以旧 socket 的 `data.isBot` 或宽限期登记为准，防止托管 bot 与同名真人互相抢席位），清定时器、全部 Map 换绑、`game.rebindPlayer` 补发全量状态。`checkReady` 开局条件：非观战成员中 ready 超过半数；组队模式下若所有参赛者处于同一队伍则拒绝开局并提示调整队伍（否则首 Tick 存活队伍数即为 1，开局即终局）。心跳掉线检测（仅房间准备阶段）：`recordLobbyHeartbeat` 刷新时间戳（进房即为基线），`startLobbyHeartbeatSweep` 全局单一定时器每分钟扫描，超过 600 秒无心跳且房间未开局的成员由 `kickFromLobby` 复用离开清理逻辑移出房间并下发 `room_kick`（前端跳首页）；对局中的房间与豁免 bot 跳过。只剩 bot 自动重置：`resetLobbyConfigIfOnlyBots` 在准备阶段的成员移出路径（`checkLeave`/`kickFromLobby`/`expireGracePeriod`）与 `endGame` 回到准备阶段时判定——剩余成员全部带 `bot` 标记（观战席人类仍算人类占用）且对局未在运行时，用 `defaultLobbyConfig()`（与建房同一默认值来源，含重新随机种子）整体重置房间设置，bot 留房待命；无 bot 的普通房间人走光后成员列表为空，不触发。`startGame` 组装 `GameConfig`（动态地图尺寸——按人数取基础比例，房间开启大地图 `map_size:'large'` 时再 ×2 即面积约 4 倍；自动分队）并注入 io 回调；`endGame` 里 `applyGameResult` 结算 ELO（K=128，队伍名次取队内最好名次在队伍间的位次——成员榜名次不能直接代入 score 公式，队伍分按人数立方加权 400·log10(n³·Σ10^(r/400))），清理宽限定时器并重置房间。`onGameEnded` 回调通知 webhook-updater 解除部署推迟。部署更新排队状态 `updateQueued`：`setUpdateQueued`（webhook-updater hooks 驱动）全局广播 `deploy_queued` 事件并向所有房间重发 `room_update`（`generateRoomConfig` 携带 `update_queued`），进入排队时向有对局的房间发宽限期提示消息；排队期间 `checkReady`/`startGame` 拒绝开局（server.ts 的 `change_ready` 同步拦截并提示「系统即将排队更新，请稍等」）；`settleActiveGamesForUpdate` 在宽限到期时对所有进行中的对局调引擎 `forceFinish` 按当前排行榜名次清算（回放存档/rating/房间清理仍由 endGame 回调完成）。
 
-
 **src/server/server-bot-manager.ts** — 服务端托管策略 Bot 管理器（issue #18，仅超管经 `/api/admin/bots*` 操作）。
 不另起进程：每次启动生成随机内存令牌（`tokens` Map：token→{username, allowTeam}，server.ts socket 中间件查询 `resolveToken`，命中置 `isBot` + `isServerBot` + `serverBotAllowTeam`），在服务器进程内用 socket.io-client 连本机回环地址（端口经 `getPort` 回调读取 listen 端口）完成正常握手。模板发现 `listTemplates()`：枚举 `bot-template/` 一级子目录，存在 `strategy.js` 或 `server-bot.js` 且导出 `attachStrategy` 的目录即为可托管模板（展示名/描述取 package.json），模板 ID 严格为目录名防路径穿越；`random-patch-bot` 是 CLI 参考模板、不在其列。策略按模板 ID 经 `createRequire` 动态加载并缓存（`strategyModules` Map）。`start(username, room, template, allowTeam)` 拒绝同用户重复启动与同房间占用（清晰中文错误）；`stop(id)` 拆监听、断连、删令牌；`list()` 出运行中 bot（含 template/allowTeam/连接状态）。日志走 `console.log` `[server-bot]` 前缀（冒烟脚本据此判定对局行为）。重启自动恢复（issue #28）：start/stop 把运行中 bot 的 `{username, room, template, allowTeam}` 列表原子写入 `data/server-bots.json`；`restore(validateUsername)` 在 listen 后由 server.ts 调用，逐条重做与手动启动相同的校验（用户存在且未封禁、房间号长度 1~15、模板可加载），全部通过才以原配置自动启动，失效记录记警告跳过并随写盘清除；缺少 template/allowTeam 的旧记录按 `simple-strategy-bot` + 不允许组队恢复。
 
@@ -97,7 +97,6 @@ _一句话：统一 presence：touch/在线窗口/落盘节流/重启恢复。_
 
 **src/server/webhook-updater.ts** — GitHub push webhook 自动部署与「更新排队」状态机。
 `isAuthorized` 校验 `x-hub-signature-256` HMAC；**有对局进行中则进入排队状态**：`enterQueuedState` 置 `hasQueuedUpdate`、经 hooks 通知 server 广播（禁开局 + 对局横幅，见 lobby-service `setUpdateQueued`），并启动宽限计时 `UPDATE_GRACE_MS`（默认 120 秒，`ROKA_DEPLOY_GRACE_MS` 可覆盖，主要用于测试）——期间对局继续，最后一局结束（`notifyGameEnded`）立即部署，到期则经 `onGraceExpired` 让 lobby-service 按当前排行榜名次清算残余对局（`settleActiveGamesForUpdate` → 引擎 `forceFinish`），清算完成的 endGame 接力触发部署；部署失败或 `ROKA_DEPLOY_DRY_RUN=1` 演练（跳过 git/pnpm 与重启）时经 `onUpdateAborted` 解除排队状态。流水线：`git fetch/reset --hard origin/main` → `pnpm install --frozen-lockfile` → `pnpm run build` → systemd 下 `exit(0)` 靠守护重启，否则 spawn 延迟重启。
-
 
 ### 对局引擎
 
@@ -162,7 +161,10 @@ _一句话：中央海椭圆 + 环陆出生点分散选址。_
 
 ### 存储与工具
 
-**src/auth-store.ts** — 用户/会话/Rating 存储（`data/users.bin`，v8 serialize + brotli）。
+**src/binary-store.ts** — 四个 Store 共用的存储底座（issue #67）：统一 v8 serialize + brotli q6 编码（`encodeBinary`/`decodeBinary`，磁盘格式与历史一致，旧数据免迁移）；`writeFileAtomicWithBackup` 原子写入（临时文件 + rename）并在替换前把旧文件复制为 `.bak`；`readFileWithBackup` 在主文件缺失/损坏时自动回退 `.bak`；`CoalescingFileWriter` 合并写盘——同一文件尚未开始的排队写请求被最新快照合并（先到的等待者随合并后的写一并完成），突发连续写入只压缩落盘一次（brotli 惰性执行，被合并的快照零开销）。
+_一句话：存储底座：统一编码、.bak 备份回退、合并写盘。_
+
+**src/auth-store.ts** — 用户/会话/Rating 存储（`data/users.bin`，v8 serialize + brotli，经 binary-store 底座）。
 密码 scrypt 加盐 + `timingSafeEqual`；角色模型：首个注册用户 = 超级管理员（`isSuperAdmin`，唯一、不可剥夺、不可封禁，同时拥有 admin），普通 admin（`isAdmin`）由超管授予/撤销（`setAdmin`），旧数据启动时由 `migrateRoles` 把首个用户升级为超管（向后兼容）；封禁字段 `bannedUntil`（毫秒时间戳，-1=永久，缺省=未封禁），到期由 `getBanStatus` 惰性判定自动解除，`banUser`/`unbanUser` 操作，`listUsersForAdmin` 出后台用户列表；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点）。可选字段 `lastSeenAt` 记录「最后在线」（= 用户最近一次有效请求/动作时间，由 presence-service 统一计算并节流落盘；旧数据无此字段按 undefined 兼容），`setLastSeenAt` 写入（presence 的落盘回调），`listLastSeen` 出全量落盘记录供 presence 启动 seed。
 排行榜 `listTopRated` 只出最近 7 天内有活动的用户：最后活动时间取 `max(lastSeenAt, updatedAt)`（对局结算、登录轮换会话等刷 `updatedAt`，presence 统一刷 `lastSeenAt`），距今 ≥ `LEADERBOARD_INACTIVITY_MS`（7×24×3600×1000）即暂时下榜（rating 数据不动，重新活跃即回榜；bot 账号同一规则）。
 _一句话：用户/会话/Rating 存储，brotli 压缩 users.bin。_
@@ -171,11 +173,11 @@ _一句话：用户/会话/Rating 存储，brotli 压缩 users.bin。_
 分页 `listPage`/`listByAuthor`；发帖 1–300 字 + 30 秒/人冷却（`FeedCooldownException` 带 `retryAfter`）；评论 1–200 字、每帖上限 200 条；点赞切换。
 _一句话：动态帖子/点赞/评论存储，带发帖冷却。_
 
-**src/announcement-store.ts** — 公告单文件 JSON 存储（`data/announcement.json`），原子串行写，`ANNOUNCEMENT_TEXT_MAX=500`。文本本身不渲染，渲染由上层经 `text-render.ts` 完成。
+**src/announcement-store.ts** — 公告单文件 JSON 存储（`data/announcement.json`），原子串行写 + `.bak` 备份回退（binary-store 底座），`ANNOUNCEMENT_TEXT_MAX=500`。文本本身不渲染，渲染由上层经 `text-render.ts` 完成。
 _一句话：公告单文件 JSON 存储，原子串行写。_
 
 **src/replay-store.ts** — 回放存取、索引与观看二进制 gzip 缓存（`data/replays/`）。
-原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`，索引项 `ReplayListItem` 含 `rank`（终局个人名次）与 `teams`（终局队伍分组 `{members, color}[]`，组序=队伍名次序，旧索引项无此字段前端回退平铺）。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且解压魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB4 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
+原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`（未压缩 v8 serialize，历史格式）启动时载入内存缓存，读路径不再重复读盘反序列化，写路径更新缓存后经 `CoalescingFileWriter` 合并落盘，主文件/备份均损坏时按空索引兜底并告警。索引项 `ReplayListItem` 含 `rank`（终局个人名次）与 `teams`（终局队伍分组 `{members, color}[]`，组序=队伍名次序，旧索引项无此字段前端回退平铺）。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且解压魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB4 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
 _一句话：回放存储与 RPB gzip 缓存，id 为内容哈希。_
 
 **src/replay-patch-binary.ts** — `ReplayData` → RPB4 观看二进制编码器（手写 LE；initial 全量帧 + 逐 patch forward/backward 差分 + 玩家 meta；RPB4 起 meta 末尾追加 fog 标志，供前端回放视角选择器）。仅编码无解码——解码在前端 `static/main/replay-binary.js`；**改格式需同步前端并升魔数**，导出 `REPLAY_BINARY_MAGIC` 供缓存陈旧性校验。
@@ -207,7 +209,7 @@ _一句话：共享类型/协议定义汇总。_
 
 ### 功能页
 
-**static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「刚刚在线」。回放列表名次列按队伍合并展示：索引项带 `teams`（终局队伍分组，组序=队伍名次序）时同队一组（组内 `, `、组间 ` › `，不展示玩家配色色块），旧数据无 `teams` 回退 `rank` 平铺；名次列成员名与房间列表房主名统一走 `username.js` 组件（rating 颜色 + 点击跳主页，接口不带颜色时经 `/api/user-colors` 批量补色）。
+**static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「刚刚在线」。回放列表名次列按队伍合并展示：索引项带 `teams`（终局队伍分组，组序=队伍名次序）时同队一组（组内 `, `、组间 `›`，不展示玩家配色色块），旧数据无 `teams` 回退 `rank` 平铺；名次列成员名与房间列表房主名统一走 `username.js` 组件（rating 颜色 + 点击跳主页，接口不带颜色时经 `/api/user-colors` 批量补色）。
 数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds/home_online` 失效通知（事件无 payload）。顶栏在线人数与右栏「刚刚在线」（排行榜下方，前 8 位最近下线用户的相对下线时间）由 `/api/online` 驱动。`home_online` 收到后对比在线人数快照，增加时经 `notify.js` 弹「有玩家上线」后台通知；`home_rooms` 收到后对比房间号快照，出现新房间时弹「有新的房间」后台通知。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态原文存 `$item.data('raw-text')`；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
@@ -306,7 +308,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 ## 配置 / CI / 脚本 / bot 模板
 
-- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot、test:lobby-guards、test:deploy-update、test:fog、test:presence、test:strategy、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot、test:lobby-guards、test:deploy-update、test:fog、test:presence、test:strategy、test:leaderboard、test:storage、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 
 - **tsconfig.json** — src→dist，CommonJS+ES2022+sourceMap；**刻意关闭严格模式**，改严格度会影响整个 src/ 编译面。
 - **eslint.config.cjs** — flat config，只查 `src/**/*.ts`，推荐规则集 + 关闭 `no-explicit-any`；不查 static/。
@@ -326,6 +328,8 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **scripts/test-fog.mjs** — `pnpm run test:fog`：迷雾远征冒烟——房主 `change_game_conf {fog:true}` 开局后，校验客户端合并局面满足迷雾不变量（帧带 `fog` 数组、迷雾格只泄地形且兵力归零、己方主城可见、视野内无敌方主城），对照默认房间不带 `fog` 字段；观战视角场景：中途进房观战者默认全图（fog 全 0、双方主城可见），`spectate_view {team}` 切换后按该队伍迷雾过滤（复用同一套不变量断言）、存活参赛者请求被忽略、切回 0 恢复全图；另覆盖 issue #51：bot 进房后迷雾被强制关闭、房主再次开启请求被拒绝、纯人类房间不受影响。
 - **scripts/test-strategy-logic.mjs** — `pnpm run test:strategy`：策略逻辑单元测试——合成 1×m 走廊棋盘直接驱动 `bot/` 纯函数模块（buildContext + planOffense），回归四类行为：优势即打（触发即攻）、集结期入口不出兵切断（防入口易位致纵队折返）、僵死对峙超时解散 + 重集结闸门 + 改善后开打、爆发期路径敌格自然增兵不误判增援弃打。
 - **scripts/test-leaderboard-activity.mjs** — `pnpm run test:leaderboard`：排行榜不活跃下榜过滤单元测试——临时数据目录起 `dist/auth-store.js` 的 UserStore，固定 now mock 时间，回归：活跃 6 天在榜、8 天下榜、恰好 7 天下榜、重新登录（rotateSession + markLastSeen）后立即回榜、无对局（ratingGames=0）不在榜、仅靠对局结算（updatedAt）无 lastSeenAt 仍算活跃；需先 `pnpm run build`。
+- **scripts/test-storage.mjs** — `pnpm run test:storage`：存储层回归（issue #67）——临时数据目录驱动 dist 四个 Store：突发连续写入状态完整（合并写不丢状态）、`.bak` 备份生成与主文件损坏自动回退、旧格式（v8+brotli q6 历史写法）文件原样可读、回放索引内存缓存/重启恢复/index.bin 损坏回退/deleteReplay 清理、公告损坏回退；需先 `pnpm run build`。
+- **scripts/analyze-replay-compression.mjs** — 回放存储压缩评估（issue #67）：扫描 `data/replays/*.rpl` 统计操作流特征（op 类型分布、选中切换占比）并对比候选编码体积（现状 v8+brotli q6 / q11 / 文本 DSL / 二进制打包）；`--limit=N` 限定扫描数量。
 - **scripts/observe-bot-match.mjs** — `pnpm run observe:bot`：对局观测/病理分析——临时数据目录起 dist 服务 + 进程内观战 recorder 逐 turn 录完整盘面（`frames.jsonl`），按 `OBS_BOTS` 启动 bot 组合（`strategy:`/`random:`/`legacy:` 前缀，`legacy` 从 git main 导出旧版做 A/B 基准），赛后生成 `report.txt`（往返抖动/送兵/前线停滞/切断无救援/主城沦陷时闲散兵力）；环境变量 `OBS_SPEED`/`OBS_MAP_TOKEN`/`OBS_MAP_MODE`/`OBS_OUT`/`OBS_MAX_MS`，输出默认 `data/observe-*/`（gitignored）。
 - **scripts/replay-bot-decisions.mjs** — bot 决策离线复盘：假 socket 驱动真实 `strategy.js` 逐 turn 重放观测目录的 `frames.jsonl`（队列执行按服务端 `chkMove`/`chkBuild` 语义模拟），完整复现跨 tick 决策状态；支持 `--validate`（与 bot 日志逐 op 比对）、`--from/--to`、`--board`、`--cell` 盘面解释；配 `BOT_TRACE=1/2` 输出进攻评估/焦点/候选榜。
 - **scripts/extract-replay-frames.mjs** — 回放转帧：从 `data/replays/<id>.rpl`（ops-v1）经 dist 引擎重放提取逐 turn 全量帧，输出 `data/observe-<id>/frames.jsonl` + `meta.json`，供 replay-bot-decisions.mjs 与分析脚本使用。
@@ -335,26 +339,23 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **bot-template/simple-strategy-bot/** — 综合策略 bot（独立 pnpm 包）：`strategy.js` 为入口与管线编排（socket/房间循环/队列镜像/逐 tick 决策，recentMoves 窗口丢弃互逆操作防往返抖动，常规输送每 tick 限 1 条 op 防挤占扩张/建设），`bot/` 为纯函数决策模块——`board.js`（棋盘视图/距离场/Dijkstra/推兵预演/孤军聚块/咽喉割点识别与双层危险场定量驻军）、`defense.js`（威胁推演与集结布防，活跃威胁逼近触发回防闩锁）、`offense.js`（目标评估/风险路径/集结打击/切断入侵/前线突破集结/打击体检与冷却）、`rescue.js`（被切断孤军的走廊救援评估与止损）、`economy.js`（皇冠/指挥所建设选址）、`logistics.js`（汇集输送/中立扩张）、`opening.js`（开局发育规划器：逐 tick 模拟选最优启动时机，1–30 tick 接管、爆发期后半交还常规管线）；CLI `index.js` 与服务端托管（`src/server/server-bot-manager.ts` 经 `strategy.js` 加载）共用这一份实现；用法见包内 `USAGE.md`。
 - **bot-template/anti-human-bot/** — 独立实现的 AI 策略 bot（独立 pnpm 包，依赖 socket.io-client）：自研协议/状态（`bot/state.cjs`）与纯函数决策管线（`bot/policy.cjs` 调度，`bot/threat.cjs` 共享局面分析层——按到达时间衰减的局部威胁场 + 建造竞赛状态，frontline/logistics/building/architecture/defense/campaign/cutoff/column/ffa/interception/rescue/opening/tactics/planner ，并导出 `ownStrandedMass` 共享连通判定——引擎 applyConnectivity 同款锚点 BFS，脖子纪律/campaign 锚点链/frontline maze 关卡评估共用一个口径等模块；`bot/cutoff.cjs` 专责截断（入侵截断 + 散兵单格/两格/三格组合截断 + 割点脖子纪律），`bot/movement-guard.cjs` 为移动护栏；`bot/campaign.cjs` 含浓缩突击（军力占优且出击兵力达决定性规模时 mode2 全冲压皇冠，带脖子截断风险检查与无状态止损，参数 `assaultMargin`/`megaStackMin`；与画圈推进（窄突出部先侧向扫一格把锋面涂成宽 2–3 连通块再前压，参数 `pushFrontWidth`）+ 锚点链（推进走廊按节奏/截断风险落指挥所保连通，参数 `anchorChainGap`/`anchorBuildEvery`；2026-09-27 第二轮加同 tick 预锚——走廊可被 1 tick 切断且大堆 ≥`preemptAnchorMinArmy` 时本 tick 不移动原地起锚，钱不够等 `preemptAnchorWaitTicks` 上限——与腾出格补锚——大堆推进后立即在原位置补锚，两动作不受节奏限制、policy 中压过截断/脖子纪律但让位背水/斩首；2026-09-28 起跳板推进常态化——rally 距最近己方皇冠 ≥`leapfrogMinDepth` 的深入长线推进把「走一步→腾出格补一座指挥所」作为默认节奏（不再要求切断风险，链距 `leapfrogChainGap`，钱不够原地等 `leapfrogWaitTicks` 凑钱，常态化期间不用 mode2 全冲；锚定距离场不查移动护栏的反向禁行边——这是此前补锚在 policy 管线里被卡死的主根因））；`bot/column.cjs` 敌方跳板纵队拦截（敌连通块深入我控区 ≥`columnMinDepth` 格且头部较上 tick 更近才出手：头自带建筑一律打头拆建筑、长纵队优先掐链（冻住 ≥`columnMinMass`）其次侧击腰部、短促自耗型迎头撞头部，出兵方案复用 cutoff 的 `planChokeAttack`；policy 中背水/告急与多路告急之下、普通推进之上）；`bot/frontline.cjs` 含 maze 拓展纪律（迷宫图拓展只派必要兵力、源点关卡贴敌不为拓展削弱咽喉，参数 `mazeMountainRatio`）与阶段化扩张-要塞方针（`fortressPhaseTurn` 起无要塞撑腰的薄皮中立扩张须够厚才拓、皇冠目标按 `lateTerritoryPerCrown` 提速，配套 `lateSkinMin`/`lateMaxCrowns`/`lateAnchorRadius`）与斩首攻冠兵力三级递升（2026-09-28 方针「三」：半兵推得下只出半兵 → 不够试智能全兵 mode0（就近合力、留守义务照算的智能分兵合力口径，余量 `crownSmartMargin`）→ 还不够才退真全兵 mode2（合力余量 `crownFullMargin`））；；此外仅有三处用户方针要求的跨回合防抖——frontline 斩首锁定（合力推皇冠的多 tick 连续攻击）、logistics 工地/集结点滞回（防目标每 tick 跳变来回倒兵）与 campaign 深入决心（已出击大堆 `campaignResolveTicks` 窗口内锁定同一皇冠方向，另一方向评分甩开 `campaignResolveMargin` 或形势剧变才解锁），均非旧版计划状态；2026-09-29 截断失灵根因修复 + 涂色/建造天平矫正：policy 涂色让位块（本 tick 推进只是中立涂色时非紧急截断/可负担建造/经济筹资依次压过涂色——根因是旧调度里非紧急截断只在 !canAdvance 时执行而被涂色无限期饿死；产能落后时经济紧急加 advanceIsPaint 条件把竞赛追赶做实）+ frontline 薄土涂色降权（中立涂色基础分 26→`paintValue`，到达兵力 <`paintThinArrive` 按差值 ×`paintThinPenalty` 扣分、负分中立候选跳过）；2026-09-29 追加方针「身后下刀」：入侵截断与纵队掐链的脖子候选按「比深入块更靠敌锚点一侧」加权（`cutoffBehindBonus`，敌锚点距离场口径），column 短促自耗型迎头撞带 `headOn` 标记、policy 层在截断模块有后方切断点时让位截断）+ 离线训练脚本（`training/`，不含生成物 results/）；入口 `bot.cjs`（CLI，`BOT_TOKEN` 鉴权、默认自动准备且 `BOT_AUTO_READY=0` 可关闭，`/ready`、`/room` 聊天命令控制），`bot/client.cjs` 的 `attachBot` 支持 `preferredTeam`/`autoReady` 初始选项；`server-bot.js` 为服务端托管适配入口（`attachStrategy` 映射为 `{roomName, preferredTeam, autoReady}`），托管启动自动准备并固定首选 2 队。人格层：`bot/client.cjs` 在组队模式下检测人类同队并自主避让换队（首选 2 队 → 最小编号空队 → 纯 bot 队，全满则按兵不动；人类侧不受任何限制）；`bot/trash-talk.cjs` 优势垃圾话（帝国时代 2 嘲讽风格文案库 ≥30 条分四档、多触发器独立冷却、全局冷却 + 每局上限 + 概率门控、wololo 彩蛋仅在对方领土单 tick 暴跌时触发且每局限 1 次）；`bot/surrender.cjs` 绝境投降（严重劣势 + 绝无胜算 + 对方活跃 + 调戏收尾四条全满足才发 GG 投降，独立可测））+ 推进方向纪律（threat.cjs 的 crownDistance 敌核心距离场 + frontline 方向加权/侧翼涂色降权，参数 pushDirectionWeight/flankPaintPenalty/paintDiscardDist）+ 建造阈值分级（architecture.cjs 的 locationRisk/buildFund/frontStable：大后方 rearBuildFund=100/前线 frontBuildFund=150/中间按敌距+威胁场过渡/绝境回落 100，位置不按出生点）+ 前线迁都（logistics 稳定前线格可作工地并获 frontBaseBonus）+ 集兵树形化（缺口 ≥bulkPullMin 时最远子树先动逐级汇聚、深后方大堆 ≥supplyTreeDepth 跳一次性拉出，一次性集满再造）+ 推进方向纪律（threat.cjs 的 crownDistance 敌核心距离场 + frontline 方向加权/侧翼涂色降权，参数 pushDirectionWeight/flankPaintPenalty/paintDiscardDist）+ 建造阈值分级（architecture.cjs 的 locationRisk/buildFund/frontStable：大后方 rearBuildFund=100/前线 frontBuildFund=150/中间按敌距+威胁场过渡/绝境回落 100，位置不按出生点）+ 前线迁都（logistics 稳定前线格可作工地并获 frontBaseBonus；2026-09-28 回调：后方优先、产能富余 frontBaseMinCrowns 后才启用前线选址，frontBaseBonus 下调至 10 且需自带资金/皇冠群撑腰；开局提速 earlyBuildTurns 内距离档按 earlyDistScale 收缩、前线阈值按 earlyFrontFundScale 下调，保底建造 earlyBuildTurns 内不贴敌 50 兵即开工）+ 集兵树形化（缺口 ≥bulkPullMin 时最远子树先动逐级汇聚、深后方大堆 ≥supplyTreeDepth 跳一次性拉出，一次性集满再造；用法见包内 `USAGE.md`，测试 `node --test test/*.test.cjs`。
 
-
-
-
-- **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`server-bots.json`（托管策略 bot 重启自动恢复状态：{username, room, template, allowTeam} 列表）、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）。
+- **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`server-bots.json`（托管策略 bot 重启自动恢复状态：{username, room, template, allowTeam} 列表）、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）；各数据文件写入时自动生成同名 `.bak` 上一代备份（损坏回退用，issue #67）。
 
 ---
 
 ## 常见任务速查
 
-| 要做什么                         | 动哪里                                                                                                                                                              |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 调平衡数值（AFK/掉线/孤军/增兵） | `src/game-engine/constants.ts`、`tick-growth.ts`                                                                                                                    |
-| 改对局规则（战斗/连通/投降）     | `src/game-engine.ts`（+ 教程复刻 `static/tutorial.js`）                                                                                                             |
-| 改 socket 协议/格子编码          | `src/types.ts`、`src/game-engine/map-encoding.ts`、`src/server.ts`、`src/server/lobby-service.ts`；同步 `static/develop-bot.html`、`bot-template/`、`static/main/*` |
-| 改回放格式                       | `src/replay-patch-binary.ts`（编码，升魔数）+ `static/main/replay-binary.js`（解码）+ ops-v1 互逆对 `src/game-engine/replay-turns.ts` ↔ `replay-scheduling.ts`      |
-| 加/改 REST API                   | `src/server.ts`（路由集中在此；注意限流与认证钩子）                                                                                                                 |
-| 改房间/断线/重连逻辑             | `src/server/lobby-service.ts` + `src/game-engine.ts`（宽限三件套）                                                                                                  |
-| 改公告/动态渲染                  | `src/text-render.ts`（同一管线；加 KaTeX 标签需同步白名单）                                                                                                         |
-| 改 Rating/段位                   | `src/auth-store.ts`（分数）、`src/rating-color.ts` + `static/styles/rating.css`（颜色）                                                                             |
-| 改地图生成                       | `src/map/`（公共件在 map-core.ts；尺寸比例在 map-size.ts）                                                                                                          |
-| 改对局页渲染                     | `static/main/render-update.js`（帧合并）、`static/styles/map.css`（视觉）                                                                                           |
-| 改首页 feed/公告样式             | `static/styles/home.css` + `static/styles/profile.css`（双改）                                                                                                      |
+| 要做什么                         | 动哪里                                                                                                                                                                                                                                                   |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 调平衡数值（AFK/掉线/孤军/增兵） | `src/game-engine/constants.ts`、`tick-growth.ts`                                                                                                                                                                                                         |
+| 改对局规则（战斗/连通/投降）     | `src/game-engine.ts`（+ 教程复刻 `static/tutorial.js`）                                                                                                                                                                                                  |
+| 改 socket 协议/格子编码          | `src/types.ts`、`src/game-engine/map-encoding.ts`、`src/server.ts`、`src/server/lobby-service.ts`；同步 `static/develop-bot.html`、`bot-template/`、`static/main/*`                                                                                      |
+| 改回放格式                       | `src/replay-patch-binary.ts`（编码，升魔数）+ `static/main/replay-binary.js`（解码）+ ops-v1 互逆对 `src/game-engine/replay-turns.ts` ↔ `replay-scheduling.ts`                                                                                           |
+| 加/改 REST API                   | `src/server.ts`（路由集中在此；注意限流与认证钩子）                                                                                                                                                                                                      |
+| 改房间/断线/重连逻辑             | `src/server/lobby-service.ts` + `src/game-engine.ts`（宽限三件套）                                                                                                                                                                                       |
+| 改公告/动态渲染                  | `src/text-render.ts`（同一管线；加 KaTeX 标签需同步白名单）                                                                                                                                                                                              |
+| 改 Rating/段位                   | `src/auth-store.ts`（分数）、`src/rating-color.ts` + `static/styles/rating.css`（颜色）                                                                                                                                                                  |
+| 改地图生成                       | `src/map/`（公共件在 map-core.ts；尺寸比例在 map-size.ts）                                                                                                                                                                                               |
+| 改对局页渲染                     | `static/main/render-update.js`（帧合并）、`static/styles/map.css`（视觉）                                                                                                                                                                                |
+| 改首页 feed/公告样式             | `static/styles/home.css` + `static/styles/profile.css`（双改）                                                                                                                                                                                           |
 | 部署/自动更新                    | `src/server/webhook-updater.ts`（排队状态机/宽限清算/dry-run）+ `src/server/lobby-service.ts`（updateQueued/清算入口）+ `src/game-engine.ts`（forceFinish）+ `static/sw.js`/`updating.html`（SW 更新页）+ `.github/workflows/bump-version-and-merge.yml` |
