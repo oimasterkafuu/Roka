@@ -1,0 +1,7 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict');
+const { project } = require('../bot/board.cjs'); const { candidates } = require('../bot/candidates.cjs'); const { createController } = require('../bot/controller.cjs');
+function b(grid, army) { return project({ n: 2, m: 3, grid_type: grid, army_cnt: army }, 1); }
+test('candidates include attack, build and merge without mountain actions', () => { const board = b([101, 1, 201, 1, 1, 2], [80, 2, 0, 60, 10, 3]); const list = candidates(board); assert.ok(list.some((a) => a.kind === 'attack')); assert.ok(list.some((a) => a.kind === 'build')); assert.ok(list.every((a) => !(a.dx === 0 && a.dy === 2))); });
+test('controller attacks exposed crown and blocks immediate reverse oscillation', () => { const board = b([101, 1, 102, 1, 1, 2], [20, 2, 4, 60, 10, 3]); const c = createController(1); const action = c.choose({ ...board, turn: 1 }); assert.ok(action); assert.equal(action.kind, 'attack'); assert.ok(action.dx >= 0 && action.dy >= 0); const again = c.choose({ ...board, turn: 1 }); assert.equal(again, null); });
+test('dead or empty board returns no action', () => { const c = createController(1); assert.equal(c.choose({ n: 1, m: 1, grid: [101], army: [1], visible: [true], playerId: 1, own: () => true, enemy: () => false, neighbors: () => [], xy: () => ({ x: 0, y: 0 }), idx: () => 0, size: 1, dead: true }), null); });

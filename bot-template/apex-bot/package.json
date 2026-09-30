@@ -1,0 +1,8 @@
+{
+  "name": "apex-bot-template",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Roka apex strategy bot template",
+  "scripts": {"start": "node index.js", "test": "node --test test/*.test.cjs", "benchmark": "node training/benchmark.cjs"},
+  "dependencies": {"socket.io-client": "^4.8.1"}
+}
