@@ -29,6 +29,10 @@ function createFrontline(state, params = {}) {
   }
   const allowed = (owner) => !params.allowedOwners || params.allowedOwners.has(owner);
   const blocked = (a, b) => params.blockedEdges?.has(`${a}:${b}`);
+  // 「断锚」语义只在我方锚点存在时成立：无建筑的合成局面里所有格子都"断锚"，
+  // 会把每个源点误判成关卡（真实对局里存活方必有皇冠，不影响实战）。
+  let hasAnchor = false;
+  for (let i = 0; i < size; i++) if (own(i) && (grid[i] === me + 100 || grid[i] === me + 50)) { hasAnchor = true; break; }
 
   function classify(a, b) {
     if (grid[b] === owners[b] + 100) return 'crown';
@@ -86,7 +90,10 @@ function createFrontline(state, params = {}) {
     const wide = ctx.frontDistance[a] === 0 && p.wideKeepWeight > 0
       ? ctx.pressure(a, { radius: 3, decay: 0.5 }).total : 0;
     const wideKeep = Math.min(Math.ceil(A * 0.5), Math.ceil(wide * p.wideKeepWeight));
-    const keepSource = Math.max(pressureKeep > 0 ? 2 : 1, pressureKeep, wideKeep);
+    let keepSource = Math.max(pressureKeep > 0 ? 2 : 1, pressureKeep, wideKeep);
+    // maze 关卡留守（下方 maze 块赋值）：普通留守与消耗冲击共用这条硬下限——
+    // 咽喉格为换兵/推进被抽干正是场 2 (7,7) 的败形。
+    let chokeKeep = 0;
     const localRatio = A / Math.max(1, defense + tgt.adj + src.adj);
     // 全局兵力落后时不再做亏本交换：只打真正赚的仗。
     const behindArmy = ctx.race.bestOwner !== null && ctx.race.myArmy < 0.95 * ctx.race.bestArmy;
@@ -167,13 +174,44 @@ function createFrontline(state, params = {}) {
       if (stranded !== null && stranded >= p.cutoffMinIsolate)
         return reject('maze拓展：源点关卡贴敌，先打先守不削弱咽喉', { from: a, to: b, stranded: Math.round(stranded) });
     }
+    // ── maze 关卡留守推广到敌格/指挥所推进（issue #70）───────────────────────
+    // 场 2：前哨皇冠 (7,7) 被自己的敌格攻击从 83 抽干到 22，敌 106 兵堆沿走廊一到
+    // 就端掉皇冠——咽喉保护只罩 neutral 拓展，攻击敌格时豁免。mazeLike 时源点是
+    // 「移除后冻住 ≥cutoffMinIsolate 兵力」的关卡且预警圈（mazeNeckWarnRange 跳
+    // 走廊距离）内有敌堆逼近时，按跳数衰减后的敌堆兵力抬高留守——关卡评分就此
+    // 计入「距可见敌主力的走廊距离」，主力镇争议咽喉而不是被一次推进抽干。
+    if (hasAnchor && ctx.mazeLike && (kind === 'enemy' || kind === 'city') && p.mazePushNeckKeep > 0) {
+      const stranded = ownStrandedMass(ctx, a, p.cutoffScan);
+      if (stranded !== null && stranded >= p.cutoffMinIsolate) {
+        const dist = new Int32Array(size).fill(-1);
+        const queue = [a]; dist[a] = 0;
+        let approach = 0;
+        for (let h = 0; h < queue.length; h++) {
+          const u = queue[h];
+          if (dist[u] >= p.mazeNeckWarnRange) continue;
+          for (const v of ctx.neighbors[u]) {
+            if (dist[v] >= 0 || !passable(v) || !known[v]) continue;
+            dist[v] = dist[u] + 1; queue.push(v);
+            if (hostile(v)) approach = Math.max(approach, count(v) - 1 - dist[v]);
+          }
+        }
+        if (approach > 0) {
+          chokeKeep = Math.ceil(approach * p.mazePushNeckKeep);
+          keepSource = Math.max(keepSource, chokeKeep);
+        }
+      }
+    }
     // ── 阶段化扩张-要塞方针（用户 2026-09-27 定稿，E 原局校准）───────────────
     // E 的净扩张速率在 turn 60–75 坍缩、皇冠从 75 起跳：前期抢地盘不动；中后期
     // 薄皮大摊子是自杀形态——中立扩张必须「有要塞撑腰」（源点在己方建筑
     // lateAnchorRadius 辐射圈内）或「自己够厚」（占领后驻军 ≥ lateSkinMin），
     // 否则这一 tick 不拓，兵留在源点养厚/转投要塞建设。敌方目标与拆建筑不算
     // 「扩张」，不受此限（中后期少量精要扩张，不是完全不扩）。
-    const fortressBacked = ctx.anchorDistance[a] >= 0 && ctx.anchorDistance[a] <= p.lateAnchorRadius;
+    // issue #70：迷宫薄皮走廊在该方针下被全禁（radius 2 / skin 10 对长走廊过严，
+    // 场 2 t110 起土地恒定 26–34、产能冻结滚雪球）。mazeLike 时放宽半径与驻军门槛。
+    const anchorRadius = ctx.mazeLike ? Math.max(p.lateAnchorRadius, p.mazeLateAnchorRadius) : p.lateAnchorRadius;
+    const skinMin = ctx.mazeLike ? Math.min(p.lateSkinMin, p.mazeLateSkinMin) : p.lateSkinMin;
+    const fortressBacked = ctx.anchorDistance[a] >= 0 && ctx.anchorDistance[a] <= anchorRadius;
     const lateThinExpand = Number.isInteger(ctx.turn) && ctx.turn >= p.fortressPhaseTurn &&
       kind === 'neutral' && !fortressBacked;
     // 深入且有威胁时能半兵就半兵（像正常扩散铺路一样，半兵够拿下目标格就只派一半，
@@ -182,7 +220,7 @@ function createFrontline(state, params = {}) {
     // 顺序取第一个通过留守/预算闸门的模式，「兵够却分多次小勺推同一目标」视为 bug。
     const deepHalf = deepPush && !noThreat && !decisiveStack;
     const modes = mazeExpand ? [1, 0] : deepHalf ? [1, 2, 0] : [2, 1, 0];
-    const arriveFloor = lateThinExpand ? Math.max(p.minArrive, p.lateSkinMin) : p.minArrive;
+    const arriveFloor = lateThinExpand ? Math.max(p.minArrive, skinMin) : p.minArrive;
     let best = null;
     for (const mode of modes) {
       const push = mode === 1 ? Math.floor(smart / 2) : mode === 2 ? cap : smart;
@@ -195,9 +233,11 @@ function createFrontline(state, params = {}) {
       // 全冲（留 1 兵）的放行条件：目标是敌方领土、源点不是自家建筑，
       // 且新占格的兵力至少能压住源点旁边的敌军。这样「半兵打不穿、全冲又不许」
       // 的死锁就不会出现（实地日志里 A=223 对守军 115、A=223 对守军 35 都被卡死）。
+      // issue #70：allInSafe 只看贴邻敌军，maze 关卡咽喉还要守住 chokeKeep 硬下限——
+      // 沿走廊逼近的敌堆 2 跳外就要计入，不能借全冲豁免把咽喉抽干（场 2 (7,7) 败形）。
       const allInSafe = !ownBuilding && kind !== 'neutral' &&
         arrive >= Math.min(keepSource, Math.max(2, src.adj * 1.2));
-      const requiredKeep = ownBuilding ? keepSource : allInSafe ? 1 : keepSource;
+      const requiredKeep = ownBuilding ? keepSource : allInSafe ? Math.max(1, chokeKeep) : keepSource;
       if (left < requiredKeep) continue;
       if (unknownNear && !buildingTarget && (left < p.unknownMargin || arrive < 4)) continue;
       // 占领后下一 tick 的相对优势：来援的己方邻格 + 新到兵力 − 目标周围可反击的敌军。
@@ -252,8 +292,9 @@ function createFrontline(state, params = {}) {
         if (reserveEdge >= 1.0 || productionEdge >= 3) need *= 0.6;
         if (dominant) need = Math.min(need, p.stallRatio);
         if (A >= need * defense) {
-          // 消耗战也要留够：自家建筑必须留下挡得住贴邻敌军的守军，普通格才允许只留 20%。
-          const floor = Math.max(1, Math.min(keepSource, Math.ceil(A * p.grindKeep)),
+          // 消耗战也要留够：自家建筑必须留下挡得住贴邻敌军的守军，普通格才允许只留 20%；
+          // maze 关卡咽喉额外受 chokeKeep 硬下限约束（换兵不许抽干咽喉，issue #70）。
+          const floor = Math.max(1, Math.min(keepSource, Math.ceil(A * p.grindKeep)), chokeKeep,
             ownBuilding ? src.adj + 1 : 0);
           let choice = null;
           for (const mode of [1, 0, 2]) {

@@ -203,8 +203,13 @@ function decide(state, params, guard) {
   // 只有当对手兵力不弱于我们（我们不是靠滚雪球赢的那一方）才值得让出进攻 tick 换产能；
   // 碾压局继续全速进攻，不做无谓的经济让位。
   const contested = race ? race.bestArmy >= 0.8 * Math.max(1, race.myArmy) : false;
-  const economyUrgent = Boolean(race?.behind) && state.turn >= 60 &&
-    (!canAdvance || (economyShare > 0 && contested && state.turn % economyShare === 0));
+  // issue #70：迷宫地皮有硬顶，皇冠是唯一产能杠杆，建造却被 advance 每 tick 抢占
+  // （场 1 皇冠 2 vs 5、场 2 存活 4 vs 8，每次兵力逆转都源于产能差）。mazeLike 且
+  // 竞赛落后时经济紧急更早启动（turn 40）、节奏更密（share 再减一拍）。
+  const maze = Boolean(ctx?.mazeLike);
+  const economyUrgent = Boolean(race?.behind) && state.turn >= (maze ? 40 : 60) &&
+    (!canAdvance || (economyShare > 0 && contested &&
+      state.turn % (maze ? Math.max(2, economyShare - 1) : economyShare) === 0));
   if (economyUrgent && !advanceWinsBuilding) {
     const buildNow = chooseBuild(state, null, constrained);
     if (buildNow) return take({ kind: 'build', ...buildNow }, 'economy-emergency-build');

@@ -60,6 +60,23 @@ const DEFAULT_PARAMS = Object.freeze({
   // 上限 lateMaxCrowns）。
   fortressPhaseTurn: 60, lateTerritoryPerCrown: 9, lateMaxCrowns: 12,
   lateSkinMin: 10, lateAnchorRadius: 2,
+  // maze 系统性弱点修复（issue #70，2026-09-30，证据 /root/antihuman-review.md）：
+  // 场 1 敌 125–191 兵大堆在 19 跳走廊尽头贴境停 16 tick 零应对（defense HORIZON=12
+  // 以主城为圆心量连通距离，走廊长度超窗）；场 2 敌堆在旧领土行军 18 turn 无拦截。
+  // mazeDefenseHorizon：mazeLike 时 defense 反应窗（皇冠 BFS 本就走连通距离，问题在
+  // 12 跳封顶）；mazeRallyWindow：mazeLike 时提前汇兵窗口，不再等敌堆贴脸才动。
+  mazeDefenseHorizon: 24, mazeRallyWindow: 10,
+  // 场 1 死因：割点 (1,5) 被 228 兵堆一刀切断、约 150 兵集群断链蒸发——cutoff 脖子
+  // 纪律只在「本 tick 可切断」时触发，敌堆进入割点走廊没有任何预警。mazeNeckWarnRange：
+  // mazeLike 时敌堆距割点走廊多少跳内触发提前驻防（也供 frontline 关卡留守用）；
+  // mazePushNeckKeep：mazeLike 时关卡源点攻击敌格/指挥所的留守倍率（对 N 跳内逼近
+  // 敌堆按跳数衰减后乘以该值），防止场 2 (7,7) 前哨皇冠被自己的攻击从 83 抽干到 22。
+  mazeNeckWarnRange: 6, mazePushNeckKeep: 1.2,
+  // campaign 锚点建站兵力门槛参数化（引擎硬门槛 50+1，不能再低；供优化器采样）。
+  anchorMinArmy: 51,
+  // 场 2 t110 起土地恒定 26–34：fortressPhaseTurn 后中立扩张要锚点 radius 2 或
+  // 驻军 ≥10，迷宫薄皮走廊被全禁 → 产能冻结。mazeLike 时放宽半径/驻军门槛。
+  mazeLateAnchorRadius: 4, mazeLateSkinMin: 4,
 
 });
 const PARAM_RANGES = Object.freeze({
@@ -94,6 +111,10 @@ const PARAM_RANGES = Object.freeze({
   pushFrontWidth: [1, 4], anchorChainGap: [2, 8], anchorBuildEvery: [2, 12], mazeMountainRatio: [0.15, 0.6],
   fortressPhaseTurn: [40, 600], lateTerritoryPerCrown: [4, 30], lateMaxCrowns: [3, 40],
   lateSkinMin: [2, 60], lateAnchorRadius: [1, 4],
+  mazeDefenseHorizon: [12, 40], mazeRallyWindow: [3, 30],
+  mazeNeckWarnRange: [2, 15], mazePushNeckKeep: [0, 4],
+  anchorMinArmy: [51, 400],
+  mazeLateAnchorRadius: [2, 8], mazeLateSkinMin: [1, 20],
 
 });
 function resolveParams(params = {}) {
