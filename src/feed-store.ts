@@ -1,9 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { deserialize, serialize } from 'node:v8';
-import { promisify } from 'node:util';
-import { brotliCompress, brotliDecompress, constants as zlibConstants } from 'node:zlib';
+import { serialize } from 'node:v8';
+import {
+  CoalescingFileWriter,
+  decodeBinary,
+  encodeRawBinary,
+  isMissingFileError,
+  readFileWithBackup,
+} from './binary-store';
 import { FeedComment, FeedPost } from './types';
 
 interface FeedFile {
@@ -32,30 +37,7 @@ export class FeedCooldownException extends Error {
   }
 }
 
-const brotliCompressAsync = promisify(brotliCompress);
-const brotliDecompressAsync = promisify(brotliDecompress);
-
-const isMissingFileError = (error: unknown): boolean =>
-  Boolean(
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    (error as NodeJS.ErrnoException).code === 'ENOENT',
-  );
-
-const encodeFeedFileBinary = async (value: FeedFile): Promise<Buffer> => {
-  const raw = serialize(value);
-  return (await brotliCompressAsync(raw, {
-    params: {
-      [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
-    },
-  })) as Buffer;
-};
-
-const decodeFeedFileBinary = async (content: Buffer): Promise<FeedFile> => {
-  const raw = (await brotliDecompressAsync(content)) as Buffer;
-  return deserialize(raw) as FeedFile;
-};
+const decodeFeedFileBinary = async (content: Buffer): Promise<FeedFile> => decodeBinary<FeedFile>(content);
 
 /**
  * 首页「动态」存储：推特式帖子，支持点赞与评论。
@@ -67,19 +49,19 @@ export class FeedStore {
 
   private readonly lastPostTimeByAuthor = new Map<string, number>();
 
-  // 写盘串行化：persist 经 promise 链排队，避免并发写交错。
-  private writeQueue: Promise<void> = Promise.resolve();
+  // 写盘合并串行化：突发连续写入只压缩落盘一次（见 binary-store）。
+  private readonly writer: CoalescingFileWriter;
 
   constructor(dataDir: string) {
     this.binaryFilePath = path.join(dataDir, 'feeds.bin');
+    this.writer = new CoalescingFileWriter(this.binaryFilePath);
   }
 
   async ensureReady(): Promise<void> {
     await mkdir(path.dirname(this.binaryFilePath), { recursive: true });
 
     try {
-      const raw = await readFile(this.binaryFilePath);
-      const parsed = await decodeFeedFileBinary(raw);
+      const parsed = await readFileWithBackup(this.binaryFilePath, decodeFeedFileBinary);
       this.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
       this.posts.sort((a, b) => b.time - a.time);
       return;
@@ -206,15 +188,9 @@ export class FeedStore {
 
   private persist(): Promise<void> {
     const data: FeedFile = { posts: this.posts };
-    // serialize 同步执行，调用时即拿到状态快照；压缩与写盘排队串行执行。
-    const binaryPromise = encodeFeedFileBinary(data);
-    const task = this.writeQueue.then(async () => {
-      const binary = await binaryPromise;
-      const tmpPath = `${this.binaryFilePath}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-      await writeFile(tmpPath, binary);
-      await rename(tmpPath, this.binaryFilePath);
-    });
-    this.writeQueue = task.catch(() => undefined);
-    return task;
+    // serialize 同步执行，调用时即拿到状态快照；brotli 压缩惰性执行，
+    // 被合并丢弃的排队写不产生压缩开销。
+    const raw = serialize(data);
+    return this.writer.write(() => encodeRawBinary(raw));
   }
 }

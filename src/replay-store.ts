@@ -1,14 +1,19 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
-import { brotliCompress, brotliDecompress, constants as zlibConstants, gunzip, gzip } from 'node:zlib';
+import { gunzip, gzip } from 'node:zlib';
+import {
+  CoalescingFileWriter,
+  decodeBinary,
+  encodeBinary,
+  readFileWithBackup,
+  writeFileAtomicWithBackup,
+} from './binary-store';
 import { encodeReplayPatchBinary, REPLAY_BINARY_MAGIC } from './replay-patch-binary';
 import { ReplayActionData, ReplayData, ReplayListItem } from './types';
 
-const brotliCompressAsync = promisify(brotliCompress);
-const brotliDecompressAsync = promisify(brotliDecompress);
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 
@@ -27,19 +32,9 @@ interface ReplaySaveSummary {
   turn: number;
 }
 
-const encodeReplayBinary = async <T>(value: T): Promise<Buffer> => {
-  const raw = serialize(value);
-  return (await brotliCompressAsync(raw, {
-    params: {
-      [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
-    },
-  })) as Buffer;
-};
+const encodeReplayBinary = <T>(value: T): Promise<Buffer> => encodeBinary(value);
 
-const decodeReplayBinary = async <T>(content: Buffer): Promise<T> => {
-  const raw = (await brotliDecompressAsync(content)) as Buffer;
-  return deserialize(raw) as T;
-};
+const decodeReplayBinary = <T>(content: Buffer): Promise<T> => decodeBinary<T>(content);
 
 export const getReplayId = (content: Buffer): string => {
   const hash = createHash('sha256').update(content).digest().subarray(0, 9);
@@ -55,12 +50,16 @@ export class ReplayStore {
 
   private readonly buildReplayFromActions: ReplayStoreOptions['buildReplayFromActions'];
 
-  // 写盘串行化：索引更新与回放文件写入经 promise 链排队，避免并发写交错。
-  private writeQueue: Promise<void> = Promise.resolve();
+  // 索引内存缓存：读路径不再每次读盘反序列化，写路径更新缓存后合并落盘。
+  private indexCache: ReplayListItem[] | null = null;
+
+  // 索引写盘合并串行化：突发连续写入只落盘一次（见 binary-store）。
+  private readonly indexWriter: CoalescingFileWriter;
 
   constructor(replayDir: string, options: ReplayStoreOptions) {
     this.replayDir = replayDir;
     this.indexFile = path.join(replayDir, REPLAY_INDEX_BIN);
+    this.indexWriter = new CoalescingFileWriter(this.indexFile);
     this.buildReplayFromActions = options.buildReplayFromActions;
   }
 
@@ -70,30 +69,31 @@ export class ReplayStore {
   }
 
   private async loadIndex(): Promise<ReplayListItem[]> {
-    try {
-      const content = await readFile(this.indexFile);
-      if (content.length === 0) {
-        return [];
-      }
-      return deserialize(content) as ReplayListItem[];
-    } catch {
-      return [];
+    if (this.indexCache) {
+      return [...this.indexCache];
     }
+    let items: ReplayListItem[] = [];
+    try {
+      // 索引是未压缩的 v8 serialize（历史格式保持不变），损坏时回退 .bak。
+      const parsed = await readFileWithBackup(this.indexFile, (content) =>
+        content.length === 0 ? [] : (deserialize(content) as ReplayListItem[]),
+      );
+      if (Array.isArray(parsed)) {
+        items = parsed;
+      }
+    } catch {
+      // 索引整体不可读（含备份）：按空索引处理，回放文件仍在，可后续重建。
+      console.warn(`[storage] ${this.indexFile} 及其备份均不可读，索引按空处理。`);
+    }
+    this.indexCache = items;
+    return [...items];
   }
 
   private async saveIndex(items: ReplayListItem[]): Promise<void> {
-    const tmpPath = `${this.indexFile}.${process.pid}.tmp`;
-    await writeFile(tmpPath, serialize(items));
-    await rename(tmpPath, this.indexFile);
-  }
-
-  private enqueue<T>(task: () => Promise<T>): Promise<T> {
-    const result = this.writeQueue.then(task);
-    this.writeQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    this.indexCache = [...items];
+    // serialize 同步执行拿到快照；索引不压缩（保持历史格式），写盘经合并队列。
+    const raw = serialize(items);
+    await this.indexWriter.write(() => Promise.resolve(raw));
   }
 
   async saveReplay(replay: ReplayActionData, summary: ReplaySaveSummary): Promise<string> {
@@ -101,24 +101,21 @@ export class ReplayStore {
     const replayId = getReplayId(binary);
     const replayPath = path.join(this.replayDir, `${replayId}${REPLAY_EXT}`);
 
-    await this.enqueue(async () => {
-      const tmpPath = `${replayPath}.${process.pid}.tmp`;
-      await writeFile(tmpPath, binary);
-      await rename(tmpPath, replayPath);
+    // 回放文件内容按哈希寻址、不可变；原子写入（临时文件 + rename）。
+    await writeFileAtomicWithBackup(replayPath, binary);
 
-      const replayItem: ReplayListItem = {
-        time: Math.floor(Date.now() / 1000),
-        id: replayId,
-        rank: [...summary.rank],
-        teams: summary.teams.map((team) => ({ members: [...team.members], color: team.color })),
-        turn: summary.turn,
-      };
+    const replayItem: ReplayListItem = {
+      time: Math.floor(Date.now() / 1000),
+      id: replayId,
+      rank: [...summary.rank],
+      teams: summary.teams.map((team) => ({ members: [...team.members], color: team.color })),
+      turn: summary.turn,
+    };
 
-      const items = await this.loadIndex();
-      items.push(replayItem);
-      items.sort((a, b) => b.time - a.time);
-      await this.saveIndex(items);
-    });
+    const items = await this.loadIndex();
+    items.push(replayItem);
+    items.sort((a, b) => b.time - a.time);
+    await this.saveIndex(items);
 
     return replayId;
   }
@@ -172,11 +169,7 @@ export class ReplayStore {
     const replay = await this.loadReplay(id);
     const binary = encodeReplayPatchBinary(replay);
     const compressed = (await gzipAsync(binary)) as Buffer;
-    await this.enqueue(async () => {
-      const tmpPath = `${cachePath}.${process.pid}.tmp`;
-      await writeFile(tmpPath, compressed);
-      await rename(tmpPath, cachePath);
-    });
+    await writeFileAtomicWithBackup(cachePath, compressed);
     return { gzip: compressed, size: binary.length };
   }
 
@@ -199,15 +192,13 @@ export class ReplayStore {
     if (!isReplayIdValid(id)) {
       return;
     }
-    await this.enqueue(async () => {
-      await rm(this.resolveReplayPath(id, REPLAY_EXT), { force: true });
-      await rm(this.resolveReplayPath(id, REPLAY_VIEW_EXT), { force: true });
-      const items = await this.loadIndex();
-      const next = items.filter((item) => item.id !== id);
-      if (next.length !== items.length) {
-        await this.saveIndex(next);
-      }
-    });
+    await rm(this.resolveReplayPath(id, REPLAY_EXT), { force: true });
+    await rm(this.resolveReplayPath(id, REPLAY_VIEW_EXT), { force: true });
+    const items = await this.loadIndex();
+    const next = items.filter((item) => item.id !== id);
+    if (next.length !== items.length) {
+      await this.saveIndex(next);
+    }
   }
 
   async listReplays(): Promise<ReplayListItem[]> {

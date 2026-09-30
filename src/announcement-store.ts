@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { isMissingFileError, readFileWithBackup, writeFileAtomicWithBackup } from './binary-store';
 
 export interface Announcement {
   text: string;
@@ -9,16 +10,22 @@ export interface Announcement {
 
 export const ANNOUNCEMENT_TEXT_MAX = 500;
 
-const isMissingFileError = (error: unknown): boolean =>
-  Boolean(
-    error &&
-    typeof error === 'object' &&
-    'code' in error &&
-    (error as NodeJS.ErrnoException).code === 'ENOENT',
-  );
+const parseAnnouncement = (content: Buffer): Announcement => {
+  const parsed = JSON.parse(content.toString('utf8')) as unknown;
+  if (parsed && typeof parsed === 'object') {
+    const record = parsed as Record<string, unknown>;
+    return {
+      text: typeof record.text === 'string' ? record.text : '',
+      updatedAt:
+        typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt) ? record.updatedAt : 0,
+      updatedBy: typeof record.updatedBy === 'string' ? record.updatedBy : '',
+    };
+  }
+  return { text: '', updatedAt: 0, updatedBy: '' };
+};
 
 /**
- * 全站公告存储：单个 JSON 文件，原子写入（临时文件 + rename）。
+ * 全站公告存储：单个 JSON 文件，原子写入（临时文件 + rename + .bak 备份）。
  */
 export class AnnouncementStore {
   private readonly filePath: string;
@@ -36,17 +43,7 @@ export class AnnouncementStore {
     await mkdir(path.dirname(this.filePath), { recursive: true });
 
     try {
-      const raw = await readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(raw) as unknown;
-      if (parsed && typeof parsed === 'object') {
-        const record = parsed as Record<string, unknown>;
-        this.current = {
-          text: typeof record.text === 'string' ? record.text : '',
-          updatedAt:
-            typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt) ? record.updatedAt : 0,
-          updatedBy: typeof record.updatedBy === 'string' ? record.updatedBy : '',
-        };
-      }
+      this.current = await readFileWithBackup(this.filePath, parseAnnouncement);
       return;
     } catch (error) {
       if (!isMissingFileError(error)) {
@@ -74,11 +71,7 @@ export class AnnouncementStore {
   private persist(): Promise<void> {
     // 调用时即序列化当前状态快照；写盘排队串行执行。
     const snapshot = JSON.stringify(this.current, null, 2);
-    const task = this.writeQueue.then(async () => {
-      const tmpPath = `${this.filePath}.${process.pid}.tmp`;
-      await writeFile(tmpPath, snapshot);
-      await rename(tmpPath, this.filePath);
-    });
+    const task = this.writeQueue.then(() => writeFileAtomicWithBackup(this.filePath, snapshot));
     this.writeQueue = task.catch(() => undefined);
     return task;
   }
