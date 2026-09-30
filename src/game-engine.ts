@@ -11,6 +11,8 @@ import {
 } from './map/map-core';
 import { generateArchipelagoMap } from './map/archipelago-map-generator';
 import { generateMediterraneanMap } from './map/mediterranean-map-generator';
+import { generateHuaxiaMap } from './map/huaxia-map-generator';
+import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
 import { generateMazeMap } from './map/maze-map-generator';
 import { generateRandomMap } from './map/random-map-generator';
 import { ReplayStore } from './replay-store';
@@ -33,6 +35,7 @@ import {
   ChatScope,
   GameConfig,
   GameResultEntry,
+  MapRegion,
   MoveMode,
   QueuedOpKind,
   ReplayActionData,
@@ -133,6 +136,8 @@ export class GameEngine {
   private readonly mapSeed: string;
 
   private readonly mapMode: MapMode;
+
+  private readonly mapRegion: MapRegion;
 
   /**
    * 迷雾远征开关（房间设置）：开启后存活参赛者只收到己方队伍视野内的
@@ -258,8 +263,12 @@ export class GameEngine {
 
     this.mapToken = normalizeMapToken(gameConf.map_token) || 'default';
     this.mapMode = gameConf.map_mode;
+    this.mapRegion = normalizeMapRegion(gameConf.map_region ?? DEFAULT_MAP_REGION);
     this.fogEnabled = gameConf.fog === true;
-    this.mapSeed = resolveMapSeed(this.mapMode, this.mapToken);
+    this.mapSeed = resolveMapSeed(
+      this.mapMode,
+      this.mapMode === 'huaxia' ? `${this.mapRegion}:${this.mapToken}` : this.mapToken,
+    );
     this.rng = new SeededRandom(this.mapSeed);
     const seededCityRatio = resolveSeededTerrainRatio(this.mapSeed, 'city_ratio');
     const seededMountainRatio = resolveSeededTerrainRatio(this.mapSeed, 'mountain_ratio');
@@ -281,6 +290,7 @@ export class GameEngine {
       fog: gameConf.fog === true,
       map_token: this.mapToken,
       map_mode: gameConf.map_mode,
+      map_region: this.mapRegion,
       player_names: [...gameConf.player_names],
       player_teams: [...gameConf.player_teams],
       map_size_version: mapSizeVersion,
@@ -350,6 +360,7 @@ export class GameEngine {
         fog: meta.fog === true,
         map_size_version: meta.map_size_version ?? 1,
         map_size: meta.map_size ?? 'normal',
+        map_region: normalizeMapRegion(meta.map_region),
       },
       dummyPlayerSids,
       dummyPlayerIds,
@@ -390,6 +401,7 @@ export class GameEngine {
         fog: replay.meta.fog === true,
         map_size_version: replay.meta.map_size_version ?? 1,
         map_size: replay.meta.map_size ?? 'normal',
+        map_region: normalizeMapRegion(replay.meta.map_region),
       },
       dummyPlayerSids,
       dummyPlayerIds,
@@ -534,6 +546,15 @@ export class GameEngine {
         mountainRatio: this.mountainRatio,
         swampRatio: this.swampRatio,
         requiredPlayers,
+      });
+    } else if (this.mapMode === 'huaxia') {
+      generated = generateHuaxiaMap(this.rng, {
+        widthRatio: this.widthRatio,
+        heightRatio: this.heightRatio,
+        cityRatio: this.cityRatio,
+        mountainRatio: this.mountainRatio,
+        swampRatio: this.swampRatio,
+        mapRegion: this.mapRegion,
       });
     } else {
       generated = generateRandomMap(this.rng, {

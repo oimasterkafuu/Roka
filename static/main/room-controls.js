@@ -61,10 +61,29 @@ function getMapModeCode() {
   if (mapMode == '峡谷回廊') return 'maze';
   if (mapMode == '群岛要塞') return 'archipelago';
   if (mapMode == '地中海') return 'mediterranean';
+  if (mapMode == '华夏系列') return 'huaxia';
   return 'random';
 }
 
+function getMapRegionCode() {
+  var regions = {
+    汉: 'han',
+    三国: 'three-kingdoms',
+    北朝: 'northern-dynasties',
+    唐: 'tang',
+    宋: 'song',
+    元: 'yuan',
+    明: 'ming',
+    清: 'qing',
+  };
+  return regions[getTabVal('map-region')] || 'han';
+}
+
 function setMapModeByCode(code) {
+  if (code == 'huaxia') {
+    setTabVal('map-mode', '华夏系列');
+    return;
+  }
   if (code == 'maze') {
     setTabVal('map-mode', '峡谷回廊');
     return;
@@ -80,9 +99,25 @@ function setMapModeByCode(code) {
   setTabVal('map-mode', '标准地图');
 }
 
+function setMapRegionByCode(code) {
+  var labels = {
+    han: '汉',
+    'three-kingdoms': '三国',
+    'northern-dynasties': '北朝',
+    tang: '唐',
+    song: '宋',
+    yuan: '元',
+    ming: '明',
+    qing: '清',
+  };
+  setTabVal('map-region', labels[code] || '汉');
+}
+
 function refreshMapInputHint() {
-  $('#map-input-label').html('地图随机种子：');
-  $('#map-token').attr('placeholder', '留空将自动生成随机种子');
+  var huaxia = getMapModeCode() == 'huaxia';
+  $('#map-region-section').css('display', huaxia ? '' : 'none');
+  $('#map-input-label').html(huaxia ? '地图随机种子（可选）：' : '地图随机种子：');
+  $('#map-token').attr('placeholder', huaxia ? '华夏地区使用固定地形参数' : '留空将自动生成随机种子');
 }
 
 function getAllowTeamModeCode() {

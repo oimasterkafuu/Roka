@@ -1,5 +1,8 @@
 export const MAX_TEAMS = 16;
 
+export type MapRegion =
+  'han' | 'three-kingdoms' | 'northern-dynasties' | 'tang' | 'song' | 'yuan' | 'ming' | 'qing';
+
 export type ChatScope = 'room' | 'sid';
 
 /**
@@ -23,7 +26,9 @@ export interface LobbyConfig {
   /** 迷雾远征开关：开启后玩家仅可见己方队伍视野范围内的归属与兵力。 */
   fog: boolean;
   map_token: string;
-  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean';
+  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
+  /** 华夏模式的地区；旧配置缺省时使用汉。 */
+  map_region: MapRegion;
   /** 地图大小：normal 标准；large 大地图（边长约 2 倍，面积约 4 倍）。 */
   map_size: 'normal' | 'large';
 }
@@ -60,7 +65,9 @@ export interface RoomUpdatePayload {
   /** 迷雾远征开关（房间设置同步给前端展示）。 */
   fog: boolean;
   map_token: string;
-  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean';
+  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
+  /** 华夏模式的地区；旧房间快照缺省时使用汉。 */
+  map_region: MapRegion;
   /** 地图大小（房间设置同步给前端展示）。 */
   map_size: 'normal' | 'large';
   in_game: boolean;
@@ -155,7 +162,9 @@ export interface ReplayMeta {
   /** 对局是否开启迷雾远征（仅作元信息记录；回放始终全视野）。 */
   fog?: boolean;
   map_token: string;
-  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean';
+  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
+  /** 新回放写入地区；旧回放缺省时按汉重建。 */
+  map_region?: MapRegion;
   player_names: string[];
   player_teams: number[];
   map_size_version?: 1 | 2;

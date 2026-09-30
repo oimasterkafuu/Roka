@@ -10,6 +10,7 @@ import { UserStore } from './auth-store';
 import { FeedCooldownException, FeedStore } from './feed-store';
 import { GameEngine } from './game-engine';
 import { resolveMapSizeRatioByPlayers } from './map/map-size';
+import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
 import { ratingTier } from './rating-color';
 import { encodeReplayPatchBinary } from './replay-patch-binary';
 import { isReplayIdValid, ReplayStore } from './replay-store';
@@ -87,7 +88,13 @@ const AUTH_ACTION_RATE_LIMIT = { max: 20, timeWindow: '1 minute' };
 const MAP_EXAMPLE_DEFAULT_PLAYER_COUNT = 4;
 const MAP_EXAMPLE_MIN_PLAYER_COUNT = 2;
 const MAP_EXAMPLE_MAX_PLAYER_COUNT = MAX_TEAMS;
-const MAP_EXAMPLE_MAP_MODES: LobbyConfig['map_mode'][] = ['random', 'maze', 'archipelago', 'mediterranean'];
+const MAP_EXAMPLE_MAP_MODES: LobbyConfig['map_mode'][] = [
+  'random',
+  'maze',
+  'archipelago',
+  'mediterranean',
+  'huaxia',
+];
 const RATE_LIMIT_REAL_IP_HEADERS = [
   'cf-connecting-ip',
   'true-client-ip',
@@ -156,8 +163,10 @@ for (const entry of String(process.env.ROKA_BOT_TOKENS ?? '').split(',')) {
 const buildMapExample = async (
   mapMode: LobbyConfig['map_mode'],
   playerCount: number,
+  mapRegion = DEFAULT_MAP_REGION,
 ): Promise<{
   map_mode: LobbyConfig['map_mode'];
+  map_region: LobbyConfig['map_region'];
   n: number;
   m: number;
   grid_type: number[];
@@ -178,12 +187,14 @@ const buildMapExample = async (
     allow_team: false,
     map_token: mapToken,
     map_mode: mapMode,
+    map_region: normalizeMapRegion(mapRegion),
     player_names: playerNames,
     player_teams: playerTeams,
     map_size_version: 2,
   });
   return {
     map_mode: mapMode,
+    map_region: normalizeMapRegion(mapRegion),
     ...generated,
   };
 };
@@ -1254,11 +1265,12 @@ const boot = async (): Promise<void> => {
       return reply.code(401).send({ error: '未登录或登录已失效。' });
     }
 
-    const query = request.query as { map_mode?: unknown; players?: unknown };
+    const query = request.query as { map_mode?: unknown; map_region?: unknown; players?: unknown };
     const mapModeRaw = String(query.map_mode ?? 'random');
     const mapMode = isMapExampleMode(mapModeRaw) ? mapModeRaw : 'random';
     const players = parseMapExamplePlayerCount(query.players);
-    const example = await buildMapExample(mapMode, players);
+    const mapRegion = normalizeMapRegion(query.map_region);
+    const example = await buildMapExample(mapMode, players, mapRegion);
     return reply.send({
       players,
       example,
@@ -1696,10 +1708,20 @@ const boot = async (): Promise<void> => {
             mapMode = 'archipelago';
           } else if (mapModeRaw === 'mediterranean') {
             mapMode = 'mediterranean';
+          } else if (mapModeRaw === 'huaxia') {
+            mapMode = 'huaxia';
           }
           if (mapMode !== oldConf.map_mode) {
             nextConf.map_mode = mapMode;
             changed.push('map_mode');
+          }
+        }
+
+        if (hasOwn('map_region')) {
+          const mapRegion = normalizeMapRegion(payload.map_region);
+          if (mapRegion !== oldConf.map_region) {
+            nextConf.map_region = mapRegion;
+            changed.push('map_region');
           }
         }
 
