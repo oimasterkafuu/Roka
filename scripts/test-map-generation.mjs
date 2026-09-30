@@ -56,7 +56,32 @@ for (const region of HUAXIA_REGIONS) {
     `${region.id} western viewport is not all sea`,
   );
   assert.equal(region.territoryAreaKm2, null, `${region.id} does not mislabel viewport as territory area`);
-  assert.ok(HUAXIA_PASSES.length >= 5, 'fixed passes are part of the terrain data');
+  assert.ok(HUAXIA_PASSES.length >= 11, 'fixed passes include narrow mountain corridors');
+  const viewportPasses = HUAXIA_PASSES.filter(
+    (pass) =>
+      pass.lon >= region.bounds.west &&
+      pass.lon <= region.bounds.east &&
+      pass.lat >= region.bounds.south &&
+      pass.lat <= region.bounds.north &&
+      isLand(pass.lon, pass.lat),
+  );
+  for (const pass of viewportPasses) {
+    let hasLand = false;
+    let traversable = false;
+    for (let x = 0; x < map.n; x += 1) {
+      const lat = region.bounds.north - ((x + 0.5) * (region.bounds.north - region.bounds.south)) / map.n;
+      for (let y = 0; y < map.m; y += 1) {
+        const lon = region.bounds.west + ((y + 0.5) * (region.bounds.east - region.bounds.west)) / map.m;
+        if (Math.hypot(lon - pass.lon, lat - pass.lat) <= pass.radius) {
+          if (map.gridType[x][y] !== 2) hasLand = true;
+          if (map.gridType[x][y] === 0) traversable = true;
+        }
+      }
+    }
+    if (hasLand) {
+      assert.ok(traversable, `${region.id} pass ${pass.name} is traversable`);
+    }
+  }
 
   for (let players = 2; players <= 16; players += 1) {
     const playerRatio = resolveMapSizeRatioByPlayers(players);
