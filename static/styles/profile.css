@@ -429,6 +429,20 @@ body.profile .comment-time {
   margin-left: 6px;
   white-space: nowrap;
 }
+/* 评论删除入口：与时间戳同级的轻量文字按钮，hover 变红（同动态删除）。 */
+body.profile .comment-delete-btn {
+  background-color: transparent;
+  box-shadow: none;
+  color: #9aa4b2;
+  font-size: 11px;
+  padding: 0;
+  margin: 0 0 0 6px;
+}
+body.profile .comment-delete-btn:hover {
+  background-color: transparent;
+  color: #d63535;
+  box-shadow: none;
+}
 body.profile .comment-input-row {
   display: flex;
   gap: 8px;
