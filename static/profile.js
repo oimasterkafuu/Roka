@@ -362,11 +362,11 @@ function commentButtonText(count) {
 }
 
 function createCommentElement(comment) {
-  var $item = $('<div class="comment-item"></div>');
+  var $item = $('<div class="comment-item"></div>').attr('data-id', comment.id);
   // 评论作者：统一用户名组件（服务端已附 authorInfo：colorClass/title）。
   var $author = usernameLink(comment.author, comment.authorInfo || null, 'comment-author');
   $item.append($author);
-  // html 字段由服务端渲染并消毒；新评论响应没有 html 字段时退化为纯文本。
+  // html 字段由服务端渲染并消毒；响应没有 html 字段时退化为纯文本。
   var $text = $('<span class="comment-text"></span>');
   if (comment.html) {
     $text.html(comment.html);
@@ -378,6 +378,10 @@ function createCommentElement(comment) {
     .text(relativeTime(comment.time))
     .attr('title', fullTime(comment.time))
     .appendTo($item);
+  // 删除入口：与动态删除同风格，作者本人或管理员可见（服务端 canManage 判定）。
+  if (comment.canManage) {
+    $('<button type="button" class="comment-delete-btn"></button>').text('删除').appendTo($item);
+  }
   return $item;
 }
 
@@ -585,6 +589,24 @@ $('#feed-list')
       } else {
         loadFeeds(feedPage);
       }
+    } catch (err) {
+      alert(err.message);
+    }
+  })
+  .on('click', '.comment-delete-btn', async function () {
+    var $comment = $(this).closest('.comment-item');
+    var $item = $comment.closest('.feed-item');
+    if (!confirm('确定删除这条评论吗？')) {
+      return;
+    }
+    try {
+      await apiPost('/api/feeds/comment/delete', {
+        id: $item.attr('data-id'),
+        commentId: $comment.attr('data-id'),
+      });
+      $comment.remove();
+      var count = $item.find('.comment-item').length;
+      $item.find('.comment-toggle').text(commentButtonText(count));
     } catch (err) {
       alert(err.message);
     }

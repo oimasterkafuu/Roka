@@ -186,6 +186,21 @@ export class FeedStore {
     return comment;
   }
 
+  // 返回 null 表示动态不存在，false 表示评论不存在。
+  async removeComment(id: string, commentId: string): Promise<boolean | null> {
+    const post = this.posts.find((item) => item.id === id);
+    if (!post) {
+      return null;
+    }
+    const index = post.comments.findIndex((item) => item.id === commentId);
+    if (index === -1) {
+      return false;
+    }
+    post.comments.splice(index, 1);
+    await this.persist();
+    return true;
+  }
+
   private persist(): Promise<void> {
     const data: FeedFile = { posts: this.posts };
     // serialize 同步执行，调用时即拿到状态快照；brotli 压缩惰性执行，
