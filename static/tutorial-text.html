@@ -293,6 +293,20 @@
               <option value="maze">峡谷回廊</option>
               <option value="archipelago">群岛要塞</option>
               <option value="mediterranean">地中海</option>
+              <option value="huaxia">华夏系列</option>
+            </select>
+          </label>
+          <label class="map-example-control" id="map-example-region-control" style="display: none"
+            >地区：
+            <select id="map-example-region">
+              <option value="han">汉</option>
+              <option value="three-kingdoms">三国</option>
+              <option value="northern-dynasties">北朝</option>
+              <option value="tang">唐</option>
+              <option value="song">宋</option>
+              <option value="yuan">元</option>
+              <option value="ming">明</option>
+              <option value="qing">清</option>
             </select>
           </label>
           <label class="map-example-control"
@@ -444,6 +458,7 @@
       let resizeTimer = 0;
 
       function mapModeLabel(mapMode) {
+        if (mapMode === 'huaxia') return '华夏系列';
         if (mapMode === 'maze') return '峡谷回廊';
         if (mapMode === 'archipelago') return '群岛要塞';
         if (mapMode === 'mediterranean') return '地中海';
@@ -529,6 +544,9 @@
         document.getElementById('map-example-meta').textContent =
           `${example.n} x ${example.m} · ${data.players} 人`;
         document.getElementById('map-example-mode').value = String(example.map_mode || 'random');
+        document.getElementById('map-example-region').value = String(example.map_region || 'han');
+        document.getElementById('map-example-region-control').style.display =
+          example.map_mode === 'huaxia' ? '' : 'none';
         document.getElementById('map-example-players').value = String(data.players);
         renderExampleBoard(document.getElementById('map-example-board'), example);
       }
@@ -571,8 +589,11 @@
 
       async function loadMapExample() {
         setMapExampleStatus('加载中…');
+        const mode = getSelectedMapMode();
+        document.getElementById('map-example-region-control').style.display = mode === 'huaxia' ? '' : 'none';
         const params = new URLSearchParams({
-          map_mode: getSelectedMapMode(),
+          map_mode: mode,
+          map_region: String(document.getElementById('map-example-region').value || 'han'),
           players: String(getSelectedMapPlayers()),
         });
         const res = await fetch(`/api/map-examples?${params.toString()}`, { cache: 'no-store' });

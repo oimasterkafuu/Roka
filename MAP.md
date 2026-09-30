@@ -20,7 +20,7 @@ src/server.ts ── Fastify 路由 + socket.io 事件（唯一入口）
    ▼
 src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降、回放记录）
    ├── src/game-engine/*              常量/主城选择/排行榜/编码/回放工具/增兵
-   └── src/map/*                      四种 map_mode 地图生成器（纯函数）
+   └── src/map/*                      五种 map_mode 地图生成器与华夏地区配置（纯函数）
    ▼
 持久化（data/，均被 gitignore）：announcement-store / auth-store / feed-store / replay-store；server-bots.json（托管 bot 重启恢复状态：{username, room, template, allowTeam} 列表）
 ```
@@ -38,7 +38,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── server.ts           # 主入口：Fastify 路由 + socket.io 事件
 │   ├── game-engine.ts      # 对局引擎核心（~1500 行）
 │   ├── game-engine/        # 引擎子模块（常量/选点/榜单/编码/回放/增兵）
-│   ├── map/                # 地图生成器（random/maze/archipelago/mediterranean）
+│   ├── map/                # 地图生成器（含 huaxia 与八个 map_region）
 │   ├── server/             # 服务层：auth / captcha / lobby / webhook
 │   ├── types.ts            # 全项目共享类型与协议定义
 │   ├── *-store.ts          # 四个持久化存储（公告/用户/动态/回放）
@@ -159,6 +159,12 @@ _一句话：矩形群岛 + 分散出生岛挑选，失败回退随机图。_
 **src/map/mediterranean-map-generator.ts** — 「地中海」：椭圆径向公式填中央海（沼泽+零星山），外围环形陆地撒山/沼泽；多源 BFS 算距海距离，在外缘带挑「不靠海」的分散出生点。
 _一句话：中央海椭圆 + 环陆出生点分散选址。_
 
+**src/map/huaxia-regions.ts** — 华夏八地区配置（汉/三国/北朝/唐/宋/元/明/清）的稳定 ID、名称与程序化地形参数；参数是公开地形资料和历史疆域资料的可玩化近似。
+_一句话：华夏地区白名单与确定性地形参数。_
+
+**src/map/huaxia-map-generator.ts** — 华夏系列生成器：按地区参数生成粗略矩形地形带，复用 Tile、连通性和现有随机出生点选择链路；同模式、地区、种子可复现。
+_一句话：华夏地图的可联通程序化近似生成。_
+
 ### 存储与工具
 
 **src/binary-store.ts** — 四个 Store 共用的存储底座（issue #67）：统一 v8 serialize + brotli q6 编码（`encodeBinary`/`decodeBinary`，磁盘格式与历史一致，旧数据免迁移）；`writeFileAtomicWithBackup` 原子写入（临时文件 + rename）并在替换前把旧文件复制为 `.bak`；`readFileWithBackup` 在主文件缺失/损坏时自动回退 `.bak`；`CoalescingFileWriter` 合并写盘——同一文件尚未开始的排队写请求被最新快照合并（先到的等待者随合并后的写一并完成），突发连续写入只压缩落盘一次（brotli 惰性执行，被合并的快照零开销）。
@@ -193,7 +199,7 @@ _一句话：Codeforces 式 rating 段位颜色映射。_
 **src/runtime-env.ts** — 启动期 `.env` 自解析（不依赖 dotenv），`JWT_SECRET`/`WEBHOOK_SECRET` 缺失则自动生成并回写 `.env`。
 _一句话：.env 加载与密钥自动生成回写。_
 
-**src/types.ts** — 全项目共享类型与协议常量（纯类型）：`MAX_TEAMS=16`、`MoveMode`（0 智能分兵/1 半兵/2 全冲）、大厅/房间视图（`LobbyConfig`/`RoomUpdatePayload` 含 `fog` 迷雾开关与 `map_size` 大地图开关）、`UpdatePayload`（grid_type/army_cnt/isolated/可选 fog/lst_move/leaderboard/kills/is_diff）、回放类型（`ReplayPatch` forward/backward、`ReplayActionData` ops-v1 操作流）、Feed 类型。**改协议字段基本都要动这里。**
+**src/types.ts** — 全项目共享类型与协议常量（纯类型）：`MAX_TEAMS=16`、`MoveMode`（0 智能分兵/1 半兵/2 全冲）、大厅/房间视图（`LobbyConfig`/`RoomUpdatePayload` 含 `fog` 迷雾开关、`map_size` 大地图开关与 `map_region` 华夏地区字段）、`UpdatePayload`（grid_type/army_cnt/isolated/可选 fog/lst_move/leaderboard/kills/is_diff）、回放类型（`ReplayPatch` forward/backward、`ReplayActionData` ops-v1 操作流）、Feed 类型。**改协议字段基本都要动这里。**
 _一句话：共享类型/协议定义汇总。_
 
 **dist/** — `pnpm run build`（tsc）产物，目录结构与 `src/` 一一对应，是运行时实际加载的代码；勿手改，行为与源码不符时先确认是否重新 build。

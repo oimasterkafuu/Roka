@@ -808,6 +808,7 @@ socket.on('room_update', function (data) {
   setAllowTeamModeByCode(Boolean(data.allow_team));
   setFogModeByCode(Boolean(data.fog));
   setMapModeByCode(data.map_mode || 'random');
+  setMapRegionByCode(data.map_region || 'han');
   setMapSizeByCode(data.map_size || 'normal');
   refreshMapInputHint();
   $('#map-token').val(normalizeMapTokenInput(data.map_token || ''));
@@ -834,6 +835,7 @@ socket.on('room_update', function (data) {
   }
   setTabGroupReadonly('tabs-game-speed', roomRunning || !isHost);
   setTabGroupReadonly('tabs-map-mode', roomRunning || !isHost);
+  setTabGroupReadonly('tabs-map-region', roomRunning || !isHost || getMapModeCode() != 'huaxia');
   setTabGroupReadonly('tabs-map-size', roomRunning || !isHost);
   setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBotForbiddingTeam);
   setTabGroupReadonly('tabs-fog-mode', roomRunning || !isHost || hasBot);
@@ -987,6 +989,13 @@ $(document).ready(function () {
       initTab(this, this.children[i], function () {
         refreshMapInputHint();
         updateConfPatch({ map_mode: getMapModeCode() });
+      });
+    }
+  });
+  $('#tabs-map-region').each(function () {
+    for (var i = 1; i < this.children.length; i++) {
+      initTab(this, this.children[i], function () {
+        updateConfPatch({ map_region: getMapRegionCode() });
       });
     }
   });

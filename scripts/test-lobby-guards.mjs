@@ -136,9 +136,7 @@ function ensureBuild() {
 
 async function prepareUsers(dir) {
   const { UserStore } = await import(pathToFileURL(path.join(rootDir, 'dist', 'auth-store.js')).href);
-  const { ensureRuntimeEnv } = await import(
-    pathToFileURL(path.join(rootDir, 'dist', 'runtime-env.js')).href
-  );
+  const { ensureRuntimeEnv } = await import(pathToFileURL(path.join(rootDir, 'dist', 'runtime-env.js')).href);
   const store = new UserStore(dir);
   await store.ensureReady();
   const env = ensureRuntimeEnv();
@@ -318,20 +316,40 @@ async function scenarioDuplicateName(baseUrl, dupToken, tokenB) {
 }
 
 async function scenarioMapSize(baseUrl, tokenA, tokenB) {
-  log('场景 3：大地图选项使地图面积放大约 4 倍');
-  // 同人数（2 人）、同种子开两局：标准 vs 大地图，比较 init_map 的 n×m。
-  const normalA = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_SIZE_NORMAL, autoReady: false, name: 'N-A' });
+  log('场景 3：大地图选项使用 MAX_TEAMS 基础比例并放大');
+  // 同人数（2 人）、同种子开两局：标准按人数缩放，大地图按 MAX_TEAMS 基础比例再乘 2。
+  const normalA = createRoomClient(baseUrl, {
+    cookie: tokenA,
+    room: ROOM_SIZE_NORMAL,
+    autoReady: false,
+    name: 'N-A',
+  });
   await waitFor(() => normalA.clientId !== '', 5000, '标准房 A 进房');
-  const normalB = createRoomClient(baseUrl, { cookie: tokenB, room: ROOM_SIZE_NORMAL, autoReady: false, name: 'N-B' });
+  const normalB = createRoomClient(baseUrl, {
+    cookie: tokenB,
+    room: ROOM_SIZE_NORMAL,
+    autoReady: false,
+    name: 'N-B',
+  });
   await waitFor(() => normalB.clientId !== '', 5000, '标准房 B 进房');
   normalA.socket.emit('change_game_conf', { map_token: MAP_SIZE_TOKEN });
   normalA.socket.emit('change_ready', { ready: true });
   normalB.socket.emit('change_ready', { ready: true });
   await waitFor(() => normalA.inits.length > 0 && normalB.inits.length > 0, 8000, '标准房开局');
 
-  const largeA = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_SIZE_LARGE, autoReady: false, name: 'L-A' });
+  const largeA = createRoomClient(baseUrl, {
+    cookie: tokenA,
+    room: ROOM_SIZE_LARGE,
+    autoReady: false,
+    name: 'L-A',
+  });
   await waitFor(() => largeA.clientId !== '', 5000, '大地图房 A 进房');
-  const largeB = createRoomClient(baseUrl, { cookie: tokenB, room: ROOM_SIZE_LARGE, autoReady: false, name: 'L-B' });
+  const largeB = createRoomClient(baseUrl, {
+    cookie: tokenB,
+    room: ROOM_SIZE_LARGE,
+    autoReady: false,
+    name: 'L-B',
+  });
   await waitFor(() => largeB.clientId !== '', 5000, '大地图房 B 进房');
   largeA.socket.emit('change_game_conf', { map_size: 'large', map_token: MAP_SIZE_TOKEN });
   largeA.socket.emit('change_ready', { ready: true });
@@ -343,11 +361,13 @@ async function scenarioMapSize(baseUrl, tokenA, tokenB) {
   const normalArea = normalInit.n * normalInit.m;
   const largeArea = largeInit.n * largeInit.m;
   const ratio = largeArea / normalArea;
-  log(`标准图 ${normalInit.n}x${normalInit.m}=${normalArea}，大地图 ${largeInit.n}x${largeInit.m}=${largeArea}，面积比 ${ratio.toFixed(2)}`);
-  if (!(ratio >= 3 && ratio <= 6)) {
-    throw new Error(`大地图面积比 ${ratio.toFixed(2)} 不在预期范围 [3, 6] 内`);
+  log(
+    `标准图 ${normalInit.n}x${normalInit.m}=${normalArea}，大地图 ${largeInit.n}x${largeInit.m}=${largeArea}，面积比 ${ratio.toFixed(2)}`,
+  );
+  if (!(ratio >= 35 && ratio <= 70)) {
+    throw new Error(`大地图面积比 ${ratio.toFixed(2)} 不在预期范围 [35, 70] 内`);
   }
-  log('场景 3 通过：大地图面积约为标准地图 4 倍');
+  log('场景 3 通过：大地图使用最大基础比例并放大 2 倍');
   for (const client of [normalA, normalB, largeA, largeB]) {
     client.socket.disconnect();
   }
@@ -363,7 +383,12 @@ async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
   // 只有服务端托管 bot 才永远排在普通成员之后）。
   const a = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_RESET, autoReady: false, name: 'rst-A' });
   await waitFor(() => a.clientId !== '', 5000, 'A 进房');
-  const bot = createRoomClient(baseUrl, { token: BOT_TOKEN, room: ROOM_RESET, autoReady: false, name: 'rst-bot' });
+  const bot = createRoomClient(baseUrl, {
+    token: BOT_TOKEN,
+    room: ROOM_RESET,
+    autoReady: false,
+    name: 'rst-bot',
+  });
   await waitFor(() => bot.clientId !== '', 5000, 'bot 进房');
 
   // A 是房主：改一组非默认设置（bot 房迷雾强制关闭，不在此列）。
@@ -374,21 +399,29 @@ async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
     map_size: 'large',
     map_token: MAP_RESET_TOKEN,
   });
-  await waitFor(() => {
-    const update = lastRoomUpdate(a);
-    return update && update.speed === 2 && update.map_mode === 'maze' && update.map_size === 'large';
-  }, 5000, '自定义设置生效');
+  await waitFor(
+    () => {
+      const update = lastRoomUpdate(a);
+      return update && update.speed === 2 && update.map_mode === 'maze' && update.map_size === 'large';
+    },
+    5000,
+    '自定义设置生效',
+  );
   log('自定义设置已生效（speed=2 / maze / large / allow_team）');
 
   // 边界：观战席的人类仍算人类占用——A 离开后 B 还在，不触发重置。
   const b = createRoomClient(baseUrl, { cookie: tokenB, room: ROOM_RESET, autoReady: false, name: 'rst-B' });
   await waitFor(() => b.clientId !== '', 5000, 'B 进房');
   b.socket.emit('change_team', { team: 0 });
-  await waitFor(() => {
-    const update = lastRoomUpdate(b);
-    const self = update?.players?.find((player) => String(player?.sid || '') === b.clientId);
-    return self && Number(self.team) === 0;
-  }, 5000, 'B 切换到观战席');
+  await waitFor(
+    () => {
+      const update = lastRoomUpdate(b);
+      const self = update?.players?.find((player) => String(player?.sid || '') === b.clientId);
+      return self && Number(self.team) === 0;
+    },
+    5000,
+    'B 切换到观战席',
+  );
   a.socket.disconnect();
   await sleep(1000);
   const afterHostLeft = lastRoomUpdate(bot);
@@ -399,10 +432,14 @@ async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
 
   // B 也离开：房间只剩 bot，设置应重置为新建房间默认值。
   b.socket.disconnect();
-  await waitFor(() => {
-    const update = lastRoomUpdate(bot);
-    return update && update.speed === 1 && update.players?.length === 1;
-  }, 5000, '只剩 bot 后设置重置');
+  await waitFor(
+    () => {
+      const update = lastRoomUpdate(bot);
+      return update && update.speed === 1 && update.players?.length === 1;
+    },
+    5000,
+    '只剩 bot 后设置重置',
+  );
   const reset = lastRoomUpdate(bot);
   if (
     reset.map_mode !== 'random' ||
@@ -422,16 +459,25 @@ async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
 
 async function scenarioNoResetDuringGame(baseUrl, tokenA) {
   log('场景 5：对局进行中人类离开不触发重置，对局结束后才重置');
-  const a = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_RESET_GAME, autoReady: false, name: 'rstg-A' });
+  const a = createRoomClient(baseUrl, {
+    cookie: tokenA,
+    room: ROOM_RESET_GAME,
+    autoReady: false,
+    name: 'rstg-A',
+  });
   await waitFor(() => a.clientId !== '', 5000, 'A 进房');
   const bot = createRoomClient(baseUrl, { token: BOT_TOKEN, room: ROOM_RESET_GAME, name: 'rstg-bot' });
   await waitFor(() => bot.clientId !== '', 5000, 'bot 进房');
 
   a.socket.emit('change_game_conf', { speed: 2, map_mode: 'maze' });
-  await waitFor(() => {
-    const update = lastRoomUpdate(a);
-    return update && update.speed === 2 && update.map_mode === 'maze';
-  }, 5000, '自定义设置生效');
+  await waitFor(
+    () => {
+      const update = lastRoomUpdate(a);
+      return update && update.speed === 2 && update.map_mode === 'maze';
+    },
+    5000,
+    '自定义设置生效',
+  );
   a.socket.emit('change_ready', { ready: true });
   await waitFor(() => bot.inits.length > 0 && a.inits.length > 0, 10_000, '双人对局开局');
 
@@ -447,10 +493,14 @@ async function scenarioNoResetDuringGame(baseUrl, tokenA) {
 
   // 人类宽限期到期按挂机投降后 bot 获胜，对局结束回到准备阶段：
   // 房间只剩 bot，此时设置应被重置。
-  await waitFor(() => {
-    const update = lastRoomUpdate(bot);
-    return update && update.in_game === false && update.speed === 1 && update.players?.length === 1;
-  }, 30_000, '对局结束后设置重置');
+  await waitFor(
+    () => {
+      const update = lastRoomUpdate(bot);
+      return update && update.in_game === false && update.speed === 1 && update.players?.length === 1;
+    },
+    30_000,
+    '对局结束后设置重置',
+  );
   const ended = lastRoomUpdate(bot);
   if (ended.map_mode !== 'random') {
     throw new Error(`对局结束后重置不彻底：${JSON.stringify(ended)}`);

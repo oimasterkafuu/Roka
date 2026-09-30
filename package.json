@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.47.2",
+  "version": "1.47.3",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -16,6 +16,7 @@
     "test:deploy-update": "node scripts/test-deploy-update.mjs",
     "test:fog": "node scripts/test-fog.mjs",
     "test:presence": "node scripts/test-presence.mjs",
+    "test:map-generation": "pnpm exec tsx scripts/test-map-generation.mjs",
     "test:strategy": "node scripts/test-strategy-logic.mjs",
     "test:leaderboard": "node scripts/test-leaderboard-activity.mjs",
     "test:storage": "node scripts/test-storage.mjs",
