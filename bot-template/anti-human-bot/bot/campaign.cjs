@@ -260,23 +260,26 @@ function chooseCampaign(state, params = {}, options = {}) {
       }
       let site = -1;
       for (const c of corridor) {
-        if (anchorDist[c] < p.anchorChainGap || grid[c] !== me || count(c) < 51) continue;
+        if (anchorDist[c] < p.anchorChainGap || grid[c] !== me || count(c) < p.anchorMinArmy) continue;
         // 建成后余兵必须压得住贴脸敌兵（否则指挥所落地即被顺手拆掉，白送 50）。
         if (ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j] && count(j) - 1 > count(c) - 50)) continue;
         if (site < 0 || anchorDist[c] > anchorDist[site]) site = c; // 离锚点最远者优先：链向前延伸
       }
       if (site >= 0) {
         const corridorHostile = corridor.some((c) => ns(c).some((j) => os[j] && !allied(me, os[j]) && !state.isolated?.[j]));
+        const ctx = createContext(state, params); // policy 流程里命中同 tick 缓存
+        // issue #70：迷宫快推单格走廊永远攒不出第二个 51 兵格（门槛即引擎建造花费），
+        // 长补给线零锚点，一次百兵扫线抹掉全部领先（场 2 北伐 t99–113 被一锅端）。
+        // mazeLike 时不再要求走廊贴敌：只要走廊存在 1 格脖子（移除后大堆段断锚）
+        // 就视为有截断风险，无条件优先落锚——包括大堆脚下（站住一 tick 建站，
+        // 下一 tick 该格成新锚点，链自然向前延伸）。
         let risky = false;
-        if (corridorHostile) {
-          const ctx = createContext(state, params); // policy 流程里命中同 tick 缓存
-          if (ctx) for (const c of corridor.slice(0, 8)) {
-            const stranded = ownStrandedMass(ctx, c, p.cutoffScan);
-            if (stranded !== null && stranded >= p.cutoffMinIsolate) { risky = true; break; }
-          }
+        if (ctx && (corridorHostile || ctx.mazeLike)) for (const c of corridor.slice(0, 8)) {
+          const stranded = ownStrandedMass(ctx, c, p.cutoffScan);
+          if (stranded !== null && stranded >= p.cutoffMinIsolate) { risky = true; break; }
         }
         const rhythm = turn % Math.max(2, Math.round(p.anchorBuildEvery)) === 0;
-        if ((risky && site !== rally) || rhythm) {
+        if ((risky && (site !== rally || ctx?.mazeLike)) || rhythm) {
           return { kind: 'build', x: Math.floor(site / m), y: site % m, op: 'b',
             reason: { code: 'campaign', phase: 'anchor', target: mem.target, rally, site, risky,
               detail: risky ? '锚点链：走廊有截断风险，优先落指挥所保连通' : '锚点链：按节奏在推进走廊落指挥所' } };

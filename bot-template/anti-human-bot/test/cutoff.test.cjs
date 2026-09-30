@@ -231,7 +231,9 @@ test('细脖子贴着敌方大堆时紧急补兵/回缩', () => {
 test('脖子守军足够时不触发驻守', () => {
   const { chooseNeckGuard } = require('../bot/cutoff.cjs');
   const s = thinNeck();
-  s.army[3 * 9 + 4] = 400; // 脖子比敌堆还厚
+  // 整条走廊（含 (3,4) 前后所有割点）都比敌堆厚——issue #70 的 maze 预警会检查
+  // 走廊上每一个割点，只加厚其中一格不再足够。
+  for (let i = 0; i < s.grid.length; i++) if (s.grid[i] === 1) s.army[i] = 400;
   assert.equal(chooseNeckGuard(s), null);
 });
 

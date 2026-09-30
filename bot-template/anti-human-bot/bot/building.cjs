@@ -66,7 +66,7 @@ function crownTarget(land, turn, p, state) {
   return Math.max(1, Math.min(target, Math.max(1, Math.floor(land / 3))));
 }
 
-function clusterValue(state, i) {
+function clusterValue(state, i, mazeLike = false) {
   const { m, n, grid, playerId: me } = state, x = Math.floor(i / m), y = i % m;
   let near = 0, adj = 0;
   for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) {
@@ -74,6 +74,10 @@ function clusterValue(state, i) {
     if (!d || d > 3 || a < 0 || b < 0 || a >= n || b >= m) continue;
     if (grid[a * m + b] === me + 100) { near++; if (d === 1) adj++; }
   }
+  // issue #70：迷宫地皮有硬顶、走廊狭长，皇冠贴邻成排贴前线会被一次突破连锁全丢
+  // （场 2 (9,5)–(9,8) 四冠一排贴 row 7 前线）。mazeLike 时改为惩罚贴邻、奖励分散——
+  // 分散的皇冠各自卡住不同走廊段/咽喉，一处失守不连锁。
+  if (mazeLike) return Math.min(near, 3) * -9 - adj * 12;
   return Math.min(near, 3) * 9 + Math.min(adj, 2) * 6 - Math.max(0, near - 5) * 12;
 }
 
@@ -127,7 +131,7 @@ function chooseBuild(state, move, params = {}) {
         Math.max(0, target - crowns - cities * 0.5) / Math.max(1, crowns) * 15 +
         (upgrade ? p.upgradeBonus : 0) + 20 - Math.min(20, risk.incoming) + deficitBonus;
       if (score < p.buildThreshold) continue;
-      score += 1000 + clusterValue(state, i);
+      score += 1000 + clusterValue(state, i, Boolean(context.context?.mazeLike));
       reason = upgrade ? '升级主城（含竞赛追赶权重）' : '后方资金到位：建造指挥所待升级主城';
     } else {
       if (upgrade || !risk.towerSafe || risk.crownSafe) continue;
