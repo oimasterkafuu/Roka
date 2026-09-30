@@ -567,3 +567,52 @@ A/B（4 图 × 2 种子 × 双方各坐先手，对改动前冻结副本 `_preci
 12 座指挥所（8 次截断风险抢先）并 2253 tick 歼灭基线；画圈侧扫是窄突出部
 专用校正，开阔地锋面本已是宽块时不触发（实局 0 次属预期）。结果见
 training/results/circlepush-ab.json。
+
+### maze 系统性弱点修复（issue #70，2026-09-30）
+
+近 24h 线上 56 败中 42 场是 maze；深读两场独立败局（gwD2oA4C1FjB 70 tick、
+eX1LjyqR5HUA 174 tick，完整复盘 /root/antihuman-review.md）定性为系统性
+策略缺陷：① 迷宫走廊 15–19 跳，defense 的 HORIZON=12 反应窗失效，敌百兵
+大堆贴境停 16 tick / 行军 18 turn 零应对；② 深入推进零锚点（走廊格永远
+攒不到建站线）+ 咽喉留守只罩中立拓展、攻击敌格豁免，一次百兵扫线抹掉全部
+领先；③ 皇冠经济学落后（2v5、存活 4v8），clusterValue 奖励贴邻致皇冠成排
+贴前线被连锁拔除，建造优先级被 advance 抢占；④ fortressPhaseTurn 后薄皮
+扩张被全禁，土地/产能冻结。按模块修复（全部只在 mazeLike 时改变行为，
+mazeLike 判定沿用 `mazeMountainRatio` 口径）：
+
+- **defense.cjs**：mazeLike 时反应窗放宽为 `mazeDefenseHorizon`（24）跳
+  （皇冠 BFS 量的本就是走廊连通距离，瓶颈在 12 跳封顶），提前汇兵窗口放宽为
+  `mazeRallyWindow`（10）；新增「贴境超大兵堆预置防线」兜底——可见敌堆
+  ≥`megaStackMin`/2 且贴境最强格压不住它时，无视上述闸门往最薄弱贴境格
+  预置增援（沿用背水一战的纪律：贡献不足缺口一成的碎兵不送、皇冠守军不动）。
+- **cutoff.cjs（脖子纪律）**：mazeLike 时从「当拍救急」扩展为 N tick 预警——
+  敌堆距割点走廊 `mazeNeckWarnRange`（6）跳内且到达时压得过割点守军，即提前
+  向割点集兵；割点受威胁（当拍或预警）时优先检查「备用连通格」：存在同时贴
+  将断锚段与锚点侧的中立格且本 tick 可夺时，先夺桥再谈驻守（场 1 的中立沼泽
+  (5,7) 全程无人打通）。止损纪律（追不上敌堆不死守）对预警同样生效。
+- **frontline.cjs**：咽喉留守从 neutral 拓展推广到 enemy/city 推进——mazeLike
+  时源点是「移除后冻住 ≥`cutoffMinIsolate` 兵力」的关卡且预警圈内有敌堆逼近
+  时，按走廊跳数衰减后的敌堆兵力 ×`mazePushNeckKeep`（1.2）抬高留守硬下限，
+  普通推进、allInSafe 全冲豁免与消耗冲击都不得击穿（场 2 前哨皇冠 (7,7) 被
+  自己的攻击从 83 抽干到 22 的败形）；关卡评分就此计入「距可见敌主力的走廊
+  距离」。中后期扩张闸门在 mazeLike 时放宽：`lateAnchorRadius` 2→
+  `mazeLateAnchorRadius`（4）、`lateSkinMin` 10→`mazeLateSkinMin`（4），
+  解除薄皮走廊扩张冻结（场 2 t110 起土地恒定 26–34）。
+- **campaign.cjs**：锚点建站兵力门槛参数化为 `anchorMinArmy`（51，引擎硬门槛
+  不可再低）；mazeLike 时走廊存在 1 格脖子即视为截断风险，不再要求走廊贴敌，
+  且允许锚点直接落在大堆脚下（旧逻辑 risky 时排除 rally，迷宫快推走廊只有
+  大堆脚下攒得够兵）——深入长补给线不再零锚点。
+- **building.cjs**：mazeLike 时 `clusterValue` 由奖励贴邻改为惩罚贴邻
+  （-9/近距皇冠、-12/贴邻），皇冠分散各守不同走廊段/咽喉，一处失守不连锁；
+  `logistics.cjs` 经济工地选址同步使用该口径。
+- **policy.cjs**：mazeLike 且建造竞赛落后时，经济紧急更早启动（turn 40）、
+  让位节奏更密（share 再减一拍），避免 advance 每 tick 抢占导致皇冠计划饿死。
+
+参数：`mazeDefenseHorizon`（24）、`mazeRallyWindow`（10）、`mazeNeckWarnRange`
+（6）、`mazePushNeckKeep`（1.2）、`anchorMinArmy`（51）、`mazeLateAnchorRadius`
+（4）、`mazeLateSkinMin`（4）。371 项测试通过（新增
+`test/maze-systemic.test.cjs` 12 条——反应窗/非迷宫对照/割点预警/预警对照/
+夺备用连通格/咽喉留守推广/留守对照/后期解冻/解冻对照/大堆脚下落锚/锚点对照/
+clusterValue 惩罚贴邻；`test/cutoff.test.cjs`「守军足够不触发」一条按预警
+语义更新为加厚整条走廊）。轻量自检：maze/random 镜像局各 700 tick 决策
+管线无异常、建造/升级/攻击正常产出。
