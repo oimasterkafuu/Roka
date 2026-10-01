@@ -53,6 +53,7 @@ function createController(playerId) {
     memory.delivery = null;
     memory.blocked = null;
     memory.site = undefined;
+    memory.buildPlan = null;
     memory.home = undefined;
   }
 
