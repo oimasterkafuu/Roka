@@ -20,4 +20,4 @@ node training/long-eval.cjs --seeds 8 --workers 8 --turns 600 --opponents simple
 
 常用选项：`--seeds N` 设置每张地图的种子数，`--workers N` 设置并行线程数，`--turns N` 设置单局服务器 Tick 上限，`--opponents anti|simple` 选择对手，`--modes random,maze,...` 固定地图类型，`--seat 0|1|both` 选择我方先后手，`--output FILE` 指定结果 JSON。环境变量 `APEX_EVAL_SEEDS`、`APEX_EVAL_WORKERS`、`APEX_EVAL_TURNS`、`APEX_EVAL_MODES` 可替代对应默认值。
 
-结果 JSON 包含胜负汇总、每局 Tick、失败回放以及决策延迟 p50/p95/p99，便于在修改策略后比较速度和稳定性。当前 48 局 Anti-Human 快速回归为 42 胜、0 负、6 平，平均胜局 269.3 Tick、最慢 585 Tick；Simple-Strategy-Bot 8 局固定种子为 8 胜 0 负、平均约 204 Tick。
+结果 JSON 包含胜负汇总、每局 Tick、失败回放、决策延迟 p50/p95/p99，以及按地图尺寸统计的阶段性皇冠/城市/兵力/存活率。大地图回归示例：`node training/long-eval.cjs --seeds 8 --sizes 0.5,0.68,1 --turns 1200 --workers 8 --opponents anti --seat both`。当前 48 局 Anti-Human 快速回归为 42 胜、0 负、6 平，平均胜局 269.3 Tick、最慢 585 Tick；Simple-Strategy-Bot 8 局固定种子为 8 胜 0 负、平均约 204 Tick。

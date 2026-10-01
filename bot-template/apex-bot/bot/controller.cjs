@@ -55,6 +55,7 @@ function createController(playerId) {
     memory.swampRatio = undefined;
     memory.site = undefined;
     memory.buildPlan = null;
+    memory.rearEconomy = null;
     memory.home = undefined;
   }
 
