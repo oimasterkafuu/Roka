@@ -38,7 +38,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── server.ts           # 主入口：Fastify 路由 + socket.io 事件
 │   ├── game-engine.ts      # 对局引擎核心（~1500 行）
 │   ├── game-engine/        # 引擎子模块（常量/选点/榜单/编码/回放/增兵）
-│   ├── map/                # 地图生成器（含 huaxia 与八个 map_region）
+│   ├── map/                # 地图生成器（含 huaxia 与十个 map_region）
 │   ├── server/             # 服务层：auth / captcha / lobby / webhook
 │   ├── types.ts            # 全项目共享类型与协议定义
 │   ├── *-store.ts          # 四个持久化存储（公告/用户/动态/回放）
@@ -206,7 +206,7 @@ _一句话：Codeforces 式 rating 段位颜色映射。_
 **src/runtime-env.ts** — 启动期 `.env` 自解析（不依赖 dotenv），`JWT_SECRET`/`WEBHOOK_SECRET` 缺失则自动生成并回写 `.env`。
 _一句话：.env 加载与密钥自动生成回写。_
 
-**src/types.ts** — 全项目共享类型与协议常量（纯类型）：`MAX_TEAMS=16`、`MoveMode`（0 智能分兵/1 半兵/2 全冲）、大厅/房间视图（`LobbyConfig`/`RoomUpdatePayload` 含 `fog` 迷雾开关、`map_size` 大地图开关与 `map_region` 华夏地区字段）、`UpdatePayload`（grid_type/army_cnt/isolated/可选 fog/lst_move/leaderboard/kills/is_diff）、回放类型（`ReplayPatch` forward/backward、`ReplayActionData` ops-v1 操作流）、Feed 类型。**改协议字段基本都要动这里。**
+**src/types.ts** — 全项目共享类型与协议常量（纯类型）：`MAX_TEAMS=16`、`MoveMode`（0 智能分兵/1 半兵/2 全冲）、大厅/房间视图（`LobbyConfig`/`RoomUpdatePayload` 含 `fog` 迷雾开关、`map_size` 大地图开关与十地区 `map_region` 华夏字段）、`UpdatePayload`（grid_type/army_cnt/isolated/可选 fog/lst_move/leaderboard/kills/is_diff）、回放类型（`ReplayPatch` forward/backward、`ReplayActionData` ops-v1 操作流）、Feed 类型。旧地区值在 normalize 层回退为 `han`。**改协议字段基本都要动这里。**
 _一句话：共享类型/协议定义汇总。_
 
 **dist/** — `pnpm run build`（tsc）产物，目录结构与 `src/` 一一对应，是运行时实际加载的代码；勿手改，行为与源码不符时先确认是否重新 build。

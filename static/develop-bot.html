@@ -299,8 +299,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td>
               可选字段 patch：<code>speed</code>（0.5~4）、<code>allow_team</code>（bool）、
               <code>fog</code
-              >（bool，迷雾远征）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>）、<code>map_region</code>（华夏模式地区：<code>han|three-kingdoms|northern-dynasties|tang|song|yuan|ming|qing</code>，缺省按 <code>han</code>）、<code>map_token</code>（最长
-              32）。 仅房主可改。房间内存在不允许组队的服务端托管策略 Bot 时不允许组队：
+              >（bool，迷雾远征）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>）、<code>map_region</code>（华夏模式地区：<code>qin|han|tang|song|yuan|ming|qing|china|hong-kong|taiwan</code>，旧值回退为
+              <code>han</code>，缺省按 <code>han</code>）、<code>map_token</code>（最长 32）。
+              仅房主可改。房间内存在不允许组队的服务端托管策略 Bot 时不允许组队：
               <code>allow_team</code> 开启请求会被拒绝（房间消息提示），且托管 Bot
               进房时会强制关闭已开启的组队模式；允许组队的托管 Bot 则由房主自由开关组队。
             </td>
@@ -324,8 +325,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td>
               房间状态快照：
               <code
-                >{ speed, allow_team, fog, map_token, map_mode, map_region, in_game, update_queued, players, ready, need
-                }</code
+                >{ speed, allow_team, fog, map_token, map_mode, map_region, in_game, update_queued, players,
+                ready, need }</code
               >。 <code>fog=true</code> 表示本房间开启了迷雾远征。
               <code>update_queued=true</code> 表示部署更新排队中：禁止开新局（<code>change_ready</code>
               会被拒绝并收到提示消息），宽限期（默认 120 秒）内未结束的对局将按当前名次清算。

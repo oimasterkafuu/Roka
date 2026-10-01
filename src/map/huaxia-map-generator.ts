@@ -1,4 +1,4 @@
-import { Tile, build2D, computeFixedMapDimensions, markLargestComponent } from './map-core';
+import { Tile, build2D, computeFixedMapDimensions } from './map-core';
 import { HUAXIA_LAND_RINGS, HUAXIA_PASSES, HUAXIA_RIDGES, type HuaxiaPoint } from './huaxia-terrain-data';
 import { getHuaxiaRegion } from './huaxia-regions';
 import type { MapRegion } from '../types';
@@ -53,6 +53,38 @@ const isMountain = (point: HuaxiaPoint, cellWidth: number): boolean =>
     return false;
   }) && !HUAXIA_PASSES.some((pass) => Math.hypot(point.lon - pass.lon, point.lat - pass.lat) <= pass.radius);
 
+/** Return the largest 4-neighbour component of the Natural Earth land mask. */
+const findLargestLandComponent = (land: boolean[][], n: number, m: number): boolean[][] => {
+  const seen = build2D(n, m, false);
+  let largest: [number, number][] = [];
+  for (let startX = 0; startX < n; startX += 1) {
+    for (let startY = 0; startY < m; startY += 1) {
+      if (!land[startX][startY] || seen[startX][startY]) continue;
+      const component: [number, number][] = [[startX, startY]];
+      seen[startX][startY] = true;
+      for (let head = 0; head < component.length; head += 1) {
+        const [x, y] = component[head];
+        for (const [dx, dy] of [
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1],
+        ] as const) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= n || ny >= m || !land[nx][ny] || seen[nx][ny]) continue;
+          seen[nx][ny] = true;
+          component.push([nx, ny]);
+        }
+      }
+      if (component.length > largest.length) largest = component;
+    }
+  }
+  const result = build2D(n, m, false);
+  for (const [x, y] of largest) result[x][y] = true;
+  return result;
+};
+
 /** Each dynasty rectangle is a geographic viewport; land outside its historical territory stays land.
  * Seed is unused here, and only affects the subsequent selectRandomGenerals call.
  */
@@ -67,6 +99,7 @@ const generateHuaxiaMap = (_rng: unknown, config: HuaxiaMapGenerationConfig): Ge
   const m = odd(base.m * scale);
   const owner = build2D(n, m, 0);
   const armyCnt = build2D(n, m, 0);
+  const land = build2D(n, m, false);
   const gridType = build2D<Tile>(n, m, 0);
 
   for (let x = 0; x < n; x += 1) {
@@ -75,13 +108,24 @@ const generateHuaxiaMap = (_rng: unknown, config: HuaxiaMapGenerationConfig): Ge
         lon: west + ((y + 0.5) * (east - west)) / m,
         lat: north - ((x + 0.5) * (north - south)) / n,
       };
-      if (!isLand(point.lon, point.lat)) gridType[x][y] = 2;
+      land[x][y] = isLand(point.lon, point.lat);
+      if (!land[x][y]) gridType[x][y] = 2;
       else if (isMountain(point, (east - west) / m)) gridType[x][y] = 1;
     }
   }
 
+  // Find components on the explicit land mask. Sea must never be treated as walkable.
+  const mainLand = findLargestLandComponent(land, n, m);
   const st = build2D(n, m, false);
-  markLargestComponent(gridType, n, m, st);
+  for (let x = 0; x < n; x += 1) {
+    for (let y = 0; y < m; y += 1) {
+      if (!mainLand[x][y]) {
+        gridType[x][y] = 2;
+      } else if (gridType[x][y] === 0) {
+        st[x][y] = true;
+      }
+    }
+  }
   return { n, m, owner, armyCnt, gridType, st };
 };
 
