@@ -340,12 +340,15 @@ function createArena({
   seed = 'default',
   mapSize = 0.5,
   fog = false,
+  engineConfig = null,
   synchronous = true,
   adapters = [],
   traceLimit = 120,
   captureReplay = traceLimit > 0,
 } = {}) {
-  if (!MAP_MODES.includes(mapMode)) throw new Error(`unsupported map: ${mapMode}`);
+  const configured = engineConfig && typeof engineConfig === 'object' ? engineConfig : {};
+  const configuredMode = configured.map_mode ?? mapMode;
+  if (!MAP_MODES.includes(configuredMode)) throw new Error(`unsupported map: ${configuredMode}`);
   if (!Number.isFinite(mapSize) || mapSize < 0.2 || mapSize > 3)
     throw new Error('mapSize must be in [0.2, 3]');
   const { GameEngine } = compileEngine({ synchronous });
@@ -380,19 +383,25 @@ function createArena({
   };
   const engine = new GameEngine(
     {
-      width_ratio: mapSize,
-      height_ratio: mapSize,
-      map_size_version: 2,
-      city_ratio: 0,
-      mountain_ratio: 0,
-      swamp_ratio: 0.05,
-      speed: 1,
-      allow_team: false,
-      fog: Boolean(fog),
-      map_token: String(seed),
-      map_mode: mapMode,
-      player_names: sids,
-      player_teams: [1, 2],
+      width_ratio: configured.width_ratio ?? mapSize,
+      height_ratio: configured.height_ratio ?? mapSize,
+      map_size_version: configured.map_size_version ?? 2,
+      map_size: configured.map_size ?? (mapSize >= 1 ? 'large' : 'normal'),
+      city_ratio: configured.city_ratio ?? 0,
+      mountain_ratio: configured.mountain_ratio ?? 0,
+      swamp_ratio: configured.swamp_ratio ?? 0.05,
+      speed: configured.speed ?? 1,
+      allow_team: configured.allow_team ?? false,
+      fog: configured.fog ?? Boolean(fog),
+      map_token: configured.map_token ?? String(seed),
+      map_mode: configuredMode,
+      map_region: configured.map_region,
+      player_names: Array.isArray(configured.player_names) && configured.player_names.length === 2
+        ? configured.player_names
+        : sids,
+      player_teams: Array.isArray(configured.player_teams) && configured.player_teams.length === 2
+        ? configured.player_teams
+        : [1, 2],
     },
     sids,
     sids,
@@ -692,6 +701,7 @@ function runMatch({
   maxTurns = 600,
   mapSize = 0.5,
   fog = false,
+  engineConfig = null,
   policies = [null, null],
   adapters = [],
   traceLimit = 120,
@@ -699,7 +709,7 @@ function runMatch({
 } = {}) {
   if (!Number.isInteger(maxTurns) || maxTurns < 0) throw new Error('maxTurns must be a non-negative integer');
   const started = performance.now();
-  const arena = createArena({ mapMode, seed, mapSize, fog, adapters, traceLimit });
+  const arena = createArena({ mapMode, seed, mapSize, fog, engineConfig, adapters, traceLimit });
   const checkpoints = [120, 300, 600, 900, 1200];
   const telemetry = {
     checkpoints,
