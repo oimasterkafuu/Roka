@@ -116,3 +116,15 @@ test('a cleared construction threat lets the existing cluster plan build again',
   assert.equal(decision.branch, 'cluster-foundation');
   assert.equal(decision.action.kind, 'build');
 });
+
+test('route guard catches a large push that leaves a smaller branch exposed', () => {
+  const b = makeBoard({
+    n: 4, m: 4,
+    grid: [101, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 201, 201, 2, 201],
+    army: [86, 146, 202, 85, 197, 148, 139, 18, 193, 71, 215, 15, 0, 0, 163, 0],
+    isolated: Array(16).fill(0), fog: Array(16).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const action = actionCoordinates(b, 10, 14, 2);
+  assert.deepEqual(routeGuard(b, action), { blocked: true, anchor: 10, cut: 10 });
+});
