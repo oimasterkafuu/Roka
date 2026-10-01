@@ -46,6 +46,15 @@ function run(job) {
   result.mapSize = job.mapSize;
   result.fog = Boolean(job.fog);
   result.metrics = { own: apex, opponent: opponentMetric };
+  if (result.telemetry) {
+    result.telemetry = {
+      checkpoints: result.telemetry.checkpoints,
+      own: result.telemetry.players[ownSeat],
+      opponent: result.telemetry.players[1 - ownSeat],
+      maxCrowns: result.telemetry.maxCrowns[ownSeat],
+      maxCities: result.telemetry.maxCities[ownSeat],
+    };
+  }
   // Keep a bounded failure replay. Successful rows omit the per-tick trace to
   // keep long JSON reports small; callers may set keepTrace for all rows.
   if (job.keepTrace || result.winner !== ownSeat) result.failureTrace = result.trace;

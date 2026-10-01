@@ -68,3 +68,19 @@ test('arena starts at server turn zero and applies growth before the first actio
   assert.equal(arena.engine.armyCnt[x][y], before + 1);
   assert.equal(arena.trace.at(-1).turn, 1);
 });
+
+test('large-map evaluation records development checkpoints', () => {
+  const result = runMatch({
+    mapMode: 'maze',
+    seed: 'large-development-metrics',
+    mapSize: 1,
+    maxTurns: 3,
+    policies: [() => null, () => null],
+    traceLimit: 0,
+  });
+  assert.deepEqual(result.telemetry.checkpoints, [120, 300, 600, 900, 1200]);
+  assert.ok(Array.isArray(result.telemetry.players));
+  assert.equal(result.telemetry.players.length, 2);
+  assert.ok(Number.isInteger(result.telemetry.maxCrowns[0]));
+  assert.ok(Number.isInteger(result.telemetry.maxCities[0]));
+});

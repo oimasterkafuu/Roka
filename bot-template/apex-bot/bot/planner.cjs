@@ -168,10 +168,10 @@ function safeMove(b, from, to, intent = 'move') {
 
 // Single objective supply tree. A funded branch is completed before another
 // branch is opened; no node is moved away from the root of the active project.
-function gather(b, m, root, need, reason) {
+function gather(b, m, root, need, reason, canEnter = at => b.own(at) && !b.isolated[at], maxDistance = Infinity) {
   if (!b.own(root) || b.isolated[root] || b.army[root] >= need) { m.delivery = null; return null; }
-  const f = field(b, [root], at => b.own(at) && !b.isolated[at]);
-  if (m.delivery?.root === root && movable(b, m.delivery.at) && f.distance[m.delivery.at] > 0) {
+  const f = field(b, [root], canEnter);
+  if (m.delivery?.root === root && movable(b, m.delivery.at) && f.distance[m.delivery.at] > 0 && f.distance[m.delivery.at] <= maxDistance) {
     const at = m.delivery.at, to = f.parent[at];
     const a = safeMove(b, at, to, 'gather');
     if (a) { m.delivery = { root, at: to, movedTurn: b.turn }; return { action: a, branch: reason }; }
@@ -179,7 +179,7 @@ function gather(b, m, root, need, reason) {
   m.delivery = null;
   const sources = [];
   for (let at = 0; at < b.size; at++) {
-    if (!movable(b, at) || at === root || !Number.isFinite(f.distance[at])) continue;
+    if (!movable(b, at) || at === root || !Number.isFinite(f.distance[at]) || f.distance[at] > maxDistance) continue;
     const spare = b.army[at] - Math.max(1, pressure(b, at));
     if (spare < 3) continue;
     const p = route(f, at), mass = p.slice(0, -1).reduce((sum, i) => sum + Math.max(0, b.army[i] - 1), 0);
@@ -431,6 +431,94 @@ function economy(b,m,own,ed,goal) {
   return economy(b, m, own, ed, goal);
 }
 
+// Long travel is an investment window. Use only nearby rear troops, with a
+// separate delivery cursor, so construction cannot reverse a military convoy.
+function sustainEconomy(b, m, own, ed, enemies) {
+  if (b.turn < ECON_DEADLINE) return null;
+  const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown');
+  if (!enemyCrowns.length) return null;
+  const cf = field(b, enemyCrowns);
+  const head =
+    m.campaign && b.own(m.campaign.at)
+      ? m.campaign.at
+      : own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
+  const distance = cf.distance[head];
+  // Do not stop a breach already within striking distance of the enemy core.
+  if (!Number.isFinite(distance) || distance < 24) return null;
+  const crowns = own.filter((at) => b.kind(at) === 'crown').length;
+  const goal = Math.min(24, Math.max(ECON_GOAL, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
+  const state = m.rearEconomy || (m.rearEconomy = { site: -1, delivery: null, spent: 0, nextWindow: 0 });
+  if (b.turn < state.nextWindow) return null;
+  const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root]);
+  const canEnter = (at) => b.own(at) && !b.isolated[at] && ed.distance[at] >= 4 && !reserved.has(at);
+  const validSite = (at) => canEnter(at) && ed.distance[at] >= 6 && ['plain', 'city'].includes(b.kind(at));
+  if (!validSite(state.site)) {
+    state.site = -1;
+    state.delivery = null;
+  }
+  if (crowns >= goal && state.site < 0) return null;
+  if (state.site < 0) {
+    // Search a bounded local neighbourhood; every selected project can
+    // already afford both construction actions without waiting for growth.
+    const candidates = own
+      .filter(validSite)
+      .map((at) => {
+        const adjacent = b.neighbors(at).filter((i) => b.own(i) && b.kind(i) === 'crown').length;
+        return { at, score: adjacent * 180 + (b.kind(at) === 'city' ? 320 : 0) + Math.min(200, b.army[at]) };
+      })
+      .sort((a, z) => z.score - a.score);
+    for (const { at } of candidates) {
+      const local = [at],
+        seen = new Set(local),
+        distances = [0];
+      let funds = 0;
+      for (let h = 0; h < local.length; h++) {
+        const cell = local[h];
+        funds += Math.max(0, b.army[cell] - 1);
+        if (distances[h] === 5) continue;
+        for (const next of b.neighbors(cell))
+          if (!seen.has(next) && canEnter(next)) {
+            seen.add(next);
+            local.push(next);
+            distances.push(distances[h] + 1);
+          }
+      }
+      if (funds < (b.kind(at) === 'city' ? 51 : 101)) continue;
+      state.site = at;
+      break;
+    }
+  }
+  if (state.site < 0) return null;
+  const at = state.site,
+    kind = b.kind(at),
+    need = kind === 'city' ? 51 : 101;
+  let decision;
+  if (b.army[at] >= need) {
+    decision = {
+      action: build(b, at, kind === 'city' ? 'c' : 'b'),
+      branch: kind === 'city' ? 'rear-upgrade' : 'rear-foundation',
+    };
+    if (kind === 'city') {
+      state.site = -1;
+      state.delivery = null;
+    }
+  } else {
+    decision = gather(b, state, at, need, 'rear-fund', canEnter, 5);
+  }
+  if (!decision) {
+    state.nextWindow = b.turn + 8;
+    state.spent = 0;
+    return null;
+  }
+  state.spent += 1;
+  // Finish foundation + crown together, then give the campaign time to move.
+  if (decision.branch === 'rear-upgrade' || (state.spent >= 8 && decision.branch !== 'rear-foundation')) {
+    state.nextWindow = b.turn + 12;
+    state.spent = 0;
+  }
+  return decision;
+}
+
 function chooseCampaign(b,m,own) {
   const crowns=[];
   for(let i=0;i<b.size;i++)if(b.enemy(i)&&b.kind(i)==='crown')crowns.push(i);
@@ -669,6 +757,10 @@ function plan(b,m) {
   const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
   const enemyTotal = enemies.reduce((sum, at) => sum + b.army[at], 0);
   const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+  const defend=defense(b,m,own);
+  if(defend)return defend;
+  const investmentWindow = sustainEconomy(b, m, own, ed, enemies);
+  if (investmentWindow) return investmentWindow;
   const finishing = enemyCrowns <= 2 && ownTotal > enemyTotal * 1.35;
   if (finishing) {
     // Once the opposing empire is already collapsing, every spare tick must
@@ -678,8 +770,6 @@ function plan(b,m) {
     if (final) return final;
     if (m.campaign?.phase === 'gather' && b.own(m.campaign.at)) return { action: null, branch: 'muster-wait' };
   }
-  const defend=defense(b,m,own);
-  if(defend)return defend;
   // Once the army lead is decisive, spending turns on side cuts or another
   // economy cycle only gives Anti-Human time to add crowns. Keep the prepared
   // crown campaign in control of the action budget while preserving the
