@@ -1,4 +1,4 @@
-// 部署更新 UX 回归测试（spec-deploy-ux）：
+// 部署更新 UX 回归测试：
 // 场景 1（更新排队广播）：对局进行中触发 webhook，服务端进入「更新排队」状态——
 //   响应 queued:true、所有客户端收到 deploy_queued、room_update 携带 update_queued、
 //   对局房间收到宽限期提示消息。

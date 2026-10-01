@@ -16,9 +16,19 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准，未结束局计平局）、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）、`pnpm run test:presence`（统一在线状态测试：presence-service 假时钟单元测试 + 真实服务器集成测试，覆盖活动刷新/过期判离线/去重计数/bot 不计入）、`pnpm run test:map-generation`（华夏九地区确定性、联通性、岛屿保留和基本可玩性测试）、`pnpm run test:huaxia-season`（上海时区年度窗口边界测试）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准，未结束局计平局）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（华夏地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）。
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准，未结束局计平局）、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）、`pnpm run test:deploy-update`（部署更新 UX 回归：webhook 排队广播、排队期禁开局、宽限到期按当前名次清算、dry-run 恢复）。
+Apex Bot 可独立运行或由服务端托管：
+
+```shell
+cd bot-template/apex-bot
+pnpm install
+BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=room BOT_TOKEN=token pnpm start
+node --test test/*.test.cjs
+node training/long-eval.cjs --help
+```
+
+离线评测直接加载当前 `src/game-engine.ts`，支持 `worker_threads` 并行、四种地图、换边和失败回放。最近一次 64 局 Anti-Human 长评测（8 workers，600 Tick 上限）为 36 胜、0 负、28 平；胜局平均 276.6 Tick，最慢 594 Tick，决策平均约 1.04 ms、p95 约 2.97 ms。Simple-Strategy-Bot 的 8 局固定种子测试为 8 胜 0 负，平均 130.4 Tick。评测命令和参数见 [`bot-template/apex-bot/USAGE.md`](bot-template/apex-bot/USAGE.md)。
 
 启动后访问 `http://localhost:23333/` 并注册账号。
 
