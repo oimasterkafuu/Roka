@@ -119,9 +119,7 @@ const generateHuaxiaMap = (_rng: unknown, config: HuaxiaMapGenerationConfig): Ge
   const st = build2D(n, m, false);
   for (let x = 0; x < n; x += 1) {
     for (let y = 0; y < m; y += 1) {
-      if (!mainLand[x][y]) {
-        gridType[x][y] = 2;
-      } else if (gridType[x][y] === 0) {
+      if (mainLand[x][y] && gridType[x][y] === 0) {
         st[x][y] = true;
       }
     }
