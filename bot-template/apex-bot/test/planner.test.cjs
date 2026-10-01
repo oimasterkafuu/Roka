@@ -34,6 +34,32 @@ test('campaign keeps moving when the supply bridge can withstand the counteratta
   assert.deepEqual(routeGuard(b, action), { blocked: false, anchor: -1, cut: -1 });
 });
 
+test('sole crown gathers a full local column before a saved enemy stack arrives', () => {
+  const b = makeBoard({
+    n: 1, m: 4,
+    grid: [1, 101, 1, 2],
+    army: [5, 10, 80, 60],
+    isolated: Array(4).fill(0), fog: Array(4).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const decision = plan(b, { playerId: 1, home: 1, threatDistance: {} });
+  assert.equal(decision.branch, 'anchor-approach');
+  assert.deepEqual(decision.action, actionCoordinates(b, 2, 1, 0));
+});
+
+test('previews a direct enemy crown capture and reinforces before the hit', () => {
+  const b = makeBoard({
+    n: 2, m: 2,
+    grid: [101, 2, 1, 1],
+    army: [10, 60, 80, 1],
+    isolated: Array(4).fill(0), fog: Array(4).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(decision.branch, 'anchor-reinforce');
+  assert.deepEqual(decision.action, actionCoordinates(b, 2, 0, 2));
+});
+
 test('campaign gathers a token spearhead instead of marching it through a corridor', () => {
   const b = makeBoard({
     n: 3, m: 5,
