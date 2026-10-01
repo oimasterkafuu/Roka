@@ -1,6 +1,6 @@
 import { MAX_TEAMS, MapRegion } from '../types';
 
-const TAIWAN_MAP_SIZE_MULTIPLIER = 1.1;
+const TAIWAN_MAP_SIZE_MULTIPLIER = 1.5;
 
 const resolveMapSizeRatioByPlayers = (playingCount: number): number => {
   const minPlayers = 2;
