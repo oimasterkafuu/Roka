@@ -15,6 +15,36 @@ const baseConfig = {
 };
 
 const serialize = (map) => JSON.stringify({ n: map.n, m: map.m, gridType: map.gridType });
+const findLandComponents = (map) => {
+  const seen = map.gridType.map((row) => row.map(() => false));
+  const components = [];
+  for (let startX = 0; startX < map.n; startX += 1) {
+    for (let startY = 0; startY < map.m; startY += 1) {
+      if (map.gridType[startX][startY] === 2 || seen[startX][startY]) continue;
+      const component = [[startX, startY]];
+      seen[startX][startY] = true;
+      for (let head = 0; head < component.length; head += 1) {
+        const [x, y] = component[head];
+        for (const [dx, dy] of [
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1],
+        ]) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= map.n || ny >= map.m || map.gridType[nx][ny] === 2 || seen[nx][ny]) {
+            continue;
+          }
+          seen[nx][ny] = true;
+          component.push([nx, ny]);
+        }
+      }
+      components.push(component);
+    }
+  }
+  return components.sort((a, b) => b.length - a.length);
+};
 const maps = new Map();
 assert.equal(HUAXIA_REGIONS.length, 9, 'exactly nine Huaxia regions are exposed');
 assert.deepEqual(
@@ -74,6 +104,7 @@ const differentSeed = generateHuaxiaMap(new SeededRandom('map-test:second'), {
 });
 assert.equal(serialize(first), serialize(differentSeed), 'terrain must not depend on the map seed');
 
+let regionsWithIslands = 0;
 for (const region of HUAXIA_REGIONS) {
   const map = generateHuaxiaMap(new SeededRandom(`map-test:${region.id}`), {
     ...baseConfig,
@@ -90,6 +121,15 @@ for (const region of HUAXIA_REGIONS) {
   );
   assert.ok(counts[0] > 0, `${region.id} has playable plains`);
   assert.ok(counts[0] > counts[1], `${region.id} keeps plains dominant over mountains`);
+  const landComponents = findLandComponents(map);
+  const islandCells = landComponents.slice(1).flat();
+  if (islandCells.length > 0) {
+    regionsWithIslands += 1;
+    assert.ok(
+      islandCells.every(([x, y]) => (map.gridType[x][y] === 0 || map.gridType[x][y] === 1) && !map.st[x][y]),
+      `${region.id} displays islands without adding them to the spawn mask`,
+    );
+  }
   assert.ok(
     map.gridType.every((row, x) => row.every((tile, y) => tile !== 2 || !map.st[x][y])),
     `${region.id} spawn mask excludes sea`,
@@ -188,5 +228,6 @@ for (const region of HUAXIA_REGIONS) {
   }
   maps.set(region.id, serialize(map));
 }
+assert.ok(regionsWithIslands > 0, 'at least one region retains visible non-main land blocks');
 assert.ok(new Set(maps.values()).size >= 2, 'regions should produce distinct terrain');
 console.log(`map generation passed: ${HUAXIA_REGIONS.length} regions, 2-16 players`);
