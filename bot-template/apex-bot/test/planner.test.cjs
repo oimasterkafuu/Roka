@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, sustainEconomy } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -127,4 +127,48 @@ test('route guard catches a large push that leaves a smaller branch exposed', ()
   }, 1);
   const action = actionCoordinates(b, 10, 14, 2);
   assert.deepEqual(routeGuard(b, action), { blocked: true, anchor: 10, cut: 10 });
+});
+
+test('long campaigns can build a funded safe frontline site instead of hauling from the rear', () => {
+  const grid = [101, ...Array(10).fill(1), 1, ...Array(22).fill(0), 102];
+  const army = [1000, ...Array(9).fill(20), 100, 101, ...Array(22).fill(0), 20];
+  const b = makeBoard({
+    n: 1, m: 35, grid, army,
+    isolated: Array(35).fill(0), fog: Array(35).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const enemies = [34];
+  const ed = require('../bot/board.cjs').distanceField(b, enemies);
+  const memory = {
+    playerId: 1,
+    campaign: { at: 10 },
+    delivery: null,
+    rearEconomy: null,
+  };
+  const decision = sustainEconomy(b, memory, [...Array(12).keys()], ed, enemies);
+  assert.equal(decision.branch, 'rear-foundation');
+  assert.deepEqual(decision.action, { kind: 'build', x: 0, y: 11, op: 'b' });
+});
+
+test('frontline construction can use a bounded local supply branch', () => {
+  const grid = [101, ...Array(12).fill(1), ...Array(21).fill(0), 102];
+  const army = Array(35).fill(0);
+  army[0] = 99;
+  for (let at = 1; at <= 9; at += 1) army[at] = 1;
+  army[10] = 100;
+  army[11] = 20;
+  army[12] = 90;
+  army[34] = 20;
+  const b = makeBoard({
+    n: 1, m: 35, grid, army,
+    isolated: Array(35).fill(0), fog: Array(35).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const enemies = [34];
+  const ed = require('../bot/board.cjs').distanceField(b, enemies);
+  const memory = { playerId: 1, campaign: { at: 10 }, delivery: null, rearEconomy: null };
+  const decision = sustainEconomy(b, memory, [...Array(13).keys()], ed, enemies);
+  assert.equal(decision.branch, 'front-fund');
+  assert.deepEqual(decision.action, { kind: 'attack', x: 0, y: 12, dx: 0, dy: 11, mode: 0, half: false });
+  assert.equal(memory.rearEconomy.front, true);
 });
