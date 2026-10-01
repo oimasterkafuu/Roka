@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -77,4 +77,42 @@ test('stalled campaign recovery clears stale cursors and resumes a safe frontier
   assert.equal(memory.campaign, null);
   assert.equal(memory.delivery, null);
   assert.deepEqual(memory.buildPlan, { cells: [1], index: 0 });
+});
+
+function investmentBoard(enemyArmy) {
+  return makeBoard({
+    n: 5, m: 5,
+    grid: [101, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 102],
+    army: [50, 10, 10, 10, 10, 0, 0, 0, 0, enemyArmy, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30],
+    isolated: Array(25).fill(0), fog: Array(25).fill(0), turn: 80,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('construction reserves a nearby garrison before spending fifty units', () => {
+  const b = investmentBoard(80);
+  assert.equal(constructionThreat(b, [0, 1, 2, 3, 4], [9, 24]), true);
+  const memory = { playerId: 1, home: 0, threatDistance: {} };
+  const decision = plan(b, memory);
+  assert.equal(decision.branch, 'defend');
+  assert.notEqual(decision.action?.kind, 'build');
+});
+
+test('construction resumes after the saved enemy stack is no longer a threat', () => {
+  const b = investmentBoard(20);
+  assert.equal(constructionThreat(b, [0, 1, 2, 3, 4], [9, 24]), false);
+});
+
+test('a cleared construction threat lets the existing cluster plan build again', () => {
+  const b = makeBoard({
+    n: 5, m: 5,
+    grid: [101, ...Array(24).fill(1)],
+    army: [60, 120, ...Array(23).fill(5)],
+    isolated: Array(25).fill(0), fog: Array(25).fill(0), turn: 80,
+    leaderboard: [{ id: 1, team: 1 }],
+  }, 1);
+  const memory = { playerId: 1, home: 0, threatDistance: {} };
+  const decision = plan(b, memory);
+  assert.equal(decision.branch, 'cluster-foundation');
+  assert.equal(decision.action.kind, 'build');
 });

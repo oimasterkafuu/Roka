@@ -23,6 +23,7 @@ const CAMPAIGN_STRENGTH_DEFAULT = Number.isFinite(Number(process.env.APEX_CAMPAI
   ? Math.max(0.05, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_STRENGTH))) : 0.25;
 const BUILD_CLUSTER_SIZE = Number.isFinite(Number(process.env.APEX_BUILD_CLUSTER_SIZE))
   ? Math.max(2, Math.min(8, Number(process.env.APEX_BUILD_CLUSTER_SIZE))) : 4;
+const BUILD_COST = 50;
 
 function field(b, starts, enter = b.passable) { return distanceField(b, starts, enter); }
 function swampRatio(b, m) {
@@ -109,6 +110,52 @@ function pressure(b, at, omit = -1) {
   let value = 0;
   for (const j of b.neighbors(at)) if (j !== omit && b.enemy(j) && !b.isolated[j]) value = Math.max(value, b.army[j] - 1);
   return value;
+}
+
+function routeArrival(b, f, at) {
+  const path = route(f, at);
+  let arrival = b.army[at] - 1;
+  for (const j of path.slice(1, -1)) {
+    arrival += b.enemy(j) ? Math.max(0, b.army[j] - 1) : -b.army[j] - 1;
+  }
+  return { arrival, distance: f.distance[at] };
+}
+
+function localGuard(b, crown, ownField = field(b, [crown], (at) => b.own(at) && !b.isolated[at])) {
+  let guard = 0;
+  for (let at = 0; at < b.size; at += 1) {
+    if (ownField.distance[at] <= 4) guard += b.army[at];
+  }
+  return guard;
+}
+
+// Building spends fifty units immediately.  If the opponent has expanded
+// while saving a border stack, that investment can turn a defendable crown
+// into a one-turn target.  Hold construction until the stack is intercepted
+// or the nearby garrison has grown back above the projected attack.
+function constructionThreat(b, own, enemies) {
+  const crowns = own.filter((at) => b.kind(at) === 'crown');
+  const buildSites = own.filter((at) => b.kind(at) === 'plain' || b.kind(at) === 'city');
+  for (const crown of crowns) {
+    const threatField = field(b, [crown]);
+    const ownField = field(b, [crown], (at) => b.own(at) && !b.isolated[at]);
+    const guard = localGuard(b, crown, ownField);
+    const buildNearCrown = buildSites.some((at) => Number.isFinite(ownField.distance[at]) && ownField.distance[at] <= 4);
+    const projectedGuard = Math.max(0, guard - (buildNearCrown ? BUILD_COST : 0));
+    for (const enemy of enemies) {
+      const distance = threatField.distance[enemy];
+      if (!Number.isFinite(distance) || distance > 12) continue;
+      const { arrival } = routeArrival(b, threatField, enemy);
+      const margin = Math.max(18, distance * 2);
+      if (arrival + margin > projectedGuard) return true;
+    }
+    const concentrated = enemies
+      .filter((at) => Number.isFinite(threatField.distance[at]) && threatField.distance[at] <= 18)
+      .sort((a, z) => b.army[z] - b.army[a])[0];
+    if (concentrated !== undefined && b.army[concentrated] >= Math.max(80, projectedGuard * 0.65) &&
+      b.army[concentrated] + 30 > projectedGuard) return true;
+  }
+  return false;
 }
 function routeGuard(b, action) {
   if (!action || action.kind !== 'attack') return { blocked: false, anchor: -1, cut: -1 };
@@ -324,6 +371,7 @@ function defense(b, m, own) {
   let worst = null;
   for (const crown of crowns) {
     const f = field(b,[crown]);
+    const guard = localGuard(b, crown);
     let nearest = Infinity;
     for (let enemy = 0; enemy < b.size; enemy += 1) {
       if (b.enemy(enemy) && !b.isolated[enemy] && f.distance[enemy] < nearest) nearest = f.distance[enemy];
@@ -334,16 +382,15 @@ function defense(b, m, own) {
     m.threatDistance[key] = nearest;
     for(let at=0;at<b.size;at++) {
       if(!b.enemy(at)||b.isolated[at]||f.distance[at]>6) continue;
-      const p = route(f,at);
-      let arrival=b.army[at]-1;
-      for(const j of p.slice(1,-1)) arrival += b.enemy(j) ? Math.max(0,b.army[j]-1) : -b.army[j]-1;
+      const { arrival } = routeArrival(b, f, at);
       const shortage=arrival-b.army[crown]-f.distance[at];
       // A stationary blob several steps away is not an emergency.  Requiring
       // either a short arrival window or a large margin prevents defence from
       // cancelling every campaign whenever the opponent merely owns a large
       // border stack.
       const imminent = f.distance[at] <= 2;
-      if(shortage>0 && (imminent || advancing) && (!worst || shortage/(f.distance[at]+1)>worst.score)) worst={at,crown,eta:f.distance[at],need:arrival+3,score:shortage/(f.distance[at]+1)};
+      const savedMass = arrival + Math.max(18, f.distance[at] * 2) > guard;
+      if(shortage>0 && (imminent || advancing || savedMass) && (!worst || shortage/(f.distance[at]+1)>worst.score)) worst={at,crown,eta:f.distance[at],need:arrival+3,score:shortage/(f.distance[at]+1)};
     }
   }
   if(!worst) return null;
@@ -383,6 +430,9 @@ function cutDefense(b, m, own) {
 }
 
 function economy(b,m,own,ed,goal) {
+  const enemies = [];
+  for (let at = 0; at < b.size; at += 1) if (b.enemy(at) && !b.isolated[at]) enemies.push(at);
+  if (constructionThreat(b, own, enemies)) return null;
   if (own.filter((i) => b.kind(i) === 'crown').length >= goal && !m.buildPlan) return null;
 
   const validSite = (at) => b.own(at) && !b.isolated[at] &&
@@ -401,7 +451,7 @@ function economy(b,m,own,ed,goal) {
         continue;
       }
       const kind = b.kind(at);
-      const need = kind === 'city' ? 50 : 100;
+      const need = kind === 'city' ? BUILD_COST : BUILD_COST * 2;
       if (b.army[at] >= need) {
         return {
           action: build(b, at, kind === 'city' ? 'c' : 'b'),
@@ -476,6 +526,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
   if (b.turn < ECON_DEADLINE) return null;
   const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown');
   if (!enemyCrowns.length) return null;
+  if (constructionThreat(b, own, enemies)) return null;
   const cf = field(b, enemyCrowns);
   const head =
     m.campaign && b.own(m.campaign.at)
@@ -523,7 +574,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
             distances.push(distances[h] + 1);
           }
       }
-      if (funds < (b.kind(at) === 'city' ? 51 : 101)) continue;
+      if (funds < (b.kind(at) === 'city' ? BUILD_COST + 1 : BUILD_COST * 2 + 1)) continue;
       state.site = at;
       break;
     }
@@ -531,7 +582,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
   if (state.site < 0) return null;
   const at = state.site,
     kind = b.kind(at),
-    need = kind === 'city' ? 51 : 101;
+    need = kind === 'city' ? BUILD_COST + 1 : BUILD_COST * 2 + 1;
   let decision;
   if (b.army[at] >= need) {
     decision = {
@@ -958,4 +1009,4 @@ function plan(b,m) {
   if(growthAction)return growthAction;
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,stranded,safeMove,gather,growth,routeGuard};
+module.exports={plan,recover,stranded,safeMove,gather,growth,routeGuard,constructionThreat,localGuard};
