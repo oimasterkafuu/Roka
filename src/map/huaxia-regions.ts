@@ -29,7 +29,6 @@ const regions: readonly { id: MapRegion; name: string; bounds: HuaxiaRegionConfi
   { id: 'ming', name: '明', bounds: { west: 90, east: 135, south: 17, north: 52 } },
   { id: 'liao', name: '辽', bounds: { west: 90, east: 125, south: 35, north: 55 } },
   { id: 'china', name: '中国', bounds: { west: 73, east: 135, south: 18, north: 54 } },
-  { id: 'hong-kong', name: '香港', bounds: { west: 113.7, east: 114.5, south: 22.1, north: 22.6 } },
   { id: 'taiwan', name: '台湾省', bounds: { west: 119, east: 122.2, south: 21.5, north: 25.5 } },
 ];
 
@@ -52,6 +51,7 @@ const LEGACY_REGION_ALIASES: Readonly<Record<string, MapRegion>> = {
   'northern-dynasties': 'han',
   // Replay compatibility: Qing was removed because it substantially overlapped China.
   qing: 'china',
+  'hong-kong': 'china',
 };
 
 export const normalizeMapRegion = (value: unknown): MapRegion => {

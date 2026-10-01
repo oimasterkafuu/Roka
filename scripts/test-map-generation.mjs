@@ -16,14 +16,15 @@ const baseConfig = {
 
 const serialize = (map) => JSON.stringify({ n: map.n, m: map.m, gridType: map.gridType });
 const maps = new Map();
-assert.equal(HUAXIA_REGIONS.length, 10, 'exactly ten Huaxia regions are exposed');
+assert.equal(HUAXIA_REGIONS.length, 9, 'exactly nine Huaxia regions are exposed');
 assert.deepEqual(
   HUAXIA_REGIONS.map((region) => region.id),
-  ['qin', 'han', 'tang', 'song', 'yuan', 'ming', 'liao', 'china', 'hong-kong', 'taiwan'],
+  ['qin', 'han', 'tang', 'song', 'yuan', 'ming', 'liao', 'china', 'taiwan'],
 );
 assert.equal(normalizeMapRegion('three-kingdoms'), 'han');
 assert.equal(normalizeMapRegion('northern-dynasties'), 'han');
 assert.equal(normalizeMapRegion('qing'), 'china');
+assert.equal(normalizeMapRegion('hong-kong'), 'china');
 const china = HUAXIA_REGIONS.find((region) => region.id === 'china');
 assert.deepEqual(china?.bounds, { west: 73, east: 135, south: 18, north: 54 });
 for (const [name, lon, lat] of [
@@ -34,9 +35,34 @@ for (const [name, lon, lat] of [
   ['台湾附近', 121, 23.5],
 ]) {
   assert.ok(
-    lon >= china.bounds.west && lon <= china.bounds.east && lat >= china.bounds.south && lat <= china.bounds.north,
+    lon >= china.bounds.west &&
+      lon <= china.bounds.east &&
+      lat >= china.bounds.south &&
+      lat <= china.bounds.north,
     `China viewport covers ${name}`,
   );
+}
+for (const [lon, lat] of [
+  [80, 44],
+  [90, 36],
+  [100, 32],
+]) {
+  assert.ok(isLand(lon, lat), `western China sample ${lon},${lat} is land`);
+}
+const chinaMap = generateHuaxiaMap(new SeededRandom('china:west'), {
+  ...baseConfig,
+  mapRegion: 'china',
+});
+assert.ok(
+  chinaMap.gridType.some((row) => row.slice(0, Math.floor(chinaMap.m / 2)).includes(0)),
+  'western half of China viewport contains plains, not only sea',
+);
+const taiwanRidge = HUAXIA_RIDGES.find((ridge) => ridge.name === '台湾中央山脉');
+assert.ok(taiwanRidge && taiwanRidge.points[0].lat >= 24.5 && taiwanRidge.points.at(-1).lat <= 22.5);
+for (const mapRegion of ['china', 'taiwan']) {
+  const a = generateHuaxiaMap(new SeededRandom('terrain:a'), { ...baseConfig, mapRegion });
+  const b = generateHuaxiaMap(new SeededRandom('terrain:b'), { ...baseConfig, mapRegion });
+  assert.equal(serialize(a), serialize(b), `${mapRegion} terrain is seed-independent`);
 }
 const first = generateHuaxiaMap(new SeededRandom('map-test:first'), {
   ...baseConfig,
@@ -147,16 +173,17 @@ for (const region of HUAXIA_REGIONS) {
       generals.every(([x, y]) => x >= 0 && sized.st[x][y] && sized.gridType[x][y] === 0),
       `${region.id} ${players}-player spawns stay on connected plains`,
     );
-    if (players === 2 && (region.id === 'taiwan' || region.id === 'hong-kong')) {
+    if (region.id === 'taiwan') {
       assert.ok(
         generals.every(([x, y]) => {
           const lat =
             region.bounds.north - ((x + 0.5) * (region.bounds.north - region.bounds.south)) / sized.n;
           const lon = region.bounds.west + ((y + 0.5) * (region.bounds.east - region.bounds.west)) / sized.m;
-          return isLand(lon, lat);
+          return isLand(lon, lat) && lon > 120 && lon < 122;
         }),
-        `${region.id} spawns stay on its designated land component`,
+        `taiwan ${players}-player spawns stay on the main island, not offshore islands`,
       );
+      assert.ok(sized.gridType.flat().includes(1), `taiwan ${players}-player map retains mountains`);
     }
   }
   maps.set(region.id, serialize(map));

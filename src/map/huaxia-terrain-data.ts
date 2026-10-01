@@ -91,6 +91,17 @@ export const HUAXIA_RIDGES: readonly HuaxiaRidge[] = [
     ],
   },
   {
+    name: '台湾中央山脉',
+    width: 0.16,
+    points: [
+      { lon: 121.25, lat: 24.8 },
+      { lon: 121.15, lat: 24.2 },
+      { lon: 121.05, lat: 23.6 },
+      { lon: 120.95, lat: 23.0 },
+      { lon: 120.85, lat: 22.4 },
+    ],
+  },
+  {
     name: '大兴安岭',
     width: 1.3,
     points: [
@@ -114,4 +125,6 @@ export const HUAXIA_PASSES: readonly (HuaxiaPoint & { name: string; radius: numb
   { name: '大散关', lon: 106.9, lat: 34.2, radius: 1 },
   { name: '夔门', lon: 109.6, lat: 30.9, radius: 1 },
   { name: '湘桂走廊', lon: 111.2, lat: 25.8, radius: 1 },
+  { name: '台湾中部山口', lon: 121.05, lat: 23.6, radius: 0.17 },
+  { name: '台湾南部山口', lon: 120.9, lat: 22.7, radius: 0.17 },
 ];
