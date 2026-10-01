@@ -1,25 +1,65 @@
 'use strict';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { attachStrategy } = require('../strategy.js');
-class MockSocket {
-  constructor() { this.connected = false; this.events = new Map(); this.sent = []; }
-  on(name, fn) { if (!this.events.has(name)) this.events.set(name, new Set()); this.events.get(name).add(fn); }
-  off(name, fn) { this.events.get(name)?.delete(fn); }
-  emit(name, payload) { this.sent.push([name, payload]); }
-  fire(name, payload) { for (const fn of this.events.get(name) || []) fn(payload); }
+const { makeBoard, connectedSet, articulationCells } = require('../bot/board.cjs');
+const { computePush, preview } = require('../bot/rules.cjs');
+const { createController } = require('../bot/controller.cjs');
+
+function frame(grid, army, n = 3, m = 5, turn = 60) {
+  return { n, m, grid, army, isolated: Array(n * m).fill(0), fog: Array(n * m).fill(0), turn, leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }] };
 }
-test('strategy validates full/diff frames, readiness protocol, and stop clears timers/listeners', () => {
-  const socket = new MockSocket(); const handle = attachStrategy(socket, { room: 'r', heartbeatIntervalMs: 0, actionDelayMs: 0 });
-  socket.fire('set_id', 'p0'); socket.fire('room_update', { players: [{ sid: 'p0', ready: false }] });
-  assert.deepEqual(socket.sent[0], ['change_ready', { ready: true }]);
-  socket.fire('init_map', { n: 1, m: 2, player_ids: ['p0', 'p1'] });
-  socket.fire('update', { turn: 0, is_diff: false, grid_type: [101, 2], army_cnt: [2, 1], isolated: [0, 0], fog: [0, 0], leaderboard: [{ id: 1, team: 1 }] });
-  assert.equal(handle.state.turn, 0); assert.equal(handle.state.grid[0], 101);
-  socket.fire('update', { turn: 1, is_diff: true, grid_type: [1, 200], army_cnt: [1, 4], isolated: [0, 0], fog: [1, 1] });
-  assert.equal(handle.state.grid[1], 200); assert.equal(handle.state.fog[1], 1);
-  socket.fire('update', { turn: 2, is_diff: true, grid_type: [1] });
-  assert.equal(handle.state.turn, 1);
-  handle.stop(); socket.fire('room_kick'); socket.fire('update', { turn: 3, is_diff: false, grid_type: [101, 2], army_cnt: [2, 1] });
-  assert.equal(handle.state.turn, 1);
+
+test('connectedSet follows anchors and does not cross enemy cells', () => {
+  const board = makeBoard(frame([
+    101, 1, 1, 2, 102,
+    200, 200, 200, 200, 200,
+    200, 200, 200, 200, 200,
+  ], Array(15).fill(1)), 1);
+  assert.deepEqual([...connectedSet(board, 1)].sort((a, b) => a - b), [0, 1, 2]);
+});
+
+test('computePush preserves the server smart split rule', () => {
+  const board = makeBoard(frame([
+    101, 1, 1, 200, 200,
+    200, 200, 200, 200, 200,
+    200, 200, 200, 200, 200,
+  ], [10, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), 1);
+  assert.equal(computePush(board, 1, 2, 0), 2);
+  assert.equal(computePush(board, 1, 2, 2), 2);
+});
+
+test('preview can capture a crown and marks decapitation', () => {
+  const board = makeBoard(frame([
+    101, 1, 102, 200, 200,
+    200, 200, 200, 200, 200,
+    200, 200, 200, 200, 200,
+  ], [10, 20, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), 1);
+  const result = preview(board, { kind: 'attack', x: 0, y: 1, dx: 0, dy: 2, mode: 2 });
+  assert.equal(result.ok, true);
+  assert.equal(result.captured, true);
+  assert.equal(result.decap, true);
+});
+
+test('articulationCells ignores a bridge that only separates two anchors', () => {
+  const board = makeBoard(frame([
+    101, 1, 101, 200, 200,
+    200, 200, 200, 200, 200,
+    200, 200, 200, 200, 200,
+  ], Array(15).fill(1)), 1);
+  assert.equal(articulationCells(board, 1).has(1), false);
+});
+
+test('controller returns one legal action and keeps a target across turns', () => {
+  const controller = createController(1);
+  const first = controller.choose(frame([
+    101, 1, 1, 2, 102,
+    200, 200, 200, 200, 200,
+    200, 200, 200, 200, 200,
+  ], [30, 12, 8, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 3, 5, 60));
+  assert.ok(first);
+  assert.ok(['attack', 'build'].includes(first.kind));
+  const stats = controller.stats();
+  assert.equal(stats.actions, 1);
+  assert.equal(stats.rejected, 0);
 });
