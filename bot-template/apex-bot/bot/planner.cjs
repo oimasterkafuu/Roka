@@ -519,6 +519,35 @@ function sustainEconomy(b, m, own, ed, enemies) {
   return decision;
 }
 
+// Large boards need a second clock besides the active crown campaign. A long
+// convoy can occupy the nearest stack for hundreds of ticks while the opponent
+// keeps painting the neutral rear. Spend a sparse, deterministic window on a
+// safe rear expansion, leaving the campaign root and its delivery cursor
+// untouched.
+function rearExpansion(b, m, own, ed, enemies) {
+  if (b.size < 800 || b.turn < 45) return null;
+  if (m.rearGrowthNext !== undefined && b.turn < m.rearGrowthNext) return null;
+  const enemyLand = enemies.length;
+  if (own.length >= Math.max(60, enemyLand * 0.92)) {
+    m.rearGrowthNext = b.turn + 12;
+    return null;
+  }
+  const crowns = enemies.filter((at) => b.kind(at) === 'crown');
+  if (!crowns.length) return null;
+  const core = field(b, crowns);
+  if (m.campaign && Number.isFinite(core.distance[m.campaign.at]) && core.distance[m.campaign.at] < 16) {
+    m.rearGrowthNext = b.turn + 4;
+    return null;
+  }
+  const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root, m.rearEconomy?.site]);
+  const rear = own.filter(
+    (at) => !reserved.has(at) && ed.distance[at] >= 5 && b.kind(at) !== 'swamp',
+  );
+  const action = opening(b, m, rear, ed);
+  m.rearGrowthNext = b.turn + (action ? 4 : 2);
+  return action ? { ...action, branch: 'rear-expansion' } : null;
+}
+
 function chooseCampaign(b,m,own) {
   const crowns=[];
   for(let i=0;i<b.size;i++)if(b.enemy(i)&&b.kind(i)==='crown')crowns.push(i);
@@ -644,8 +673,17 @@ function chooseCampaign(b,m,own) {
   const rootArmy = b.army[c.at] || 0;
   if (b.turn - c.started >= CAMPAIGN_REBASE_AFTER &&
       ((c.phase === 'gather' && rootArmy < 18) || (c.phase === 'attack' && rootArmy < 8))) {
+    const bestDistance = Number.isFinite(c.bestCrownDistance) ? c.bestCrownDistance : f.distance[c.at];
     const alternatives = own
-      .filter((at) => at !== c.at && b.army[at] > rootArmy + 24 && Number.isFinite(f.distance[at]))
+      .filter((at) =>
+        at !== c.at &&
+        b.army[at] > rootArmy + 24 &&
+        Number.isFinite(f.distance[at]) &&
+        // A rebase is allowed only when it moves the same campaign closer to
+        // its crown. Switching to a stronger rear stack after the spearhead
+        // has advanced is the long-map oscillation this planner must avoid.
+        f.distance[at] + 1 < bestDistance,
+      )
       .sort((a, z) => (b.army[z] - f.distance[z] * 2) - (b.army[a] - f.distance[a] * 2));
     if (alternatives.length) {
       c.at = alternatives[0];
@@ -687,8 +725,14 @@ function chooseCampaign(b,m,own) {
     // gives Anti-Human a full building cycle.  Rebase immediately to the
     // strongest reachable stack while keeping the same crown objective.
     if (b.army[c.at] < 18) {
+      const bestDistance = Number.isFinite(c.bestCrownDistance) ? c.bestCrownDistance : f.distance[c.at];
       const alternatives = own
-        .filter((at) => at !== c.at && b.army[at] > b.army[c.at] + 24 && Number.isFinite(f.distance[at]))
+        .filter((at) =>
+          at !== c.at &&
+          b.army[at] > b.army[c.at] + 24 &&
+          Number.isFinite(f.distance[at]) &&
+          f.distance[at] + 1 < bestDistance,
+        )
         .sort((a, z) => (b.army[z] - f.distance[z] * 2) - (b.army[a] - f.distance[a] * 2));
       if (alternatives.length) {
         c.at = alternatives[0];
@@ -779,6 +823,8 @@ function plan(b,m) {
     const assault = chooseCampaign(b, m, own);
     if (assault) return assault;
   }
+  const rear = rearExpansion(b, m, own, ed, enemies);
+  if (rear) return rear;
   const cutGuard = cutDefense(b, m, own);
   if (cutGuard) return cutGuard;
   const cut = strategicCut(b, own);
