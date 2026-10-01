@@ -2,6 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { serialize } from 'node:v8';
+import type { DisciplineType } from './server/auto-ban-policy';
 import {
   CoalescingFileWriter,
   decodeBinary,
@@ -13,6 +14,23 @@ import {
 interface RatingHistoryPoint {
   t: number;
   r: number;
+}
+
+export interface BanRecord {
+  startedAt: number;
+  bannedUntil: number;
+  type: DisciplineType | 'manual';
+  reason: string;
+  triggeredAt: number;
+  evidence: string;
+}
+
+export interface DisciplineRecord {
+  occurredAt: number;
+  type: DisciplineType | 'normal_surrender' | 'leave' | 'disconnect_timeout';
+  turn: number;
+  elapsedMs: number;
+  evidence: string;
 }
 
 interface StoredUser {
@@ -31,6 +49,10 @@ interface StoredUser {
   // 封禁截止时间的 Unix 毫秒时间戳；-1 表示永久封禁；缺省表示未封禁。
   // 到期不解数据，读取时惰性判定为已解除（见 getBanStatus）。
   bannedUntil?: number;
+  currentBan?: BanRecord;
+  banHistory?: BanRecord[];
+  disciplineHistory?: DisciplineRecord[];
+  automaticBanCount?: number;
   ratingHistory?: RatingHistoryPoint[];
   // 最后在线时间：用户最近一次有效请求/动作的时间，由 presence-service 统一维护
   // （本字段只是它的持久化落盘）。旧数据无此字段，读取时按 undefined 处理（向后兼容）。
@@ -65,12 +87,15 @@ export interface AdminUserEntry {
   isSuperAdmin: boolean;
   /** -1 表示永久封禁；null 表示未封禁。 */
   bannedUntil: number | null;
+  ban: BanRecord | null;
+  banHistory: BanRecord[];
 }
 
 export interface BanStatus {
   banned: boolean;
   /** -1 表示永久封禁；banned=false 时为 null。 */
   bannedUntil: number | null;
+  ban: BanRecord | null;
 }
 
 interface UserFile {
@@ -125,6 +150,46 @@ export const getLastActiveAt = (user: { lastSeenAt?: number; updatedAt: number }
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
+const toBanRecord = (value: unknown): BanRecord | null => {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.startedAt !== 'number' ||
+    typeof value.bannedUntil !== 'number' ||
+    typeof value.type !== 'string' ||
+    typeof value.reason !== 'string' ||
+    typeof value.triggeredAt !== 'number' ||
+    typeof value.evidence !== 'string'
+  )
+    return null;
+  return {
+    startedAt: value.startedAt,
+    bannedUntil: value.bannedUntil,
+    type: value.type as BanRecord['type'],
+    reason: value.reason,
+    triggeredAt: value.triggeredAt,
+    evidence: value.evidence,
+  };
+};
+
+const toDisciplineRecord = (value: unknown): DisciplineRecord | null => {
+  if (!isRecord(value)) return null;
+  if (
+    typeof value.occurredAt !== 'number' ||
+    typeof value.type !== 'string' ||
+    typeof value.turn !== 'number' ||
+    typeof value.elapsedMs !== 'number' ||
+    typeof value.evidence !== 'string'
+  )
+    return null;
+  return {
+    occurredAt: value.occurredAt,
+    type: value.type as DisciplineType,
+    turn: value.turn,
+    elapsedMs: value.elapsedMs,
+    evidence: value.evidence,
+  };
+};
+
 const toStoredUser = (value: unknown): StoredUser | null => {
   if (!isRecord(value)) {
     return null;
@@ -152,6 +217,13 @@ const toStoredUser = (value: unknown): StoredUser | null => {
   const ratingGames = value.ratingGames;
   const lastSeenAt = value.lastSeenAt;
   const bannedUntil = value.bannedUntil;
+  const currentBan = toBanRecord(value.currentBan);
+  const banHistory = (Array.isArray(value.banHistory) ? value.banHistory : [])
+    .map(toBanRecord)
+    .filter((item): item is BanRecord => item !== null);
+  const disciplineHistory = (Array.isArray(value.disciplineHistory) ? value.disciplineHistory : [])
+    .map(toDisciplineRecord)
+    .filter((item): item is DisciplineRecord => item !== null);
   const ratingHistoryRaw = Array.isArray(value.ratingHistory) ? value.ratingHistory : [];
   const ratingHistory: RatingHistoryPoint[] = [];
   for (const point of ratingHistoryRaw) {
@@ -177,6 +249,13 @@ const toStoredUser = (value: unknown): StoredUser | null => {
     isAdmin: value.isAdmin === true ? true : undefined,
     isSuperAdmin: value.isSuperAdmin === true ? true : undefined,
     bannedUntil: typeof bannedUntil === 'number' && Number.isFinite(bannedUntil) ? bannedUntil : undefined,
+    currentBan: currentBan ?? undefined,
+    banHistory,
+    disciplineHistory,
+    automaticBanCount:
+      typeof value.automaticBanCount === 'number' && Number.isFinite(value.automaticBanCount)
+        ? value.automaticBanCount
+        : undefined,
     ratingHistory,
     lastSeenAt: typeof lastSeenAt === 'number' && Number.isFinite(lastSeenAt) ? lastSeenAt : undefined,
   };
@@ -388,45 +467,100 @@ export class UserStore {
   getBanStatus(usernameInput: string): BanStatus {
     const user = this.usersByKey.get(this.normalize(usernameInput));
     if (!user || typeof user.bannedUntil !== 'number') {
-      return { banned: false, bannedUntil: null };
+      return { banned: false, bannedUntil: null, ban: null };
     }
     if (user.bannedUntil < 0 || user.bannedUntil > Date.now()) {
-      return { banned: true, bannedUntil: user.bannedUntil };
+      return { banned: true, bannedUntil: user.bannedUntil, ban: user.currentBan ?? null };
     }
     user.bannedUntil = undefined;
+    user.currentBan = undefined;
     void this.persist().catch(() => undefined);
-    return { banned: false, bannedUntil: null };
+    return { banned: false, bannedUntil: null, ban: null };
   }
 
   isBanned(usernameInput: string): boolean {
     return this.getBanStatus(usernameInput).banned;
   }
 
-  /**
-   * 封禁用户。bannedUntil 为截止毫秒时间戳，-1 表示永久封禁。
-   * 超级管理员不可封禁（在存储层兜底，路由层另有提示）。
-   */
-  async banUser(usernameInput: string, bannedUntil: number): Promise<void> {
+  async applyBan(
+    usernameInput: string,
+    bannedUntil: number,
+    details: {
+      type: BanRecord['type'];
+      reason: string;
+      triggeredAt?: number;
+      evidence?: string;
+    },
+  ): Promise<BanRecord> {
     const user = this.usersByKey.get(this.normalize(usernameInput));
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-    if (user.isSuperAdmin === true) {
-      throw new Error('不能封禁超级管理员。');
-    }
+    if (!user) throw new Error('用户不存在。');
+    if (user.isSuperAdmin === true) throw new Error('不能封禁超级管理员。');
+    const now = Date.now();
+    const record: BanRecord = {
+      startedAt: now,
+      bannedUntil,
+      type: details.type,
+      reason: details.reason,
+      triggeredAt: details.triggeredAt ?? now,
+      evidence: details.evidence ?? '',
+    };
     user.bannedUntil = bannedUntil;
-    user.updatedAt = Date.now();
+    user.currentBan = record;
+    user.banHistory = [...(user.banHistory ?? []), record].slice(-50);
+    if (details.type !== 'manual') {
+      user.automaticBanCount = (user.automaticBanCount ?? 0) + 1;
+    }
+    user.updatedAt = now;
     await this.persist();
+    return record;
+  }
+
+  async applyAutomaticDiscipline(
+    usernameInput: string,
+    bannedUntil: number,
+    type: DisciplineType,
+    triggeredAt: number,
+    evidence: string,
+  ): Promise<BanRecord> {
+    return this.applyBan(usernameInput, bannedUntil, {
+      type,
+      reason: type === 'afk' ? '连续挂机' : '消极游戏',
+      triggeredAt,
+      evidence,
+    });
+  }
+
+  /** 旧 API 兼容：管理员调用方未提供理由时仍记录为手动封禁。 */
+  async banUser(usernameInput: string, bannedUntil: number, reason = '管理员手动封禁'): Promise<void> {
+    await this.applyBan(usernameInput, bannedUntil, {
+      type: 'manual',
+      reason,
+    });
   }
 
   async unbanUser(usernameInput: string): Promise<void> {
     const user = this.usersByKey.get(this.normalize(usernameInput));
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
+    if (!user) throw new Error('用户不存在。');
     user.bannedUntil = undefined;
+    user.currentBan = undefined;
     user.updatedAt = Date.now();
     await this.persist();
+  }
+
+  async recordDisciplineEvent(usernameInput: string, event: DisciplineRecord): Promise<DisciplineRecord[]> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) return [];
+    user.disciplineHistory = [...(user.disciplineHistory ?? []), event].slice(-100);
+    await this.persist();
+    return user.disciplineHistory;
+  }
+
+  listDisciplineEvents(usernameInput: string): DisciplineRecord[] {
+    return [...(this.usersByKey.get(this.normalize(usernameInput))?.disciplineHistory ?? [])];
+  }
+
+  getAutomaticBanCount(usernameInput: string): number {
+    return this.usersByKey.get(this.normalize(usernameInput))?.automaticBanCount ?? 0;
   }
 
   /**
@@ -466,6 +600,8 @@ export class UserStore {
         isAdmin: user.isAdmin === true,
         isSuperAdmin: user.isSuperAdmin === true,
         bannedUntil: ban.banned ? ban.bannedUntil : null,
+        ban: ban.banned ? ban.ban : null,
+        banHistory: (user.banHistory ?? []).slice(-10),
       });
     }
     entries.sort((a, b) => a.createdAt - b.createdAt);

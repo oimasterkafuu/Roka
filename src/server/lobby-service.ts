@@ -1,7 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Server as SocketIOServer } from 'socket.io';
 import { UserStore } from '../auth-store';
-import { GameEngine } from '../game-engine';
+import { GameDisciplineEvent, GameEngine } from '../game-engine';
+import {
+  AFK_WINDOW_MS,
+  evaluateAutomaticDiscipline,
+  isRapidSurrender,
+  RAPID_SURRENDER_WINDOW_MS,
+} from './auto-ban-policy';
 import { DISCONNECT_GRACE_MS } from '../game-engine/constants';
 import { isHuaxiaSeasonActive } from '../map/huaxia-season';
 import { resolveMapSizeRatioByPlayersAndRegion } from '../map/map-size';
@@ -88,7 +94,64 @@ class LobbyService {
   constructor(
     private readonly replayStore: ReplayStore,
     private readonly userStore: UserStore,
+    private readonly disconnectUser?: (username: string) => void,
   ) {}
+
+  private isBotUsername(username: string): boolean {
+    for (const players of this.lobbyPlayers.values()) {
+      if (players.some((player) => player.uid === username && player.bot === true)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async handleDisciplineEvent(event: GameDisciplineEvent): Promise<void> {
+    if (this.isBotUsername(event.username)) return;
+    const type =
+      event.cause === 'afk'
+        ? 'afk'
+        : isRapidSurrender(event)
+          ? 'rapid_surrender'
+          : event.cause === 'leave'
+            ? 'leave'
+            : event.cause === 'disconnect_timeout'
+              ? 'disconnect_timeout'
+              : 'normal_surrender';
+    const previous = this.userStore
+      .listDisciplineEvents(event.username)
+      .filter((item) => item.type === 'afk' || item.type === 'rapid_surrender')
+      .map((item) => ({
+        cause: item.type === 'afk' ? ('afk' as const) : ('manual_surrender' as const),
+        turn: item.turn,
+        elapsedMs: item.elapsedMs,
+        occurredAt: item.occurredAt,
+      }));
+    await this.userStore.recordDisciplineEvent(event.username, {
+      occurredAt: event.occurredAt,
+      type,
+      turn: event.turn,
+      elapsedMs: event.elapsedMs,
+      evidence: `${event.cause} at turn ${event.turn}`,
+    });
+    if (type !== 'afk' && type !== 'rapid_surrender') return;
+    const decision = evaluateAutomaticDiscipline(
+      event,
+      previous,
+      event.occurredAt,
+      this.userStore.getAutomaticBanCount(event.username),
+    );
+    if (!decision) return;
+    await this.userStore.applyAutomaticDiscipline(
+      event.username,
+      decision.bannedUntil,
+      decision.type,
+      event.occurredAt,
+      `${decision.triggerCount} events within ${type === 'afk' ? AFK_WINDOW_MS : RAPID_SURRENDER_WINDOW_MS}ms`,
+    );
+    await this.userStore.clearSession(event.username);
+    this.disconnectUser?.(event.username);
+  }
 
   md5(input: string): string {
     return createHash('md5').update(input, 'utf-8').digest('hex');
@@ -558,6 +621,9 @@ class LobbyService {
       },
       emitInitMap: (sid, data) => {
         io.to(`sid_${sid}`).emit('init_map', data);
+      },
+      disciplineEvent: (event) => {
+        void this.handleDisciplineEvent(event).catch(() => undefined);
       },
       chatMessage: (id, scope, sender, color, text, team = false) => {
         this.sendSystemMessage(io, id, scope, sender, color, text, team);

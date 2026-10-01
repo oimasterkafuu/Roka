@@ -102,6 +102,24 @@
               <tbody id="replays-body"></tbody>
             </table>
             <p id="replays-empty" class="panel-empty" style="display: none">暂无回放。</p>
+            <div class="replay-stats" aria-live="polite">
+              <div class="replay-stats-head">
+                <span>过去 24 小时已结束对局</span>
+                <strong id="replay-stats-games">-</strong>
+              </div>
+              <div
+                id="replay-stats-chart"
+                class="replay-stats-chart"
+                role="img"
+                aria-label="过去24小时按小时对局数"
+              ></div>
+              <div id="replay-stats-note" class="replay-stats-note">
+                统计窗口：当前时间向前 24 小时，按 Asia/Shanghai 自然小时统计。
+              </div>
+              <p id="replay-stats-error" class="replay-stats-error" style="display: none">
+                统计加载失败，请稍后重试。
+              </p>
+            </div>
             <div class="panel-pager">
               <button id="replays-prev" type="button" class="btn btn-secondary btn-sm" disabled>
                 上一页
@@ -451,13 +469,96 @@
       var REPLAYS_LIMIT = 10;
       var replaysOffset = 0;
 
+      function renderReplayStats(stats) {
+        var $games = $('#replay-stats-games');
+        var $chart = $('#replay-stats-chart');
+        var $error = $('#replay-stats-error');
+        if (!stats || !Array.isArray(stats.buckets) || stats.buckets.length !== 24) {
+          $games.text('-');
+          $chart.empty();
+          $error.show();
+          return;
+        }
+        var buckets = stats.buckets;
+        var max = Math.max.apply(
+          null,
+          buckets.map(function (bucket) {
+            return Number(bucket.count) || 0;
+          }),
+        );
+        var width = 480;
+        var height = 140;
+        var left = 8;
+        var right = 8;
+        var top = 12;
+        var bottom = 24;
+        var plotWidth = width - left - right;
+        var plotHeight = height - top - bottom;
+        var points = buckets.map(function (bucket, index) {
+          var x = left + (plotWidth * index) / (buckets.length - 1);
+          var count = Number(bucket.count) || 0;
+          var y = top + plotHeight - (max ? (count / max) * plotHeight : 0);
+          return { x: x, y: y, count: count, label: bucket.label || '' };
+        });
+        var polyline = points
+          .map(function (point) {
+            return point.x + ',' + point.y;
+          })
+          .join(' ');
+        var circles = points
+          .map(function (point) {
+            return (
+              '<circle cx="' +
+              point.x +
+              '" cy="' +
+              point.y +
+              '" r="2.5"><title>' +
+              point.label +
+              '：' +
+              point.count +
+              ' 局</title></circle>'
+            );
+          })
+          .join('');
+        var firstLabel = points[0].label;
+        var lastLabel = points[points.length - 1].label;
+        $games.text(Number(stats.games) || 0);
+        $chart.html(
+          '<svg viewBox="0 0 ' +
+            width +
+            ' ' +
+            height +
+            '" preserveAspectRatio="none" aria-hidden="true">' +
+            '<line class="replay-stats-axis" x1="' +
+            left +
+            '" y1="' +
+            (top + plotHeight) +
+            '" x2="' +
+            (width - right) +
+            '" y2="' +
+            (top + plotHeight) +
+            '"></line>' +
+            '<polyline class="replay-stats-line" points="' +
+            polyline +
+            '"></polyline>' +
+            circles +
+            '</svg><div class="replay-stats-labels"><span>' +
+            firstLabel +
+            '</span><span>' +
+            lastLabel +
+            '</span></div>',
+        );
+        $error.hide();
+      }
+
       async function loadReplays(offset) {
         try {
           var res = await fetch('/api/replays?offset=' + offset + '&limit=' + REPLAYS_LIMIT);
           if (!res.ok) {
-            return;
+            throw new Error('replays request failed');
           }
           var data = await res.json();
+          renderReplayStats(data.stats);
           var items = Array.isArray(data.items) ? data.items : [];
           replaysOffset = offset;
           var $body = $('#replays-body');
@@ -503,7 +604,9 @@
           $('#replays-prev').prop('disabled', offset <= 0);
           $('#replays-next').prop('disabled', !data.has_more);
         } catch (e) {
-          // 忽略加载失败
+          $('#replay-stats-games').text('-');
+          $('#replay-stats-chart').empty();
+          $('#replay-stats-error').show();
         }
       }
 

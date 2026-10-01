@@ -650,6 +650,65 @@ body.home .feed-pager .pager-ellipsis {
   padding: 0 2px;
 }
 
+/* 过去 24 小时回放统计 */
+body.home .replay-stats {
+  margin: 14px 0 4px;
+  padding-top: 12px;
+  border-top: 1px solid #eef1f6;
+}
+body.home .replay-stats-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+body.home .replay-stats-head strong {
+  color: teal;
+  font-size: 22px;
+}
+body.home .replay-stats-chart {
+  margin-top: 8px;
+  min-height: 72px;
+}
+body.home .replay-stats-chart svg {
+  display: block;
+  width: 100%;
+  height: 110px;
+  overflow: visible;
+}
+body.home .replay-stats-axis {
+  stroke: #dfe6ee;
+  stroke-width: 1;
+}
+body.home .replay-stats-line {
+  fill: none;
+  stroke: teal;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+body.home .replay-stats-chart circle {
+  fill: teal;
+}
+body.home .replay-stats-labels {
+  display: flex;
+  justify-content: space-between;
+  color: #9aa4b2;
+  font-size: 10px;
+  margin-top: -18px;
+}
+body.home .replay-stats-note,
+body.home .replay-stats-error {
+  color: #9aa4b2;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+body.home .replay-stats-error {
+  color: #d63535;
+}
+
 /* 上传并查看回放 */
 body.home .replay-upload {
   display: flex;

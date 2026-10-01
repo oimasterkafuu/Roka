@@ -95,8 +95,9 @@
           本项目不是官方 generals.io 服务。页面中的来源信息用于致谢与许可证合规说明，
           便于追溯核心玩法、实现参考和协议来源。
         </p>
-        <div style="margin-top: 12px">
+        <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px">
           <button id="goto-tutorial-btn" class="small inverted">查看完整规则与教程 →</button>
+          <button id="goto-develop-btn" class="small">参与网站开发 →</button>
         </div>
       </section>
 
@@ -130,7 +131,7 @@
             <td>Closed-source</td>
           </tr>
           <tr>
-            <th>原始玩法</th>
+            <th>玩法参考</th>
             <td>
               Konkr.io
               <br />
@@ -207,6 +208,10 @@
 
       document.getElementById('goto-tutorial-btn').addEventListener('click', function () {
         location.href = '/tutorial';
+      });
+
+      document.getElementById('goto-develop-btn').addEventListener('click', function () {
+        location.href = '/develop';
       });
 
       loadUser();
