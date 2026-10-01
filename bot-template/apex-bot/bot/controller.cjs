@@ -1,7 +1,7 @@
 'use strict';
 
 const { makeBoard } = require('./board.cjs');
-const { plan, recover, growth } = require('./planner.cjs');
+const { plan, recover, secureDecision, growth } = require('./planner.cjs');
 const { preview } = require('./rules.cjs');
 
 function createController(playerId) {
@@ -36,7 +36,7 @@ function createController(playerId) {
         }
       }
     }
-    let decision = plan(board, memory);
+    let decision = secureDecision(board, plan(board, memory));
     if (!decision.action) {
       memory.noActionTurns += 1;
       // A short no-op is intentional during muster.  A longer one means the
@@ -50,8 +50,8 @@ function createController(playerId) {
           [...Array(board.size).keys()].filter((at) => board.own(at) && !board.isolated[at]),
         );
         if (fallback) {
-          decision = fallback;
-          memory.noActionTurns = 0;
+          decision = secureDecision(board, fallback);
+          if (decision.action) memory.noActionTurns = 0;
         }
       }
       memory.maxNoActionStreak = Math.max(memory.maxNoActionStreak, memory.noActionTurns);
