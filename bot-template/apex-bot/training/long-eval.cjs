@@ -27,9 +27,12 @@ function list(value, fallback) {
 }
 function config(options = {}) {
   const env = process.env;
+  const profile = String(options.profile ?? env.APEX_EVAL_PROFILE ?? 'standard');
+  if (!['standard', 'large'].includes(profile)) throw new Error('profile must be standard or large');
+  const defaultSizes = profile === 'large' ? '0.5,0.68,1' : '0.5';
   const sizes = list(
     options.sizes ?? options.mapSize ?? env.APEX_EVAL_SIZES ?? env.APEX_EVAL_SIZE,
-    '0.5',
+    defaultSizes,
   ).map(Number);
   if (!sizes.length || sizes.some((size) => !Number.isFinite(size) || size < 0.2 || size > 3))
     throw new Error('map sizes must be in [0.2, 3]');
@@ -57,6 +60,7 @@ function config(options = {}) {
   if (!Array.isArray(seats) || !seats.length || seats.some((seat) => typeof seat !== 'boolean'))
     throw new Error('seats must be a nonempty array of booleans');
   return {
+    profile,
     seeds: integer(options.seeds ?? env.APEX_EVAL_SEEDS, 8, 1, 10000),
     seedOffset: integer(options.seedOffset ?? env.APEX_EVAL_OFFSET, 0, 0, 10000000),
     seedPrefix: String(options.seedPrefix ?? env.APEX_EVAL_PREFIX ?? 'apex-long'),
@@ -107,16 +111,45 @@ function developmentSummary(rows) {
   const checkpoints = [120, 300, 600, 900, 1200];
   const at = {};
   for (const checkpoint of checkpoints) {
-    const samples = rows.map((row) => row.telemetry?.own?.[checkpoint]).filter(Boolean);
+    const samples = rows
+      .map((row) => ({
+        own: row.telemetry?.own?.[checkpoint],
+        opponent: row.telemetry?.opponent?.[checkpoint],
+      }))
+      .filter((sample) => sample.own);
     if (!samples.length) continue;
+    const paired = samples.filter((sample) => sample.opponent);
+    const ratio = (key) => {
+      const values = paired
+        .map((sample) => {
+          const denominator = Number(sample.opponent[key]);
+          return denominator > 0 ? Number(sample.own[key]) / denominator : null;
+        })
+        .filter(Number.isFinite);
+      return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    };
     at[checkpoint] = {
       samples: samples.length,
       coverage: samples.length / rows.length,
-      meanCrowns: samples.reduce((sum, sample) => sum + sample.crowns, 0) / samples.length,
-      meanCities: samples.reduce((sum, sample) => sum + sample.cities, 0) / samples.length,
-      meanArmy: samples.reduce((sum, sample) => sum + sample.army, 0) / samples.length,
-      alive: samples.filter((sample) => sample.crowns > 0).length,
-      aliveRate: samples.filter((sample) => sample.crowns > 0).length / rows.length,
+      pairedSamples: paired.length,
+      meanCrowns: samples.reduce((sum, sample) => sum + sample.own.crowns, 0) / samples.length,
+      meanCities: samples.reduce((sum, sample) => sum + sample.own.cities, 0) / samples.length,
+      meanArmy: samples.reduce((sum, sample) => sum + sample.own.army, 0) / samples.length,
+      meanLand: samples.reduce((sum, sample) => sum + sample.own.land, 0) / samples.length,
+      meanBuilds: samples.reduce((sum, sample) => sum + (sample.own.builds || 0), 0) / samples.length,
+      meanUpgrades: samples.reduce((sum, sample) => sum + (sample.own.upgrades || 0), 0) / samples.length,
+      meanAttacks: samples.reduce((sum, sample) => sum + (sample.own.attacks || 0), 0) / samples.length,
+      alive: samples.filter((sample) => sample.own.crowns > 0).length,
+      aliveRate: samples.filter((sample) => sample.own.crowns > 0).length / rows.length,
+      armyRatio: ratio('army'),
+      landRatio: ratio('land'),
+      crownRatio: ratio('crowns'),
+      cityDelta: paired.length
+        ? paired.reduce((sum, sample) => sum + sample.own.cities - sample.opponent.cities, 0) / paired.length
+        : null,
+      armyAheadRate: paired.length
+        ? paired.filter((sample) => sample.own.army >= sample.opponent.army).length / paired.length
+        : null,
     };
   }
   const maxCrowns = rows.map((row) => row.telemetry?.maxCrowns).filter(Number.isFinite);
@@ -144,6 +177,7 @@ function aggregate(rows) {
     maxWinTurns: winTurns.at(-1) ?? null,
     within120: wins.filter((row) => row.turns <= 120).length,
     within600: wins.filter((row) => row.turns <= 600).length,
+    largeMap: rows.length > 0 && rows.every((row) => Number(row.mapSize) >= 0.68),
     elapsedMs: rows.reduce((total, row) => total + (row.elapsedMs || 0), 0),
     development: developmentSummary(rows),
   };
@@ -331,7 +365,7 @@ async function evaluate(options = {}) {
   );
   const sourceAtEnd = sourceFingerprint();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     startedAt,
     finishedAt: new Date().toISOString(),
     wallMs: performance.now() - started,
@@ -354,6 +388,10 @@ async function evaluate(options = {}) {
     byOpponent: group(results, 'opponent'),
     bySize: group(results, 'mapSize'),
     byFog: group(results, 'fog'),
+    byScale: {
+      standard: aggregate(results.filter((row) => Number(row.mapSize) < 0.68)),
+      large: aggregate(results.filter((row) => Number(row.mapSize) >= 0.68)),
+    },
     results,
   };
 }
@@ -365,6 +403,7 @@ const CLI_FIELDS = {
   turns: 'turns',
   workers: 'workers',
   sizes: 'sizes',
+  profile: 'profile',
   modes: 'modes',
   opponents: 'opponents',
   fog: 'fog',
@@ -414,6 +453,7 @@ CLI values override APEX_EVAL_* environment variables.
   --workers N        Worker count, 1..32 (default up to 8; APEX_EVAL_WORKERS)
   --modes CSV        random,maze,archipelago,mediterranean (APEX_EVAL_MODES)
   --sizes CSV        Map size ratios, 0.2..3 (default 0.5; APEX_EVAL_SIZES)
+  --profile NAME     standard (0.5) or large (0.5,0.68,1) size suite
   --opponents CSV    anti,simple (default anti; APEX_EVAL_OPPONENTS)
   --fog VALUE        false, true, or both (default false; APEX_EVAL_FOG)
   --seat VALUE       Apex seat: 0, 1, or both (default both; APEX_EVAL_SEAT=0|1)

@@ -10,13 +10,29 @@ const {
   runMatch,
   replayMatch,
 } = require('../training/engine.cjs');
-const { parseCli } = require('../training/long-eval.cjs');
+const { aggregate, config, makeJobs, parseCli } = require('../training/long-eval.cjs');
 
 test('long evaluation --help parses without constructing a match', () => {
   const parsed = parseCli(['--help']);
   assert.equal(parsed.help, true);
   assert.deepEqual(parsed.options, {});
   assert.equal(parseCli(['--seeds', '2', '--workers', '3', '--seat', 'both']).options.seeds, '2');
+  assert.equal(parseCli(['--profile', 'large']).options.profile, 'large');
+});
+
+test('large evaluation profile schedules all supported map scales', () => {
+  const settings = config({
+    profile: 'large',
+    seeds: 1,
+    modes: ['random'],
+    opponents: ['anti'],
+    seats: [false],
+  });
+  assert.deepEqual(settings.sizes, [0.5, 0.68, 1]);
+  assert.deepEqual(
+    makeJobs(settings).map((job) => job.mapSize),
+    [0.5, 0.68, 1],
+  );
 });
 
 test('decision timing uses bounded samples and keeps an exact maximum', () => {
@@ -74,7 +90,7 @@ test('large-map evaluation records development checkpoints', () => {
     mapMode: 'maze',
     seed: 'large-development-metrics',
     mapSize: 1,
-    maxTurns: 3,
+    maxTurns: 120,
     policies: [() => null, () => null],
     traceLimit: 0,
   });
@@ -83,4 +99,37 @@ test('large-map evaluation records development checkpoints', () => {
   assert.equal(result.telemetry.players.length, 2);
   assert.ok(Number.isInteger(result.telemetry.maxCrowns[0]));
   assert.ok(Number.isInteger(result.telemetry.maxCities[0]));
+  assert.ok(Number.isInteger(result.telemetry.players[0][120].builds));
+  assert.ok(Number.isInteger(result.telemetry.players[0][120].attacks));
+});
+
+test('development summary compares large-map economy with the opponent', () => {
+  const row = (own, opponent) => ({
+    mapSize: 1,
+    ownWon: false,
+    ended: false,
+    telemetry: {
+      own: { 600: own },
+      opponent: { 600: opponent },
+      maxCrowns: own.crowns,
+      maxCities: own.cities,
+    },
+  });
+  const summary = aggregate([
+    row(
+      { crowns: 8, cities: 2, army: 120, land: 40, builds: 5, upgrades: 2, attacks: 30 },
+      { crowns: 10, cities: 3, army: 100, land: 50 },
+    ),
+    row(
+      { crowns: 12, cities: 4, army: 80, land: 60, builds: 8, upgrades: 3, attacks: 40 },
+      { crowns: 10, cities: 4, army: 100, land: 50 },
+    ),
+  ]);
+  const checkpoint = summary.development.checkpoints[600];
+  assert.equal(summary.largeMap, true);
+  assert.equal(checkpoint.pairedSamples, 2);
+  assert.equal(checkpoint.meanBuilds, 6.5);
+  assert.equal(checkpoint.cityDelta, -0.5);
+  assert.equal(checkpoint.armyAheadRate, 0.5);
+  assert.equal(checkpoint.armyRatio, 1);
 });
