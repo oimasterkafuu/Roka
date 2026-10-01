@@ -539,7 +539,19 @@ function sustainEconomy(b, m, own, ed, enemies) {
       : own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
   const distance = cf.distance[head];
   // Do not stop a breach already within striking distance of the enemy core.
-  if (!Number.isFinite(distance) || distance < 24) return null;
+  if (!Number.isFinite(distance) || distance < 24) {
+    // A rear project selected before the spearhead arrived must not continue
+    // consuming turns after the campaign enters its finishing corridor.
+    // Abandon only the remote project; a safe frontline project remains valid
+    // and can finish without pulling the assault stack backwards.
+    if (m.rearEconomy?.site >= 0 && !m.rearEconomy.front) {
+      m.rearEconomy.site = -1;
+      m.rearEconomy.delivery = null;
+      m.rearEconomy.spent = 0;
+      m.rearEconomy.nextWindow = b.turn + 12;
+    }
+    return null;
+  }
   const crowns = own.filter((at) => b.kind(at) === 'crown').length;
   const infrastructureCap = b.size >= 1600 ? 36 : b.size >= 800 ? 28 : 24;
   const goal = Math.min(infrastructureCap, Math.max(ECON_GOAL, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
@@ -547,15 +559,51 @@ function sustainEconomy(b, m, own, ed, enemies) {
   if (b.turn < state.nextWindow) return null;
   const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root]);
   const canEnter = (at) => b.own(at) && !b.isolated[at] && ed.distance[at] >= 4 && !reserved.has(at);
-  const validSite = (at) => canEnter(at) && ed.distance[at] >= 6 && ['plain', 'city'].includes(b.kind(at));
+  const validSite = (at) => canEnter(at) && ed.distance[at] >= (state.front ? 4 : 6) && ['plain', 'city'].includes(b.kind(at));
   if (!validSite(state.site)) {
     state.site = -1;
     state.delivery = null;
+    state.front = false;
   }
   if (crowns >= goal && state.site < 0) return null;
   if (state.site < 0) {
-    // Search a bounded local neighbourhood; every selected project can
-    // already afford both construction actions without waiting for growth.
+    const frontField = m.campaign && b.own(m.campaign.at)
+      ? field(b, [m.campaign.at], (at) => b.own(at) && !b.isolated[at])
+      : null;
+    // A frontline project does not have to be funded by the single cell on
+    // which it is built.  On a large board that cell is often a fresh plain
+    // with only a small garrison, while two or three safe neighbours already
+    // contain enough spare army.  Check the local six-step neighbourhood and
+    // use it as a bounded supply tree; this prevents a rear stack from walking
+    // the entire campaign corridor just to pay for a city.
+    const frontCandidates = own
+      .filter((at) => !reserved.has(at) && frontField && frontField.distance[at] > 0 && frontField.distance[at] <= 5 &&
+        ed.distance[at] >= 4 && ['plain', 'city'].includes(b.kind(at)))
+      .map((at) => {
+        const need = b.kind(at) === 'city' ? BUILD_COST + 1 : BUILD_COST * 2 + 1;
+        const local = field(b, [at], canEnter);
+        const localSpare = own.reduce((sum, source) => {
+          if (source === at || !Number.isFinite(local.distance[source]) || local.distance[source] > 6) return sum;
+          return sum + Math.max(0, b.army[source] - Math.max(1, pressure(b, source)));
+        }, Math.max(0, b.army[at]));
+        return {
+          at,
+          need,
+          localSpare,
+          localDistance: local.distance[at],
+          score: (b.army[at] >= need ? 900 : 0) + (6 - frontField.distance[at]) * 140 + (b.kind(at) === 'city' ? 320 : 0) +
+            Math.min(200, b.army[at]) + Math.min(120, localSpare) * 0.35 + ed.distance[at] * 2,
+        };
+      })
+      .filter((candidate) => candidate.localSpare >= candidate.need)
+      .sort((a, z) => z.score - a.score);
+    if (frontCandidates.length) {
+      state.site = frontCandidates[0].at;
+      state.front = true;
+    }
+    // If no funded frontline site exists, search a bounded rear neighbourhood;
+    // every selected project can already afford both construction actions
+    // without waiting for growth.
     const candidates = own
       .filter(validSite)
       .map((at) => {
@@ -563,7 +611,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
         return { at, score: adjacent * 180 + (b.kind(at) === 'city' ? 320 : 0) + Math.min(200, b.army[at]) };
       })
       .sort((a, z) => z.score - a.score);
-    for (const { at } of candidates) {
+    if (state.site < 0) for (const { at } of candidates) {
       const local = [at],
         seen = new Set(local),
         distances = [0];
@@ -581,6 +629,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
       }
       if (funds < (b.kind(at) === 'city' ? BUILD_COST + 1 : BUILD_COST * 2 + 1)) continue;
       state.site = at;
+      state.front = false;
       break;
     }
   }
@@ -596,10 +645,11 @@ function sustainEconomy(b, m, own, ed, enemies) {
     };
     if (kind === 'city') {
       state.site = -1;
+      state.front = false;
       state.delivery = null;
     }
   } else {
-    decision = gather(b, state, at, need, 'rear-fund', canEnter, 5);
+    decision = gather(b, state, at, need, state.front ? 'front-fund' : 'rear-fund', canEnter, state.front ? 6 : 5);
   }
   if (!decision) {
     state.nextWindow = b.turn + 8;
@@ -613,6 +663,84 @@ function sustainEconomy(b, m, own, ed, enemies) {
     state.spent = 0;
   }
   return decision;
+}
+
+// When a campaign is still gathering on a large board, a safe one-step push
+// near its head is often cheaper than repeatedly moving the same rear stack
+// through a long corridor.  This is deliberately a narrow window: it only
+// fires while the campaign is stalled in muster, only uses cells at least
+// four steps from the enemy, and never consumes the campaign root or its
+// active delivery cursor.  The resulting local bridge can later fund a
+// frontline city through sustainEconomy().
+function forwardExpansion(b, m, own, ed, enemies) {
+  if (b.size < 800 || b.turn < 70 || !m.campaign || m.campaign.phase !== 'gather') return null;
+  if (m.forwardGrowthNext !== undefined && b.turn < m.forwardGrowthNext) return null;
+  const campaign = m.campaign;
+  if (!Number.isInteger(campaign.at) || !b.own(campaign.at) || b.isolated[campaign.at]) return null;
+  const targetField = Number.isInteger(campaign.crown) ? field(b, [campaign.crown]) : null;
+  const longRoute = targetField && Number.isFinite(targetField.distance[campaign.at]) && targetField.distance[campaign.at] >= 20;
+  if (!longRoute) return null;
+  const enemyLand = enemies.length;
+  if (own.length >= Math.max(55, enemyLand * 1.05)) {
+    m.forwardGrowthNext = b.turn + 12;
+    return null;
+  }
+  const frontField = field(b, [campaign.at], (at) => b.own(at) && !b.isolated[at]);
+  const reserved = new Set([campaign.at, m.delivery?.at, m.delivery?.root, m.rearEconomy?.site]);
+  const options = [];
+  for (const from of own) {
+    if (reserved.has(from) || !movable(b, from) || frontField.distance[from] > 4) continue;
+    for (const to of b.neighbors(from)) {
+      if (reserved.has(to) || b.owner(to) !== 0 || !b.passable(to) || b.kind(to) === 'swamp') continue;
+      if (ed.distance[to] < 5) continue;
+      const action = safeMove(b, from, to, 'gather');
+      if (!action || routeGuard(b, action).blocked) continue;
+      const room = b.neighbors(to).filter((next) => b.passable(next) && b.owner(next) === 0).length;
+      options.push({
+        action,
+        score: (5 - frontField.distance[from]) * 90 + Math.min(80, ed.distance[to]) * 3 + room * 12 +
+          Math.min(120, b.army[from]) * 0.15,
+      });
+    }
+  }
+  m.forwardGrowthNext = b.turn + (options.length ? 10 : 5);
+  options.sort((a, z) => z.score - a.score);
+  return options[0] ? { ...options[0], branch: 'forward-expansion' } : null;
+}
+
+// Paint a second safe lane on very large boards when the active campaign is
+// not under attack.  This keeps the nearest local sources close to the front
+// and is cheaper than asking one rear stack to cross the whole map for every
+// muster or construction project.
+function broadExpansion(b, m, own, ed, enemies) {
+  if (b.size < 800 || b.turn < 55) return null;
+  if (m.rearEconomy?.site >= 0 || (m.campaign?.phase === 'attack' && b.army[m.campaign.at] >= 18)) return null;
+  if (m.broadGrowthNext !== undefined && b.turn < m.broadGrowthNext) return null;
+  if (own.length >= Math.max(60, enemies.length * 0.98)) {
+    m.broadGrowthNext = b.turn + 14;
+    return null;
+  }
+  const homeField = Number.isInteger(m.home) ? field(b, [m.home], (at) => b.own(at) && !b.isolated[at]) : null;
+  const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root]);
+  const options = [];
+  for (const from of own) {
+    if (reserved.has(from) || !movable(b, from)) continue;
+    for (const to of b.neighbors(from)) {
+      if (reserved.has(to) || b.owner(to) !== 0 || !b.passable(to) || b.kind(to) === 'swamp') continue;
+      if (ed.distance[to] < 5) continue;
+      const action = safeMove(b, from, to, 'gather');
+      if (!action || routeGuard(b, action).blocked) continue;
+      const room = b.neighbors(to).filter((next) => b.passable(next) && b.owner(next) === 0).length;
+      const depth = homeField && Number.isFinite(homeField.distance[from]) ? homeField.distance[from] : 0;
+      options.push({
+        action,
+        score: depth * 4 + Math.min(80, ed.distance[to]) * 2 + room * 10 + Math.min(120, b.army[from]) * 0.12,
+      });
+    }
+  }
+  m.broadGrowthNext = b.turn + (options.length ? 8 : 5);
+  options.sort((a, z) => z.score - a.score);
+  return options[0] ? { action: options[0].action, branch: 'broad-expansion' } : null;
 }
 
 // Large boards need a second clock besides the active crown campaign. A long
@@ -724,7 +852,8 @@ function chooseCampaign(b,m,own) {
           (sum, cell) => sum + (b.friendly(cell) ? 0 : b.army[cell] + 1),
           0,
         );
-        const score = distance * 12 + resistance * 0.35 + b.army[crown] * 0.05;
+        const coreBias = crown === m.enemyHome ? -260 : 0;
+        const score = distance * 12 + resistance * 0.35 + b.army[crown] * 0.05 + coreBias;
         if (!next || score < next.score) next = { crown, score, distance };
       }
       if (next) {
@@ -749,8 +878,13 @@ function chooseCampaign(b,m,own) {
         const path = route(f, at);
         const resistance = path.slice(1).reduce((sum, cell) => sum + (b.friendly(cell) ? 0 : b.army[cell] + 1), 0);
         const readiness = b.army[at] - resistance;
+        // The first enemy crown is the only stable proxy for the original
+        // core. A moderate bias keeps it ahead of disposable frontier crowns
+        // when reachable, while distance and route resistance still prevent
+        // an impossible cross-map commitment.
+        const coreBias = crown === m.enemyHome ? 450 : 0;
         const score=-f.distance[at]*2.5-resistance*0.18-b.army[crown]*0.08+
-          b.army[at]*campaignStrength + Math.max(-120, Math.min(120, readiness))*campaignReadiness;
+          coreBias + b.army[at]*campaignStrength + Math.max(-120, Math.min(120, readiness))*campaignReadiness;
         const recovery = recoveryField && Number.isFinite(recoveryField.distance[at])
           ? -recoveryField.distance[at] * 4
           : 0;
@@ -794,7 +928,10 @@ function chooseCampaign(b,m,own) {
   // through the opponent's main spine is usually a trap.  Swamp-heavy maps
   // already have sparse usable lanes; adding a detour there only delays the
   // decisive push.
-  const p = walls > b.size * 0.25 ? (weightedRoute(b,c.at,c.crown) || route(f,c.at)) : route(f,c.at);
+  const longBoardRoute = b.size >= 800 && Number.isFinite(f.distance[c.at]) && f.distance[c.at] >= 20;
+  const p = (walls > b.size * 0.25 || longBoardRoute)
+    ? (weightedRoute(b,c.at,c.crown) || route(f,c.at))
+    : route(f,c.at);
   if(p.length<2)return null;
   let resistance=0;
   for(const i of p.slice(1))if(!b.friendly(i)) resistance+=b.army[i]+(b.kind(i)==='crown'?p.length:0)+1;
@@ -812,7 +949,7 @@ function chooseCampaign(b,m,own) {
   const urgencyCap = Math.max(260, ownTotal * MULTI_CROWN_CAP);
   const desired = Math.min(rawDesired, urgencyCap);
   if(c.phase==='gather'&&b.army[c.at]<desired) {
-    const delivery=gather(b,m,c.at,desired,'muster');
+    const delivery = gather(b, m, c.at, desired, 'muster');
     if(delivery)return delivery;
     // A severed spearhead can remain technically connected while no source
     // can safely reach it.  Waiting for the normal campaign timeout here
@@ -879,7 +1016,8 @@ function chooseCampaign(b,m,own) {
     return {action:a,branch:'march'};
   }
   c.phase='gather';
-  const delivery=gather(b,m,c.at,Math.max(desired,b.army[to]*1.3+30),'muster');
+  const target = Math.max(desired, b.army[to] * 1.3 + 30);
+  const delivery = gather(b, m, c.at, target, 'muster');
   if(delivery)return delivery;
   return null;
 }
@@ -945,6 +1083,18 @@ function plan(b,m) {
     if (final) return final;
     if (m.campaign?.phase === 'gather' && b.own(m.campaign.at)) return { action: null, branch: 'muster-wait' };
   }
+  const coreReady = Number.isInteger(m.enemyHome) && b.enemy(m.enemyHome) && b.kind(m.enemyHome) === 'crown' &&
+    b.turn >= 180 && ownTotal >= enemyTotal * 1.1 && enemyCrowns > 1;
+  if (coreReady) {
+    const coreCampaign = chooseCampaign(b, m, own);
+    if (coreCampaign) return coreCampaign;
+  }
+  // On a large board the original enemy crown can be more than a hundred
+  // cells away. Waiting until the six-crown economy plan is complete starts
+  // that march too late: the opponent has already filled the map with new
+  // crowns by the time the column reaches its core. Once the opening reserve
+  // is ahead by a modest margin, give the core campaign the action budget and
+  // let the economy resume from the forward bridge it creates.
   // Once the army lead is decisive, spending turns on side cuts or another
   // economy cycle only gives Anti-Human time to add crowns. Keep the prepared
   // crown campaign in control of the action budget while preserving the
@@ -954,6 +1104,10 @@ function plan(b,m) {
     const assault = chooseCampaign(b, m, own);
     if (assault) return assault;
   }
+  const forward = forwardExpansion(b, m, own, ed, enemies);
+  if (forward) return forward;
+  const broad = broadExpansion(b, m, own, ed, enemies);
+  if (broad) return broad;
   const rear = rearExpansion(b, m, own, ed, enemies);
   if (rear) return rear;
   const cutGuard = cutDefense(b, m, own);
@@ -1014,4 +1168,4 @@ function plan(b,m) {
   if(growthAction)return growthAction;
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,stranded,safeMove,gather,growth,routeGuard,constructionThreat,localGuard};
+module.exports={plan,recover,stranded,safeMove,gather,growth,routeGuard,constructionThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion};

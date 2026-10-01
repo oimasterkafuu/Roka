@@ -17,6 +17,7 @@ function createController(playerId) {
     maxNoActionStreak: 0,
     byBranch: Object.create(null),
     threatDistance: Object.create(null),
+    enemyHome: undefined,
   };
 
   function choose(raw) {
@@ -24,6 +25,17 @@ function createController(playerId) {
     if (!board.playerId || board.dead || board.ended || board.turn === memory.lastTurn) return null;
     memory.lastTurn = board.turn;
     for (let i = 0; i < board.size; i += 1) board.army[i] += growth(board, i, 1);
+    // The opponent's first crown is its strategic core.  Remember it before
+    // the frontier fills with newly built crowns; long campaigns should not
+    // spend every window on the nearest disposable outpost.
+    if (!Number.isInteger(memory.enemyHome)) {
+      for (let at = 0; at < board.size; at += 1) {
+        if (board.enemy(at) && board.kind(at) === 'crown') {
+          memory.enemyHome = at;
+          break;
+        }
+      }
+    }
     let decision = plan(board, memory);
     if (!decision.action) {
       memory.noActionTurns += 1;
@@ -74,6 +86,7 @@ function createController(playerId) {
     memory.maxNoActionStreak = 0;
     memory.byBranch = Object.create(null);
     memory.threatDistance = Object.create(null);
+    memory.enemyHome = undefined;
     memory.campaign = null;
     memory.delivery = null;
     memory.blocked = null;
@@ -82,6 +95,8 @@ function createController(playerId) {
     memory.buildPlan = null;
     memory.rearEconomy = null;
     memory.rearGrowthNext = undefined;
+    memory.forwardGrowthNext = undefined;
+    memory.broadGrowthNext = undefined;
     memory.home = undefined;
     memory.musterWaitTurns = 0;
   }
