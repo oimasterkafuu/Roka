@@ -4,7 +4,7 @@ const { connectedSet, distanceField, anchorCells, cutAnalysis } = require('./boa
 const { computePush, actionCoordinates, preview } = require('./rules.cjs');
 
 const ECON_GOAL = Number(process.env.APEX_ECON_GOAL || 6);
-const ECON_DEADLINE = Number(process.env.APEX_ECON_DEADLINE || 110);
+const ECON_DEADLINE = Number(process.env.APEX_ECON_DEADLINE || 90);
 const FORCE_MARGIN = Number.isFinite(Number(process.env.APEX_FORCE_MARGIN))
   ? Math.max(0, Math.min(1, Number(process.env.APEX_FORCE_MARGIN))) : 0.12;
 const MULTI_CROWN_CAP = Number.isFinite(Number(process.env.APEX_MULTI_CROWN_CAP))
@@ -17,14 +17,22 @@ const CAMPAIGN_REBASE_AFTER = Number.isFinite(Number(process.env.APEX_CAMPAIGN_R
   ? Math.max(6, Math.min(80, Number(process.env.APEX_CAMPAIGN_REBASE_AFTER))) : 14;
 const CAMPAIGN_BLOCK_COOLDOWN = Number.isFinite(Number(process.env.APEX_CAMPAIGN_BLOCK_COOLDOWN))
   ? Math.max(4, Math.min(60, Number(process.env.APEX_CAMPAIGN_BLOCK_COOLDOWN))) : 20;
-const CAMPAIGN_STRENGTH = Number.isFinite(Number(process.env.APEX_CAMPAIGN_STRENGTH))
-  ? Math.max(0.05, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_STRENGTH))) : 0.15;
 const CAMPAIGN_READINESS = Number.isFinite(Number(process.env.APEX_CAMPAIGN_READINESS))
-  ? Math.max(0, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_READINESS))) : 0.2;
+  ? Math.max(0, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_READINESS))) : 0;
+const CAMPAIGN_STRENGTH_DEFAULT = Number.isFinite(Number(process.env.APEX_CAMPAIGN_STRENGTH))
+  ? Math.max(0.05, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_STRENGTH))) : 0.25;
 const BUILD_CLUSTER_SIZE = Number.isFinite(Number(process.env.APEX_BUILD_CLUSTER_SIZE))
   ? Math.max(2, Math.min(8, Number(process.env.APEX_BUILD_CLUSTER_SIZE))) : 4;
 
 function field(b, starts, enter = b.passable) { return distanceField(b, starts, enter); }
+function swampRatio(b, m) {
+  if (m.swampRatio === undefined) {
+    let swampTiles = 0;
+    for (let at = 0; at < b.size; at += 1) if (b.kind(at) === 'swamp') swampTiles += 1;
+    m.swampRatio = b.size ? swampTiles / b.size : 0;
+  }
+  return m.swampRatio;
+}
 function route(f, at) { const out = [at]; while (f.parent[at] >= 0) { at = f.parent[at]; out.push(at); } return out; }
 function weightedRoute(b, start, target) {
   if (start === target) return [start];
@@ -143,7 +151,8 @@ function safeMove(b, from, to, intent = 'move') {
   const targetArmy = b.army[to];
   const enemy = !b.friendly(to);
   const finalCrown = b.enemy(to) && b.kind(to) === 'crown' && b.grid.filter(v => v === b.grid[to]).length === 1;
-  for (const mode of [2, 0, 1]) {
+  const modes = intent === 'gather' ? [0, 1, 2] : [2, 0, 1];
+  for (const mode of modes) {
     const send = computePush(b, from, to, mode);
     if (send <= 0 || (enemy && send <= targetArmy)) continue;
     if (finalCrown && send > targetArmy) return actionCoordinates(b, from, to, mode);
@@ -164,7 +173,7 @@ function gather(b, m, root, need, reason) {
   const f = field(b, [root], at => b.own(at) && !b.isolated[at]);
   if (m.delivery?.root === root && movable(b, m.delivery.at) && f.distance[m.delivery.at] > 0) {
     const at = m.delivery.at, to = f.parent[at];
-    const a = safeMove(b, at, to);
+    const a = safeMove(b, at, to, 'gather');
     if (a) { m.delivery = { root, at: to, movedTurn: b.turn }; return { action: a, branch: reason }; }
   }
   m.delivery = null;
@@ -178,7 +187,7 @@ function gather(b, m, root, need, reason) {
   }
   sources.sort((a, z) => z.score - a.score);
   for (const s of sources) {
-    const a = safeMove(b, s.at, s.p[1]);
+    const a = safeMove(b, s.at, s.p[1], 'gather');
     if (a) { m.delivery = { root, at: s.p[1], movedTurn: b.turn }; return { action: a, branch: reason }; }
   }
   return null;
@@ -426,6 +435,9 @@ function chooseCampaign(b,m,own) {
   const crowns=[];
   for(let i=0;i<b.size;i++)if(b.enemy(i)&&b.kind(i)==='crown')crowns.push(i);
   if(!crowns.length) return null;
+  const maritime = swampRatio(b, m) > 0.3 && swampRatio(b, m) < 0.55;
+  const campaignStrength = maritime ? 0.15 : CAMPAIGN_STRENGTH_DEFAULT;
+  const campaignReadiness = maritime ? 0.2 : CAMPAIGN_READINESS;
   if (m.blocked && b.turn >= m.blocked.until) m.blocked = null;
   if (m.campaign && m.delivery?.root === m.campaign.at) {
     const rallyField = field(b, [m.campaign.at], at => b.own(at) && !b.isolated[at]);
@@ -481,8 +493,42 @@ function chooseCampaign(b,m,own) {
     // back to the strongest rear stack.
     const hintAt = m.campaign && Number.isInteger(m.campaign.at) ? m.campaign.at : -1;
     const recoveryField = hintAt >= 0 ? field(b, [hintAt]) : null;
+
+    // A captured crown is a breach, not the end of the operation.  Reusing
+    // the breach as the next rally root keeps the assault moving through a
+    // compact crown cluster.  The old selector preferred a large rear stack,
+    // which made every subsequent crown start another long march and left
+    // the spearhead idle at the first captured crown.
+    if (hintAt >= 0 && b.own(hintAt) && !b.isolated[hintAt] && b.army[hintAt] > 1) {
+      let next = null;
+      for (const crown of crowns) {
+        const f = field(b, [crown]);
+        const distance = f.distance[hintAt];
+        if (!Number.isFinite(distance)) continue;
+        const path = route(f, hintAt);
+        const resistance = path.slice(1).reduce(
+          (sum, cell) => sum + (b.friendly(cell) ? 0 : b.army[cell] + 1),
+          0,
+        );
+        const score = distance * 12 + resistance * 0.35 + b.army[crown] * 0.05;
+        if (!next || score < next.score) next = { crown, score, distance };
+      }
+      if (next) {
+        m.campaign = {
+          crown: next.crown,
+          at: hintAt,
+          score: -next.score,
+          phase: 'gather',
+          started: b.turn,
+          lastPhase: 'gather',
+          lastProgress: b.turn,
+          deliveryBestDistance: Infinity,
+          bestCrownDistance: next.distance,
+        };
+      }
+    }
     let best=null;
-    for(const crown of crowns) {
+    if (!m.campaign) for(const crown of crowns) {
       if (m.blocked && m.blocked.crown === crown && b.turn < m.blocked.until) continue;
       const f=field(b,[crown]);
       for(const at of own)if(b.army[at]>2 && Number.isFinite(f.distance[at])){
@@ -490,7 +536,7 @@ function chooseCampaign(b,m,own) {
         const resistance = path.slice(1).reduce((sum, cell) => sum + (b.friendly(cell) ? 0 : b.army[cell] + 1), 0);
         const readiness = b.army[at] - resistance;
         const score=-f.distance[at]*2.5-resistance*0.18-b.army[crown]*0.08+
-          b.army[at]*CAMPAIGN_STRENGTH + Math.max(-120, Math.min(120, readiness))*CAMPAIGN_READINESS;
+          b.army[at]*campaignStrength + Math.max(-120, Math.min(120, readiness))*campaignReadiness;
         const recovery = recoveryField && Number.isFinite(recoveryField.distance[at])
           ? -recoveryField.distance[at] * 4
           : 0;
@@ -536,13 +582,38 @@ function chooseCampaign(b,m,own) {
   // stack.  The reserve is enough to absorb rounding and one counter-push,
   // while the route itself keeps growing every tick if we wait for a 35%
   // surplus.
-  const rawDesired=Math.max(120,resistance+Math.max(20,resistance*FORCE_MARGIN));
+  // Once only a few crowns remain, the operation is in the finishing phase.
+  // A fixed 120-unit muster is wasteful there: the next crown in a compact
+  // cluster may have only a few defenders, and waiting for another full army
+  // lets it keep producing units while the spearhead sits idle.
+  const minimumDesired = crowns.length <= 3 ? 18 : 120;
+  const rawDesired=Math.max(minimumDesired,resistance+Math.max(20,resistance*FORCE_MARGIN));
   const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
   const urgencyCap = Math.max(260, ownTotal * MULTI_CROWN_CAP);
   const desired = Math.min(rawDesired, urgencyCap);
   if(c.phase==='gather'&&b.army[c.at]<desired) {
     const delivery=gather(b,m,c.at,desired,'muster');
     if(delivery)return delivery;
+    // A severed spearhead can remain technically connected while no source
+    // can safely reach it.  Waiting for the normal campaign timeout here
+    // gives Anti-Human a full building cycle.  Rebase immediately to the
+    // strongest reachable stack while keeping the same crown objective.
+    if (b.army[c.at] < 18) {
+      const alternatives = own
+        .filter((at) => at !== c.at && b.army[at] > b.army[c.at] + 24 && Number.isFinite(f.distance[at]))
+        .sort((a, z) => (b.army[z] - f.distance[z] * 2) - (b.army[a] - f.distance[a] * 2));
+      if (alternatives.length) {
+        c.at = alternatives[0];
+        c.phase = 'gather';
+        c.started = b.turn;
+        c.lastAt = c.at;
+        c.lastProgress = b.turn;
+        c.deliveryBestDistance = Infinity;
+        c.bestCrownDistance = f.distance[c.at];
+        m.delivery = null;
+        return chooseCampaign(b, m, own);
+      }
+    }
   }
   c.phase='attack';
   const to=p[1];
@@ -630,7 +701,8 @@ function plan(b,m) {
   const campaignBusy = Boolean(m.campaign && (!m.blocked || b.turn >= m.blocked.until));
   if(strike && !campaignBusy && (b.turn < 90 || strike.score > 100))return strike;
   if(tactic)return tactic;
-  if(b.turn<50 || (fogged && explore)) return opening(b,m,own,ed)||{action:null,branch:'wait'};
+  const openingTurns = swampRatio(b, m) > 0.3 && swampRatio(b, m) < 0.55 ? 50 : 40;
+  if(b.turn<openingTurns || (fogged && explore)) return opening(b,m,own,ed)||{action:null,branch:'wait'};
   // A failed core route opens a short recovery window.  Spend it on a
   // winnable local border capture instead of immediately rebuilding the same
   // long muster; this changes the geometry and the economy before retrying.
