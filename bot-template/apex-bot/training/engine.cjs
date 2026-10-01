@@ -641,6 +641,43 @@ function replayMatch(replay) {
   };
 }
 
+function structureTelemetry(engine, player) {
+  const owners = engine.owner || [];
+  const grid = engine.gridType || [];
+  let crowns = 0;
+  let cities = 0;
+  let army = 0;
+  let land = 0;
+  for (let x = 0; x < owners.length; x += 1) {
+    for (let y = 0; y < (owners[x]?.length || 0); y += 1) {
+      if (owners[x][y] !== player + 1) continue;
+      const tile = grid[x]?.[y];
+      const troops = Number(engine.armyCnt?.[x]?.[y]) || 0;
+      army += troops;
+      land += 1;
+      if (tile === -2) crowns += 1;
+      else if (tile === -1) cities += 1;
+    }
+  }
+  return { crowns, cities, army, land };
+}
+
+function recordMatchTelemetry(telemetry, engine, turn) {
+  for (let player = 0; player < 2; player += 1) {
+    const sample = structureTelemetry(engine, player);
+    telemetry.maxCrowns[player] = Math.max(telemetry.maxCrowns[player], sample.crowns);
+    telemetry.maxCities[player] = Math.max(telemetry.maxCities[player], sample.cities);
+    if (turn >= telemetry.nextCheckpoint[player]) {
+      for (const checkpoint of telemetry.checkpoints) {
+        if (checkpoint > turn || telemetry.byTurn[player][checkpoint]) continue;
+        telemetry.byTurn[player][checkpoint] = sample;
+      }
+      telemetry.nextCheckpoint[player] =
+        telemetry.checkpoints.find((checkpoint) => checkpoint > turn) ?? Infinity;
+    }
+  }
+}
+
 function runMatch({
   mapMode = 'random',
   seed = 'default',
@@ -655,6 +692,15 @@ function runMatch({
   if (!Number.isInteger(maxTurns) || maxTurns < 0) throw new Error('maxTurns must be a non-negative integer');
   const started = performance.now();
   const arena = createArena({ mapMode, seed, mapSize, fog, adapters, traceLimit });
+  const checkpoints = [120, 300, 600, 900, 1200];
+  const telemetry = {
+    checkpoints,
+    maxCrowns: [0, 0],
+    maxCities: [0, 0],
+    nextCheckpoint: [checkpoints[0], checkpoints[0]],
+    byTurn: [Object.create(null), Object.create(null)],
+  };
+  recordMatchTelemetry(telemetry, arena.engine, arena.engine.turn);
   const ownPolicies = Array.isArray(policies) ? policies : [null, null];
   while (!arena.ended && arena.engine.turn < maxTurns) {
     const actions = [0, 1].map((p) => {
@@ -674,6 +720,7 @@ function runMatch({
       return action;
     });
     arena.tick(actions);
+    recordMatchTelemetry(telemetry, arena.engine, arena.engine.turn);
   }
   arena.drainAdapters();
   const leaderboard = arena.engine.buildLeaderboard();
@@ -691,6 +738,12 @@ function runMatch({
     replay: arena.replay,
     elapsedMs: performance.now() - started,
     trace: arena.trace,
+    telemetry: {
+      checkpoints,
+      players: telemetry.byTurn,
+      maxCrowns: telemetry.maxCrowns,
+      maxCities: telemetry.maxCities,
+    },
   };
 }
 

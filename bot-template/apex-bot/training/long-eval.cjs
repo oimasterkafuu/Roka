@@ -103,6 +103,31 @@ function makeJobs(options) {
   }
   return jobs;
 }
+function developmentSummary(rows) {
+  const checkpoints = [120, 300, 600, 900, 1200];
+  const at = {};
+  for (const checkpoint of checkpoints) {
+    const samples = rows.map((row) => row.telemetry?.own?.[checkpoint]).filter(Boolean);
+    if (!samples.length) continue;
+    at[checkpoint] = {
+      samples: samples.length,
+      coverage: samples.length / rows.length,
+      meanCrowns: samples.reduce((sum, sample) => sum + sample.crowns, 0) / samples.length,
+      meanCities: samples.reduce((sum, sample) => sum + sample.cities, 0) / samples.length,
+      meanArmy: samples.reduce((sum, sample) => sum + sample.army, 0) / samples.length,
+      alive: samples.filter((sample) => sample.crowns > 0).length,
+      aliveRate: samples.filter((sample) => sample.crowns > 0).length / rows.length,
+    };
+  }
+  const maxCrowns = rows.map((row) => row.telemetry?.maxCrowns).filter(Number.isFinite);
+  const maxCities = rows.map((row) => row.telemetry?.maxCities).filter(Number.isFinite);
+  return {
+    checkpoints: at,
+    meanMaxCrowns: maxCrowns.length ? maxCrowns.reduce((a, b) => a + b, 0) / maxCrowns.length : null,
+    meanMaxCities: maxCities.length ? maxCities.reduce((a, b) => a + b, 0) / maxCities.length : null,
+  };
+}
+
 function aggregate(rows) {
   const completed = rows.filter((row) => !row.error);
   const wins = completed.filter((row) => row.ownWon);
@@ -120,6 +145,7 @@ function aggregate(rows) {
     within120: wins.filter((row) => row.turns <= 120).length,
     within600: wins.filter((row) => row.turns <= 600).length,
     elapsedMs: rows.reduce((total, row) => total + (row.elapsedMs || 0), 0),
+    development: developmentSummary(rows),
   };
 }
 function group(rows, key) {
