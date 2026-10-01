@@ -957,11 +957,7 @@ class LobbyService {
     players: LobbyPlayer[],
     conf: LobbyConfig,
   ): Pick<LobbyConfig, 'width_ratio' | 'height_ratio'> {
-    const baseRatio =
-      conf.map_size === 'large'
-        ? resolveMapSizeRatioByPlayers(MAX_TEAMS)
-        : this.getMapSizeRatioByPlayers(players);
-    const ratio = baseRatio * (conf.map_size === 'large' ? 2 : 1);
+    const ratio = this.getMapSizeRatioByPlayers(players) * (conf.map_size === 'large' ? 2 : 1);
     return {
       width_ratio: ratio,
       height_ratio: ratio,
