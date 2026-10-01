@@ -316,8 +316,8 @@ async function scenarioDuplicateName(baseUrl, dupToken, tokenB) {
 }
 
 async function scenarioMapSize(baseUrl, tokenA, tokenB) {
-  log('场景 3：大地图选项使用 MAX_TEAMS 基础比例并放大');
-  // 同人数（2 人）、同种子开两局：标准按人数缩放，大地图按 MAX_TEAMS 基础比例再乘 2。
+  log('场景 3：大地图在相同人数的标准地图基础上放大');
+  // 同人数（2 人）、同种子开两局：大地图按当前人数的标准地图比例再乘 2。
   const normalA = createRoomClient(baseUrl, {
     cookie: tokenA,
     room: ROOM_SIZE_NORMAL,
@@ -364,10 +364,17 @@ async function scenarioMapSize(baseUrl, tokenA, tokenB) {
   log(
     `标准图 ${normalInit.n}x${normalInit.m}=${normalArea}，大地图 ${largeInit.n}x${largeInit.m}=${largeArea}，面积比 ${ratio.toFixed(2)}`,
   );
-  if (!(ratio >= 35 && ratio <= 70)) {
-    throw new Error(`大地图面积比 ${ratio.toFixed(2)} 不在预期范围 [35, 70] 内`);
+  const heightRatio = largeInit.n / normalInit.n;
+  const widthRatio = largeInit.m / normalInit.m;
+  if (!(heightRatio >= 1.8 && heightRatio <= 2.2 && widthRatio >= 1.8 && widthRatio <= 2.2)) {
+    throw new Error(
+      `大地图长宽比 ${heightRatio.toFixed(2)}x${widthRatio.toFixed(2)} 不在预期范围 [1.8, 2.2] 内`,
+    );
   }
-  log('场景 3 通过：大地图使用最大基础比例并放大 2 倍');
+  if (!(ratio >= 3.2 && ratio <= 4.8)) {
+    throw new Error(`大地图面积比 ${ratio.toFixed(2)} 不在预期范围 [3.2, 4.8] 内`);
+  }
+  log('场景 3 通过：大地图按当前人数的标准尺寸放大约 2 倍');
   for (const client of [normalA, normalB, largeA, largeB]) {
     client.socket.disconnect();
   }
