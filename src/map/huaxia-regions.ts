@@ -27,8 +27,8 @@ const regions: readonly { id: MapRegion; name: string; bounds: HuaxiaRegionConfi
   { id: 'song', name: '宋', bounds: { west: 97, east: 125, south: 18, north: 43 } },
   { id: 'yuan', name: '元', bounds: { west: 70, east: 142, south: 8, north: 59 } },
   { id: 'ming', name: '明', bounds: { west: 90, east: 135, south: 17, north: 52 } },
-  { id: 'qing', name: '清', bounds: { west: 70, east: 145, south: 17, north: 57 } },
-  { id: 'china', name: '中国', bounds: { west: 97, east: 123, south: 20, north: 42 } },
+  { id: 'liao', name: '辽', bounds: { west: 90, east: 125, south: 35, north: 55 } },
+  { id: 'china', name: '中国', bounds: { west: 73, east: 135, south: 18, north: 54 } },
   { id: 'hong-kong', name: '香港', bounds: { west: 113.7, east: 114.5, south: 22.1, north: 22.6 } },
   { id: 'taiwan', name: '台湾省', bounds: { west: 119, east: 122.2, south: 21.5, north: 25.5 } },
 ];
@@ -50,6 +50,8 @@ export const isMapRegion = (value: unknown): value is MapRegion => REGION_BY_ID.
 const LEGACY_REGION_ALIASES: Readonly<Record<string, MapRegion>> = {
   'three-kingdoms': 'han',
   'northern-dynasties': 'han',
+  // Replay compatibility: Qing was removed because it substantially overlapped China.
+  qing: 'china',
 };
 
 export const normalizeMapRegion = (value: unknown): MapRegion => {

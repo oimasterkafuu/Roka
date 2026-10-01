@@ -19,10 +19,25 @@ const maps = new Map();
 assert.equal(HUAXIA_REGIONS.length, 10, 'exactly ten Huaxia regions are exposed');
 assert.deepEqual(
   HUAXIA_REGIONS.map((region) => region.id),
-  ['qin', 'han', 'tang', 'song', 'yuan', 'ming', 'qing', 'china', 'hong-kong', 'taiwan'],
+  ['qin', 'han', 'tang', 'song', 'yuan', 'ming', 'liao', 'china', 'hong-kong', 'taiwan'],
 );
 assert.equal(normalizeMapRegion('three-kingdoms'), 'han');
 assert.equal(normalizeMapRegion('northern-dynasties'), 'han');
+assert.equal(normalizeMapRegion('qing'), 'china');
+const china = HUAXIA_REGIONS.find((region) => region.id === 'china');
+assert.deepEqual(china?.bounds, { west: 73, east: 135, south: 18, north: 54 });
+for (const [name, lon, lat] of [
+  ['新疆范围', 87, 43],
+  ['西藏范围', 91, 30],
+  ['北京范围', 116.4, 39.9],
+  ['广东范围', 113.3, 23.1],
+  ['台湾附近', 121, 23.5],
+]) {
+  assert.ok(
+    lon >= china.bounds.west && lon <= china.bounds.east && lat >= china.bounds.south && lat <= china.bounds.north,
+    `China viewport covers ${name}`,
+  );
+}
 const first = generateHuaxiaMap(new SeededRandom('map-test:first'), {
   ...baseConfig,
   mapRegion: 'han',
