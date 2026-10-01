@@ -174,9 +174,13 @@ function routeGuard(b, action) {
     // the "cut" would make every deep move look unsafe and cannot be repaired
     // by the build action available here.
     if (b.kind(at) !== 'plain') continue;
-    if (!cuts.separates(at, previewResult.to) || cuts.mass[at] < 30) continue;
+    if (!cuts.separates(at, previewResult.to) || cuts.mass[at] < 1) continue;
     if (pressure(after, at) <= after.army[at] + 1) continue;
-    if (cuts.mass[at] < Math.max(30, previewResult.send * 0.5)) continue;
+    // The pushed column can be much larger than the side branch it leaves
+    // behind. Comparing detached mass with half of `send` misses exactly that
+    // case: the bridge still strands real territory even though the moving
+    // army is enormous. Any non-empty detached branch is relevant here; the
+    // pressure and post-build reserve checks below keep trivial cuts cheap.
     blocked = true;
     if (cut < 0 || cuts.mass[at] > cuts.mass[cut]) cut = at;
     // Building costs 50 immediately. Only create a new anchor when its
@@ -193,6 +197,7 @@ function routeGuard(b, action) {
   if (blocked) return { blocked: true, anchor, cut };
   return { blocked: false, anchor: -1, cut: -1 };
 }
+
 function safeMove(b, from, to, intent = 'move') {
   if (!movable(b, from) || !b.passable(to)) return null;
   const targetArmy = b.army[to];
