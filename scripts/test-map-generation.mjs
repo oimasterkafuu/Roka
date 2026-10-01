@@ -3,7 +3,7 @@ import { SeededRandom, checkConnection } from '../src/map/map-core.ts';
 import { selectRandomGenerals } from '../src/game-engine/general-selection.ts';
 import { HUAXIA_RIDGES, HUAXIA_PASSES } from '../src/map/huaxia-terrain-data.ts';
 import { generateHuaxiaMap, isLand } from '../src/map/huaxia-map-generator.ts';
-import { HUAXIA_REGIONS, normalizeMapRegion } from '../src/map/huaxia-regions.ts';
+import { DEFAULT_MAP_REGION, HUAXIA_REGIONS, normalizeMapRegion } from '../src/map/huaxia-regions.ts';
 import { resolveMapSizeRatioByPlayers } from '../src/map/map-size.ts';
 
 const baseConfig = {
@@ -49,8 +49,9 @@ const maps = new Map();
 assert.equal(HUAXIA_REGIONS.length, 9, 'exactly nine Huaxia regions are exposed');
 assert.deepEqual(
   HUAXIA_REGIONS.map((region) => region.id),
-  ['qin', 'han', 'tang', 'song', 'yuan', 'ming', 'liao', 'china', 'taiwan'],
+  ['qin', 'han', 'tang', 'liao', 'song', 'yuan', 'ming', 'china', 'taiwan'],
 );
+assert.equal(DEFAULT_MAP_REGION, 'china');
 assert.equal(normalizeMapRegion('three-kingdoms'), 'han');
 assert.equal(normalizeMapRegion('northern-dynasties'), 'han');
 assert.equal(normalizeMapRegion('qing'), 'china');

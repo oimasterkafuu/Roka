@@ -808,7 +808,7 @@ socket.on('room_update', function (data) {
   setAllowTeamModeByCode(Boolean(data.allow_team));
   setFogModeByCode(Boolean(data.fog));
   setMapModeByCode(data.map_mode || 'random');
-  setMapRegionByCode(data.map_region || 'han');
+  setMapRegionByCode(data.map_region || 'china');
   setMapSizeByCode(data.map_size || 'normal');
   refreshMapInputHint();
   $('#map-token').val(normalizeMapTokenInput(data.map_token || ''));
