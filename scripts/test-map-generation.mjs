@@ -195,7 +195,7 @@ for (const region of HUAXIA_REGIONS) {
     const standardRatio = resolveMapSizeRatioByPlayers(8);
     const taiwanRatio = resolveMapSizeRatioByPlayersAndRegion(8, region.id);
     assert.ok(taiwanRatio > standardRatio, 'taiwan map ratio is larger than the standard ratio');
-    assert.ok(Math.abs(taiwanRatio / standardRatio - 1.1) < 1e-12, 'taiwan map ratio increases by 10%');
+    assert.ok(Math.abs(taiwanRatio / standardRatio - 1.5) < 1e-12, 'taiwan map ratio increases by 50%');
   }
 
   for (let players = 2; players <= 16; players += 1) {

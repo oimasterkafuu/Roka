@@ -144,7 +144,7 @@ _一句话：主城/地块/爆发期兵力增长规则。_
 **src/map/map-core.ts** — 公共底座：`Tile` 类型（-2 出生点/-1/0 空/1 山/2 沼泽）、`SeededRandom`（SHA-256(token) 驱动 mulberry32，同 token 同图）、`computeBaseMapDimensions`（随机图的 45×45 按 ratio 缩放取奇）与 `computeFixedMapDimensions`（华夏固定尺寸）、`checkConnection`（并查集，主连通分量 >90%）、`markLargestComponent`、地形系数派生。
 _一句话：地图生成器公共底座（Tile 类型、种子 RNG、连通性）。_
 
-**src/map/map-size.ts** — `resolveMapSizeRatioByPlayers`：人数 → 地图宽高比例（二次函数，下限 0.34）。
+**src/map/map-size.ts** — `resolveMapSizeRatioByPlayers`：人数 → 地图宽高比例（二次函数，下限 0.34）；`resolveMapSizeRatioByPlayersAndRegion` 为台湾省应用 1.5 倍边长倍率。
 _一句话：人数 → 地图宽高比例的纯函数。_
 
 **src/map/random-map-generator.ts** — 默认随机图：按概率撒山/沼泽（上限 0.24/0.16），反复重试直到连通；同时定义所有生成器共用的 `MapGenerationConfig`/`GeneratedMap` 类型。不预置中立城市（城市只由玩家建造）。
