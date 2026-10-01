@@ -218,10 +218,94 @@ function safeMove(b, from, to, intent = 'move') {
   return null;
 }
 
-// Single objective supply tree. A funded branch is completed before another
-// branch is opened; no node is moved away from the root of the active project.
+function supplyReservations(m) {
+  const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root]);
+  for (const [from, to] of m.delivery?.edges || []) { reserved.add(from); reserved.add(to); }
+  return reserved;
+}
+
+function advanceSupplyTree(b, m, reason, canEnter) {
+  const state = m.delivery;
+  // Invalidate the whole route when ownership or a safety constraint changes.
+  // Never continue an obsolete tree through an enemy-captured junction.
+  if (state.edges.some(([from, to]) => !canEnter(from) || !canEnter(to))) {
+    m.delivery = null;
+    return null;
+  }
+  while (state.edges.length) {
+    if (state.pending) {
+      const [previousFrom] = state.edges[0];
+      if (b.turn <= state.movedTurn) return null;
+      if (b.army[previousFrom] >= state.pending.army) { m.delivery = null; return null; }
+      state.edges.shift();
+      state.pending = null;
+      continue;
+    }
+    const [from, to] = state.edges[0];
+    if (!movable(b, from)) { state.edges.shift(); continue; }
+    const action = safeMove(b, from, to, 'gather');
+    if (!action || routeGuard(b, action).blocked) { m.delivery = null; return null; }
+    state.pending = { army: b.army[from] };
+    state.at = to;
+    state.movedTurn = b.turn;
+    return { action, branch: `${reason}-tree` };
+  }
+  m.delivery = null;
+  return null;
+}
+
+// Merge affordable tributaries BEFORE moving their shared trunk. Unlike
+// round-robin convoys this traverses each shared edge once. The selected tree
+// is frozen until delivery or invalidation, so growth cannot keep adding new
+// sources and postpone the original delivery indefinitely.
+function treeGather(b, m, root, need, reason, canEnter, f, sources) {
+  const trunk = sources[0].p;
+  const nodes = new Set(trunk);
+  const spare = (at) => at === root ? 0 : Math.max(0, b.army[at] - Math.max(1, pressure(b, at)));
+  let funds = trunk.reduce((sum, at) => sum + spare(at), 0);
+  const deficit = need - b.army[root];
+  let branches = 0;
+  // A sufficient direct convoy is already cheaper; do not delay it merely
+  // to exercise the tree mechanism.
+  while (funds < deficit && branches < 4) {
+    let best = null;
+    for (const source of sources) {
+      if (nodes.has(source.at)) continue;
+      const extra = [];
+      let junction = source.at;
+      while (!nodes.has(junction) && junction >= 0) {
+        extra.push(junction); junction = f.parent[junction];
+      }
+      if (junction < 0 || junction === root || extra.length > 4) continue;
+      const mass = extra.reduce((sum, at) => sum + spare(at), 0);
+      if (mass < 8 || nodes.size + extra.length > 160) continue;
+      const score = Math.min(deficit - funds, mass) / extra.length;
+      if (!best || score > best.score) best = { extra, mass, score };
+    }
+    if (!best) break;
+    best.extra.forEach((at) => nodes.add(at));
+    funds += best.mass;
+    branches += 1;
+  }
+  if (!branches) return null;
+  const edges = [...nodes].filter((at) => at !== root)
+    // Drain leaves first.  If a shared trunk is moved toward the root before
+    // its tributary arrives, that trunk edge is already consumed and the
+    // branch's army stops one junction short of the objective.
+    .sort((a, z) => f.distance[z] - f.distance[a] || a - z)
+    .map((at) => [at, f.parent[at]]);
+  m.delivery = { mode: 'tree', root, at: edges[0][0], edges, branches, movedTurn: -1 };
+  return advanceSupplyTree(b, m, reason, canEnter);
+}
+
+// One objective owns the delivery; short deliveries finish before switching.
 function gather(b, m, root, need, reason, canEnter = at => b.own(at) && !b.isolated[at], maxDistance = Infinity) {
   if (!b.own(root) || b.isolated[root] || b.army[root] >= need) { m.delivery = null; return null; }
+  const treeActive = m.delivery?.mode === 'tree' && m.delivery.root === root;
+  if (treeActive) {
+    const decision = advanceSupplyTree(b, m, reason, canEnter);
+    if (decision) return decision;
+  }
   const f = field(b, [root], canEnter);
   if (m.delivery?.root === root && movable(b, m.delivery.at) && f.distance[m.delivery.at] > 0 && f.distance[m.delivery.at] <= maxDistance) {
     const at = m.delivery.at, to = f.parent[at];
@@ -238,6 +322,10 @@ function gather(b, m, root, need, reason, canEnter = at => b.own(at) && !b.isola
     sources.push({ at, p, score: Math.min(need - b.army[root] + 50, mass) / (p.length - 1) });
   }
   sources.sort((a, z) => z.score - a.score);
+  if (b.size >= 800 && reason === 'muster' && need - b.army[root] >= 80 && sources[0]?.p.length >= 9) {
+    const decision = treeGather(b, m, root, need, reason, canEnter, f, sources);
+    if (decision) return decision;
+  }
   for (const s of sources) {
     const a = safeMove(b, s.at, s.p[1], 'gather');
     if (a) { m.delivery = { root, at: s.p[1], movedTurn: b.turn }; return { action: a, branch: reason }; }
@@ -557,7 +645,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
   const goal = Math.min(infrastructureCap, Math.max(ECON_GOAL, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
   const state = m.rearEconomy || (m.rearEconomy = { site: -1, delivery: null, spent: 0, nextWindow: 0 });
   if (b.turn < state.nextWindow) return null;
-  const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root]);
+  const reserved = supplyReservations(m);
   const canEnter = (at) => b.own(at) && !b.isolated[at] && ed.distance[at] >= 4 && !reserved.has(at);
   const validSite = (at) => canEnter(at) && ed.distance[at] >= (state.front ? 4 : 6) && ['plain', 'city'].includes(b.kind(at));
   if (!validSite(state.site)) {
@@ -686,7 +774,8 @@ function forwardExpansion(b, m, own, ed, enemies) {
     return null;
   }
   const frontField = field(b, [campaign.at], (at) => b.own(at) && !b.isolated[at]);
-  const reserved = new Set([campaign.at, m.delivery?.at, m.delivery?.root, m.rearEconomy?.site]);
+  const reserved = supplyReservations(m);
+  reserved.add(m.rearEconomy?.site);
   const options = [];
   for (const from of own) {
     if (reserved.has(from) || !movable(b, from) || frontField.distance[from] > 4) continue;
@@ -721,7 +810,7 @@ function broadExpansion(b, m, own, ed, enemies) {
     return null;
   }
   const homeField = Number.isInteger(m.home) ? field(b, [m.home], (at) => b.own(at) && !b.isolated[at]) : null;
-  const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root]);
+  const reserved = supplyReservations(m);
   const options = [];
   for (const from of own) {
     if (reserved.has(from) || !movable(b, from)) continue;
@@ -763,7 +852,8 @@ function rearExpansion(b, m, own, ed, enemies) {
     m.rearGrowthNext = b.turn + 4;
     return null;
   }
-  const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root, m.rearEconomy?.site]);
+  const reserved = supplyReservations(m);
+  reserved.add(m.rearEconomy?.site);
   const rear = own.filter(
     (at) => !reserved.has(at) && ed.distance[at] >= 5 && b.kind(at) !== 'swamp',
   );
@@ -782,6 +872,7 @@ function chooseCampaign(b,m,own) {
   const campaignReadiness = maritime ? 0.2 : CAMPAIGN_READINESS;
   if (m.blocked && b.turn >= m.blocked.until) m.blocked = null;
   if (m.campaign && m.delivery?.root === m.campaign.at) {
+    if (m.delivery.mode === 'tree' && m.delivery.movedTurn === b.turn - 1) m.campaign.lastProgress = b.turn;
     const rallyField = field(b, [m.campaign.at], at => b.own(at) && !b.isolated[at]);
     const rallyDistance = rallyField.distance[m.delivery.at];
     // Count only monotonic movement toward the active root as progress.  A
@@ -1168,4 +1259,4 @@ function plan(b,m) {
   if(growthAction)return growthAction;
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,stranded,safeMove,gather,growth,routeGuard,constructionThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion};
+module.exports={plan,recover,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion};
