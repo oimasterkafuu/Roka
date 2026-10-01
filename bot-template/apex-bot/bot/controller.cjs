@@ -56,6 +56,7 @@ function createController(playerId) {
     memory.site = undefined;
     memory.buildPlan = null;
     memory.rearEconomy = null;
+    memory.rearGrowthNext = undefined;
     memory.home = undefined;
   }
 
