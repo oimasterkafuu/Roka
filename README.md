@@ -16,11 +16,13 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准，未结束局计平局）、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）、`pnpm run test:presence`（统一在线状态测试：presence-service 假时钟单元测试 + 真实服务器集成测试，覆盖活动刷新/过期判离线/去重计数/bot 不计入）、`pnpm run test:map-generation`（华夏八地区确定性、联通性和基本可玩性测试）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准，未结束局计平局）、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）、`pnpm run test:presence`（统一在线状态测试：presence-service 假时钟单元测试 + 真实服务器集成测试，覆盖活动刷新/过期判离线/去重计数/bot 不计入）、`pnpm run test:map-generation`（华夏八地区确定性、联通性和基本可玩性测试）、`pnpm run test:huaxia-season`（上海时区年度窗口边界测试）。
 
 其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准，未结束局计平局）、`pnpm run test:bot`（bot 集成测试：用临时数据目录启动服务器，接入两个 `bot-template/random-patch-bot` 自动开局对局；dist 缺失时会自动构建）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试：超管 API 启动 simple-strategy-bot 与 random-patch-bot 对局，并启动 anti-human-bot 校验模板枚举/自动准备/房间唯一/组队开关）、`pnpm run test:lobby-guards`（开局/换绑守卫回归：全员同队拒绝开局、同名人类不抢 bot 席位、断线重连恢复、大地图面积、只剩 bot 时房间设置重置且对局中不触发）、`pnpm run test:deploy-update`（部署更新 UX 回归：webhook 排队广播、排队期禁开局、宽限到期按当前名次清算、dry-run 恢复）。
 
 启动后访问 `http://localhost:23333/` 并注册账号。
+
+华夏系列地图与地图示例仅在每年中国时区 10 月 1 日至 10 月 7 日（含全天）开放，10 月 8 日自动关闭，按 `Asia/Shanghai` 判断且不写死年份。回放重建不受年度窗口影响。
 
 ## 游戏规则
 

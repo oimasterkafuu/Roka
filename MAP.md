@@ -20,7 +20,7 @@ src/server.ts ── Fastify 路由 + socket.io 事件（唯一入口）
    ▼
 src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降、回放记录）
    ├── src/game-engine/*              常量/主城选择/排行榜/编码/回放工具/增兵
-   └── src/map/*                      五种 map_mode 地图生成器与华夏地区配置（纯函数）
+   └── src/map/*                      五种 map_mode 地图生成器、华夏地区配置与年度开放窗口（纯函数）
    ▼
 持久化（data/，均被 gitignore）：announcement-store / auth-store / feed-store / replay-store；server-bots.json（托管 bot 重启恢复状态：{username, room, template, allowTeam} 列表）
 ```
@@ -168,6 +168,9 @@ _一句话：真实公开陆地底图 + 明确标注的游戏化地形层。_
 
 **src/map/huaxia-regions.ts** — 华夏九地区（秦/汉/唐/宋/元/明/辽/中国/台湾省）的独立经纬度矩形、球面矩形面积和稳定 ID；矩形面积是视口面积，历史疆域面积因没有可靠边界矢量而明确为未知；旧 `qing` / `hong-kong` ID 归一为中国。
 _一句话：按代表时期估计的独立地理视口配置。_
+
+**src/map/huaxia-season.ts** — `isHuaxiaSeasonActive(date)` 以 `Asia/Shanghai` 判断每年 10 月 1 日至 10 月 7 日（含全天）的年度开放窗口；纯函数可传固定 Date 测试。
+_一句话：华夏地图年度国庆开放窗口。_
 
 **src/map/huaxia-map-generator.ts** — 按地区矩形投影真实陆地多边形，矩形内非历史疆域陆地也正常渲染为陆地，海陆比例随视口变化；固定山脉层并标记最大连通分量，不读取地图 RNG，种子只在后续出生点选择中生效。
 _一句话：地理矩形视口内的真实海陆栅格化生成。_
@@ -321,7 +324,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 ## 配置 / CI / 脚本 / bot 模板
 
-- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot、test:lobby-guards、test:deploy-update、test:fog、test:presence、test:strategy、test:leaderboard、test:storage、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot、test:lobby-guards、test:deploy-update、test:fog、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 
 - **tsconfig.json** — src→dist，CommonJS+ES2022+sourceMap；**刻意关闭严格模式**，改严格度会影响整个 src/ 编译面。
 - **eslint.config.cjs** — flat config，只查 `src/**/*.ts`，推荐规则集 + 关闭 `no-explicit-any`；不查 static/。
@@ -334,6 +337,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **scripts/test-bot.mjs** — `pnpm run test:bot`：临时数据目录起服务 + 两个 bot 自动对局，双方收到 `init_map` 且累计 ≥10 回合即通过。
 - **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，另启动 anti-human-bot 校验模板自动枚举（simple-strategy-bot/anti-human-bot 入选、random-patch-bot 排除）、自动准备进入对局、同房间第二个 bot 409、不可托管模板 400、allowTeam=true 房间组队默认关闭且房主可开启、开启后 bot 自主避让到固定的 2 队、人类换到 bot 队伍不被服务端修正且 bot 再次主动避让；保留 403 权限闸、房长保留（host 落在第三方 bot）、allowTeam=false 托管 bot 房间禁止组队（bot 进房强制关闭已开组队 + 房主开启请求被拒绝）、`init_map` + ≥5 条实际 attack、杀服重启后按状态文件（含 template/allowTeam）自动恢复原配置、停止 API 清空列表与状态文件。
 - **scripts/test-lobby-guards.mjs** — `pnpm run test:lobby-guards`：开局/换绑守卫回归——组队模式全员同队拒绝开局（换队后可开）、对局中同名人类连接不得接管 bot 席位（以观战进房且 bot 持续收 update）、bot 与人类各自断线重连仍可恢复席位、大地图面积约为标准 4 倍、只剩 bot 时房间设置重置为默认值（观战人类仍算占用不触发；对局进行中不触发、对局结束后才重置）。
+- **scripts/test-huaxia-season.mjs** — `pnpm run test:huaxia-season`：用固定 UTC 时间验证 `Asia/Shanghai` 下 9/30 关闭、10/1 开启、10/7 开启、10/8 关闭及次年 10/1 开启。
 - **scripts/test-presence.mjs** — `pnpm run test:presence`：统一在线状态测试。单元部分用假时钟驱动 dist 的 presence-service（活动刷新、过期判离线、去重计数、离线↔在线转换、节流/兜底落盘、「刚刚在线」、seed 恢复）；集成部分临时数据目录起 dist 服务（注入 `ROKA_BOT_TOKENS`），验证任意 API 请求刷新「最后在线」、`/api/online` 自身不计活动、多连接按用户去重、bot 连接不计入在线、重启后从落盘恢复。不跑对局，硬上限 60 秒。
 
 - **scripts/test-deploy-update.mjs** — `pnpm run test:deploy-update`：部署更新 UX 回归——`ROKA_DEPLOY_GRACE_MS=4000` + `ROKA_DEPLOY_DRY_RUN=1` 起临时服务：对局中触发 webhook 进入排队（queued:true + `deploy_queued` 广播 + `room_update.update_queued` + 宽限提示）、排队期就绪被拒不开局、宽限到期按当前名次清算（game_end 帧 + 回放 id + rating 生效）、dry-run 结束后解除排队可重新开局。

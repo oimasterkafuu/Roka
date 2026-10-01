@@ -299,8 +299,12 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td>
               可选字段 patch：<code>speed</code>（0.5~4）、<code>allow_team</code>（bool）、
               <code>fog</code
-              >（bool，迷雾远征）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>）、<code>map_region</code>（华夏模式地区：<code>qin|han|tang|song|yuan|ming|liao|china|taiwan</code>；旧值 <code>qing</code> / <code>hong-kong</code> 归一为 <code>china</code>，其他未知值回退为
-              <code>han</code>，缺省按 <code>han</code>）、<code>map_token</code>（最长 32）。
+              >（bool，迷雾远征）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>）、<code>map_region</code>（华夏模式地区：<code>qin|han|tang|song|yuan|ming|liao|china|taiwan</code>；旧值
+              <code>qing</code> / <code>hong-kong</code> 归一为 <code>china</code>，其他未知值回退为
+              <code>han</code>，缺省按 <code>han</code>）、<code>map_token</code>（最长
+              32）。华夏系列仅在每年中国时区 10 月 1 日至 10 月 7
+              日（含全天）开放；非活动期设置请求会被拒绝，过期房间配置在
+              <code>room_update</code> 与开局时回退为 <code>random</code>。回放重建不受当前日期影响。
               仅房主可改。房间内存在不允许组队的服务端托管策略 Bot 时不允许组队：
               <code>allow_team</code> 开启请求会被拒绝（房间消息提示），且托管 Bot
               进房时会强制关闭已开启的组队模式；允许组队的托管 Bot 则由房主自由开关组队。
