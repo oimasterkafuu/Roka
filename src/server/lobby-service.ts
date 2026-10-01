@@ -4,7 +4,7 @@ import { UserStore } from '../auth-store';
 import { GameEngine } from '../game-engine';
 import { DISCONNECT_GRACE_MS } from '../game-engine/constants';
 import { isHuaxiaSeasonActive } from '../map/huaxia-season';
-import { resolveMapSizeRatioByPlayers } from '../map/map-size';
+import { resolveMapSizeRatioByPlayersAndRegion } from '../map/map-size';
 import { DEFAULT_MAP_REGION, getHuaxiaRegion, normalizeMapRegion } from '../map/huaxia-regions';
 import { ReplayStore } from '../replay-store';
 import {
@@ -945,19 +945,20 @@ class LobbyService {
     return players.filter((player) => player.team !== 0).length;
   }
 
-  private getMapSizeRatioByPlayers(players: LobbyPlayer[]): number {
-    return resolveMapSizeRatioByPlayers(this.getPlayingCount(players));
+  private getMapSizeRatioByPlayers(players: LobbyPlayer[], mapRegion: LobbyConfig['map_region']): number {
+    return resolveMapSizeRatioByPlayersAndRegion(this.getPlayingCount(players), mapRegion);
   }
 
   /**
-   * 开局时的实际地图尺寸：按人数取基础比例，房间开启大地图时再 ×2
+   * 开局时的实际地图尺寸：按人数取基础比例，台湾省地图略微放大，房间开启大地图时再 ×2
    * （边长约 2 倍、面积约 4 倍）。
    */
   private getMapSizeConfigByPlayers(
     players: LobbyPlayer[],
     conf: LobbyConfig,
   ): Pick<LobbyConfig, 'width_ratio' | 'height_ratio'> {
-    const ratio = this.getMapSizeRatioByPlayers(players) * (conf.map_size === 'large' ? 2 : 1);
+    const ratio =
+      this.getMapSizeRatioByPlayers(players, conf.map_region) * (conf.map_size === 'large' ? 2 : 1);
     return {
       width_ratio: ratio,
       height_ratio: ratio,
