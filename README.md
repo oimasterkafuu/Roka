@@ -28,7 +28,7 @@ node --test test/*.test.cjs
 node training/long-eval.cjs --help
 ```
 
-离线评测直接加载当前 `src/game-engine.ts`，支持 `worker_threads` 并行、四种地图、换边和失败回放。最近一次 48 局 Anti-Human 快速回归（8 workers，600 Tick 上限）为 42 胜、0 负、6 平；胜局平均 269.3 Tick，最慢 585 Tick，决策 p50 约 0.67 ms、p95 约 2.25 ms。Simple-Strategy-Bot 的 8 局固定种子测试为 8 胜 0 负，平均约 204 Tick。评测命令和参数见 [`bot-template/apex-bot/USAGE.md`](bot-template/apex-bot/USAGE.md)。
+离线评测直接加载当前 `src/game-engine.ts`，支持 `worker_threads` 并行、四种地图、换边和失败回放。最近一次 48 局 Anti-Human 快速回归（8 workers，600 Tick 上限）为 42 胜、0 负、6 平；胜局平均 269.3 Tick，最慢 585 Tick，决策 p50 约 0.67 ms、p95 约 2.25 ms。Simple-Strategy-Bot 的 8 局固定种子测试为 8 胜 0 负，平均约 204 Tick。评测命令和参数见 [`bot-template/apex-bot/USAGE.md`](bot-template/apex-bot/USAGE.md)。大地图回归应使用 `--sizes 0.5,0.68,1 --turns 1200`；报告会按尺寸给出 120/300/600/900/1200 Tick 的皇冠、城市、兵力和存活率。
 
 启动后访问 `http://localhost:23333/` 并注册账号。
 
