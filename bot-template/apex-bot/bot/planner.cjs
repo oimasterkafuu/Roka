@@ -665,6 +665,46 @@ function strategicCut(b, own) {
   return options[0] || null;
 }
 
+// When a direct crown reinforcement cannot catch the incoming column, attack
+// its supply articulation instead.  A defensive gather can be mathematically
+// hopeless while a nearby cut still removes the entire hostile branch; leave
+// this decision ahead of the fallback gather so defence does not become a
+// passive loop beside an already doomed crown.
+function defensiveCut(b, worst) {
+  const owner = b.owner(worst.at);
+  if (owner <= 0) return null;
+  const cuts = cutAnalysis(b, owner);
+  const candidates = [...cuts.points]
+    .filter((at) => b.enemy(at) && !b.isolated[at] &&
+      (at === worst.at || cuts.mass[at] >= 20 || cuts.land[at] >= 3))
+    .sort((a, z) => (cuts.mass[z] - cuts.mass[a]) || (cuts.land[z] - cuts.land[a]));
+  let best = null;
+  for (const to of candidates) {
+    for (const from of b.neighbors(to)) {
+      if (!b.own(from) || b.isolated[from] || !movable(b, from)) continue;
+      const action = safeMove(b, from, to, 'cut');
+      if (!action) continue;
+      const guard = routeGuard(b, action);
+      if (guard.blocked) {
+        // A defensive cut can intentionally leave a newly captured bridge
+        // outside our old anchor graph.  Permit that trade when the enemy
+        // branch removed by the cut is materially larger than the exposed
+        // friendly tail; this is the emergency case where preserving the
+        // tail simply loses the crown on the next tick.
+        const result = preview(b, action);
+        const ownCuts = cutAnalysis(result.after, b.playerId);
+        const ownLoss = guard.cut >= 0 ? ownCuts.mass[guard.cut] : 0;
+        const enemyGain = cuts.mass[to] || 0;
+        if (enemyGain < Math.max(20, ownLoss * 1.05)) continue;
+      }
+      const score = cuts.mass[to] * 2 + cuts.land[to] * 20 - b.army[to] +
+        (to === worst.at ? 40 : 0);
+      if (!best || score > best.score) best = { action, branch: 'defense-cut', score };
+    }
+  }
+  return best;
+}
+
 function defense(b, m, own) {
   const crowns = own.filter(i => b.kind(i)==='crown');
   if (!m.threatDistance) m.threatDistance = Object.create(null);
@@ -716,7 +756,15 @@ function defense(b, m, own) {
   if(!worst) return null;
   // Intercept at the head or at its actual supply cut, before pulling a crown.
   for(const from of b.neighbors(worst.at)) if(b.own(from)) { const a=safeMove(b,from,worst.at,'cut'); if(a)return {action:a,branch:'intercept'}; }
-  return gather(b,m,worst.crown,worst.need,'defend');
+  const cut = defensiveCut(b, worst);
+  if (cut) return cut;
+  const delivery = gather(b,m,worst.crown,worst.need,'defend');
+  if (delivery) return delivery;
+  // The local crown may still be impossible to save, while a broader enemy
+  // articulation is attackable from another branch.  Use that last-resort
+  // cut before yielding the tick to economy or a new campaign.
+  const fallback = strategicCut(b, own);
+  return fallback ? { ...fallback, branch: 'defense-cut' } : null;
 }
 
 function cutDefense(b, m, own) {
@@ -1266,6 +1314,41 @@ function chooseCampaign(b,m,own) {
   const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
   const urgencyCap = Math.max(260, ownTotal * MULTI_CROWN_CAP);
   const desired = Math.min(rawDesired, urgencyCap);
+
+  // The full path resistance is a useful estimate for the eventual crown
+  // capture, but it is the wrong gate for the first move.  On a maze it can
+  // include every enemy cell in a long corridor, so the old planner kept
+  // feeding the rally root for dozens of turns while the opponent closed the
+  // map.  Open the corridor as soon as the spearhead can take its first
+  // hostile cell (or can safely advance through friendly land); later cells
+  // are handled one by one as the column moves forward.
+  let firstHostile = -1;
+  for (let i = 1; i < p.length; i += 1) {
+    if (b.enemy(p[i])) { firstHostile = p[i]; break; }
+  }
+  const firstContactNeed = firstHostile >= 0
+    ? Math.max(18, b.army[firstHostile] + 8)
+    : 18;
+  const musterTurns = c.musterTurns || 0;
+  // Do not launch a token column merely because the first visible cell is
+  // weak.  It still needs a meaningful fraction of the eventual push, with a
+  // ceiling so a long maze cannot demand the sum of every enemy stack before
+  // moving.  This turns a long muster into a staged attack without feeding a
+  // twenty-unit spearhead into the first counter-cut.
+  const breakthroughThreshold = Math.min(
+    desired,
+    Math.max(firstContactNeed, Math.min(160, desired * 0.65)),
+  );
+  const breakthroughReady = b.army[c.at] >= breakthroughThreshold && musterTurns >= 2;
+  if (c.phase === 'gather') {
+    c.musterTurns = musterTurns + 1;
+    if (breakthroughReady) {
+      c.phase = 'attack';
+      c.lastPhase = 'gather';
+      c.lastProgress = b.turn;
+      c.musterTurns = 0;
+    }
+  }
   if(c.phase==='gather'&&b.army[c.at]<desired) {
     const delivery = gather(b, m, c.at, desired, 'muster');
     if(delivery)return delivery;
@@ -1381,6 +1464,15 @@ function plan(b,m) {
   if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
   if(tactic?.branch==='crown')return tactic;
+  // Once a campaign has a valid rally root, keep its convoy/attack sequence
+  // together.  The generic defence and economy passes used to run first on
+  // every tick; a harmless nearby pressure signal could therefore steal the
+  // action budget, reset the delivery cursor, and make the bot collect the
+  // same route forever without ever reaching the first hostile cell.
+  if (m.campaign && Number.isInteger(m.campaign.at) && b.own(m.campaign.at) && !b.isolated[m.campaign.at]) {
+    const campaign = chooseCampaign(b, m, own);
+    if (campaign?.action) return campaign;
+  }
   const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
   const enemyTotal = enemies.reduce((sum, at) => sum + b.army[at], 0);
   const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
@@ -1482,4 +1574,4 @@ function plan(b,m) {
   if(growthAction)return growthAction;
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
