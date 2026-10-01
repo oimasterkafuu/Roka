@@ -116,6 +116,35 @@ async function scenarioLegacyCompat() {
   }
 }
 
+async function scenarioDisciplineStorage() {
+  console.log('场景 3b：封禁理由、详情持久化与到期');
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'roka-storage-discipline-'));
+  try {
+    const store = new UserStore(dataDir);
+    await store.ensureReady();
+    await store.register('discipline_admin', 'password1');
+    await store.register('discipline_user', 'password1');
+    const until = Date.now() + 3_600_000;
+    await store.applyBan('discipline_user', until, {
+      type: 'manual',
+      reason: '发布不当言论',
+      evidence: 'test evidence',
+    });
+    const listed = store.listUsersForAdmin().find((item) => item.username === 'discipline_user');
+    check('管理员查询包含封禁理由与证据', listed?.ban?.reason === '发布不当言论' && listed.ban.evidence === 'test evidence');
+    const restarted = new UserStore(dataDir);
+    await restarted.ensureReady();
+    check('封禁详情重启后仍持久化', restarted.getBanStatus('discipline_user').ban?.reason === '发布不当言论');
+    await restarted.applyBan('discipline_user', Date.now() - 1, {
+      type: 'manual',
+      reason: '过期测试',
+    });
+    check('到期惰性恢复但保留历史', !restarted.getBanStatus('discipline_user').banned && restarted.listUsersForAdmin().find((item) => item.username === 'discipline_user').banHistory.length >= 2);
+  } finally {
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}
+
 async function scenarioFeedStore() {
   console.log('场景 4：FeedStore 突发写入 + 损坏回退');
   const dataDir = await mkdtemp(path.join(tmpdir(), 'roka-storage-feeds-'));
@@ -214,6 +243,7 @@ async function scenarioAnnouncement() {
 async function main() {
   await scenarioUserStore();
   await scenarioLegacyCompat();
+  await scenarioDisciplineStorage();
   await scenarioFeedStore();
   await scenarioReplayStore();
   await scenarioAnnouncement();

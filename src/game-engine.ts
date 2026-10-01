@@ -59,6 +59,17 @@ type QueuedOp =
  */
 const BUILD_COST = 50;
 
+export type GameDisciplineCause = 'manual_surrender' | 'leave' | 'afk' | 'disconnect_timeout';
+
+export interface GameDisciplineEvent {
+  gameId: string;
+  username: string;
+  cause: GameDisciplineCause;
+  turn: number;
+  elapsedMs: number;
+  occurredAt: number;
+}
+
 interface GameCallbacks {
   update: (sid: string, data: UpdatePayload) => void;
   emitInitMap: (
@@ -74,6 +85,7 @@ interface GameCallbacks {
     team?: boolean,
   ) => void;
   endGame: (gid: string, result: GameResultEntry[]) => void;
+  disciplineEvent?: (event: GameDisciplineEvent) => void;
   md5: (input: string) => string;
   replayStore: ReplayStore;
 }
@@ -104,6 +116,8 @@ export class GameEngine {
   private readonly chatMessage: GameCallbacks['chatMessage'];
 
   private readonly endGame: GameCallbacks['endGame'];
+
+  private readonly disciplineEvent: NonNullable<GameCallbacks['disciplineEvent']>;
 
   private readonly md5: GameCallbacks['md5'];
 
@@ -250,6 +264,7 @@ export class GameEngine {
     this.emitInitMap = callbacks.emitInitMap;
     this.chatMessage = callbacks.chatMessage;
     this.endGame = callbacks.endGame;
+    this.disciplineEvent = callbacks.disciplineEvent ?? (() => undefined);
     this.md5 = callbacks.md5;
     this.replayStore = callbacks.replayStore;
 
@@ -370,6 +385,7 @@ export class GameEngine {
         emitInitMap: () => undefined,
         chatMessage: () => undefined,
         endGame: () => undefined,
+        disciplineEvent: () => undefined,
         md5: (input) => input,
         replayStore: {
           saveReplay: async () => '',
@@ -411,6 +427,7 @@ export class GameEngine {
         emitInitMap: () => undefined,
         chatMessage: () => undefined,
         endGame: () => undefined,
+        disciplineEvent: () => undefined,
         md5: (input) => input,
         replayStore: {
           saveReplay: async () => '',
@@ -1122,7 +1139,7 @@ export class GameEngine {
       return false;
     }
     this.disconnectedAt[id] = null;
-    if (this.applySurrenderByIndex(id, '挂机')) {
+    if (this.applySurrenderByIndex(id, 'disconnect_timeout')) {
       this.sendSystemMessage(`${this.names[id]} 掉线超过宽限期，自动投降并转为观战。`);
       this.scheduleImmediateTick();
     }
@@ -1580,7 +1597,7 @@ export class GameEngine {
     if (typeof id === 'undefined') {
       return;
     }
-    this.applySurrenderByIndex(id, '投降');
+    this.applySurrenderByIndex(id, 'leave');
     this.pmove[id] = [];
     this.watching[id] = false;
     this.sendSystemMessage(`${this.names[id]} 离开了游戏。`);
@@ -1592,7 +1609,7 @@ export class GameEngine {
     if (typeof id === 'undefined') {
       return;
     }
-    const changed = this.applySurrenderByIndex(id, '投降');
+    const changed = this.applySurrenderByIndex(id, 'manual_surrender');
     if (!changed) {
       return;
     }
@@ -1614,7 +1631,7 @@ export class GameEngine {
       if (idleTurns < AFK_MIN_TURNS || idleMs < AFK_MIN_MS) {
         continue;
       }
-      if (!this.applySurrenderByIndex(p, '挂机')) {
+      if (!this.applySurrenderByIndex(p, 'afk')) {
         continue;
       }
       this.sendSystemMessage(`${this.names[p]} 因挂机自动投降并转为观战。`);
@@ -1628,7 +1645,7 @@ export class GameEngine {
    * - 否则（FFA 或队伍已无其他存活成员），主城与所有指挥所被拆除为普通空地，
    *   领土减半后打入孤军，进入自然衰减流程。
    */
-  private applySurrenderByIndex(playerIndex: number, reason: '投降' | '挂机'): boolean {
+  private applySurrenderByIndex(playerIndex: number, cause: GameDisciplineCause): boolean {
     if (this.pstat[playerIndex] === LEFT_GAME) {
       return false;
     }
@@ -1640,8 +1657,17 @@ export class GameEngine {
       this.teardownEmpire(playerIndex + 1);
     }
     this.markEliminated(playerIndex);
-    this.recentKills[this.md5(this.playerSids[playerIndex])] = reason;
+    this.recentKills[this.md5(this.playerSids[playerIndex])] =
+      cause === 'afk' || cause === 'disconnect_timeout' ? '挂机' : '投降';
     this.pmove[playerIndex] = [];
+    this.disciplineEvent({
+      gameId: this.gid,
+      username: this.names[playerIndex],
+      cause,
+      turn: this.turn,
+      elapsedMs: Date.now() - this.startAt,
+      occurredAt: Date.now(),
+    });
     return true;
   }
 

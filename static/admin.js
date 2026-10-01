@@ -114,11 +114,15 @@ function roleLabel(user) {
 }
 
 function banStatusLabel(user) {
-  if (user.bannedUntil === -1) {
-    return '已永久封禁';
-  }
+  var ban = user.ban;
   if (typeof user.bannedUntil === 'number') {
-    return '封禁至 ' + fullTime(user.bannedUntil);
+    var label = user.bannedUntil === -1 ? '永久封禁' : '封禁至 ' + fullTime(user.bannedUntil);
+    if (ban) {
+      label += '｜' + ban.type + '｜' + ban.reason;
+      label += '｜起 ' + fullTime(ban.startedAt) + '｜触发 ' + fullTime(ban.triggeredAt);
+      if (ban.evidence) label += '｜' + ban.evidence;
+    }
+    return label;
   }
   return '正常';
 }
@@ -297,6 +301,7 @@ async function setAdmin(username, granting) {
 function openBanDialog(username) {
   $('#ban-target').text(username);
   $('#ban-duration').val('3600000');
+  $('#ban-reason').val('管理员手动封禁');
   $('#ban-custom-field').hide();
   $('#ban-error').hide();
   $('#ban-dialog-mask').css('display', 'flex');
@@ -315,7 +320,7 @@ $('#ban-cancel').on('click', closeBanDialog);
 $('#ban-confirm').on('click', async function () {
   var username = $('#ban-target').text();
   var choice = $('#ban-duration').val();
-  var payload = { username: username };
+  var payload = { username: username, reason: $('#ban-reason').val() };
   if (choice === 'permanent') {
     payload.permanent = true;
   } else if (choice === 'custom') {

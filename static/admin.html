@@ -39,7 +39,7 @@
               <th>注册时间</th>
               <th>最后在线</th>
               <th>角色</th>
-              <th>状态</th>
+              <th>封禁详情</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -107,6 +107,15 @@
         <div class="dialog-field" id="ban-custom-field" style="display: none">
           <label for="ban-custom-hours">自定义时长（小时）</label>
           <input type="number" id="ban-custom-hours" min="1" step="1" value="24" />
+        </div>
+        <div class="dialog-field">
+          <label for="ban-reason">封禁理由</label>
+          <select id="ban-reason">
+            <option value="管理员手动封禁">管理员手动封禁</option>
+            <option value="消极游戏">消极游戏</option>
+            <option value="连续挂机">连续挂机</option>
+            <option value="发布不当言论">发布不当言论</option>
+          </select>
         </div>
         <p id="ban-error" class="dialog-error" style="display: none"></p>
         <div class="dialog-actions">

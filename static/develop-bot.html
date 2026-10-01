@@ -299,7 +299,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td>
               可选字段 patch：<code>speed</code>（0.5~4）、<code>allow_team</code>（bool）、
               <code>fog</code
-              >（bool，迷雾远征）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>）、<code>map_region</code>（华夏模式地区：<code>qin|han|tang|liao|song|yuan|ming|china|taiwan</code>；旧值
+              >（bool，迷雾远征）、<code>map_size</code>（<code>normal|large</code>）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>）、<code>map_region</code>（华夏模式地区：<code>qin|han|tang|liao|song|yuan|ming|china|taiwan</code>；旧值
               <code>qing</code> / <code>hong-kong</code> 归一为 <code>china</code>，其他未知值和缺省值回退为
               <code>china</code>）、<code>map_token</code>（最长 32）。华夏系列仅在每年中国时区 10 月 1 日至
               10 月 7 日（含全天）开放；非活动期设置请求会被拒绝，过期房间配置在
@@ -328,9 +328,10 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td>
               房间状态快照：
               <code
-                >{ speed, allow_team, fog, map_token, map_mode, map_region, in_game, update_queued, players,
-                ready, need }</code
-              >。 <code>fog=true</code> 表示本房间开启了迷雾远征。
+                >{ speed, allow_team, fog, map_size, map_token, map_mode, map_region, in_game, update_queued,
+                players, ready, need }</code
+              >。 <code>fog=true</code> 表示本房间开启了迷雾远征；<code>map_size</code> 为
+              <code>normal</code> 或 <code>large</code>。
               <code>update_queued=true</code> 表示部署更新排队中：禁止开新局（<code>change_ready</code>
               会被拒绝并收到提示消息），宽限期（默认 120 秒）内未结束的对局将按当前名次清算。
             </td>
@@ -596,7 +597,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               <code>mode</code> 决定：<code>2</code> 全冲（只留 1 兵看守）、<code>1</code>
               半兵（智能分兵理论推出量减半取整，一次性）、<code>0</code>
               智能分兵（为其他三方向的非己方相邻格（山脉除外）保留「兵力-1」之和 + 1）。<code>half</code>
-              保留作兼容（<code>half=true</code> 等价 <code>mode=1</code>）。
+              保留作兼容：仅当 <code>mode</code> 缺失或无效时，<code>half=true</code> 才回退为
+              <code>mode=1</code>；有效的 <code>mode</code> 始终优先。
             </td>
           </tr>
           <tr>
@@ -606,8 +608,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
                 >op='c'</code
               >
               升级主城（相当于 C / E 键），均消耗 50 兵。与 <code>attack</code> 共用同一队列，每 Tick
-              每玩家最多执行一条队列操作。入队只校验地形（普通地块），可排在队列很靠后的未来位置；
-              执行时才校验归属/兵力/连通，条件不满足会自动跳过（通过
+              每玩家最多执行一条队列操作。服务端入队只记录合法的
+              <code>op</code> 与坐标，不校验地形、归属、兵力或连通，可排在队列很靠后的未来位置；
+              执行时才校验地形、归属/兵力/连通，条件不满足会自动跳过（通过
               <code>lst_move.skip</code> 告知丢弃数量），不会产生消耗。在普通地块上连发 <code>b</code> +
               <code>c</code>
               两条即可两 Tick 后建成主城（相当于在普通地块按 C / E 键）。

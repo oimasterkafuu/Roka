@@ -14,6 +14,7 @@ import { resolveMapSizeRatioByPlayers } from './map/map-size';
 import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
 import { ratingTier } from './rating-color';
 import { encodeReplayPatchBinary } from './replay-patch-binary';
+import { buildReplayStats } from './server/replay-stats';
 import { isReplayIdValid, ReplayStore } from './replay-store';
 import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText } from './text-render';
@@ -48,7 +49,9 @@ const feedStore = new FeedStore(dataDir);
 const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const captchaService = new CaptchaService();
-const lobbyService = new LobbyService(replayStore, userStore);
+const lobbyService = new LobbyService(replayStore, userStore, (username) => {
+  authService.disconnectUserSockets(username);
+});
 // 服务器实际监听端口：listen 前赋值；托管 bot 自连回环地址时读取（API 调用必发生在 listen 后）。
 let listenPort = Number(process.env.PORT) || 23333;
 const serverBotManager = new ServerBotManager({
@@ -483,6 +486,10 @@ const boot = async (): Promise<void> => {
       return reply.redirect('/login');
     }
 
+    const banStatus = userStore.getBanStatus(authUser.username);
+    if (banStatus.banned) {
+      return reply.code(403).send({ error: '该账号已被封禁。' });
+    }
     (request as AuthRequest).authUser = authUser;
     // 任何已认证请求都算一次用户活动；/api/online 自身除外（在线状态查询是被动
     // 轮询，计入会让在线状态自我维持、永不掉线）。
@@ -711,7 +718,12 @@ const boot = async (): Promise<void> => {
     if (!admin) {
       return;
     }
-    const body = request.body as { username?: unknown; permanent?: unknown; durationMs?: unknown };
+    const body = request.body as {
+      username?: unknown;
+      permanent?: unknown;
+      durationMs?: unknown;
+      reason?: unknown;
+    };
     const target = String(body?.username ?? '').trim();
     if (!USERNAME_REGEX.test(target) || !userStore.getPublicProfile(target)) {
       return reply.code(404).send({ error: '用户不存在。' });
@@ -736,7 +748,11 @@ const boot = async (): Promise<void> => {
       ? -1
       : Date.now() + Math.min(BAN_DURATION_MAX_MS, Math.max(BAN_DURATION_MIN_MS, Math.floor(durationRaw)));
 
-    await userStore.banUser(target, bannedUntil);
+    const reason =
+      String(body?.reason ?? '')
+        .trim()
+        .slice(0, 200) || '管理员手动封禁';
+    await userStore.banUser(target, bannedUntil, reason);
     // 踢下线：清空会话使旧 JWT 立即失效，并断开该用户全部 socket 连接。
     await userStore.clearSession(target);
     authService.disconnectUserSockets(target);
@@ -1253,7 +1269,7 @@ const boot = async (): Promise<void> => {
     const next_offset = offset + items.length;
     const has_more = next_offset < allItems.length;
 
-    return reply.send({ items, next_offset, has_more });
+    return reply.send({ items, next_offset, has_more, stats: buildReplayStats(allItems) });
   });
 
   app.get('/api/rooms', async (_request, reply) => {
@@ -1356,6 +1372,10 @@ const boot = async (): Promise<void> => {
       next(new Error('未登录或登录已失效。'));
       return;
     }
+    if (userStore.getBanStatus(authUser.username).banned) {
+      next(new Error('该账号已被封禁。'));
+      return;
+    }
 
     socket.data.username = authUser.username;
     next();
@@ -1374,6 +1394,11 @@ const boot = async (): Promise<void> => {
     if (!isBot) {
       recordPresence(username);
       socket.use((_packet, next) => {
+        if (userStore.getBanStatus(username).banned) {
+          socket.disconnect(true);
+          next(new Error('该账号已被封禁。'));
+          return;
+        }
         recordPresence(username);
         next();
       });
@@ -1393,6 +1418,12 @@ const boot = async (): Promise<void> => {
     }
     socket.join(`sid_${socket.id}`);
     socket.emit('set_id', lobbyService.md5(socket.id));
+    const rejectIfBanned = (): boolean => {
+      if (isBot || !userStore.getBanStatus(username).banned) return false;
+      socket.emit('error_message', { error: '该账号已被封禁。' });
+      socket.disconnect(true);
+      return true;
+    };
 
     // ROKA_BOT_TOKENS 鉴权的 bot 无浏览器标签页，豁免房间心跳踢出。
     if (socket.data.isBot) {
@@ -1479,6 +1510,7 @@ const boot = async (): Promise<void> => {
     });
 
     socket.on('join_game_room', (data: { room?: string }) => {
+      if (rejectIfBanned()) return;
       const room = String(data.room ?? '').trim();
       if (room.length === 0 || room.length > 15) {
         return;
@@ -1526,6 +1558,7 @@ const boot = async (): Promise<void> => {
     });
 
     socket.on('change_team', (data: { team: unknown }) => {
+      if (rejectIfBanned()) return;
       const gid = lobbyService.lobbyOfSid.get(socket.id);
       if (!gid) {
         return;
@@ -1593,6 +1626,7 @@ const boot = async (): Promise<void> => {
     });
 
     socket.on('change_ready', (data: { ready: unknown }) => {
+      if (rejectIfBanned()) return;
       const gid = lobbyService.lobbyOfSid.get(socket.id);
       if (!gid) {
         return;
