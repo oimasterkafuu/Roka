@@ -1,6 +1,6 @@
 'use strict';
 
-const { connectedSet, distanceField, anchorCells, cutAnalysis } = require('./board.cjs');
+const { makeBoard, connectedSet, distanceField, anchorCells, cutAnalysis } = require('./board.cjs');
 const { computePush, actionCoordinates, preview } = require('./rules.cjs');
 
 const ECON_GOAL = Number(process.env.APEX_ECON_GOAL || 6);
@@ -24,6 +24,11 @@ const CAMPAIGN_STRENGTH_DEFAULT = Number.isFinite(Number(process.env.APEX_CAMPAI
 const BUILD_CLUSTER_SIZE = Number.isFinite(Number(process.env.APEX_BUILD_CLUSTER_SIZE))
   ? Math.max(2, Math.min(8, Number(process.env.APEX_BUILD_CLUSTER_SIZE))) : 4;
 const BUILD_COST = 50;
+const SMALL_COLUMN = 18;
+const FINISH_RESIDUE = 30;
+const APPROACH_RADIUS = 12;
+const APPROACH_MIN_FORCE = 40;
+const APPROACH_MARGIN = 18;
 
 function field(b, starts, enter = b.passable) { return distanceField(b, starts, enter); }
 function swampRatio(b, m) {
@@ -157,6 +162,102 @@ function constructionThreat(b, own, enemies) {
   }
   return false;
 }
+
+function asPlayer(b, playerId) {
+  return makeBoard({
+    n: b.n,
+    m: b.m,
+    grid: b.grid,
+    army: b.army,
+    isolated: b.isolated,
+    fog: b.fog,
+    turn: b.turn,
+    leaderboard: b.leaderboard,
+    teams: b.teams,
+    _adjacency: b._adjacency,
+  }, playerId);
+}
+
+function detachedAfter(b, after, owner) {
+  const before = connectedSet(b, owner);
+  const connected = connectedSet(after, owner);
+  let mass = 0;
+  let land = 0;
+  for (let at = 0; at < b.size; at += 1) {
+    if (!before.has(at) || connected.has(at) || b.owner(at) !== owner) continue;
+    mass += Math.max(0, Number(after.army[at]) || 0);
+    land += 1;
+  }
+  return { mass, land };
+}
+
+// Preview the opponent's next legal attack against every command tower.  A
+// normal pressure check misses the important case where the opponent first
+// captures a one-unit bridge cell and then reaches the tower on the next tick.
+// Keep this narrow: only a successful capture of a city/crown that strands a
+// substantial connected branch is considered an emergency.
+function enemyAnchorThreats(b) {
+  const anchors = anchorCells(b, b.playerId).filter((at) => b.own(at) && !b.isolated[at]);
+  const loneCrown = anchors.filter((at) => b.kind(at) === 'crown').length === 1;
+  const byOwner = new Map();
+  const threats = [];
+  for (const anchor of anchors) {
+    for (const source of b.neighbors(anchor)) {
+      if (!b.enemy(source) || b.isolated[source]) continue;
+      const enemyOwner = b.owner(source);
+      let enemyBoard = byOwner.get(enemyOwner);
+      if (!enemyBoard) {
+        enemyBoard = asPlayer(b, enemyOwner);
+        byOwner.set(enemyOwner, enemyBoard);
+      }
+      for (const mode of [2, 0, 1]) {
+        const action = actionCoordinates(enemyBoard, source, anchor, mode);
+        const result = preview(enemyBoard, action);
+        if (!result.ok || !result.captured) continue;
+        const detached = detachedAfter(b, result.after, b.playerId);
+        threats.push({ anchor, source, action, send: result.send, detachedMass: detached.mass, detachedLand: detached.land,
+          fatal: b.kind(anchor) === 'crown' && loneCrown });
+        break;
+      }
+    }
+  }
+  return threats.filter((threat) => threat.fatal || threat.detachedMass >= FINISH_RESIDUE);
+}
+
+function approachThreat(b, anchor, guard) {
+  const f = field(b, [anchor]);
+  let best = null;
+  for (let at = 0; at < b.size; at += 1) {
+    if (!b.enemy(at) || b.isolated[at] || !Number.isFinite(f.distance[at]) || f.distance[at] > APPROACH_RADIUS) continue;
+    const distance = f.distance[at];
+    const force = Math.max(0, b.army[at] - Math.max(1, distance - 2));
+    if (force < APPROACH_MIN_FORCE || force < b.army[anchor] * 2 + 8) continue;
+    if (force < guard * 0.55 && distance > 6) continue;
+    const need = Math.max(b.army[anchor] + 8, Math.min(220, force + APPROACH_MARGIN));
+    const score = (force - b.army[anchor]) / (distance + 1);
+    if (!best || score > best.score) best = { at, distance, force, need, score };
+  }
+  return best;
+}
+
+// A crown raid may finish with an expendable remnant. Count what a countercut
+// would actually disconnect after the capture, rather than requiring the
+// spent assault force to preserve a route it no longer needs.
+function crownFinish(b, action, result = preview(b, action)) {
+  if (!result.ok || !result.captured || !b.enemy(result.to) || b.kind(result.to) !== 'crown') return false;
+  const after = result.after;
+  if (!result.decap && after.army[result.to] > FINISH_RESIDUE) return false;
+  const cuts = cutAnalysis(after, after.playerId);
+  for (const at of cuts.points) {
+    if (cuts.mass[at] > FINISH_RESIDUE && pressure(after, at) > after.army[at]) return false;
+  }
+  // Other opponents can still punish an exposed home crown after a kill.
+  for (const at of anchorCells(after, after.playerId)) {
+    if (after.kind(at) === 'crown' && pressure(after, at) > after.army[at]) return false;
+  }
+  return true;
+}
+
 function routeGuard(b, action) {
   if (!action || action.kind !== 'attack') return { blocked: false, anchor: -1, cut: -1 };
   const to = b.idx(action.dx, action.dy);
@@ -164,15 +265,17 @@ function routeGuard(b, action) {
   if (!previewResult.ok || (previewResult.captured === false && b.enemy(to))) {
     return { blocked: false, anchor: -1, cut: -1 };
   }
+  if (crownFinish(b, action, previewResult)) return { blocked: false, anchor: -1, cut: -1 };
   const after = previewResult.after;
   const cuts = cutAnalysis(after, after.playerId);
   let blocked = false;
   let anchor = -1;
   let cut = -1;
   for (const at of cuts.points) {
-    // Crowns and cities are already anchors.  Treating the crown itself as
-    // the "cut" would make every deep move look unsafe and cannot be repaired
-    // by the build action available here.
+    // Keep the campaign guard focused on a plain bridge that the move really
+    // leaves behind. Command-tower loss is handled by enemyAnchorThreats;
+    // treating every anchor as a route cut makes an ordinary head move look
+    // unsafe and changes which repair cell is selected.
     if (b.kind(at) !== 'plain') continue;
     if (!cuts.separates(at, previewResult.to) || cuts.mass[at] < 1) continue;
     if (pressure(after, at) <= after.army[at] + 1) continue;
@@ -198,24 +301,128 @@ function routeGuard(b, action) {
   return { blocked: false, anchor: -1, cut: -1 };
 }
 
-function safeMove(b, from, to, intent = 'move') {
+function safeMove(b, from, to, intent = 'move', modes = intent === 'gather' ? [0, 1, 2] : [2, 0, 1]) {
   if (!movable(b, from) || !b.passable(to)) return null;
   const targetArmy = b.army[to];
   const enemy = !b.friendly(to);
-  const finalCrown = b.enemy(to) && b.kind(to) === 'crown' && b.grid.filter(v => v === b.grid[to]).length === 1;
-  const modes = intent === 'gather' ? [0, 1, 2] : [2, 0, 1];
   for (const mode of modes) {
     const send = computePush(b, from, to, mode);
     if (send <= 0 || (enemy && send <= targetArmy)) continue;
-    if (finalCrown && send > targetArmy) return actionCoordinates(b, from, to, mode);
+    const action = actionCoordinates(b, from, to, mode);
+    if (b.enemy(to) && b.kind(to) === 'crown' && crownFinish(b, action)) return action;
     const left = b.army[from] - send;
     const arrive = enemy ? send - targetArmy : targetArmy + send;
+    // Check the payload, not just the source stack or gather phase. A large
+    // source can still yield only two soldiers after smart reservations.
+    if (intent === 'campaign' && arrive < SMALL_COLUMN) continue;
     if (b.kind(from) === 'crown' && left < pressure(b, from, to)) continue;
     if (enemy && arrive < pressure(b, to, from) * 0.65 && intent !== 'cut') continue;
     if (left < pressure(b, from, to) && (stranded(b, b.playerId, from) + arrive) > 30) continue;
-    return actionCoordinates(b, from, to, mode);
+    return action;
   }
   return null;
+}
+
+function costlySupplyCuts(b) {
+  const cuts = cutAnalysis(b, b.playerId);
+  return [...cuts.points].filter((at) => cuts.mass[at] > FINISH_RESIDUE &&
+    !b.isolated[at] && pressure(b, at) > b.army[at]);
+}
+
+function repairSupply(b, at) {
+  // Reinforce or remove the attacker in one action. A delivery that would
+  // arrive only after the threatened anchor falls is not an emergency repair.
+  const needed = pressure(b, at);
+  for (const from of b.neighbors(at)) {
+    if (!b.own(at) || !b.own(from)) continue;
+    const action = safeMove(b, from, at, 'gather');
+    if (action && b.army[at] + computePush(b, from, at, action.mode) >= needed && !routeGuard(b, action).blocked) {
+      return { action, branch: 'supply-defend' };
+    }
+  }
+  for (const enemy of b.neighbors(at)) {
+    if (!b.enemy(enemy) || b.isolated[enemy]) continue;
+    for (const from of b.neighbors(enemy)) {
+      const action = safeMove(b, from, enemy, 'cut');
+      if (action && !routeGuard(b, action).blocked && !costlySupplyCuts(preview(b, action).after).length) {
+        return { action, branch: 'supply-intercept' };
+      }
+    }
+  }
+  // Only the concrete one-hit threat opens this building window. Find a
+  // funded cell inside the threatened branch, and verify that losing the old
+  // city would no longer strand a substantial army after this exact build.
+  const cuts = cutAnalysis(b, b.playerId);
+  const sites = [];
+  for (let site = 0; site < b.size; site += 1) {
+    if (!b.own(site) || b.isolated[site] || b.kind(site) !== 'plain' || b.army[site] < BUILD_COST) continue;
+    if (site !== at && !cuts.separates(at, site)) continue;
+    if (b.army[site] - BUILD_COST < pressure(b, site)) continue;
+    sites.push(site);
+  }
+  sites.sort((a, z) => b.army[z] - b.army[a]);
+  for (const site of sites) {
+    const action = build(b, site);
+    const after = preview(b, action).after;
+    if (!costlySupplyCuts(after).length) return { action, branch: 'supply-anchor' };
+  }
+  return null;
+}
+
+function anchorDefense(b) {
+  const threats = enemyAnchorThreats(b)
+    .sort((a, z) => Number(z.fatal) - Number(a.fatal) || z.detachedMass - a.detachedMass || z.send - a.send);
+  for (const threat of threats) {
+    // Remove the attacking head if a neighbouring stack can do so in one
+    // legal action. This is preferable to pulling the crown backwards and
+    // keeps the response local even on a long map.
+    for (const from of b.neighbors(threat.source)) {
+      if (!b.own(from) || b.isolated[from] || !movable(b, from)) continue;
+      const action = safeMove(b, from, threat.source, 'cut');
+      if (action && !routeGuard(b, action).blocked) return { action, branch: 'anchor-intercept' };
+    }
+    // If interception is unavailable, fill the tower with a full push. The
+    // amount is checked against the exact simulated send, so this branch does
+    // not spend a turn on a cosmetic one-unit reinforcement.
+    for (const from of b.neighbors(threat.anchor)) {
+      if (!b.own(from) || b.isolated[from] || !movable(b, from)) continue;
+      const action = safeMove(b, from, threat.anchor, 'gather', [2, 0, 1]);
+      if (!action) continue;
+      const send = computePush(b, from, threat.anchor, action.mode);
+      if (b.army[threat.anchor] + send > threat.send + 1) {
+        return { action, branch: 'anchor-reinforce' };
+      }
+    }
+    const repair = repairSupply(b, threat.anchor);
+    if (repair) return { ...repair, branch: repair.branch || 'anchor-repair' };
+  }
+  const cuts = cutAnalysis(b, b.playerId);
+  const endangered = costlySupplyCuts(b)
+    .filter((at) => ['city', 'crown'].includes(b.kind(at)))
+    .sort((a, z) => cuts.mass[z] - cuts.mass[a]);
+  for (const at of endangered) {
+    const repair = repairSupply(b, at);
+    if (repair) return repair;
+  }
+  return null;
+}
+
+// Every chosen move, including tactics, funding and stall recovery, must use
+// the same connectivity check. Otherwise a non-campaign branch can drain the
+// very city the campaign guard is trying to preserve.
+function secureDecision(b, decision) {
+  if (!decision.action || decision.action.kind !== 'attack') return decision;
+  const guard = routeGuard(b, decision.action);
+  if (!guard.blocked) return decision;
+  const from = b.idx(decision.action.x, decision.action.y);
+  const to = b.idx(decision.action.dx, decision.action.dy);
+  for (const mode of [0, 1, 2]) {
+    if (mode === decision.action.mode) continue;
+    const action = safeMove(b, from, to, decision.branch === 'march' ? 'campaign' : 'move', [mode]);
+    if (action && !routeGuard(b, action).blocked) return { ...decision, action };
+  }
+  if (guard.anchor >= 0) return { action: build(b, guard.anchor), branch: 'route-anchor' };
+  return repairSupply(b, guard.cut) || { action: null, branch: 'supply-hold' };
 }
 
 function supplyReservations(m) {
@@ -465,6 +672,26 @@ function defense(b, m, own) {
   for (const crown of crowns) {
     const f = field(b,[crown]);
     const guard = localGuard(b, crown);
+    // A long approach is an emergency only while this is the sole crown.
+    // Once a second crown exists, a distant stack must not freeze every
+    // campaign around a disposable outpost; direct tower captures are still
+    // handled by enemyAnchorThreats below.
+    const approach = crowns.length === 1 ? approachThreat(b, crown, guard) : null;
+    if (approach && b.army[crown] < approach.need) {
+      // Fill the threatened crown with a full local column first. Smart split
+      // deliberately leaves a reserve for neighbouring fronts, but that is
+      // the wrong trade when a saved enemy stack is already approaching the
+      // only crown. The next call can then pull the next tributary in turn.
+      const direct = [...b.neighbors(crown)]
+        .filter((from) => b.own(from) && !b.isolated[from] && movable(b, from))
+        .sort((a, z) => b.army[z] - b.army[a]);
+      for (const from of direct) {
+        const action = safeMove(b, from, crown, 'gather', [2, 0, 1]);
+        if (action) return { action, branch: 'anchor-approach' };
+      }
+      const delivery = gather(b, m, crown, approach.need, 'anchor-approach');
+      if (delivery) return delivery;
+    }
     let nearest = Infinity;
     for (let enemy = 0; enemy < b.size; enemy += 1) {
       if (b.enemy(enemy) && !b.isolated[enemy] && f.distance[enemy] < nearest) nearest = f.distance[enemy];
@@ -1077,14 +1304,6 @@ function chooseCampaign(b,m,own) {
   if (c.phase === 'gather' && b.army[c.at] < Math.min(desired, 18)) return null;
   c.phase='attack';
   const to=p[1];
-  // Before exposing a long supply route, anchor the active army itself. This
-  // works for any topology, including a maze whose geometric width is one.
-  if(b.kind(c.at)==='plain' && b.army[c.at]>=90) {
-    const cuts=cutAnalysis(b,b.playerId);
-    const danger = own.some(i=>i!==c.at && cuts.land[i]>0 &&
-      pressure(b,i)>b.army[i] && cuts.mass[i]>b.army[c.at]*0.7);
-    if(danger) return {action:build(b,c.at),branch:'anchor'};
-  }
   const a=safeMove(b,c.at,to,'campaign');
   if(a){
     const guard = routeGuard(b, a);
@@ -1092,6 +1311,8 @@ function chooseCampaign(b,m,own) {
       return { action: build(b, guard.anchor), branch: 'route-anchor' };
     }
     if (guard.blocked) {
+      const repair = repairSupply(b, guard.cut);
+      if (repair) return repair;
       // The next move would expose a large, anchorless branch to a one-turn
       // enemy cutoff.  Reinforce the exact articulation cell when logistics
       // can reach it; otherwise hold the spearhead instead of repeatedly
@@ -1156,6 +1377,8 @@ function plan(b,m) {
   // switch the action budget to economy, rallying, and visible combat.
   const explore = !fogged || b.turn < 120 || own.length < 40 || (fogged && b.turn % 5 === 0);
   const ed=field(b,enemies);
+  const anchorGuard = anchorDefense(b);
+  if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
   if(tactic?.branch==='crown')return tactic;
   const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
@@ -1259,4 +1482,4 @@ function plan(b,m) {
   if(growthAction)return growthAction;
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion};
