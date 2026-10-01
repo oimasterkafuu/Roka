@@ -299,14 +299,14 @@
           <label class="map-example-control" id="map-example-region-control" style="display: none"
             >地区：
             <select id="map-example-region">
+              <option value="china">中国</option>
               <option value="qin">秦</option>
               <option value="han">汉</option>
               <option value="tang">唐</option>
+              <option value="liao">辽</option>
               <option value="song">宋</option>
               <option value="yuan">元</option>
               <option value="ming">明</option>
-              <option value="liao">辽</option>
-              <option value="china">中国</option>
               <option value="taiwan">台湾省</option>
             </select>
           </label>
@@ -550,7 +550,7 @@
         document.getElementById('map-example-meta').textContent =
           `${example.n} x ${example.m} · ${data.players} 人`;
         document.getElementById('map-example-mode').value = String(example.map_mode || 'random');
-        document.getElementById('map-example-region').value = String(example.map_region || 'han');
+        document.getElementById('map-example-region').value = String(example.map_region || 'china');
         syncMapExampleRegionControl();
         document.getElementById('map-example-players').value = String(data.players);
         renderExampleBoard(document.getElementById('map-example-board'), example);
@@ -620,7 +620,7 @@
         syncMapExampleRegionControl();
         const params = new URLSearchParams({
           map_mode: mode,
-          map_region: String(document.getElementById('map-example-region').value || 'han'),
+          map_region: String(document.getElementById('map-example-region').value || 'china'),
           players: String(getSelectedMapPlayers()),
         });
         const res = await fetch(`/api/map-examples?${params.toString()}`, { cache: 'no-store' });

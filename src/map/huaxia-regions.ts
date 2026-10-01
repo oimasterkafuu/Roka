@@ -24,10 +24,10 @@ const regions: readonly { id: MapRegion; name: string; bounds: HuaxiaRegionConfi
   { id: 'qin', name: '秦', bounds: { west: 96, east: 111, south: 30, north: 39 } },
   { id: 'han', name: '汉', bounds: { west: 73, east: 135, south: 18, north: 49 } },
   { id: 'tang', name: '唐', bounds: { west: 70, east: 140, south: 16, north: 55 } },
+  { id: 'liao', name: '辽', bounds: { west: 90, east: 125, south: 35, north: 55 } },
   { id: 'song', name: '宋', bounds: { west: 97, east: 125, south: 18, north: 43 } },
   { id: 'yuan', name: '元', bounds: { west: 70, east: 142, south: 8, north: 59 } },
   { id: 'ming', name: '明', bounds: { west: 90, east: 135, south: 17, north: 52 } },
-  { id: 'liao', name: '辽', bounds: { west: 90, east: 125, south: 35, north: 55 } },
   { id: 'china', name: '中国', bounds: { west: 73, east: 135, south: 18, north: 54 } },
   { id: 'taiwan', name: '台湾省', bounds: { west: 119, east: 122.2, south: 21.5, north: 25.5 } },
 ];
@@ -40,7 +40,7 @@ export const HUAXIA_REGIONS: readonly HuaxiaRegionConfig[] = regions.map(({ id, 
   territoryAreaKm2: null,
 }));
 
-export const DEFAULT_MAP_REGION: MapRegion = 'han';
+export const DEFAULT_MAP_REGION: MapRegion = 'china';
 
 const REGION_BY_ID = new Map(HUAXIA_REGIONS.map((region) => [region.id, region]));
 

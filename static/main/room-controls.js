@@ -98,14 +98,14 @@ function getMapRegionCode() {
     秦: 'qin',
     汉: 'han',
     唐: 'tang',
+    辽: 'liao',
     宋: 'song',
     元: 'yuan',
     明: 'ming',
-    辽: 'liao',
     中国: 'china',
     台湾省: 'taiwan',
   };
-  return regions[getTabVal('map-region')] || 'han';
+  return regions[getTabVal('map-region')] || 'china';
 }
 
 function setMapModeByCode(code) {
@@ -133,14 +133,14 @@ function setMapRegionByCode(code) {
     qin: '秦',
     han: '汉',
     tang: '唐',
+    liao: '辽',
     song: '宋',
     yuan: '元',
     ming: '明',
-    liao: '辽',
     china: '中国',
     taiwan: '台湾省',
   };
-  setTabVal('map-region', labels[code] || '汉');
+  setTabVal('map-region', labels[code] || '中国');
 }
 
 function refreshMapInputHint() {
