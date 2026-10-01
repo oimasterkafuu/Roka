@@ -33,7 +33,7 @@ node training/long-eval.cjs --seeds 24 --workers 8 --turns 600 --opponents anti 
 node training/long-eval.cjs --help
 ```
 
-评测结果默认打印为 JSON；传入 `--output FILE` 或设置 `APEX_EVAL_OUTPUT` 可保存报告。`--profile large` 会固定覆盖 0.5、0.68、1 三档地图尺寸，建议配合 1200 Tick 观察完整长距离战役。报告包括每局地图、种子、胜负、Tick、决策延迟直方图、失败回放，以及按尺寸和尺寸组汇总的 120/300/600/900/1200 Tick 皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的兵力/领土/皇冠比。最近一次 48 局 Anti-Human 快速回归得到 42 胜、0 负、6 平，所有胜局都在 600 Tick 内，平均胜局 269.3 Tick，最慢 585 Tick；Simple-Strategy-Bot 的 8 局固定种子测试得到 8 胜 0 负，平均约 204 Tick。决策 p50 约 0.67 ms、p95 约 2.25 ms。结果用于回归比较，不把平局计作击杀。
+评测结果默认打印为 JSON；传入 `--output FILE` 或设置 `APEX_EVAL_OUTPUT` 可保存报告。`--profile large` 会固定覆盖 0.5、0.68、1 三档地图尺寸，建议配合 1200 Tick 观察完整长距离战役。报告包括每局地图、种子、胜负、Tick、决策延迟直方图、失败回放，以及按尺寸和尺寸组汇总的 120/300/600/900/1200 Tick 皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的兵力/领土/皇冠比。历史 48 局 Anti-Human 基准曾记录 42 胜、0 负、6 平；实际结果会随种子、尺寸和代码版本变化，应以评测报告为准。结果用于回归比较，不把平局计作击杀。
 
 服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机。
 Bot 加入房间后默认自动切换到配置队伍并发送准备；只有设置 `BOT_AUTO_READY=0` 或传入 `autoReady: false` 才会关闭自动准备。
