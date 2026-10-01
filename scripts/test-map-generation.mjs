@@ -4,7 +4,7 @@ import { selectRandomGenerals } from '../src/game-engine/general-selection.ts';
 import { HUAXIA_RIDGES, HUAXIA_PASSES } from '../src/map/huaxia-terrain-data.ts';
 import { generateHuaxiaMap, isLand } from '../src/map/huaxia-map-generator.ts';
 import { DEFAULT_MAP_REGION, HUAXIA_REGIONS, normalizeMapRegion } from '../src/map/huaxia-regions.ts';
-import { resolveMapSizeRatioByPlayers } from '../src/map/map-size.ts';
+import { resolveMapSizeRatioByPlayers, resolveMapSizeRatioByPlayersAndRegion } from '../src/map/map-size.ts';
 
 const baseConfig = {
   widthRatio: 0.8,
@@ -191,8 +191,15 @@ for (const region of HUAXIA_REGIONS) {
     }
   }
 
+  if (region.id === 'taiwan') {
+    const standardRatio = resolveMapSizeRatioByPlayers(8);
+    const taiwanRatio = resolveMapSizeRatioByPlayersAndRegion(8, region.id);
+    assert.ok(taiwanRatio > standardRatio, 'taiwan map ratio is larger than the standard ratio');
+    assert.ok(Math.abs(taiwanRatio / standardRatio - 1.1) < 1e-12, 'taiwan map ratio increases by 10%');
+  }
+
   for (let players = 2; players <= 16; players += 1) {
-    const playerRatio = resolveMapSizeRatioByPlayers(players);
+    const playerRatio = resolveMapSizeRatioByPlayersAndRegion(players, region.id);
     const sized = generateHuaxiaMap(new SeededRandom(`size:${players}`), {
       ...baseConfig,
       widthRatio: playerRatio,
