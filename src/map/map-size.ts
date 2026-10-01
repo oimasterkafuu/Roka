@@ -1,4 +1,6 @@
-import { MAX_TEAMS } from '../types';
+import { MAX_TEAMS, MapRegion } from '../types';
+
+const TAIWAN_MAP_SIZE_MULTIPLIER = 1.1;
 
 const resolveMapSizeRatioByPlayers = (playingCount: number): number => {
   const minPlayers = 2;
@@ -9,4 +11,9 @@ const resolveMapSizeRatioByPlayers = (playingCount: number): number => {
   return Math.max(0.34, ratio);
 };
 
-export { resolveMapSizeRatioByPlayers };
+const resolveMapSizeRatioByPlayersAndRegion = (playingCount: number, mapRegion: MapRegion): number => {
+  const ratio = resolveMapSizeRatioByPlayers(playingCount);
+  return mapRegion === 'taiwan' ? ratio * TAIWAN_MAP_SIZE_MULTIPLIER : ratio;
+};
+
+export { resolveMapSizeRatioByPlayers, resolveMapSizeRatioByPlayersAndRegion };
