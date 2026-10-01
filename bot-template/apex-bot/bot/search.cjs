@@ -8,7 +8,8 @@ function rankBySearch(board) {
     .sort((a, b) => b.quick - a.quick).slice(0, 10)
     .map(({ action }) => ({ action, ...bestResponse(board, action, candidates) }))
     .sort((a, b) => b.score - a.score);
-  board.searchStats = { candidates: ranked.length, elapsedMs: Number(process.hrtime.bigint() - started) / 1e6 };
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  board.searchStats = { candidates: ranked.length, elapsedMs, timeout: false, p95: elapsedMs };
   return ranked;
 }
 function chooseBySearch(board) { return rankBySearch(board)[0]?.action || null; }
