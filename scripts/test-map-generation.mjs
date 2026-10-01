@@ -3,7 +3,7 @@ import { SeededRandom, checkConnection } from '../src/map/map-core.ts';
 import { selectRandomGenerals } from '../src/game-engine/general-selection.ts';
 import { HUAXIA_RIDGES, HUAXIA_PASSES } from '../src/map/huaxia-terrain-data.ts';
 import { generateHuaxiaMap, isLand } from '../src/map/huaxia-map-generator.ts';
-import { HUAXIA_REGIONS } from '../src/map/huaxia-regions.ts';
+import { HUAXIA_REGIONS, normalizeMapRegion } from '../src/map/huaxia-regions.ts';
 import { resolveMapSizeRatioByPlayers } from '../src/map/map-size.ts';
 
 const baseConfig = {
@@ -16,6 +16,13 @@ const baseConfig = {
 
 const serialize = (map) => JSON.stringify({ n: map.n, m: map.m, gridType: map.gridType });
 const maps = new Map();
+assert.equal(HUAXIA_REGIONS.length, 10, 'exactly ten Huaxia regions are exposed');
+assert.deepEqual(
+  HUAXIA_REGIONS.map((region) => region.id),
+  ['qin', 'han', 'tang', 'song', 'yuan', 'ming', 'qing', 'china', 'hong-kong', 'taiwan'],
+);
+assert.equal(normalizeMapRegion('three-kingdoms'), 'han');
+assert.equal(normalizeMapRegion('northern-dynasties'), 'han');
 const first = generateHuaxiaMap(new SeededRandom('map-test:first'), {
   ...baseConfig,
   mapRegion: 'han',
@@ -40,9 +47,23 @@ for (const region of HUAXIA_REGIONS) {
     },
     [0, 0, 0],
   );
-  assert.ok(counts[2] > 0, `${region.id} has sea in its geographic viewport`);
+  assert.ok(counts[0] > 0, `${region.id} has playable plains`);
   assert.ok(counts[0] > counts[1], `${region.id} keeps plains dominant over mountains`);
-  assert.ok(counts[1] > 0, `${region.id} has fixed mountain lines`);
+  assert.ok(
+    map.gridType.every((row, x) => row.every((tile, y) => tile !== 2 || !map.st[x][y])),
+    `${region.id} spawn mask excludes sea`,
+  );
+  assert.ok(map.st.flat().filter(Boolean).length >= 16, `${region.id} has enough main-land plains`);
+  const hasRidgeInViewport = HUAXIA_RIDGES.some((ridge) =>
+    ridge.points.some(
+      (point) =>
+        point.lon >= region.bounds.west &&
+        point.lon <= region.bounds.east &&
+        point.lat >= region.bounds.south &&
+        point.lat <= region.bounds.north,
+    ),
+  );
+  if (hasRidgeInViewport) assert.ok(counts[1] > 0, `${region.id} has fixed mountain lines`);
   assert.ok(
     HUAXIA_RIDGES.some((ridge) => ridge.width >= 1.1),
     'main ridges are wider',
@@ -51,10 +72,15 @@ for (const region of HUAXIA_REGIONS) {
     HUAXIA_RIDGES.some((ridge) => ridge.width <= 0.9),
     'branch ridges are thinner',
   );
-  assert.ok(
-    isLand(region.bounds.west + 1, region.bounds.north - 1),
-    `${region.id} western viewport is not all sea`,
+  const hasLandInViewport = [0.2, 0.5, 0.8].some((latRatio) =>
+    [0.2, 0.5, 0.8].some((lonRatio) =>
+      isLand(
+        region.bounds.west + (region.bounds.east - region.bounds.west) * lonRatio,
+        region.bounds.south + (region.bounds.north - region.bounds.south) * latRatio,
+      ),
+    ),
   );
+  assert.ok(hasLandInViewport, `${region.id} viewport contains land`);
   assert.equal(region.territoryAreaKm2, null, `${region.id} does not mislabel viewport as territory area`);
   assert.ok(HUAXIA_PASSES.length >= 11, 'fixed passes include narrow mountain corridors');
   const viewportPasses = HUAXIA_PASSES.filter(
@@ -106,6 +132,17 @@ for (const region of HUAXIA_REGIONS) {
       generals.every(([x, y]) => x >= 0 && sized.st[x][y] && sized.gridType[x][y] === 0),
       `${region.id} ${players}-player spawns stay on connected plains`,
     );
+    if (players === 2 && (region.id === 'taiwan' || region.id === 'hong-kong')) {
+      assert.ok(
+        generals.every(([x, y]) => {
+          const lat =
+            region.bounds.north - ((x + 0.5) * (region.bounds.north - region.bounds.south)) / sized.n;
+          const lon = region.bounds.west + ((y + 0.5) * (region.bounds.east - region.bounds.west)) / sized.m;
+          return isLand(lon, lat);
+        }),
+        `${region.id} spawns stay on its designated land component`,
+      );
+    }
   }
   maps.set(region.id, serialize(map));
 }

@@ -67,14 +67,16 @@ function getMapModeCode() {
 
 function getMapRegionCode() {
   var regions = {
+    秦: 'qin',
     汉: 'han',
-    三国: 'three-kingdoms',
-    北朝: 'northern-dynasties',
     唐: 'tang',
     宋: 'song',
     元: 'yuan',
     明: 'ming',
     清: 'qing',
+    中国: 'china',
+    香港: 'hong-kong',
+    台湾省: 'taiwan',
   };
   return regions[getTabVal('map-region')] || 'han';
 }
@@ -101,14 +103,16 @@ function setMapModeByCode(code) {
 
 function setMapRegionByCode(code) {
   var labels = {
+    qin: '秦',
     han: '汉',
-    'three-kingdoms': '三国',
-    'northern-dynasties': '北朝',
     tang: '唐',
     song: '宋',
     yuan: '元',
     ming: '明',
     qing: '清',
+    china: '中国',
+    'hong-kong': '香港',
+    taiwan: '台湾省',
   };
   setTabVal('map-region', labels[code] || '汉');
 }
