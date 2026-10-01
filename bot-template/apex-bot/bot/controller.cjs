@@ -52,6 +52,7 @@ function createController(playerId) {
     memory.campaign = null;
     memory.delivery = null;
     memory.blocked = null;
+    memory.swampRatio = undefined;
     memory.site = undefined;
     memory.buildPlan = null;
     memory.home = undefined;
