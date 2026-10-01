@@ -3,6 +3,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { UserStore } from '../auth-store';
 import { GameEngine } from '../game-engine';
 import { DISCONNECT_GRACE_MS } from '../game-engine/constants';
+import { isHuaxiaSeasonActive } from '../map/huaxia-season';
 import { resolveMapSizeRatioByPlayers } from '../map/map-size';
 import { DEFAULT_MAP_REGION, getHuaxiaRegion, normalizeMapRegion } from '../map/huaxia-regions';
 import { ReplayStore } from '../replay-store';
@@ -332,6 +333,8 @@ class LobbyService {
       throw new Error(`Missing lobby config for room: ${gid}`);
     }
     const normalizedMapToken = this.normalizeMapToken(conf.map_token);
+    const mapMode =
+      conf.map_mode === 'huaxia' && !isHuaxiaSeasonActive(new Date()) ? 'random' : conf.map_mode;
     if (normalizedMapToken !== conf.map_token) {
       conf.map_token = normalizedMapToken;
       this.lobbyConfig.set(gid, conf);
@@ -361,7 +364,7 @@ class LobbyService {
       allow_team: conf.allow_team,
       fog: conf.fog === true,
       map_token: conf.map_token,
-      map_mode: conf.map_mode,
+      map_mode: mapMode,
       map_region: normalizeMapRegion(conf.map_region),
       map_size: conf.map_size === 'large' ? 'large' : 'normal',
       in_game: this.isLobbyGameRunning(gid),
@@ -540,6 +543,7 @@ class LobbyService {
 
     const gameConf: GameConfig = {
       ...conf,
+      map_mode: conf.map_mode === 'huaxia' && !isHuaxiaSeasonActive(new Date()) ? 'random' : conf.map_mode,
       ...this.getMapSizeConfigByPlayers(players, conf),
       player_names: playerNames,
       player_teams: playerTeams,

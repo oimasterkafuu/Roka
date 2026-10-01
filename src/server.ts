@@ -9,6 +9,7 @@ import { Announcement, AnnouncementStore, ANNOUNCEMENT_TEXT_MAX } from './announ
 import { UserStore } from './auth-store';
 import { FeedCooldownException, FeedStore } from './feed-store';
 import { GameEngine } from './game-engine';
+import { isHuaxiaSeasonActive } from './map/huaxia-season';
 import { resolveMapSizeRatioByPlayers } from './map/map-size';
 import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
 import { ratingTier } from './rating-color';
@@ -1268,6 +1269,9 @@ const boot = async (): Promise<void> => {
     const query = request.query as { map_mode?: unknown; map_region?: unknown; players?: unknown };
     const mapModeRaw = String(query.map_mode ?? 'random');
     const mapMode = isMapExampleMode(mapModeRaw) ? mapModeRaw : 'random';
+    if (mapMode === 'huaxia' && !isHuaxiaSeasonActive(new Date())) {
+      return reply.code(403).send({ error: '华夏系列地图仅在每年 10 月 1 日至 10 月 7 日开放。' });
+    }
     const players = parseMapExamplePlayerCount(query.players);
     const mapRegion = normalizeMapRegion(query.map_region);
     const example = await buildMapExample(mapMode, players, mapRegion);
@@ -1709,6 +1713,15 @@ const boot = async (): Promise<void> => {
           } else if (mapModeRaw === 'mediterranean') {
             mapMode = 'mediterranean';
           } else if (mapModeRaw === 'huaxia') {
+            if (!isHuaxiaSeasonActive(new Date())) {
+              lobbyService.sendLobbySystemMessage(
+                io,
+                roomVal,
+                '华夏系列地图仅在每年 10 月 1 日至 10 月 7 日开放。',
+              );
+              lobbyService.emitRoomUpdate(io, gid);
+              return;
+            }
             mapMode = 'huaxia';
           }
           if (mapMode !== oldConf.map_mode) {

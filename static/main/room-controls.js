@@ -56,7 +56,35 @@ async function copyRoomLink() {
   }
 }
 
+function isHuaxiaSeasonActiveClient() {
+  var parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  var month = Number(
+    parts.find(function (part) {
+      return part.type == 'month';
+    }).value,
+  );
+  var day = Number(
+    parts.find(function (part) {
+      return part.type == 'day';
+    }).value,
+  );
+  return month == 10 && day >= 1 && day <= 7;
+}
+
+function refreshHuaxiaAvailability() {
+  var active = isHuaxiaSeasonActiveClient();
+  $('[data-map-mode="huaxia"]').css('display', active ? '' : 'none');
+  if (!active && getTabVal('map-mode') == '华夏系列') {
+    setTabVal('map-mode', '标准地图');
+  }
+}
+
 function getMapModeCode() {
+  refreshHuaxiaAvailability();
   var mapMode = getTabVal('map-mode');
   if (mapMode == '峡谷回廊') return 'maze';
   if (mapMode == '群岛要塞') return 'archipelago';
@@ -81,7 +109,7 @@ function getMapRegionCode() {
 }
 
 function setMapModeByCode(code) {
-  if (code == 'huaxia') {
+  if (code == 'huaxia' && isHuaxiaSeasonActiveClient()) {
     setTabVal('map-mode', '华夏系列');
     return;
   }
@@ -293,6 +321,11 @@ function initTab(x, y, callback) {
 
 var chatStr = '';
 var teamPrefix = '[队伍] ';
+
+$(document).ready(function () {
+  refreshHuaxiaAvailability();
+  window.setInterval(refreshHuaxiaAvailability, 60 * 1000);
+});
 
 function checkChat() {
   var tmp = $('#chatroom-input').val(),

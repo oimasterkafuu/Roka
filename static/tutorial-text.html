@@ -592,7 +592,29 @@
         select.value = '4';
       }
 
+      function isHuaxiaSeasonActive() {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Shanghai',
+          month: '2-digit',
+          day: '2-digit',
+        }).formatToParts(new Date());
+        const month = Number(parts.find((part) => part.type === 'month').value);
+        const day = Number(parts.find((part) => part.type === 'day').value);
+        return month === 10 && day >= 1 && day <= 7;
+      }
+
+      function refreshHuaxiaOption() {
+        const option = document.querySelector('#map-example-mode option[value="huaxia"]');
+        const active = isHuaxiaSeasonActive();
+        option.hidden = !active;
+        if (!active && getSelectedMapMode() === 'huaxia') {
+          document.getElementById('map-example-mode').value = 'random';
+        }
+        syncMapExampleRegionControl();
+      }
+
       async function loadMapExample() {
+        refreshHuaxiaOption();
         setMapExampleStatus('加载中…');
         const mode = getSelectedMapMode();
         syncMapExampleRegionControl();
@@ -652,7 +674,8 @@
         const authed = await loadUser();
         if (!authed) return;
         initMapPlayerOptions();
-        syncMapExampleRegionControl();
+        refreshHuaxiaOption();
+        window.setInterval(refreshHuaxiaOption, 60 * 1000);
         try {
           await loadMapExample();
         } catch {
