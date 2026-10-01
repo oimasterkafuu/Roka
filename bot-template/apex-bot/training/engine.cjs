@@ -570,7 +570,7 @@ function createArena({
       if (!captureReplay) return null;
       return {
         schemaVersion: 1,
-        settings: { mapMode, seed, mapSize, fog },
+        settings: { mapMode, seed, mapSize, fog, engineConfig },
         initial: initialSnapshot,
         totalTicks: engine.turn,
         complete: !replayTruncated,

@@ -2,9 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { makeBoard } = require('../bot/board.cjs');
+const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, sustainEconomy } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, sustainEconomy, treeGather } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -171,4 +171,28 @@ test('frontline construction can use a bounded local supply branch', () => {
   assert.equal(decision.branch, 'front-fund');
   assert.deepEqual(decision.action, { kind: 'attack', x: 0, y: 12, dx: 0, dy: 11, mode: 0, half: false });
   assert.equal(memory.rearEconomy.front, true);
+});
+
+test('tree gathering drains tributaries before their shared trunk', () => {
+  const grid = [101, ...Array(9).fill(1)];
+  const army = [1, 2, 2, 2, 20, 1, 1, 1, 30, 1];
+  const b = makeBoard({
+    n: 1, m: 10, grid, army,
+    isolated: Array(10).fill(0), fog: Array(10).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }],
+  }, 1);
+  const root = 0;
+  const canEnter = (at) => b.own(at) && !b.isolated[at];
+  const field = distanceField(b, [root], canEnter);
+  const memory = { delivery: null };
+  const sources = [
+    { at: 4, p: [4, 3, 2, 1, 0] },
+    { at: 8, p: [8, 7, 6, 5, 4, 3, 2, 1, 0] },
+  ];
+  const decision = treeGather(b, memory, root, 100, 'muster', canEnter, field, sources);
+  assert.equal(decision.branch, 'muster-tree');
+  assert.equal(decision.action.x, 0);
+  assert.equal(decision.action.y, 8);
+  assert.equal(decision.action.dy, 7);
+  assert.equal(memory.delivery.edges[0][0], 8);
 });
