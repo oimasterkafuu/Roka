@@ -1,48 +1,262 @@
 'use strict';
-const { project } = require('./bot/board.cjs');
+
+const { makeBoard } = require('./bot/board.cjs');
 const { createController } = require('./bot/controller.cjs');
-function finiteArray(a, size) { return Array.isArray(a) && a.length === size && a.every(Number.isFinite); }
-function applyDiff(values, target) {
-  if (!Array.isArray(values) || values.length % 2) return false;
-  const next = target.slice();
-  for (let i = 0; i < values.length; i += 2) if (!Number.isInteger(values[i]) || values[i] < 0 || values[i] >= next.length || !Number.isFinite(values[i + 1])) return false; else next[values[i]] = values[i + 1];
-  target.splice(0, target.length, ...next); return true;
+
+function validFrameArray(value, size) {
+  return Array.isArray(value) && value.length === size && value.every(Number.isFinite);
 }
+
+function applyDiff(target, diff) {
+  if (!Array.isArray(diff) || diff.length % 2 !== 0) return false;
+  const next = target.slice();
+  for (let i = 0; i < diff.length; i += 2) {
+    const index = diff[i];
+    const value = diff[i + 1];
+    if (!Number.isInteger(index) || index < 0 || index >= next.length || !Number.isFinite(value))
+      return false;
+    next[index] = value;
+  }
+  target.splice(0, target.length, ...next);
+  return true;
+}
+
 function attachStrategy(socket, options = {}) {
-  const room = String(options.room || '').trim(); if (!room) throw new Error('attachStrategy: missing room');
+  const room = String(options.room || '').trim();
+  if (!room) throw new Error('attachStrategy: missing room');
   const log = typeof options.log === 'function' ? options.log : () => {};
-  const state = { n: 0, m: 0, size: 0, grid: [], army: [], isolated: [], fog: [], leaderboard: [], teams: new Map(), clientId: '', playerId: 0, turn: -1, inGame: false, dead: false, queue: [] };
-  let controller = null, heartbeat = null, kickTimer = null, actionTimer = null;
-  const onSetId = (id) => { state.clientId = String(id || ''); };
-  const reset = (n, m) => { state.n = n; state.m = m; state.size = n * m; state.grid = Array(state.size).fill(200); state.army = Array(state.size).fill(0); state.isolated = Array(state.size).fill(0); state.fog = Array(state.size).fill(0); state.leaderboard = []; state.teams = new Map(); state.turn = -1; state.inGame = true; state.dead = false; state.queue = []; controller = createController(0); };
-  const onInit = (data = {}) => { const n = Number(data.n), m = Number(data.m); if (!Number.isInteger(n) || !Number.isInteger(m) || n < 1 || m < 1 || n * m > 100000) return; reset(n, m); const ids = Array.isArray(data.player_ids) ? data.player_ids.map(String) : []; state.playerId = ids.indexOf(state.clientId) + 1; controller = createController(state.playerId); log(`init_map ${n}x${m}, playerId=${state.playerId || 'spectator'}`); };
-  const updateMeta = (payload) => { if (Array.isArray(payload.leaderboard)) { state.leaderboard = payload.leaderboard.map((p) => ({ ...p })); state.teams = new Map(state.leaderboard.map((p) => [Number(p.id), Number(p.team) || Number(p.id)])); const me = state.leaderboard.find((p) => Number(p.id) === state.playerId); state.dead = Boolean(me && (me.dead > 0 || me.class_ === 'dead')); } };
-  const onUpdate = (payload = {}) => {
-    if (!state.inGame || !Number.isInteger(payload.turn) || payload.turn < state.turn) return;
-    const fields = [['grid_type', state.grid], ['army_cnt', state.army], ['isolated', state.isolated], ['fog', state.fog]];
-    for (const [name, target] of fields) {
-      if (payload[name] === undefined && (name === 'isolated' || name === 'fog')) {
-        if (!payload.is_diff) target.fill(0);
+  const actionDelayMs = Math.max(0, Number(options.actionDelayMs ?? 60) || 0);
+  const state = {
+    n: 0,
+    m: 0,
+    size: 0,
+    playerId: 0,
+    clientId: '',
+    turn: -1,
+    grid: [],
+    army: [],
+    isolated: [],
+    fog: [],
+    leaderboard: [],
+    teams: new Map(),
+    inGame: false,
+    dead: false,
+    ended: false,
+    queued: 0,
+  };
+  let controller = null;
+  let heartbeat = null;
+  let decisionTimer = null;
+  let reconnectTimer = null;
+  let lastRoomCommand = '';
+
+  function reset(n, m, ids) {
+    if (decisionTimer) {
+      clearTimeout(decisionTimer);
+      decisionTimer = null;
+    }
+    state.n = n;
+    state.m = m;
+    state.size = n * m;
+    state.grid = Array(state.size).fill(200);
+    state.army = Array(state.size).fill(0);
+    state.isolated = Array(state.size).fill(0);
+    state.fog = Array(state.size).fill(0);
+    state.turn = -1;
+    state.leaderboard = [];
+    state.teams = new Map();
+    state.queued = 0;
+    state.playerId = ids.indexOf(state.clientId) + 1;
+    state.dead = false;
+    state.ended = false;
+    state.inGame = true;
+    controller = createController(state.playerId);
+    lastRoomCommand = '';
+  }
+
+  function updatePlayers(payload) {
+    if (!Array.isArray(payload.leaderboard)) return;
+    state.leaderboard = payload.leaderboard.map((entry) => ({ ...entry }));
+    state.teams = new Map(
+      state.leaderboard.map((entry) => [Number(entry.id), Number(entry.team) || Number(entry.id)]),
+    );
+    const me = state.leaderboard.find((entry) => Number(entry.id) === state.playerId);
+    state.dead = state.dead || Boolean(me && (me.dead > 0 || me.class_ === 'dead'));
+  }
+
+  function decide() {
+    if (!state.inGame || state.dead || state.ended || !controller || !state.playerId) return;
+    const board = makeBoard(
+      {
+        n: state.n,
+        m: state.m,
+        grid: state.grid,
+        army: state.army,
+        isolated: state.isolated,
+        fog: state.fog,
+        leaderboard: state.leaderboard,
+        teams: state.teams,
+        turn: state.turn,
+        dead: state.dead,
+        ended: state.ended,
+      },
+      state.playerId,
+    );
+    const action = controller.choose(board);
+    if (!action) return;
+    state.queued += 1;
+    socket.emit(action.kind === 'build' ? 'build' : 'attack', action);
+  }
+
+  function onSetId(id) {
+    state.clientId = String(id || '');
+  }
+
+  function onInit(payload = {}) {
+    const n = Number(payload.n);
+    const m = Number(payload.m);
+    const ids = Array.isArray(payload.player_ids) ? payload.player_ids.map(String) : [];
+    if (!Number.isInteger(n) || !Number.isInteger(m) || n < 1 || m < 1 || n * m > 100000) return;
+    reset(n, m, ids);
+    log(`new game ${n}x${m}, player=${state.playerId}`);
+  }
+
+  function onUpdate(payload = {}) {
+    if (!state.inGame || !Number.isInteger(payload.turn) || payload.turn <= state.turn) return;
+    const next = {
+      grid: state.grid.slice(),
+      army: state.army.slice(),
+      isolated: state.isolated.slice(),
+      fog: state.fog.slice(),
+    };
+    const fields = [
+      ['grid_type', 'grid'],
+      ['army_cnt', 'army'],
+      ['isolated', 'isolated'],
+      ['fog', 'fog'],
+    ];
+    for (const [wire, local] of fields) {
+      if (payload[wire] === undefined) {
+        if (!payload.is_diff && (local === 'fog' || local === 'isolated')) next[local].fill(0);
         continue;
       }
-      const ok = payload.is_diff ? applyDiff(payload[name], target) : finiteArray(payload[name], state.size);
-      if (!ok) return;
-      if (!payload.is_diff) target.splice(0, target.length, ...payload[name]);
+      if (payload.is_diff) {
+        if (!applyDiff(next[local], payload[wire])) return;
+      } else if (validFrameArray(payload[wire], state.size)) {
+        next[local] = payload[wire].slice();
+      } else {
+        return;
+      }
     }
-    updateMeta(payload); state.turn = payload.turn; if (payload.lst_move && state.queue.length) state.queue.shift();
+    if (!payload.is_diff && payload.fog === undefined) next.fog.fill(0);
+    state.grid.splice(0, state.size, ...next.grid);
+    state.army.splice(0, state.size, ...next.army);
+    state.isolated.splice(0, state.size, ...next.isolated);
+    state.fog.splice(0, state.size, ...next.fog);
+    updatePlayers(payload);
+    state.turn = payload.turn;
+    state.ended = Boolean(payload.game_end);
     if (payload.kills && payload.kills[state.clientId]) state.dead = true;
-    if (payload.game_end) { state.inGame = false; state.queue = []; controller?.reset(); if (actionTimer) clearTimeout(actionTimer); log(`game ended at turn ${state.turn}`); return; }
+    if (state.ended) {
+      state.inGame = false;
+      if (decisionTimer) clearTimeout(decisionTimer);
+      controller?.reset();
+      return;
+    }
     if (!state.playerId || state.dead) return;
-    if (actionTimer) clearTimeout(actionTimer); actionTimer = setTimeout(() => { const frame = project({ n: state.n, m: state.m, grid_type: state.grid, army_cnt: state.army, isolated: state.isolated, fog: state.fog, leaderboard: state.leaderboard, teams: state.teams, turn: state.turn, dead: state.dead }, state.playerId); const action = controller.choose(frame); if (action) { state.queue.push(action); socket.emit(action.kind === 'build' ? 'build' : 'attack', action); } }, Number(options.actionDelayMs || 0));
-  };
-  const onRoomUpdate = (data = {}) => { if (options.autoReady === false || state.inGame) return; const me = (data.players || []).find((p) => String(p.sid || p.client_id || '') === state.clientId); if (me && !me.ready) socket.emit('change_ready', { ready: true }); };
-  const onConnect = () => socket.emit('join_game_room', { room });
-  const onDisconnect = () => { state.inGame = false; if (actionTimer) clearTimeout(actionTimer); };
-  const onLeft = () => { state.inGame = false; state.queue = []; controller?.reset(); };
-  const onKick = () => { state.inGame = false; if (kickTimer) clearTimeout(kickTimer); kickTimer = setTimeout(() => socket.emit('join_game_room', { room }), 500); };
-  socket.on('connect', onConnect); socket.on('disconnect', onDisconnect); socket.on('set_id', onSetId); socket.on('init_map', onInit); socket.on('update', onUpdate); socket.on('room_update', onRoomUpdate); socket.on('left', onLeft); socket.on('room_kick', onKick);
-  const heartbeatMs = Math.max(0, Number(options.heartbeatIntervalMs ?? 30000) || 0); if (heartbeatMs) { heartbeat = setInterval(() => socket.emit('room_heartbeat'), heartbeatMs); heartbeat.unref?.(); }
+    if (decisionTimer) clearTimeout(decisionTimer);
+    decisionTimer = setTimeout(decide, actionDelayMs);
+  }
+
+  function onRoomUpdate(payload = {}) {
+    if (state.inGame) return;
+    if (payload.in_game === true) return;
+    const players = Array.isArray(payload.players) ? payload.players : [];
+    const me = players.find((entry) => String(entry.sid || entry.client_id || '') === state.clientId);
+    if (!me) return;
+    const desiredTeam = Number(options.team);
+    if (Number.isInteger(desiredTeam) && desiredTeam >= 0 && Number(me.team) !== desiredTeam) {
+      const key = `team:${desiredTeam}`;
+      if (lastRoomCommand !== key) {
+        lastRoomCommand = key;
+        socket.emit('change_team', { team: desiredTeam });
+      }
+      return;
+    }
+    if (options.autoReady === false) return;
+    if (!me.ready) {
+      const key = `ready:${desiredTeam || me.team}`;
+      if (lastRoomCommand !== key) {
+        lastRoomCommand = key;
+        socket.emit('change_ready', { ready: true });
+      }
+    }
+  }
+
+  function onConnect() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    socket.emit('join_game_room', { room });
+  }
+
+  function onDisconnect() {
+    state.inGame = false;
+    lastRoomCommand = '';
+    if (decisionTimer) clearTimeout(decisionTimer);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (socket.connected) socket.emit('join_game_room', { room });
+    }, 500);
+  }
+
+  function onLeft() {
+    state.inGame = false;
+    state.ended = true;
+    lastRoomCommand = '';
+    controller?.reset();
+  }
+
+  function onKick() {
+    state.inGame = false;
+    lastRoomCommand = '';
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (socket.connected) socket.emit('join_game_room', { room });
+    }, 500);
+  }
+
+  const listeners = [
+    ['set_id', onSetId],
+    ['init_map', onInit],
+    ['update', onUpdate],
+    ['room_update', onRoomUpdate],
+    ['connect', onConnect],
+    ['disconnect', onDisconnect],
+    ['left', onLeft],
+    ['room_kick', onKick],
+  ];
+  for (const [event, listener] of listeners) socket.on(event, listener);
+  const heartbeatMs = Math.max(0, Number(options.heartbeatIntervalMs ?? 30000) || 0);
+  if (heartbeatMs) {
+    heartbeat = setInterval(() => socket.emit('room_heartbeat'), heartbeatMs);
+    heartbeat.unref?.();
+  }
   if (socket.connected) onConnect();
-  return { state, stop() { if (heartbeat) clearInterval(heartbeat); if (kickTimer) clearTimeout(kickTimer); if (actionTimer) clearTimeout(actionTimer); for (const [e, fn] of [['connect', onConnect], ['disconnect', onDisconnect], ['set_id', onSetId], ['init_map', onInit], ['update', onUpdate], ['room_update', onRoomUpdate], ['left', onLeft], ['room_kick', onKick]]) socket.off(e, fn); } };
+
+  return {
+    state,
+    controller: () => controller,
+    stop() {
+      if (heartbeat) clearInterval(heartbeat);
+      if (decisionTimer) clearTimeout(decisionTimer);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      for (const [event, listener] of listeners) socket.off(event, listener);
+    },
+  };
 }
+
 module.exports = { attachStrategy };
