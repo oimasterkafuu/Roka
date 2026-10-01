@@ -256,6 +256,45 @@ function frontierStrike(b, own) {
   return options[0] || null;
 }
 
+function reposition(b, own) {
+  const sources = own
+    .filter((at) => movable(b, at))
+    .sort((a, z) => b.army[z] - b.army[a]);
+  for (const from of sources) {
+    const neighbours = b.neighbors(from)
+      .filter((to) => b.own(to) && !b.isolated[to] && b.army[from] > b.army[to] + 4)
+      .sort((a, z) => b.army[a] - b.army[z]);
+    for (const to of neighbours) {
+      const action = safeMove(b, from, to, 'gather');
+      if (action) return { action, branch: 'stalled-reposition' };
+    }
+  }
+  return null;
+}
+
+function emergencyProbe(b, own) {
+  const sources = own
+    .filter((at) => movable(b, at))
+    .sort((a, z) => b.army[z] - b.army[a]);
+  for (const from of sources) {
+    const targets = b.neighbors(from)
+      .filter((to) => b.passable(to) && !b.friendly(to) && b.kind(to) !== 'swamp')
+      .sort((a, z) => {
+        const value = (at) => (b.kind(at) === 'crown' ? 10000 : b.kind(at) === 'city' ? 500 : b.enemy(at) ? 100 : 0);
+        return value(z) - value(a);
+      });
+    for (const to of targets) {
+      const mode = b.enemy(to) ? 0 : 2;
+      const send = computePush(b, from, to, mode);
+      if (send <= 0 || (b.enemy(to) && send <= b.army[to])) continue;
+      const action = actionCoordinates(b, from, to, mode);
+      if (routeGuard(b, action).blocked) continue;
+      if (preview(b, action).ok) return { action, branch: 'stalled-probe' };
+    }
+  }
+  return null;
+}
+
 function strategicCut(b, own) {
   const options = [];
   const cache = new Map();
@@ -446,7 +485,8 @@ function sustainEconomy(b, m, own, ed, enemies) {
   // Do not stop a breach already within striking distance of the enemy core.
   if (!Number.isFinite(distance) || distance < 24) return null;
   const crowns = own.filter((at) => b.kind(at) === 'crown').length;
-  const goal = Math.min(24, Math.max(ECON_GOAL, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
+  const infrastructureCap = b.size >= 1600 ? 36 : b.size >= 800 ? 28 : 24;
+  const goal = Math.min(infrastructureCap, Math.max(ECON_GOAL, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
   const state = m.rearEconomy || (m.rearEconomy = { site: -1, delivery: null, spent: 0, nextWindow: 0 });
   if (b.turn < state.nextWindow) return null;
   const reserved = new Set([m.campaign?.at, m.delivery?.at, m.delivery?.root]);
@@ -544,7 +584,8 @@ function rearExpansion(b, m, own, ed, enemies) {
     (at) => !reserved.has(at) && ed.distance[at] >= 5 && b.kind(at) !== 'swamp',
   );
   const action = opening(b, m, rear, ed);
-  m.rearGrowthNext = b.turn + (action ? 4 : 2);
+  const growthInterval = b.size >= 1600 ? (action ? 2 : 1) : (action ? 4 : 2);
+  m.rearGrowthNext = b.turn + growthInterval;
   return action ? { ...action, branch: 'rear-expansion' } : null;
 }
 
@@ -671,26 +712,23 @@ function chooseCampaign(b,m,own) {
   // stacks remain elsewhere. Rebase the same crown campaign instead of
   // sending repeated deliveries into a dead corridor.
   const rootArmy = b.army[c.at] || 0;
+  const brokenSpearhead = c.phase === 'attack' && rootArmy < 12;
   if (b.turn - c.started >= CAMPAIGN_REBASE_AFTER &&
-      ((c.phase === 'gather' && rootArmy < 18) || (c.phase === 'attack' && rootArmy < 8))) {
+      ((c.phase === 'gather' && rootArmy < 18) || brokenSpearhead)) {
     const bestDistance = Number.isFinite(c.bestCrownDistance) ? c.bestCrownDistance : f.distance[c.at];
     const alternatives = own
-      .filter((at) =>
-        at !== c.at &&
-        b.army[at] > rootArmy + 24 &&
-        Number.isFinite(f.distance[at]) &&
-        // A rebase is allowed only when it moves the same campaign closer to
-        // its crown. Switching to a stronger rear stack after the spearhead
-        // has advanced is the long-map oscillation this planner must avoid.
-        f.distance[at] + 1 < bestDistance,
-      )
+      .filter((at) => at !== c.at && b.army[at] > rootArmy + 40 && Number.isFinite(f.distance[at]) &&
+        (f.distance[at] + 1 < bestDistance ||
+          (brokenSpearhead && (c.recoveryRebases || 0) < 2)))
       .sort((a, z) => (b.army[z] - f.distance[z] * 2) - (b.army[a] - f.distance[a] * 2));
     if (alternatives.length) {
       c.at = alternatives[0];
       c.phase = 'gather';
+      c.started = b.turn;
       c.lastAt = c.at;
       c.lastProgress = b.turn;
-      c.bestCrownDistance = f.distance[c.at];
+      c.bestCrownDistance = Math.min(bestDistance, f.distance[c.at]);
+      c.recoveryRebases = (c.recoveryRebases || 0) + 1;
       m.delivery = null;
     }
   }
@@ -747,6 +785,12 @@ function chooseCampaign(b,m,own) {
       }
     }
   }
+  // Never turn a token garrison into a marching campaign.  On narrow maps a
+  // one to ten unit hop can be legal every tick yet make no real progress:
+  // the opponent cuts it immediately and the controller keeps reselecting the
+  // same corridor.  Keep gathering (or let the recovery path rebase it) until
+  // the root has a meaningful column.
+  if (c.phase === 'gather' && b.army[c.at] < Math.min(desired, 18)) return null;
   c.phase='attack';
   const to=p[1];
   // Before exposing a long supply route, anchor the active army itself. This
@@ -782,6 +826,37 @@ function chooseCampaign(b,m,own) {
   const delivery=gather(b,m,c.at,Math.max(desired,b.army[to]*1.3+30),'muster');
   if(delivery)return delivery;
   return null;
+}
+
+// A stale campaign can legitimately have no legal move for a few ticks while
+// a convoy gathers or a bridge is being reinforced.  Once that pause becomes
+// longer than the bounded muster wait, keeping every old cursor is harmful:
+// the rest of the board may still have a safe local expansion or cut.  Clear
+// only the stale military cursors and resume from the current frontier while
+// leaving a funded construction plan intact.
+function recover(b, m, own) {
+  const enemies = [];
+  for (let at = 0; at < b.size; at += 1) if (b.enemy(at) && !b.isolated[at]) enemies.push(at);
+  const ed = field(b, enemies);
+  const assaultRoot = m.campaign?.at;
+  // A healthy spearhead that is already attacking should keep ownership of
+  // the action budget.  The recovery hook is for stale logistics, not for
+  // replacing a finishing assault with a fresh opening on the other side.
+  if (m.campaign?.phase === 'attack' && Number.isInteger(assaultRoot) && b.army[assaultRoot] >= 18) {
+    const strike = frontierStrike(b, own);
+    if (strike) return { ...strike, branch: 'stalled-recovery' };
+    return reposition(b, own);
+  }
+  m.campaign = null;
+  m.delivery = null;
+  m.blocked = null;
+  const strike = frontierStrike(b, own);
+  if (strike) return { ...strike, branch: 'stalled-recovery' };
+  const cut = strategicCut(b, own);
+  if (cut) return { ...cut, branch: 'stalled-cut' };
+  const expansion = opening(b, m, own, ed);
+  if (expansion) return { ...expansion, branch: 'stalled-expansion' };
+  return reposition(b, own) || emergencyProbe(b, own);
 }
 
 function plan(b,m) {
@@ -862,8 +937,20 @@ function plan(b,m) {
   // spends the action on a new frontier and is exactly the oscillation that
   // starves a planned core assault.
   if (m.campaign && m.campaign.phase === 'gather' && b.own(m.campaign.at) && !b.isolated[m.campaign.at]) {
+    m.musterWaitTurns = (m.musterWaitTurns || 0) + 1;
+    if (m.musterWaitTurns >= 8) {
+      const blockedCrown = m.campaign.crown;
+      m.blocked = { crown: blockedCrown, until: b.turn + CAMPAIGN_BLOCK_COOLDOWN };
+      m.campaign = null;
+      m.delivery = null;
+      m.musterWaitTurns = 0;
+      const recovery = frontierStrike(b, own);
+      if (recovery) return { ...recovery, branch: 'muster-recovery' };
+      return { action: null, branch: 'campaign-reset' };
+    }
     return { action: null, branch: 'muster-wait' };
   }
+  m.musterWaitTurns = 0;
   const investment=economy(b,m,own,ed,ECON_GOAL);
   if(investment && (!enemyInvested || b.turn < 80))return investment;
   if(campaign)return campaign;
@@ -871,4 +958,4 @@ function plan(b,m) {
   if(growthAction)return growthAction;
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,stranded,safeMove,gather,growth,routeGuard};
+module.exports={plan,recover,stranded,safeMove,gather,growth,routeGuard};
