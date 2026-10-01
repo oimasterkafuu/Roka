@@ -184,6 +184,17 @@ function attachStrategy(socket, options = {}) {
       return;
     }
     if (options.autoReady === false) return;
+    // The server clears readiness while fewer than two players are present
+    // and refuses it during deployment. Do not latch a request it cannot keep:
+    // a later room update must still be able to ready us when a human joins.
+    if (payload.update_queued || (Number.isFinite(Number(payload.need)) && Number(payload.need) <= 1)) {
+      lastRoomCommand = '';
+      return;
+    }
+    if (me.ready) {
+      lastRoomCommand = '';
+      return;
+    }
     if (!me.ready) {
       const key = `ready:${desiredTeam || me.team}`;
       if (lastRoomCommand !== key) {

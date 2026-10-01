@@ -107,7 +107,6 @@ test('room updates choose the configured team, then ready exactly once', () => {
   const bot = attachStrategy(socket, {
     room: 'r',
     team: 2,
-    autoReady: true,
     heartbeatIntervalMs: 0,
     actionDelayMs: 0,
   });
@@ -145,6 +144,30 @@ test('connect clears an obsolete reconnect timer and performs one rejoin', async
   assert.equal(socket.sent('join_game_room').length, 2);
   await new Promise((resolve) => setTimeout(resolve, 550));
   assert.equal(socket.sent('join_game_room').length, 2);
+  bot.stop();
+});
+
+test('default auto-ready survives an empty room, deployment, and readiness reset', () => {
+  const socket = new FakeSocket();
+  const bot = attachStrategy(socket, { room: 'r', heartbeatIntervalMs: 0 });
+  socket.receive('set_id', 'me');
+  const lobby = (need, ready = false, update_queued = false) => ({
+    in_game: false, need, update_queued, players: [{ sid: 'me', team: 1, ready }],
+  });
+  socket.receive('room_update', lobby(1));
+  assert.equal(socket.sent('change_ready').length, 0);
+  socket.receive('room_update', lobby(2, false, true));
+  assert.equal(socket.sent('change_ready').length, 0);
+  socket.receive('room_update', lobby(2));
+  assert.equal(socket.sent('change_ready').length, 1);
+  socket.receive('room_update', lobby(2, true));
+  socket.receive('room_update', lobby(1));
+  socket.receive('room_update', lobby(2));
+  assert.equal(socket.sent('change_ready').length, 2);
+  init(socket);
+  socket.receive('update', frame(10, { game_end: true }));
+  socket.receive('room_update', lobby(2));
+  assert.equal(socket.sent('change_ready').length, 3);
   bot.stop();
 });
 

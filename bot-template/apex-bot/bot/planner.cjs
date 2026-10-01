@@ -9,6 +9,20 @@ const FORCE_MARGIN = Number.isFinite(Number(process.env.APEX_FORCE_MARGIN))
   ? Math.max(0, Math.min(1, Number(process.env.APEX_FORCE_MARGIN))) : 0.12;
 const MULTI_CROWN_CAP = Number.isFinite(Number(process.env.APEX_MULTI_CROWN_CAP))
   ? Math.max(0.5, Math.min(1.5, Number(process.env.APEX_MULTI_CROWN_CAP))) : 0.85;
+const CAMPAIGN_GATHER_TIMEOUT = Number.isFinite(Number(process.env.APEX_CAMPAIGN_GATHER_TIMEOUT))
+  ? Math.max(8, Math.min(80, Number(process.env.APEX_CAMPAIGN_GATHER_TIMEOUT))) : 28;
+const CAMPAIGN_ATTACK_TIMEOUT = Number.isFinite(Number(process.env.APEX_CAMPAIGN_ATTACK_TIMEOUT))
+  ? Math.max(8, Math.min(60, Number(process.env.APEX_CAMPAIGN_ATTACK_TIMEOUT))) : 18;
+const CAMPAIGN_REBASE_AFTER = Number.isFinite(Number(process.env.APEX_CAMPAIGN_REBASE_AFTER))
+  ? Math.max(6, Math.min(80, Number(process.env.APEX_CAMPAIGN_REBASE_AFTER))) : 14;
+const CAMPAIGN_BLOCK_COOLDOWN = Number.isFinite(Number(process.env.APEX_CAMPAIGN_BLOCK_COOLDOWN))
+  ? Math.max(4, Math.min(60, Number(process.env.APEX_CAMPAIGN_BLOCK_COOLDOWN))) : 20;
+const CAMPAIGN_STRENGTH = Number.isFinite(Number(process.env.APEX_CAMPAIGN_STRENGTH))
+  ? Math.max(0.05, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_STRENGTH))) : 0.15;
+const CAMPAIGN_READINESS = Number.isFinite(Number(process.env.APEX_CAMPAIGN_READINESS))
+  ? Math.max(0, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_READINESS))) : 0.2;
+const BUILD_CLUSTER_SIZE = Number.isFinite(Number(process.env.APEX_BUILD_CLUSTER_SIZE))
+  ? Math.max(2, Math.min(8, Number(process.env.APEX_BUILD_CLUSTER_SIZE))) : 4;
 
 function field(b, starts, enter = b.passable) { return distanceField(b, starts, enter); }
 function route(f, at) { const out = [at]; while (f.parent[at] >= 0) { at = f.parent[at]; out.push(at); } return out; }
@@ -87,6 +101,42 @@ function pressure(b, at, omit = -1) {
   let value = 0;
   for (const j of b.neighbors(at)) if (j !== omit && b.enemy(j) && !b.isolated[j]) value = Math.max(value, b.army[j] - 1);
   return value;
+}
+function routeGuard(b, action) {
+  if (!action || action.kind !== 'attack') return { blocked: false, anchor: -1, cut: -1 };
+  const to = b.idx(action.dx, action.dy);
+  const previewResult = preview(b, action);
+  if (!previewResult.ok || (previewResult.captured === false && b.enemy(to))) {
+    return { blocked: false, anchor: -1, cut: -1 };
+  }
+  const after = previewResult.after;
+  const cuts = cutAnalysis(after, after.playerId);
+  let blocked = false;
+  let anchor = -1;
+  let cut = -1;
+  for (const at of cuts.points) {
+    // Crowns and cities are already anchors.  Treating the crown itself as
+    // the "cut" would make every deep move look unsafe and cannot be repaired
+    // by the build action available here.
+    if (b.kind(at) !== 'plain') continue;
+    if (!cuts.separates(at, previewResult.to) || cuts.mass[at] < 30) continue;
+    if (pressure(after, at) <= after.army[at] + 1) continue;
+    if (cuts.mass[at] < Math.max(30, previewResult.send * 0.5)) continue;
+    blocked = true;
+    if (cut < 0 || cuts.mass[at] > cuts.mass[cut]) cut = at;
+    // Building costs 50 immediately. Only create a new anchor when its
+    // remaining garrison still survives the same one-hit cutoff; otherwise
+    // the "defensive" build would pay for the breach itself.
+    if (b.own(at) && b.kind(at) === 'plain' &&
+      b.army[at] - 50 > pressure(after, at) + 1) {
+      anchor = at;
+      break;
+    }
+  }
+  // A long unanchored corridor is the other common form of the same failure:
+  // the head is safe now, but the next enemy tap can sever the whole column.
+  if (blocked) return { blocked: true, anchor, cut };
+  return { blocked: false, anchor: -1, cut: -1 };
 }
 function safeMove(b, from, to, intent = 'move') {
   if (!movable(b, from) || !b.passable(to)) return null;
@@ -285,19 +335,91 @@ function cutDefense(b, m, own) {
 }
 
 function economy(b,m,own,ed,goal) {
-  if(m.site!==undefined && (!b.own(m.site)||b.isolated[m.site]||b.kind(m.site)==='crown')) m.site=undefined;
-  if(m.site!==undefined) {
-    const at=m.site, need=b.kind(at)==='city'?50:100;
-    if(ed.distance[at]<3) { m.site=undefined; return null; }
-    if(b.army[at]>=need) return {action:build(b,at,b.kind(at)==='city'?'c':'b'),branch:'invest'};
-    return gather(b,m,at,need+1,'fund');
+  if (own.filter((i) => b.kind(i) === 'crown').length >= goal && !m.buildPlan) return null;
+
+  const validSite = (at) => b.own(at) && !b.isolated[at] &&
+    (b.kind(at) === 'plain' || b.kind(at) === 'city') &&
+    (ed.distance[at] === Infinity || ed.distance[at] >= 4);
+
+  // Keep a short, contiguous construction plan. A plan is deliberately
+  // stateful: after a foundation is built, the same cell is upgraded next;
+  // only then is the adjacent cell selected. This produces a compact crown
+  // cluster instead of scattering one half-funded city across the map.
+  if (m.buildPlan) {
+    while (m.buildPlan.index < m.buildPlan.cells.length) {
+      const at = m.buildPlan.cells[m.buildPlan.index];
+      if (!validSite(at)) {
+        m.buildPlan.index += 1;
+        continue;
+      }
+      const kind = b.kind(at);
+      const need = kind === 'city' ? 50 : 100;
+      if (b.army[at] >= need) {
+        return {
+          action: build(b, at, kind === 'city' ? 'c' : 'b'),
+          branch: kind === 'city' ? 'cluster-upgrade' : 'cluster-foundation',
+        };
+      }
+      const funding = gather(b, m, at, need + 1, 'cluster-fund');
+      if (funding) return funding;
+      // No safe local delivery is available. Leave the plan intact so the
+      // next economy window can retry, but let the military planner act now.
+      return null;
+    }
+    m.buildPlan = null;
   }
-  if(own.filter(i=>b.kind(i)==='crown').length>=goal) return null;
-  const sites=own.filter(i=>['plain','city'].includes(b.kind(i)) && ed.distance[i]>=4);
-  sites.sort((a,z)=> (b.kind(z)==='city'?80:0)+b.army[z] -(b.kind(a)==='city'?80:0)-b.army[a]);
-  if(!sites.length) return null;
-  m.site=sites[0];
-  return economy(b,m,own,ed,goal);
+
+  const anchors = anchorCells(b, b.playerId).filter((at) => b.own(at) && !b.isolated[at]);
+  if (!anchors.length) return null;
+  const anchorDistance = field(b, anchors, (at) => b.own(at) && !b.isolated[at]);
+  const candidate = own.filter(validSite);
+  if (!candidate.length) return null;
+
+  const anchorNeighbours = (at) => b.neighbors(at).filter((next) =>
+    b.own(next) && ['city', 'crown'].includes(b.kind(next))).length;
+  const siteScore = (at) => {
+    const kind = b.kind(at);
+    const adjacent = anchorNeighbours(at);
+    const distance = anchorDistance.distance[at];
+    const front = Number.isFinite(ed.distance[at]) ? Math.min(ed.distance[at], 12) : 12;
+    return (kind === 'city' ? 320 : 0) + adjacent * 180 +
+      (Number.isFinite(distance) ? Math.max(0, 8 - distance) * 18 : -80) +
+      Math.min(180, b.army[at]) * 0.35 + front * 8;
+  };
+  candidate.sort((a, z) => siteScore(z) - siteScore(a));
+  const seed = candidate[0];
+  const cells = [seed];
+  const used = new Set(cells);
+  // Reserve a cluster only for funds that already exist in the safe rear.
+  // This keeps the plan contiguous without promising four construction sites
+  // when the board can currently finance only one of them.
+  const crowns = own.filter((at) => b.kind(at) === 'crown').length;
+  const available = own.reduce((sum, at) =>
+    sum + Math.max(0, b.army[at] - Math.max(1, pressure(b, at))), 0);
+  const clusterSize = Math.min(BUILD_CLUSTER_SIZE, Math.max(1, goal - crowns),
+    Math.max(1, Math.floor(available / 110)));
+  while (cells.length < clusterSize) {
+    const frontier = [];
+    for (const base of cells) {
+      for (const next of b.neighbors(base)) {
+        if (used.has(next) || !validSite(next)) continue;
+        const adjacency = cells.filter((cell) => b.neighbors(cell).includes(next)).length;
+        frontier.push({
+          at: next,
+          score: adjacency * 150 + anchorNeighbours(next) * 80 +
+            (b.kind(next) === 'city' ? 280 : 0) + Math.min(150, b.army[next]) * 0.25 +
+            (Number.isFinite(ed.distance[next]) ? Math.min(ed.distance[next], 10) * 5 : 50),
+        });
+      }
+    }
+    if (!frontier.length) break;
+    frontier.sort((a, z) => z.score - a.score);
+    const next = frontier[0].at;
+    used.add(next);
+    cells.push(next);
+  }
+  m.buildPlan = { cells, index: 0, seed, started: b.turn };
+  return economy(b, m, own, ed, goal);
 }
 
 function chooseCampaign(b,m,own) {
@@ -318,17 +440,21 @@ function chooseCampaign(b,m,own) {
     }
   }
   if(m.campaign) {
-    const currentArmy = b.army[m.campaign.at] || 0;
+    const targetField = Number.isInteger(m.campaign.crown) ? field(b, [m.campaign.crown]) : null;
+    const crownDistance = targetField ? targetField.distance[m.campaign.at] : Infinity;
+    const routeProgress = Number.isFinite(crownDistance) &&
+      (m.campaign.bestCrownDistance === undefined || crownDistance < m.campaign.bestCrownDistance);
     const phaseChanged = m.campaign.lastPhase !== m.campaign.phase;
-    const phaseLimit = m.campaign.phase === 'attack' ? 14 : 24;
-    const armyProgress = currentArmy > (m.campaign.lastArmy || 0) + 2;
-    if (phaseChanged || m.campaign.lastAt !== m.campaign.at || armyProgress) {
+    const phaseLimit = m.campaign.phase === 'attack' ? CAMPAIGN_ATTACK_TIMEOUT : CAMPAIGN_GATHER_TIMEOUT;
+    // Army growth alone is not campaign progress.  A blocked rally root must
+    // eventually be abandoned even when its crown keeps producing units.
+    if (routeProgress) m.campaign.bestCrownDistance = crownDistance;
+    if (phaseChanged || m.campaign.lastAt !== m.campaign.at || routeProgress) {
       m.campaign.lastAt = m.campaign.at;
-      m.campaign.lastArmy = currentArmy;
       m.campaign.lastProgress = b.turn;
       m.campaign.lastPhase = m.campaign.phase;
     } else if (b.turn - (m.campaign.lastProgress ?? m.campaign.started) > phaseLimit) {
-      m.blocked = { crown: m.campaign.crown, until: b.turn + 35 };
+      m.blocked = { crown: m.campaign.crown, until: b.turn + CAMPAIGN_BLOCK_COOLDOWN };
       m.campaign = null;
       m.delivery = null;
       return null;
@@ -362,12 +488,14 @@ function chooseCampaign(b,m,own) {
       for(const at of own)if(b.army[at]>2 && Number.isFinite(f.distance[at])){
         const path = route(f, at);
         const resistance = path.slice(1).reduce((sum, cell) => sum + (b.friendly(cell) ? 0 : b.army[cell] + 1), 0);
-        const score=-f.distance[at]*2.5-resistance*0.18-b.army[crown]*0.08+b.army[at]*0.15;
+        const readiness = b.army[at] - resistance;
+        const score=-f.distance[at]*2.5-resistance*0.18-b.army[crown]*0.08+
+          b.army[at]*CAMPAIGN_STRENGTH + Math.max(-120, Math.min(120, readiness))*CAMPAIGN_READINESS;
         const recovery = recoveryField && Number.isFinite(recoveryField.distance[at])
           ? -recoveryField.distance[at] * 4
           : 0;
         const adjusted = score + recovery;
-        if(!best||adjusted>best.score)best={crown,at,score:adjusted,phase:'gather',started:b.turn,lastPhase:'gather',lastProgress:b.turn,deliveryBestDistance:Infinity};
+        if(!best||adjusted>best.score)best={crown,at,score:adjusted,phase:'gather',started:b.turn,lastPhase:'gather',lastProgress:b.turn,deliveryBestDistance:Infinity,bestCrownDistance:f.distance[at]};
       }
     }
     if (!best && m.blocked && b.turn >= m.blocked.until) m.blocked = null;
@@ -376,6 +504,24 @@ function chooseCampaign(b,m,own) {
   const c=m.campaign;
   if(!c) return null;
   const f=field(b,[c.crown]);
+  // A failed push can leave the campaign root nearly empty while stronger
+  // stacks remain elsewhere. Rebase the same crown campaign instead of
+  // sending repeated deliveries into a dead corridor.
+  const rootArmy = b.army[c.at] || 0;
+  if (b.turn - c.started >= CAMPAIGN_REBASE_AFTER &&
+      ((c.phase === 'gather' && rootArmy < 18) || (c.phase === 'attack' && rootArmy < 8))) {
+    const alternatives = own
+      .filter((at) => at !== c.at && b.army[at] > rootArmy + 24 && Number.isFinite(f.distance[at]))
+      .sort((a, z) => (b.army[z] - f.distance[z] * 2) - (b.army[a] - f.distance[a] * 2));
+    if (alternatives.length) {
+      c.at = alternatives[0];
+      c.phase = 'gather';
+      c.lastAt = c.at;
+      c.lastProgress = b.turn;
+      c.bestCrownDistance = f.distance[c.at];
+      m.delivery = null;
+    }
+  }
   let walls = 0;
   for (let at = 0; at < b.size; at += 1) if (b.kind(at) === 'mountain') walls += 1;
   // Weighted routing is valuable in obstacle-rich maps, where a short path
@@ -409,7 +555,26 @@ function chooseCampaign(b,m,own) {
     if(danger) return {action:build(b,c.at),branch:'anchor'};
   }
   const a=safeMove(b,c.at,to,'campaign');
-  if(a){return {action:a,branch:'march'};}
+  if(a){
+    const guard = routeGuard(b, a);
+    if (guard.anchor >= 0) {
+      return { action: build(b, guard.anchor), branch: 'route-anchor' };
+    }
+    if (guard.blocked) {
+      // The next move would expose a large, anchorless branch to a one-turn
+      // enemy cutoff.  Reinforce the exact articulation cell when logistics
+      // can reach it; otherwise hold the spearhead instead of repeatedly
+      // feeding the same corridor.
+      if (guard.cut >= 0 && b.own(guard.cut)) {
+        const need = Math.max(b.army[guard.cut] + 2, pressure(b, guard.cut) + 2);
+        const reinforcement = gather(b, m, guard.cut, need, 'route-reinforce');
+        if (reinforcement) return reinforcement;
+      }
+      c.phase = 'gather';
+      return { action: null, branch: 'route-hold' };
+    }
+    return {action:a,branch:'march'};
+  }
   c.phase='gather';
   const delivery=gather(b,m,c.at,Math.max(desired,b.army[to]*1.3+30),'muster');
   if(delivery)return delivery;
@@ -444,6 +609,15 @@ function plan(b,m) {
   }
   const defend=defense(b,m,own);
   if(defend)return defend;
+  // Once the army lead is decisive, spending turns on side cuts or another
+  // economy cycle only gives Anti-Human time to add crowns. Keep the prepared
+  // crown campaign in control of the action budget while preserving the
+  // immediate defence check above.
+  const decisive = enemyCrowns <= 6 && ownTotal >= Math.max(350, enemyTotal * 1.35) && ownTotal > enemyTotal + 150;
+  if (decisive) {
+    const assault = chooseCampaign(b, m, own);
+    if (assault) return assault;
+  }
   const cutGuard = cutDefense(b, m, own);
   if (cutGuard) return cutGuard;
   const cut = strategicCut(b, own);
@@ -489,4 +663,4 @@ function plan(b,m) {
   if(growthAction)return growthAction;
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,stranded,safeMove,gather,growth};
+module.exports={plan,stranded,safeMove,gather,growth,routeGuard};
