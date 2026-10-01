@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, sustainEconomy, treeGather } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, sustainEconomy, treeGather, defensiveCut } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -58,6 +58,41 @@ test('previews a direct enemy crown capture and reinforces before the hit', () =
   const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
   assert.equal(decision.branch, 'anchor-reinforce');
   assert.deepEqual(decision.action, actionCoordinates(b, 2, 0, 2));
+});
+
+test('opens a staged campaign before the full maze resistance is assembled', () => {
+  const b = makeBoard({
+    n: 1, m: 8,
+    grid: [101, 1, 1, 2, 2, 2, 2, 102],
+    army: [20, 170, 1, 4, 4, 4, 4, 8],
+    isolated: Array(8).fill(0), fog: Array(8).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const memory = {
+    playerId: 1, home: 0,
+    campaign: {
+      crown: 7, at: 1, phase: 'gather', started: 0, lastPhase: 'gather',
+      lastProgress: 0, deliveryBestDistance: Infinity, bestCrownDistance: 6,
+      musterTurns: 2,
+    },
+    delivery: null, blocked: null, threatDistance: {},
+  };
+  const decision = plan(b, memory);
+  assert.equal(decision.branch, 'march');
+  assert.deepEqual(decision.action, actionCoordinates(b, 1, 2, 2));
+});
+
+test('cuts an enemy supply articulation when direct crown defence cannot arrive', () => {
+  const b = makeBoard({
+    n: 2, m: 5,
+    grid: [101, 1, 2, 2, 102, 1, 1, 1, 1, 1],
+    army: [5, 20, 100, 20, 5, 5, 20, 1, 100, 1],
+    isolated: Array(10).fill(0), fog: Array(10).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const decision = defensiveCut(b, { at: 2, crown: 0, need: 100 });
+  assert.equal(decision.branch, 'defense-cut');
+  assert.deepEqual(decision.action, actionCoordinates(b, 8, 3, 2));
 });
 
 test('campaign gathers a token spearhead instead of marching it through a corridor', () => {
