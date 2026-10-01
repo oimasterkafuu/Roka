@@ -1,7 +1,6 @@
 export const MAX_TEAMS = 16;
 
-export type MapRegion =
-  'qin' | 'han' | 'tang' | 'song' | 'yuan' | 'ming' | 'liao' | 'china' | 'hong-kong' | 'taiwan';
+export type MapRegion = 'qin' | 'han' | 'tang' | 'song' | 'yuan' | 'ming' | 'liao' | 'china' | 'taiwan';
 
 export type ChatScope = 'room' | 'sid';
 

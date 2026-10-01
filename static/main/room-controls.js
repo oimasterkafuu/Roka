@@ -75,7 +75,6 @@ function getMapRegionCode() {
     明: 'ming',
     辽: 'liao',
     中国: 'china',
-    香港: 'hong-kong',
     台湾省: 'taiwan',
   };
   return regions[getTabVal('map-region')] || 'han';
@@ -111,7 +110,6 @@ function setMapRegionByCode(code) {
     ming: '明',
     liao: '辽',
     china: '中国',
-    'hong-kong': '香港',
     taiwan: '台湾省',
   };
   setTabVal('map-region', labels[code] || '汉');
