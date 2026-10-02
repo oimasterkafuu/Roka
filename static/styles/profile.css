@@ -503,16 +503,24 @@ body.profile .feed-pager .pager-ellipsis {
 
 /* 三栏资料页：桌面并排，窄屏自然折叠为单栏。 */
 body.profile .profile-wrap {
-  max-width: 1440px;
+  max-width: 1280px;
+  padding: 20px 20px 40px;
 }
 body.profile .profile-columns {
   display: grid;
-  grid-template-columns: minmax(230px, 0.85fr) minmax(360px, 1.5fr) minmax(250px, 0.95fr);
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
   align-items: start;
   gap: 16px;
 }
 body.profile .profile-column .card {
   margin-bottom: 16px;
+}
+body.profile .profile-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+body.profile .profile-stats-peak {
+  grid-template-columns: minmax(0, 1fr);
 }
 body.profile .points-level-card {
   margin-top: 14px;
@@ -520,8 +528,7 @@ body.profile .points-level-card {
   border-radius: 10px;
   background: linear-gradient(135deg, #f0fbfb, #f7f9fb);
 }
-body.profile .points-level-head,
-body.profile .points-rank-line {
+body.profile .points-level-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -535,8 +542,7 @@ body.profile .points-level-title strong {
 body.profile .points-total {
   color: #6b7686;
 }
-body.profile .points-total strong,
-body.profile .points-rank-line strong {
+body.profile .points-total strong {
   color: #253042;
   font-family: Quicksand-Bold, HYMaQiDuo-Bold;
 }
@@ -559,53 +565,8 @@ body.profile .points-level-next {
   color: #9aa4b2;
   font-size: 11px;
 }
-body.profile .points-rank-line {
-  justify-content: flex-start;
-  color: #6b7686;
-}
-body.profile .points-leaderboard {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-body.profile .points-rank-item {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 4px;
-  border-bottom: 1px solid #f0f2f6;
-  font-size: 13px;
-}
-body.profile .points-rank-item:last-child {
-  border-bottom: 0;
-}
-body.profile .points-rank-number {
-  color: #9aa4b2;
-  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-  text-align: center;
-}
-body.profile .points-rank-points {
-  color: #6b7686;
-  white-space: nowrap;
-}
-@media (max-width: 1050px) {
+@media (max-width: 1100px) {
   body.profile .profile-columns {
-    grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.2fr);
-  }
-  body.profile .profile-column-right {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 16px;
-  }
-}
-@media (max-width: 720px) {
-  body.profile .profile-columns,
-  body.profile .profile-column-right {
-    display: block;
-  }
-  body.profile .profile-column .card {
-    margin-bottom: 12px;
+    grid-template-columns: minmax(0, 1fr);
   }
 }

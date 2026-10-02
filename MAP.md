@@ -181,12 +181,12 @@ _一句话：地理矩形视口内的真实海陆栅格化生成。_
 _一句话：存储底座：统一编码、.bak 备份回退、合并写盘。_
 
 **src/auth-store.ts** — 用户/会话/Rating/积分存储（`data/users.bin`，v8 serialize + brotli，经 binary-store 底座）。
-密码 scrypt 加盐 + `timingSafeEqual`；角色模型：首个注册用户 = 超级管理员（`isSuperAdmin`，唯一、不可剥夺、不可封禁，同时拥有 admin），普通 admin（`isAdmin`）由超管授予/撤销（`setAdmin`），旧数据启动时由 `migrateRoles` 把首个用户升级为超管（向后兼容）；封禁字段 `bannedUntil`（毫秒时间戳，-1=永久，缺省=未封禁），到期由 `getBanStatus` 惰性判定自动解除，`banUser`/`unbanUser` 操作，`listUsersForAdmin` 出后台用户列表；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点）。积分 API 导出 `GAME_POINTS`/等级阈值与等级进度计算，旧用户缺省积分按 0 兼容，`applyPointsUpdates` 为真实注册用户批量累加积分，`listPointsRank`/`getPointsRank` 提供全站排名。可选字段 `lastSeenAt` 记录「最后在线」（= 用户最近一次有效请求/动作时间，由 presence-service 统一计算并节流落盘；旧数据无此字段按 undefined 兼容），`setLastSeenAt` 写入（presence 的落盘回调），`listLastSeen` 出全量落盘记录供 presence 启动 seed。
+密码 scrypt 加盐 + `timingSafeEqual`；角色模型：首个注册用户 = 超级管理员（`isSuperAdmin`，唯一、不可剥夺、不可封禁，同时拥有 admin），普通 admin（`isAdmin`）由超管授予/撤销（`setAdmin`），旧数据启动时由 `migrateRoles` 把首个用户升级为超管（向后兼容）；封禁字段 `bannedUntil`（毫秒时间戳，-1=永久，缺省=未封禁），到期由 `getBanStatus` 惰性判定自动解除，`banUser`/`unbanUser` 操作，`listUsersForAdmin` 出后台用户列表；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点），`getRatingRank` 只统计 `ratingGames>0` 的注册用户并按显示 Rating、注册时间、用户名稳定排序，导出 `displayRatingRank` 生成个人页分段名次。积分规则常量、`getGamePoints` 与 `calculateHistoricalPoints` 集中在此：每局 40 基础分 + 40~100 排名分，动态奖励为发帖 30、获得互动 10、点赞他人 10、评论 20；`applyPointsUpdates` 支持正负更新并 clamp 到 0。`initializeHistoricalPoints` 使用 `UserFile.pointsMigrationVersion` 从回放和动态完整重建一次旧用户积分，避免旧版每局 10 分重复叠加；积分排名仅保留存储层能力，不在个人页展示。可选字段 `lastSeenAt` 记录「最后在线」（= 用户最近一次有效请求/动作的时间，由 presence-service 统一计算并节流落盘；旧数据无此字段按 undefined 兼容），`setLastSeenAt` 写入（presence 的落盘回调），`listLastSeen` 出全量落盘记录供 presence 启动 seed。
 排行榜 `listTopRated` 只出最近 7 天内有活动的用户：最后活动时间取 `max(lastSeenAt, updatedAt)`（对局结算、登录轮换会话等刷 `updatedAt`，presence 统一刷 `lastSeenAt`），距今 ≥ `LEADERBOARD_INACTIVITY_MS`（7×24×3600×1000）即暂时下榜（rating 数据不动，重新活跃即回榜；bot 账号同一规则）。
 _一句话：用户/会话/Rating 存储，brotli 压缩 users.bin。_
 
 **src/feed-store.ts** — 动态存储（`data/feeds.bin`，同 v8+brotli）。
-分页 `listPage`/`listByAuthor`；发帖 1–300 字 + 30 秒/人冷却（`FeedCooldownException` 带 `retryAfter`）；评论 1–200 字、每帖上限 200 条，`removeComment` 删除评论（权限校验在 server.ts：作者本人或管理员）；点赞切换。
+分页 `listPage`/`listByAuthor`，只读迁移快照 `listAll`；发帖 1–300 字 + 30 秒/人冷却（`FeedCooldownException` 带 `retryAfter`）；评论 1–200 字、每帖上限 200 条，`removeComment` 删除评论（权限校验在 server.ts：作者本人或管理员）；点赞切换。server.ts 按发帖/互动操作同步发放与回扣积分。
 _一句话：动态帖子/点赞/评论存储，带发帖冷却与评论删除。_
 
 **src/announcement-store.ts** — 公告单文件 JSON 存储（`data/announcement.json`），原子串行写 + `.bak` 备份回退（binary-store 底座），`ANNOUNCEMENT_TEXT_MAX=500`。文本本身不渲染，渲染由上层经 `text-render.ts` 完成。
@@ -261,8 +261,8 @@ _一句话：房间设置 tabs、链接复制、队伍与聊天前缀。_
 **static/main/blink-clock.js** — 全局闪烁时钟：在 `#map` 容器上周期切换 `blink-slow`（1s 衰减期）/`blink-fast`（0.4s 宽限期）/`pulse-soft`（1.2s 教程目标），单元格只挂声明 class，相位统一驱动。
 _一句话：#map 容器级闪烁相位时钟，三种周期。_
 
-**static/profile.html / profile.js** — 个人主页 `/u/:username`：三栏资料/积分等级卡、全站积分排名、最近 rating 变更、手写 SVG rating 历史折线图（峰值金色高亮）、TA 的动态与回放。动态部分与首页代码平行（数据源换 `/api/profile/:u/feeds`），游客保留只读展示，登录用户显示已有互动；动态作者/评论与回放名次列的用户名统一走 `username.js` 组件（rating 颜色 + 点击跳主页）。
-_一句话：个人主页逻辑：积分等级/排名、SVG rating 图 + 动态/回放。_
+**static/profile.html / profile.js** — 个人主页 `/u/:username`：与首页一致的三栏资料卡/积分等级进度、最高 Rating、分段 Rating 排名、最近 rating 变更、手写 SVG rating 历史折线图（峰值金色高亮）、TA 的动态与回放；不展示积分排名。动态部分与首页代码平行（数据源换 `/api/profile/:u/feeds`），游客保留只读展示，登录用户显示已有互动；动态作者/评论与回放名次列的用户名统一走 `username.js` 组件（rating 颜色 + 点击跳主页）。
+_一句话：个人主页逻辑：积分等级/进度、Rating 排名与 SVG Rating 图 + 动态/回放。_
 
 **static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态）分页展示（每页 20 条，前端即时过滤），顶部搜索框按用户名子串即时筛选并显示用户总数/匹配数；封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框 / 策略 Bot），便于扩展新管理模块。「策略 Bot」分区仅超管可见（`viewerIsSuperAdmin` 门控 + 服务端 403 兜底）：初始化时拉取 `GET /api/admin/bot-templates` 自动填充模板下拉框（无可托管模板时禁用启动按钮并提示），输入用户名 + 房间号、选择模板并勾选是否允许组队后启动（成功后仅清空房间输入），表格展示运行中 bot（用户名/房间/模板/组队/启动时间/连接状态）并可手动停止。
 _一句话：后台管理页：用户封禁、管理员权限分配与策略 Bot 托管。_
