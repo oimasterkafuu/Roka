@@ -1107,6 +1107,67 @@ function defensiveCut(b, worst) {
   return best;
 }
 
+// A visible enemy column can approach a crown or command city through neutral
+// land without ever touching our border.  In that case the first legal answer
+// is a staged move toward a point on the enemy's actual route, not ordinary
+// expansion.  This stays deliberately narrow: approachThreat supplies the
+// same force/arrival gate as crown defence, and every emitted step still goes
+// through safeMove, preview, and routeGuard.
+function emergencyDefensiveCut(b, own) {
+  const cuts = cutAnalysis(b, b.playerId);
+  const targets = anchorCells(b, b.playerId)
+    .filter((at) => b.own(at) && !b.isolated[at] && ['crown', 'city'].includes(b.kind(at)))
+    .map((at) => ({ at, value: b.kind(at) === 'crown' ? 1000 : 500 }));
+  for (const at of cuts.points) {
+    if (b.own(at) && !b.isolated[at] && cuts.mass[at] >= FINISH_RESIDUE) {
+      targets.push({ at, value: 220 + Math.min(180, cuts.mass[at]) });
+    }
+  }
+
+  const options = [];
+  for (const protectedTarget of targets) {
+    const protectedAt = protectedTarget.at;
+    const guard = localGuard(b, protectedAt);
+    const threat = approachThreat(b, protectedAt, guard);
+    if (!threat) continue;
+    const threatOwner = b.owner(threat.at);
+    const threatField = field(b, [protectedAt]);
+    const threatPath = route(threatField, threat.at).reverse();
+    const maxCutDistance = Math.min(8, Math.max(2, threat.distance - 1));
+    for (let i = 1; i < threatPath.length - 1; i += 1) {
+      const target = threatPath[i];
+      if (!b.visible[target] || !b.passable(target) || b.own(target)) continue;
+      if (threatField.distance[target] < 2 || threatField.distance[target] > maxCutDistance) continue;
+      // Do not blindly march through the threatening player's visible army.
+      // Other visible owners remain valid route cells: the emergency rule is
+      // allowed to cross their land when that is the only legal approach.
+      const canEnter = (at) => b.visible[at] && b.passable(at) &&
+        (!b.enemy(at) || b.owner(at) !== threatOwner || at === target);
+      const supply = distanceField(b, own.filter((at) => movable(b, at)), canEnter);
+      if (!Number.isFinite(supply.distance[target])) continue;
+      const path = route(supply, target).reverse();
+      if (path.length < 2) continue;
+      const from = path[0];
+      const next = path[1];
+      if (!movable(b, from)) continue;
+      const action = safeMove(b, from, next, 'cut');
+      if (!action || !preview(b, action).ok || routeGuard(b, action).blocked) continue;
+      const routeCost = path.length - 1;
+      const terrainPenalty = b.kind(next) === 'swamp' ? 8 : 0;
+      const foreignBonus = b.owner(next) > 0 && !b.own(next) ? 12 : 0;
+      const targetValue = protectedTarget.value;
+      options.push({
+        action,
+        branch: 'emergency-defense-cut',
+        score: targetValue + (maxCutDistance - threatField.distance[target]) * 30 - routeCost * 8 -
+          terrainPenalty + foreignBonus + threat.force * 0.05,
+      });
+    }
+  }
+  options.sort((a, z) => z.score - a.score);
+  return options[0] || null;
+}
+
 function defense(b, m, own) {
   const crowns = own.filter(i => b.kind(i)==='crown');
   if (!m.threatDistance) m.threatDistance = Object.create(null);
@@ -1131,6 +1192,8 @@ function defense(b, m, own) {
         const action = safeMove(b, from, crown, 'gather', [2, 0, 1]);
         if (action) return { action, branch: 'anchor-approach' };
       }
+      const emergency = emergencyDefensiveCut(b, own);
+      if (emergency) return emergency;
       const delivery = gather(b, m, crown, approach.need, 'anchor-approach');
       if (delivery) return delivery;
     }
@@ -1155,9 +1218,15 @@ function defense(b, m, own) {
       if(shortage>0 && (imminent || advancing || savedMass) && (!worst || shortage/(f.distance[at]+1)>worst.score)) worst={at,crown,eta:f.distance[at],need:arrival+3,score:shortage/(f.distance[at]+1)};
     }
   }
+  // This check also handles a rear approach that has not entered our territory
+  // yet, so it must run even when the local six-cell `worst` scan found nothing.
+  if (worst) {
+    // Intercept at the head or at its actual supply cut, before pulling a crown.
+    for(const from of b.neighbors(worst.at)) if(b.own(from)) { const a=safeMove(b,from,worst.at,'cut'); if(a)return {action:a,branch:'intercept'}; }
+  }
+  const emergency = emergencyDefensiveCut(b, own);
+  if (emergency) return emergency;
   if(!worst) return null;
-  // Intercept at the head or at its actual supply cut, before pulling a crown.
-  for(const from of b.neighbors(worst.at)) if(b.own(from)) { const a=safeMove(b,from,worst.at,'cut'); if(a)return {action:a,branch:'intercept'}; }
   const cut = defensiveCut(b, worst);
   if (cut) return cut;
   const delivery = gather(b,m,worst.crown,worst.need,'defend');
@@ -2167,4 +2236,4 @@ function plan(b,m) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut};

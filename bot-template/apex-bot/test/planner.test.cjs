@@ -3,8 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
-const { actionCoordinates } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, defensiveCut } = require('../bot/planner.cjs');
+const { actionCoordinates, preview } = require('../bot/rules.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, defensiveCut, emergencyDefensiveCut } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -201,6 +201,65 @@ test('cuts an enemy supply articulation when direct crown defence cannot arrive'
   assert.equal(decision.branch, 'defense-cut');
   assert.deepEqual(decision.action, actionCoordinates(b, 8, 3, 2));
 });
+
+function rearRouteThreat(targetCode = 200, targetArmy = 0, enemyArmy = 240) {
+  const grid = [101, 1, targetCode, targetCode === 3 ? 3 : 200, 2, 1, 1, 1, 200, 200];
+  const army = [100, 1, targetArmy, targetCode === 3 ? targetArmy : 0, enemyArmy, 1, 1, 100, 0, 0];
+  return makeBoard({
+    n: 2, m: 5, grid, army,
+    isolated: Array(10).fill(0), fog: Array(10).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }, { id: 3, team: 3 }],
+  }, 1);
+}
+
+test('cuts across visible neutral land when an enemy column bypasses our border', () => {
+  const b = rearRouteThreat();
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(decision.branch, 'emergency-defense-cut');
+  assert.deepEqual(decision.action, actionCoordinates(b, 7, 2, 2));
+  assert.equal(preview(b, decision.action).ok, true);
+});
+
+test('keeps a swamp route available for an emergency defensive cut', () => {
+  const b = rearRouteThreat(204);
+  const decision = emergencyDefensiveCut(b, [...Array(10).keys()].filter((at) => b.own(at)));
+  assert.equal(decision.branch, 'emergency-defense-cut');
+  assert.deepEqual(decision.action, actionCoordinates(b, 7, 2, 2));
+  assert.equal(b.kind(2), 'swamp');
+  assert.equal(preview(b, decision.action).ok, true);
+});
+
+test('can enter another visible player territory to intercept the rear route', () => {
+  const b = rearRouteThreat(3, 20);
+  const decision = emergencyDefensiveCut(b, [...Array(10).keys()].filter((at) => b.own(at)));
+  assert.equal(decision.branch, 'emergency-defense-cut');
+  assert.equal(b.owner(2), 3);
+  assert.deepEqual(decision.action, actionCoordinates(b, 7, 2, 2));
+  assert.equal(preview(b, decision.action).captured, true);
+});
+
+test('does not promote an ordinary foreign move without a rear threat', () => {
+  const b = rearRouteThreat(3, 20, 20);
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(emergencyDefensiveCut(b, [...Array(10).keys()].filter((at) => b.own(at))), null);
+  assert.notEqual(decision.branch, 'emergency-defense-cut');
+});
+
+test('rejects mountains and underpowered foreign targets for emergency cuts', () => {
+  const mountain = makeBoard({
+    n: 1, m: 5, grid: [101, 1, 201, 201, 2], army: [100, 100, 0, 0, 240],
+    isolated: Array(5).fill(0), fog: Array(5).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  assert.equal(emergencyDefensiveCut(mountain, [0, 1]), null);
+
+  const weak = rearRouteThreat(3, 120);
+  assert.equal(emergencyDefensiveCut(weak, [...Array(10).keys()].filter((at) => bOwn(weak, at))), null);
+});
+
+function bOwn(board, at) {
+  return board.own(at) && !board.isolated[at];
+}
 
 test('campaign gathers a token spearhead instead of marching it through a corridor', () => {
   const b = makeBoard({
