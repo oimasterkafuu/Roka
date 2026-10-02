@@ -125,6 +125,7 @@ async function loadProfile() {
     .addClass(p.colorClass || 'rt-unrated');
   $('#p-title').text(p.title || '');
   $('#p-max-rating').text(Math.round(getMaxRating(p.ratingHistory || [], p.rating)));
+  setRatingWithProvisional($('#p-rating'), p.rating, p.provisional);
   $('#p-days').text(p.registeredDays);
   $('#p-points').text(Number.isFinite(p.points) ? p.points : 0);
   $('#p-level, #p-level-label').text(p.level && p.level.level ? p.level.level : 1);
@@ -145,6 +146,16 @@ async function loadProfile() {
   renderRatingChanges(p.ratingHistory || []);
   renderRatingChart(p.ratingHistory || []);
   return true;
+}
+
+// 新手期未定型时，在当前 Rating 右侧加「?」提示。
+function setRatingWithProvisional($el, rating, provisional) {
+  $el.empty().text(Math.round(rating));
+  if (provisional === true) {
+    $('<span class="rating-provisional">?</span>')
+      .attr('title', '基准分尚未发完，rating 未定型')
+      .appendTo($el);
+  }
 }
 
 // 最高 Rating：历史记录与当前显示分取最大值；无历史时即当前分。
