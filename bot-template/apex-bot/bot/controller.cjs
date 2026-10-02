@@ -1,7 +1,7 @@
 'use strict';
 
 const { makeBoard } = require('./board.cjs');
-const { plan, recover, secureDecision, growth } = require('./planner.cjs');
+const { plan, recover, secureDecision, growth, isMazeBoard, mazeActionGuard } = require('./planner.cjs');
 const { preview } = require('./rules.cjs');
 
 function createController(playerId) {
@@ -18,12 +18,46 @@ function createController(playerId) {
     byBranch: Object.create(null),
     threatDistance: Object.create(null),
     enemyHome: undefined,
+    mazeHistory: {
+      lastFrom: -1,
+      lastTo: -1,
+      edge: '',
+      edgeStreak: 0,
+      recent: [],
+      blockedUntil: Object.create(null),
+      reroutes: 0,
+      holds: 0,
+      holdStreak: 0,
+    },
   };
+
+  function recordMazeAction(board, action) {
+    if (!memory.maze) return;
+    const history = memory.mazeHistory;
+    if (action.kind !== 'attack') {
+      history.lastFrom = -1;
+      history.lastTo = -1;
+      history.edge = '';
+      history.edgeStreak = 0;
+      history.recent = [];
+      history.holdStreak = 0;
+      return;
+    }
+    const from = board.idx(action.x, action.y);
+    const to = board.idx(action.dx, action.dy);
+    const edge = from < to ? `${from}:${to}` : `${to}:${from}`;
+    history.edgeStreak = history.edge === edge ? history.edgeStreak + 1 : 1;
+    history.edge = edge;
+    history.lastFrom = from;
+    history.lastTo = to;
+    history.recent = [...history.recent.filter((item) => item !== edge), edge].slice(-10);
+  }
 
   function choose(raw) {
     const board = raw?.neighbors ? raw : makeBoard(raw, memory.playerId);
     if (!board.playerId || board.dead || board.ended || board.turn === memory.lastTurn) return null;
     memory.lastTurn = board.turn;
+    if (memory.maze === undefined) memory.maze = isMazeBoard(board);
     for (let i = 0; i < board.size; i += 1) board.army[i] += growth(board, i, 1);
     // The opponent's first crown is its strategic core.  Remember it before
     // the frontier fills with newly built crowns; long campaigns should not
@@ -37,12 +71,13 @@ function createController(playerId) {
       }
     }
     let decision = secureDecision(board, plan(board, memory));
+    decision = mazeActionGuard(board, memory, decision);
     if (!decision.action) {
       memory.noActionTurns += 1;
       // A short no-op is intentional during muster.  A longer one means the
       // selected corridor or logistics cursor is stale; recover locally
       // instead of appearing to idle forever on maze maps.
-      const recoveryThreshold = board.size >= 800 ? 8 : 12;
+      const recoveryThreshold = memory.maze ? 4 : board.size >= 800 ? 8 : 12;
       if (memory.noActionTurns >= recoveryThreshold) {
         const fallback = recover(
           board,
@@ -50,7 +85,7 @@ function createController(playerId) {
           [...Array(board.size).keys()].filter((at) => board.own(at) && !board.isolated[at]),
         );
         if (fallback) {
-          decision = secureDecision(board, fallback);
+          decision = mazeActionGuard(board, memory, secureDecision(board, fallback));
           if (decision.action) memory.noActionTurns = 0;
         }
       }
@@ -71,6 +106,7 @@ function createController(playerId) {
       memory.campaign.at = board.idx(decision.action.dx, decision.action.dy);
       if (memory.branch !== 'muster') memory.campaign.phase = 'attack';
     }
+    recordMazeAction(board, decision.action);
     memory.actions += 1;
     return decision.action;
   }
@@ -87,6 +123,7 @@ function createController(playerId) {
     memory.byBranch = Object.create(null);
     memory.threatDistance = Object.create(null);
     memory.enemyHome = undefined;
+    memory.maze = undefined;
     memory.campaign = null;
     memory.delivery = null;
     memory.blocked = null;
@@ -99,6 +136,17 @@ function createController(playerId) {
     memory.broadGrowthNext = undefined;
     memory.home = undefined;
     memory.musterWaitTurns = 0;
+    memory.mazeHistory = {
+      lastFrom: -1,
+      lastTo: -1,
+      edge: '',
+      edgeStreak: 0,
+      recent: [],
+      blockedUntil: Object.create(null),
+      reroutes: 0,
+      holds: 0,
+      holdStreak: 0,
+    };
   }
 
   return {
