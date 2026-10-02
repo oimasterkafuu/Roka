@@ -1611,12 +1611,11 @@
     try {
       const res = await fetch('/api/auth/me');
       if (!res.ok) {
-        throw new Error('unauthorized');
+        return false;
       }
       await res.json();
       return true;
     } catch {
-      location.href = '/login';
       return false;
     }
   }
@@ -1637,10 +1636,7 @@
 
   async function main() {
     cacheDom();
-    const authed = await loadUser();
-    if (!authed) {
-      return;
-    }
+    await loadUser();
     bindEvents();
     resetTutorial();
     startTickLoop();
