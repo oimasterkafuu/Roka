@@ -98,6 +98,18 @@ export interface BanStatus {
   ban: BanRecord | null;
 }
 
+const formatBanDeadline = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+export const formatBanMessage = (banStatus: BanStatus): string => {
+  const reason = banStatus.ban?.reason?.trim() || '管理员封禁';
+  const deadline = banStatus.bannedUntil === -1 ? '永久' : formatBanDeadline(banStatus.bannedUntil ?? 0);
+  return `该账号已被封禁。理由：${reason}。解除时间：${deadline}。`;
+};
+
 interface UserFile {
   users: StoredUser[];
 }

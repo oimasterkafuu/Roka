@@ -22,7 +22,7 @@ import { brotliCompress, brotliDecompress, constants as zlibConstants } from 'no
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(rootDir, 'package.json'));
-const { UserStore } = require('./dist/auth-store.js');
+const { UserStore, formatBanMessage } = require('./dist/auth-store.js');
 const { FeedStore } = require('./dist/feed-store.js');
 const { ReplayStore } = require('./dist/replay-store.js');
 const { AnnouncementStore } = require('./dist/announcement-store.js');
@@ -134,7 +134,18 @@ async function scenarioDisciplineStorage() {
     check('管理员查询包含封禁理由与证据', listed?.ban?.reason === '发布不当言论' && listed.ban.evidence === 'test evidence');
     const restarted = new UserStore(dataDir);
     await restarted.ensureReady();
-    check('封禁详情重启后仍持久化', restarted.getBanStatus('discipline_user').ban?.reason === '发布不当言论');
+    const banStatus = restarted.getBanStatus('discipline_user');
+    check('封禁详情重启后仍持久化', banStatus.ban?.reason === '发布不当言论');
+    const visibleMessage = formatBanMessage(banStatus);
+    check(
+      '普通用户提示包含理由和解除时间但不含证据',
+      visibleMessage === `该账号已被封禁。理由：发布不当言论。解除时间：${new Date(until).getFullYear()}-${String(new Date(until).getMonth() + 1).padStart(2, '0')}-${String(new Date(until).getDate()).padStart(2, '0')} ${String(new Date(until).getHours()).padStart(2, '0')}:${String(new Date(until).getMinutes()).padStart(2, '0')}。` && !visibleMessage.includes('test evidence'),
+    );
+    check(
+      '旧封禁无理由时使用管理员封禁并显示永久',
+      formatBanMessage({ banned: true, bannedUntil: -1, ban: null }) ===
+        '该账号已被封禁。理由：管理员封禁。解除时间：永久。',
+    );
     await restarted.applyBan('discipline_user', Date.now() - 1, {
       type: 'manual',
       reason: '过期测试',
