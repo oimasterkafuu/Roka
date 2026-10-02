@@ -163,6 +163,153 @@ function constructionThreat(b, own, enemies) {
   return false;
 }
 
+// Humans often skip every early build, paint a narrow corridor, and then
+// spend the saved army on a direct crown raid. A construction-only safety
+// check sees that attack too late because the stack is still many cells from
+// the crown. Detect the characteristic 1v1 state before committing money or
+// a long campaign to the rear: the opponent still has only its initial crown,
+// owns no city, has a meaningful territory/army lead, and is already inside a
+// reachable approach window. Maze corridors get a longer warning horizon.
+function earlyRushProfile(b, own, enemies) {
+  if (b.turn < 25 || b.turn > 135 || !enemies.length) return null;
+  const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+  if (enemyCrowns !== 1 || enemies.some((at) => b.kind(at) === 'city')) return null;
+  const crowns = own.filter((at) => b.kind(at) === 'crown');
+  if (!crowns.length) return { active: true, homeReserve: 0, distance: 0, crown: -1, enemyHome: -1 };
+  let walls = 0;
+  for (let at = 0; at < b.size; at += 1) if (b.kind(at) === 'mountain') walls += 1;
+  // The attack may start only after our first build, so the warning window
+  // must include the opponent's travel time after that build.  A fixed
+  // twelve-cell check misses compact 1x30/maze boards where the home stack
+  // is still several dozen cells away but reaches the crown before the next
+  // construction cycle. Keep the horizon bounded on large maps so this
+  // latent defence does not freeze ordinary long-range development.
+  const horizon = walls > b.size * 0.12 ? 48 : 36;
+  const maze = walls > b.size * 0.12;
+  let swampTiles = 0;
+  for (let at = 0; at < b.size; at += 1) if (b.kind(at) === 'swamp') swampTiles += 1;
+  const maritime = b.size > 0 && swampTiles / b.size > 0.3 && swampTiles / b.size < 0.55;
+  const enemyHome = enemies.find((at) => b.kind(at) === 'crown');
+  if (enemyHome === undefined) return null;
+  // A second crown can be much closer to the saved enemy home than the
+  // original crown. Select the weakest reachable target instead of assuming
+  // crowns[0] is the one a delayed raid will hit.
+  let crown = crowns[0];
+  let crownField = field(b, [crown]);
+  let crownDistance = crownField.distance[enemyHome];
+  for (const candidate of crowns.slice(1)) {
+    const candidateField = field(b, [candidate]);
+    const candidateDistance = candidateField.distance[enemyHome];
+    if (candidateDistance < crownDistance ||
+      (candidateDistance === crownDistance && b.army[candidate] < b.army[crown])) {
+      crown = candidate;
+      crownField = candidateField;
+      crownDistance = candidateDistance;
+    }
+  }
+  const ownArmy = own.reduce((sum, at) => sum + b.army[at], 0);
+  const enemyArmy = enemies.reduce((sum, at) => sum + b.army[at], 0);
+  const landLead = enemies.length >= own.length + 8 || enemies.length >= own.length * 1.12;
+  const armyLead = enemyArmy >= Math.max(90, ownArmy * 0.78);
+  let nearest = Infinity;
+  let strongest = 0;
+  for (const at of enemies) {
+    const distance = crownField.distance[at];
+    if (!Number.isFinite(distance) || distance > horizon) continue;
+    nearest = Math.min(nearest, distance);
+    strongest = Math.max(strongest, b.army[at]);
+  }
+  const closeStack = strongest >= Math.max(36, ownArmy * 0.08);
+  const owner = b.owner(enemyHome);
+  const homeField = field(b, [enemyHome], (at) => b.owner(at) === owner && !b.isolated[at]);
+  let homeReserve = 0;
+  for (const at of enemies) {
+    if (!b.isolated[at] && homeField.distance[at] <= 5) homeReserve += b.army[at];
+  }
+  const distance = crownDistance;
+  // A player can keep the whole army behind the crown and still have a
+  // winning attack.  Total army/land lead is therefore only a bonus signal;
+  // the essential signal is a funded home reserve with a short route to our
+  // sole crown while the opponent has not spent its first city investment.
+  const savedHome = b.turn >= 25 && Number.isFinite(distance) && distance <= horizon &&
+    homeReserve >= 48 && (enemyArmy >= Math.max(48, ownArmy * 0.45) || homeReserve >= 80);
+  const advancing = Number.isFinite(nearest) && closeStack && (landLead || armyLead || nearest <= 6);
+  if (!savedHome && !advancing) return null;
+  return {
+    active: true,
+    homeReserve,
+    distance,
+    crown,
+    enemyHome,
+    maritime,
+    maze,
+    ownArmy,
+    enemyArmy,
+    guard: localGuard(b, crown),
+    // A build can remove fifty units from a cell that is also part of the
+    // crown's local guard. Keep a larger buffer on a short route and on maze
+    // maps where one corridor is easy to lose.
+    buildBuffer: BUILD_COST + Math.max(12, Math.min(36, distance * 2)),
+  };
+}
+
+function earlyRushThreat(b, own, enemies) {
+  return Boolean(earlyRushProfile(b, own, enemies));
+}
+
+function rushCrownFloor(profile) {
+  return Math.max(18, Math.min(100, Math.ceil(profile.homeReserve * 0.8 + Math.min(12, profile.distance))));
+}
+
+function delayedRushGuard(b, m, own, enemies, profile) {
+  if (!profile?.active || profile.crown < 0) return null;
+  const crownFloor = rushCrownFloor(profile);
+  const needed = Math.min(260, Math.max(
+    crownFloor,
+    profile.homeReserve + Math.max(12, profile.distance * 2) + 10,
+  ));
+  // The crown floor is the phase boundary. Once it is met, do not keep
+  // waiting for the entire enemy home reserve; those soldiers may never
+  // leave home and the lost expansion window would hand over several crowns.
+  if (b.army[profile.crown] >= crownFloor) return null;
+  const direct = b.neighbors(profile.crown)
+    .filter((from) => b.own(from) && !b.isolated[from] && movable(b, from))
+    .sort((a, z) => b.army[z] - b.army[a]);
+  for (const from of direct) {
+    const action = safeMove(b, from, profile.crown, 'gather', [2, 0, 1]);
+    if (action) return { action, branch: 'delayed-rush-guard' };
+  }
+  const delivery = gather(b, m, profile.crown, needed, 'delayed-rush-guard',
+    (at) => b.own(at) && !b.isolated[at], Math.min(8, Math.max(4, profile.distance)));
+  return delivery;
+}
+
+function rushOutwardMove(b, action, profile) {
+  if (!profile?.active || profile.crown < 0 || action?.kind !== 'attack') return false;
+  const from = b.idx(action.x, action.y);
+  const to = b.idx(action.dx, action.dy);
+  if (from !== profile.crown) return false;
+  return to !== profile.crown && !b.enemy(to) && b.army[profile.crown] < rushCrownFloor(profile);
+}
+
+function latentReserveMove(b, profile) {
+  if (!profile?.active || profile.crown < 0) return null;
+  const crownField = field(b, [profile.crown]);
+  const sources = [];
+  for (let from = 0; from < b.size; from += 1) {
+    if (from === profile.crown || !movable(b, from)) continue;
+    for (const to of b.neighbors(from)) {
+      if (!b.own(to) || b.isolated[to] || crownField.distance[to] >= crownField.distance[from]) continue;
+      const action = safeMove(b, from, to, 'gather', [0, 1]);
+      if (action && !routeGuard(b, action).blocked) {
+        sources.push({ action, score: crownField.distance[from] - crownField.distance[to] + b.army[from] * 0.001 });
+      }
+    }
+  }
+  sources.sort((a, z) => z.score - a.score);
+  return sources[0] ? { ...sources[0], branch: 'delayed-rush-rally' } : null;
+}
+
 function asPlayer(b, playerId) {
   return makeBoard({
     n: b.n,
@@ -1461,6 +1608,17 @@ function plan(b,m) {
   // switch the action budget to economy, rallying, and visible combat.
   const explore = !fogged || b.turn < 120 || own.length < 40 || (fogged && b.turn % 5 === 0);
   const ed=field(b,enemies);
+  const rushProfile = earlyRushProfile(b, own, enemies);
+  // Do not let a harmlessly distant reserve freeze the whole economy once
+  // the sole crown already has enough local guard.  The hold specifically
+  // covers the post-build exposure window: fifty units spent on a nearby
+  // site plus the travel margin of the saved home column.
+  const immediateRushHold = rushProfile && !rushProfile.maritime && b.turn < 42 && rushProfile.homeReserve >= 150 &&
+    b.army[rushProfile.crown] < rushCrownFloor(rushProfile);
+  const rushBuildHold = rushProfile && (immediateRushHold ||
+    (!rushProfile.maritime && (rushProfile.maze || rushProfile.distance <= 24) &&
+      b.turn >= 42 && rushProfile.homeReserve >= 80 &&
+      b.army[rushProfile.crown] < rushCrownFloor(rushProfile)));
   // On large maps a first campaign can monopolize the action budget while
   // the opponent paints several hundred cells. Pause only a gathering
   // campaign when the territory gap is structural; an already marching
@@ -1496,7 +1654,8 @@ function plan(b,m) {
       const economyWindow = gatherWindow &&
         (ownTotal < enemyTotal * 1.15 || enemyCrowns > own.filter((at) => b.kind(at) === 'crown').length) &&
         b.turn % 8 === 0;
-      if (!campaignPaused && !economyWindow) return campaign;
+      const latentCrownMove = rushBuildHold && rushOutwardMove(b, campaign.action, rushProfile);
+      if (!campaignPaused && !economyWindow && !latentCrownMove) return campaign;
       campaignPaused = true;
     }
   }
@@ -1505,7 +1664,11 @@ function plan(b,m) {
   const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
   const defend=defense(b,m,own);
   if(defend)return defend;
-  const investmentWindow = sustainEconomy(b, m, own, ed, enemies);
+  if (rushBuildHold) {
+    const guard = delayedRushGuard(b, m, own, enemies, rushProfile);
+    if (guard) return guard;
+  }
+  const investmentWindow = rushBuildHold ? null : sustainEconomy(b, m, own, ed, enemies);
   if (investmentWindow) return investmentWindow;
   const finishing = enemyCrowns <= 2 && ownTotal > enemyTotal * 1.35;
   if (finishing) {
@@ -1537,12 +1700,14 @@ function plan(b,m) {
     const assault = campaignPaused ? null : chooseCampaign(b, m, own);
     if (assault) return assault;
   }
-  const forward = forwardExpansion(b, m, own, ed, enemies);
-  if (forward) return forward;
-  const broad = broadExpansion(b, m, own, ed, enemies);
-  if (broad) return broad;
-  const rear = rearExpansion(b, m, own, ed, enemies);
-  if (rear) return rear;
+  if (!rushBuildHold) {
+    const forward = forwardExpansion(b, m, own, ed, enemies);
+    if (forward) return forward;
+    const broad = broadExpansion(b, m, own, ed, enemies);
+    if (broad) return broad;
+    const rear = rearExpansion(b, m, own, ed, enemies);
+    if (rear) return rear;
+  }
   const cutGuard = cutDefense(b, m, own);
   if (cutGuard) return cutGuard;
   const cut = strategicCut(b, own);
@@ -1556,7 +1721,16 @@ function plan(b,m) {
   if(strike && !campaignBusy && (b.turn < 90 || strike.score > 100))return strike;
   if(tactic)return tactic;
   const openingTurns = swampRatio(b, m) > 0.3 && swampRatio(b, m) < 0.55 ? 50 : 40;
-  if(b.turn<openingTurns || (fogged && explore)) return opening(b,m,own,ed)||{action:null,branch:'wait'};
+  if(b.turn<openingTurns || (fogged && explore)) {
+    if (rushBuildHold) {
+      const guard = delayedRushGuard(b, m, own, enemies, rushProfile);
+      if (guard) return guard;
+      const rally = latentReserveMove(b, rushProfile);
+      if (rally) return rally;
+      return { action: null, branch: 'delayed-rush-wait' };
+    }
+    return opening(b,m,own,ed)||{action:null,branch:'wait'};
+  }
   // A failed core route opens a short recovery window.  Spend it on a
   // winnable local border capture instead of immediately rebuilding the same
   // long muster; this changes the geometry and the economy before retrying.
@@ -1569,12 +1743,12 @@ function plan(b,m) {
   // has turned into infrastructure.  Start the prepared strike immediately;
   // postponing it behind another economy cycle gives the opponent a free
   // window to multiply its core.
-  if (b.turn < ECON_DEADLINE && !(earlyStrike && process.env.APEX_EARLY_MAZE !== '0')) {
+  if (!rushBuildHold && b.turn < ECON_DEADLINE && !(earlyStrike && process.env.APEX_EARLY_MAZE !== '0')) {
     const invest=economy(b,m,own,ed,ECON_GOAL);
     if(invest)return invest;
   }
   const campaign=(!campaignPaused && (enemyInvested || b.turn >= 70)) ? chooseCampaign(b,m,own) : null;
-  if(campaign)return campaign;
+  if(campaign && !(rushBuildHold && rushOutwardMove(b, campaign.action, rushProfile))) return campaign;
   // Once a campaign has a valid rally root but no legal delivery step, keep
   // the root intact and let growth refill it.  Falling back to opening here
   // spends the action on a new frontier and is exactly the oscillation that
@@ -1594,11 +1768,12 @@ function plan(b,m) {
     return { action: null, branch: 'muster-wait' };
   }
   m.musterWaitTurns = 0;
-  const investment=economy(b,m,own,ed,ECON_GOAL);
+  const investment=rushBuildHold ? null : economy(b,m,own,ed,ECON_GOAL);
   if(investment && (!enemyInvested || b.turn < 80))return investment;
-  if(campaign)return campaign;
-  const growthAction=economy(b,m,own,ed,ECON_GOAL);
+  if(campaign && !(rushBuildHold && rushOutwardMove(b, campaign.action, rushProfile))) return campaign;
+  const growthAction=rushBuildHold ? null : economy(b,m,own,ed,ECON_GOAL);
   if(growthAction)return growthAction;
+  if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
