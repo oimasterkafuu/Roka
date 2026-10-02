@@ -242,7 +242,12 @@ class LobbyService {
     sid: string,
     uid: string,
     gid: string,
-    options?: { serverBot?: boolean; serverBotAllowTeam?: boolean; bot?: boolean },
+    options?: {
+      serverBot?: boolean;
+      serverBotAllowTeam?: boolean;
+      serverBotAllowFog?: boolean;
+      bot?: boolean;
+    },
   ): void {
     this.lobbyOfSid.set(sid, gid);
     // 进房本身即是「标签页开启」的证明，作为心跳基线。
@@ -279,10 +284,10 @@ class LobbyService {
 
     const player: LobbyPlayer = { sid, uid, team: targetTeam, ready: false };
     if (isBot) {
-      // Bot 对局不支持迷雾远征（issue #51）：bot 进房时若迷雾已开启则强制关闭，
-      // 房主后续重新开启的请求在 server.ts 的 change_game_conf 里拦截。
+      // 第三方 Bot 与未允许迷雾的托管 Bot 不支持迷雾远征：进房时若迷雾已开启
+      // 则强制关闭，房主后续重新开启的请求在 server.ts 的 change_game_conf 里拦截。
       player.bot = true;
-      if (conf.fog) {
+      if (conf.fog && (options?.serverBot !== true || options.serverBotAllowFog !== true)) {
         conf.fog = false;
       }
     }
@@ -292,6 +297,7 @@ class LobbyService {
       // 开启组队，仅移除 change_game_conf 的组队开关限制，由房主决定是否启用。
       player.serverBot = true;
       player.serverBotAllowTeam = options.serverBotAllowTeam === true;
+      player.serverBotAllowFog = options.serverBotAllowFog === true;
       if (options.serverBotAllowTeam !== true && conf.allow_team) {
         // 不允许组队的托管 bot：进房强制关闭组队并规整队伍。
         conf.allow_team = false;
@@ -417,6 +423,7 @@ class LobbyService {
       ready: Boolean(player.ready && player.team !== 0),
       ...(player.serverBot === true ? { server_bot: true } : {}),
       ...(player.serverBot === true ? { server_bot_allow_team: player.serverBotAllowTeam === true } : {}),
+      ...(player.serverBot === true ? { server_bot_allow_fog: player.serverBotAllowFog === true } : {}),
       ...(player.bot === true ? { bot: true } : {}),
     }));
 

@@ -19,12 +19,12 @@ import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
  * 模块加载即连接服务器，不作为可托管选项。模板按目录名缓存加载。
  *
  * 重启自动恢复（issue #28）：start/stop 时把运行中 bot 的
- * {username, room, template, allowTeam} 列表同步写入 stateFilePath（JSON，
- * 临时文件 + rename 原子替换）；服务器重启后由 restore() 读回，逐条重做与
- * 手动启动相同的校验（用户存在且未封禁、房间号长度 1~15、模板可加载），
+ * {username, room, template, allowTeam, allowFog} 列表同步写入 stateFilePath
+ *（JSON，临时文件 + rename 原子替换）；服务器重启后由 restore() 读回，逐条
+ * 重做与手动启动相同的校验（用户存在且未封禁、房间号长度 1~15、模板可加载），
  * 全部通过才以原配置自动启动；失效记录只记警告并随成功启动的写盘清除，
- * 不影响服务器启动。缺少 template/allowTeam 的旧记录按 simple-strategy-bot +
- * allowTeam=false 恢复，维持旧行为。
+ * 不影响服务器启动。缺少 template/allowTeam/allowFog 的旧记录按
+ * simple-strategy-bot + 不允许组队/迷雾恢复，维持旧行为。
  */
 
 interface StrategyOptions {
@@ -48,6 +48,7 @@ interface ServerBotInfo {
   room: string;
   template: string;
   allowTeam: boolean;
+  allowFog: boolean;
   startedAt: number;
   connected: boolean;
 }
@@ -70,7 +71,7 @@ interface RunningServerBot extends ServerBotInfo {
 interface ServerBotManagerOptions {
   /** 服务器实际监听端口（start 时读取，API 调用必然发生在 listen 之后）。 */
   getPort: () => number;
-  /** 自动恢复状态文件（JSON）：运行中 bot 的 {username, room, template, allowTeam} 列表。 */
+  /** 自动恢复状态文件（JSON）：运行中 bot 的 {username, room, template, allowTeam, allowFog} 列表。 */
   stateFilePath: string;
 }
 
@@ -80,12 +81,14 @@ interface SavedServerBot {
   room: string;
   template?: string;
   allowTeam?: boolean;
+  allowFog?: boolean;
 }
 
-/** 内存临时令牌表项：token → bot 身份与组队许可，供 server.ts 的 socket 中间件查询。 */
+/** 内存临时令牌表项：token → bot 身份、组队与迷雾许可，供 server.ts 查询。 */
 interface TokenEntry {
   username: string;
   allowTeam: boolean;
+  allowFog: boolean;
 }
 
 const BOT_TEMPLATE_DIR = path.join('bot-template');
@@ -113,6 +116,7 @@ class ServerBotManager {
       room: bot.room,
       template: bot.template,
       allowTeam: bot.allowTeam,
+      allowFog: bot.allowFog,
       startedAt: bot.startedAt,
       connected: bot.socket.connected,
     }));
@@ -163,7 +167,13 @@ class ServerBotManager {
     return templates;
   }
 
-  start(username: string, room: string, templateId: string, allowTeam: boolean): ServerBotInfo {
+  start(
+    username: string,
+    room: string,
+    templateId: string,
+    allowTeam: boolean,
+    allowFog: boolean,
+  ): ServerBotInfo {
     for (const bot of this.bots.values()) {
       if (bot.username === username) {
         throw new Error(`用户 ${username} 已有运行中的策略 Bot。`);
@@ -196,6 +206,7 @@ class ServerBotManager {
       room,
       template: templateId,
       allowTeam,
+      allowFog,
       startedAt: Date.now(),
       connected: false,
       token,
@@ -203,10 +214,10 @@ class ServerBotManager {
       handle,
     };
     this.bots.set(id, bot);
-    this.tokens.set(token, { username, allowTeam });
+    this.tokens.set(token, { username, allowTeam, allowFog });
     this.persistState();
     console.log(
-      `[server-bot] ${username}: started in room ${room} (template=${templateId}, allowTeam=${allowTeam}, id=${id})`,
+      `[server-bot] ${username}: started in room ${room} (template=${templateId}, allowTeam=${allowTeam}, allowFog=${allowFog}, id=${id})`,
     );
     return this.list().find((item) => item.id === id) as ServerBotInfo;
   }
@@ -240,13 +251,14 @@ class ServerBotManager {
         if (saved.room.length === 0 || saved.room.length > 15) {
           throw new Error(`房间号无效（长度 1~15）。`);
         }
-        // 旧记录缺少 template/allowTeam：按 simple-strategy-bot + 不允许组队恢复。
+        // 旧记录缺少 template/allowTeam/allowFog：按旧默认值恢复。
         const template = saved.template ?? DEFAULT_TEMPLATE;
         const allowTeam = saved.allowTeam === true;
+        const allowFog = saved.allowFog === true;
         this.loadStrategy(template);
-        this.start(saved.username, saved.room, template, allowTeam);
+        this.start(saved.username, saved.room, template, allowTeam, allowFog);
         console.log(
-          `[server-bot] ${saved.username}: 已按重启前配置自动恢复（房间 ${saved.room}，模板 ${template}，组队 ${allowTeam ? '允许' : '不允许'}）`,
+          `[server-bot] ${saved.username}: 已按重启前配置自动恢复（房间 ${saved.room}，模板 ${template}，组队 ${allowTeam ? '允许' : '不允许'}，迷雾 ${allowFog ? '允许' : '不允许'}）`,
         );
       } catch (error) {
         console.warn(
@@ -290,6 +302,7 @@ class ServerBotManager {
         room: bot.room,
         template: bot.template,
         allowTeam: bot.allowTeam,
+        allowFog: bot.allowFog,
       }));
       mkdirSync(path.dirname(this.options.stateFilePath), { recursive: true });
       const tmpPath = `${this.options.stateFilePath}.${process.pid}.tmp`;

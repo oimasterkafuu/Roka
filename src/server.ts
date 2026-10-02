@@ -823,8 +823,8 @@ const boot = async (): Promise<void> => {
     return reply.send({ items: serverBotManager.listTemplates() });
   });
 
-  // 启动：{ username, room, template, allowTeam }。Bot 在服务器进程内以该用户
-  // 身份连接本服务器，按所选模板加入房间并自动准备。
+  // 启动：{ username, room, template, allowTeam, allowFog }。Bot 在服务器进程内
+  // 以该用户身份连接本服务器，按所选模板加入房间并自动准备。
   app.post(
     '/api/admin/bots/start',
     { preHandler: adminActionRateLimitPreHandler },
@@ -838,11 +838,13 @@ const boot = async (): Promise<void> => {
         room?: unknown;
         template?: unknown;
         allowTeam?: unknown;
+        allowFog?: unknown;
       };
       const username = String(body?.username ?? '').trim();
       const room = String(body?.room ?? '').trim();
       const template = String(body?.template ?? '').trim();
       const allowTeam = body?.allowTeam === true;
+      const allowFog = body?.allowFog === true;
       if (!USERNAME_REGEX.test(username) || !userStore.getPublicProfile(username)) {
         return reply.code(404).send({ error: '用户不存在。' });
       }
@@ -857,7 +859,7 @@ const boot = async (): Promise<void> => {
         return reply.code(400).send({ error: '模板不存在或不可托管。' });
       }
       try {
-        const bot = serverBotManager.start(username, room, template, allowTeam);
+        const bot = serverBotManager.start(username, room, template, allowTeam, allowFog);
         return reply.send({ ok: true, bot });
       } catch (error) {
         return reply.code(409).send({ error: error instanceof Error ? error.message : '启动失败。' });
@@ -1376,13 +1378,14 @@ const boot = async (): Promise<void> => {
 
       // 服务端托管策略 Bot：命中管理器生成的内存临时令牌时以指定用户放行，
       // 额外标记 isServerBot（进房不当房主，见 lobby-service.joinLobby）并记录
-      // 启动时的组队许可（serverBotAllowTeam）。
+      // 启动时的组队与迷雾许可。
       const serverBot = serverBotManager.resolveToken(fromHandshake);
       if (serverBot) {
         socket.data.username = serverBot.username;
         socket.data.isBot = true;
         socket.data.isServerBot = true;
         socket.data.serverBotAllowTeam = serverBot.allowTeam;
+        socket.data.serverBotAllowFog = serverBot.allowFog;
         next();
         return;
       }
@@ -1568,6 +1571,7 @@ const boot = async (): Promise<void> => {
         lobbyService.joinLobby(socket.id, username, room, {
           serverBot: socket.data.isServerBot === true,
           serverBotAllowTeam: socket.data.serverBotAllowTeam === true,
+          serverBotAllowFog: socket.data.serverBotAllowFog === true,
           bot: socket.data.isBot === true,
         });
         socket.join(`game_${roomVal}`);
@@ -1582,8 +1586,13 @@ const boot = async (): Promise<void> => {
         ) {
           lobbyService.sendLobbySystemMessage(io, roomVal, '官方策略 Bot 进入房间，组队模式已关闭。');
         }
-        // Bot 进房会强制关闭迷雾远征（见 lobby-service.joinLobby），补充提示。
-        if (socket.data.isBot === true && hadFog && lobbyService.lobbyConfig.get(room)?.fog === false) {
+        // 不允许迷雾的 Bot 进房会强制关闭迷雾远征（见 lobby-service.joinLobby），补充提示。
+        if (
+          socket.data.isBot === true &&
+          socket.data.serverBotAllowFog !== true &&
+          hadFog &&
+          lobbyService.lobbyConfig.get(room)?.fog === false
+        ) {
           lobbyService.sendLobbySystemMessage(io, roomVal, 'Bot 进入房间，迷雾远征已关闭。');
         }
         lobbyService.emitHomeRooms(io);
@@ -1761,10 +1770,16 @@ const boot = async (): Promise<void> => {
           const fogRaw = payload.fog;
           const fog = Boolean(fogRaw === true || fogRaw === 1 || fogRaw === '1' || fogRaw === 'true');
           if (fog !== (oldConf.fog === true)) {
-            if (fog && players.some((player) => player.bot === true)) {
-              // 房间内有 Bot（第三方或官方托管）时禁止开启迷雾远征：拒绝改动
-              // 并回发房间状态复位前端开关。
-              lobbyService.sendLobbySystemMessage(io, roomVal, 'Bot 对局不支持迷雾远征，无法开启。');
+            if (
+              fog &&
+              players.some(
+                (player) =>
+                  player.bot === true && (player.serverBot !== true || player.serverBotAllowFog !== true),
+              )
+            ) {
+              // 房间内有不支持迷雾的 Bot（第三方或未允许迷雾的官方托管）时禁止开启：
+              // 拒绝改动并回发房间状态复位前端开关。
+              lobbyService.sendLobbySystemMessage(io, roomVal, '房间内有 Bot 不支持迷雾远征，无法开启。');
               lobbyService.emitRoomUpdate(io, gid);
             } else {
               nextConf.fog = fog;

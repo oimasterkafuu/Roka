@@ -820,16 +820,19 @@ socket.on('room_update', function (data) {
   var allowTeam = Boolean(data.allow_team);
   var roomRunning = Boolean(data.in_game);
   var hasServerBotForbiddingTeam = false;
-  var hasBot = false;
+  var hasBotForbiddingFog = false;
   for (var i = 0; i < data.players.length; i++) {
     var p = data.players[i];
     if (p.server_bot && p.server_bot_allow_team !== true) {
       hasServerBotForbiddingTeam = true;
     }
-    if (p.bot || p.server_bot) {
-      hasBot = true;
+    if (
+      (p.bot && !(p.server_bot && p.server_bot_allow_fog === true)) ||
+      (p.server_bot && p.server_bot_allow_fog !== true)
+    ) {
+      hasBotForbiddingFog = true;
     }
-    if (hasServerBotForbiddingTeam && hasBot) {
+    if (hasServerBotForbiddingTeam && hasBotForbiddingFog) {
       break;
     }
   }
@@ -838,9 +841,9 @@ socket.on('room_update', function (data) {
   setTabGroupReadonly('tabs-map-region', roomRunning || !isHost || getMapModeCode() != 'huaxia');
   setTabGroupReadonly('tabs-map-size', roomRunning || !isHost);
   setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBotForbiddingTeam);
-  setTabGroupReadonly('tabs-fog-mode', roomRunning || !isHost || hasBot);
+  setTabGroupReadonly('tabs-fog-mode', roomRunning || !isHost || hasBotForbiddingFog);
   $('#team-mode-bot-hint').css('display', hasServerBotForbiddingTeam ? '' : 'none');
-  $('#fog-mode-bot-hint').css('display', hasBot ? '' : 'none');
+  $('#fog-mode-bot-hint').css('display', hasBotForbiddingFog ? '' : 'none');
   $('#team-mode-section').css('display', isHost && !roomRunning ? '' : 'none');
   if (isHost && !roomRunning) $('#map-token').removeAttr('disabled');
   else $('#map-token').attr('disabled', '');
