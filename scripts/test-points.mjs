@@ -15,13 +15,13 @@ const {
 } = require('../dist/auth-store.js');
 
 for (const [points, level, next] of [
-  [0, 1, 16],
-  [15, 1, 16],
-  [16, 2, 108],
-  [108, 3, 288],
-  [288, 4, 1000],
-  [1000, 5, 2888],
-  [2888, 6, null],
+  [0, 1, 100],
+  [99, 1, 100],
+  [100, 2, 1000],
+  [1000, 3, 10000],
+  [10000, 4, 30000],
+  [30000, 5, 100000],
+  [100000, 6, null],
 ]) {
   const result = getUserLevelProgress(points);
   assert.equal(result.level, level, `level at ${points}`);
