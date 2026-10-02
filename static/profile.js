@@ -128,7 +128,8 @@ async function loadProfile() {
   setRatingWithProvisional($('#p-rating'), p.rating, p.provisional);
   $('#p-days').text(p.registeredDays);
   $('#p-points').text(Number.isFinite(p.points) ? p.points : 0);
-  $('#p-level, #p-level-label').text(p.level && p.level.level ? p.level.level : 1);
+  $('#p-level').text(p.ratingGames);
+  $('#p-level-label').text(p.level && p.level.level ? p.level.level : 1);
   $('#p-rating-rank').text(p.ratingDisplayRank || '-');
   var level = p.level || { points: 0, currentLevelPoints: 0, nextLevelPoints: 16, progress: 0 };
   $('#p-level-progress').css('width', Math.round((level.progress || 0) * 100) + '%');
