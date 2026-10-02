@@ -257,6 +257,35 @@ function earlyRushThreat(b, own, enemies) {
   return Boolean(earlyRushProfile(b, own, enemies));
 }
 
+// A maze has a single-lane campaign cost: a column with only one or two
+// anchors cannot replace losses or keep the rear connected. Once the opponent
+// has built, pause a long/gathering campaign until a compact anchor chain is
+// available. A healthy spearhead at the final approach may still finish.
+function mazeInfrastructureHold(b, m, own, enemies) {
+  let walls = 0;
+  for (let at = 0; at < b.size; at += 1) if (b.kind(at) === 'mountain') walls += 1;
+  if (walls <= b.size * 0.12) return false;
+  const enemyCities = enemies.filter((at) => b.kind(at) === 'city').length;
+  const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+  if (enemyCities === 0 && enemyCrowns <= 1) return false;
+  const target = Number.isInteger(m.enemyHome) && b.enemy(m.enemyHome) && b.kind(m.enemyHome) === 'crown'
+    ? m.enemyHome : enemies.find((at) => b.kind(at) === 'crown');
+  if (!Number.isInteger(target)) return false;
+  const targetField = field(b, [target]);
+  const root = Number.isInteger(m.campaign?.at) && b.own(m.campaign.at)
+    ? m.campaign.at : own.find((at) => b.kind(at) === 'crown');
+  const distance = Number.isInteger(root) ? targetField.distance[root] : Infinity;
+  if (!Number.isFinite(distance)) return false;
+  if (m.campaign?.phase !== 'gather' && distance < (b.size >= 800 ? 24 : 8)) return false;
+  const anchors = own.filter((at) => ['city', 'crown'].includes(b.kind(at)));
+  const cities = own.filter((at) => b.kind(at) === 'city');
+  const requiredAnchors = distance >= 48 ? 4 : distance >= 30 ? 3 : 2;
+  if (anchors.length >= requiredAnchors && cities.length >= 1) return false;
+  if (m.campaign?.phase === 'attack' && distance <= 8 &&
+      b.army[m.campaign.at] >= Math.max(36, b.army[target] * 1.25 + 12)) return false;
+  return true;
+}
+
 function rushCrownFloor(profile) {
   return Math.max(18, Math.min(100, Math.ceil(profile.homeReserve * 0.8 + Math.min(12, profile.distance))));
 }
@@ -1628,6 +1657,17 @@ function plan(b,m) {
   const largeExpansionPause = largeExpansionRace &&
     (!m.campaign || m.campaign.phase === 'gather') && b.turn % 5 !== 0;
   if (largeExpansionPause) campaignPaused = true;
+  const mazeBuildHold = mazeInfrastructureHold(b, m, own, enemies);
+  if (mazeBuildHold) {
+    campaignPaused = true;
+    // Drop stale delivery state so the economy pass cannot keep feeding the
+    // obsolete two-anchor assault after the opponent has built.
+    if (m.campaign && m.campaign.phase !== 'attack') {
+      m.campaign = null;
+      m.delivery = null;
+      m.musterWaitTurns = 0;
+    }
+  }
   const anchorGuard = anchorDefense(b);
   if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
@@ -1776,4 +1816,4 @@ function plan(b,m) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
