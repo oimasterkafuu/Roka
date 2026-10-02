@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const { makeBoard, connectedSet, articulationCells } = require('../bot/board.cjs');
 const { computePush, preview } = require('../bot/rules.cjs');
 const { createController } = require('../bot/controller.cjs');
+const { createOpponentStats } = require('../strategy.js');
 
 function frame(grid, army, n = 3, m = 5, turn = 60) {
   return { n, m, grid, army, isolated: Array(n * m).fill(0), fog: Array(n * m).fill(0), turn, leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }] };
@@ -62,4 +63,41 @@ test('controller returns one legal action and keeps a target across turns', () =
   const stats = controller.stats();
   assert.equal(stats.actions, 1);
   assert.equal(stats.rejected, 0);
+});
+
+test('tracks opponent loss streaks and opens a cooldown after repeated losses', () => {
+  let now = 1_000;
+  const stats = createOpponentStats(() => now);
+  const defeated = [
+    { id: 1, team: 1, uid: 'Apex', class_: 'dead', dead: 1 },
+    { id: 2, team: 2, uid: 'human', class_: '', dead: 0 },
+  ];
+  stats.record(defeated, 1);
+  stats.record(defeated, 1);
+  stats.record(defeated, 1);
+  const blocked = stats.blocked([{ uid: 'human' }]);
+  assert.ok(blocked);
+  assert.equal(blocked.losses, 3);
+  assert.equal(blocked.consecutiveLosses, 3);
+  now += 181_000;
+  assert.equal(stats.blocked([{ uid: 'human' }]), null);
+});
+
+test('a win resets only that opponent\'s consecutive loss streak', () => {
+  const stats = createOpponentStats(() => 1_000);
+  const loss = [
+    { id: 1, team: 1, uid: 'Apex', class_: 'dead', dead: 1 },
+    { id: 2, team: 2, uid: 'human', class_: '', dead: 0 },
+  ];
+  const win = [
+    { id: 1, team: 1, uid: 'Apex', class_: '', dead: 0 },
+    { id: 2, team: 2, uid: 'human', class_: 'dead', dead: 1 },
+  ];
+  stats.record(loss, 1);
+  stats.record(loss, 1);
+  stats.record(win, 1);
+  const snapshot = stats.snapshot().human;
+  assert.equal(snapshot.losses, 2);
+  assert.equal(snapshot.wins, 1);
+  assert.equal(snapshot.consecutiveLosses, 0);
 });

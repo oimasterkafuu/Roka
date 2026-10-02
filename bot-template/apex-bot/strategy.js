@@ -3,6 +3,67 @@
 const { makeBoard } = require('./bot/board.cjs');
 const { createController } = require('./bot/controller.cjs');
 
+const configuredLossLimit = Number(process.env.APEX_LOSS_STREAK_LIMIT);
+const configuredCooldown = Number(process.env.APEX_LOSS_COOLDOWN_MS);
+const LOSS_STREAK_LIMIT = Number.isFinite(configuredLossLimit) ? Math.max(2, configuredLossLimit) : 3;
+const LOSS_COOLDOWN_MS = Number.isFinite(configuredCooldown) ? Math.max(10_000, configuredCooldown) : 180_000;
+
+function createOpponentStats(now = () => Date.now()) {
+  const records = new Map();
+  const get = (uid) => {
+    const key = String(uid || '').trim();
+    if (!key) return null;
+    let record = records.get(key);
+    if (!record) {
+      record = { games: 0, wins: 0, losses: 0, draws: 0, consecutiveLosses: 0, cooldownUntil: 0 };
+      records.set(key, record);
+    }
+    return record;
+  };
+  return {
+    record(leaderboard, playerId, timestamp = now()) {
+      if (!Array.isArray(leaderboard)) return [];
+      const me = leaderboard.find((entry) => Number(entry.id) === Number(playerId));
+      if (!me) return [];
+      const ownDead = Number(me.dead) > 0 || me.class_ === 'dead';
+      const ownTeam = Number(me.team) || Number(me.id);
+      const changes = [];
+      for (const opponent of leaderboard) {
+        if (!opponent || Number(opponent.id) === Number(playerId)) continue;
+        if ((Number(opponent.team) || Number(opponent.id)) === ownTeam) continue;
+        const enemyDead = Number(opponent.dead) > 0 || opponent.class_ === 'dead';
+        const record = get(opponent.uid);
+        if (!record) continue;
+        let result = 'draw';
+        if (!ownDead && enemyDead) result = 'win';
+        else if (ownDead && !enemyDead) result = 'loss';
+        record.games += 1;
+        record[result === 'win' ? 'wins' : result === 'loss' ? 'losses' : 'draws'] += 1;
+        if (result === 'loss' || result === 'draw') record.consecutiveLosses += 1;
+        else record.consecutiveLosses = 0;
+        if (record.consecutiveLosses >= LOSS_STREAK_LIMIT) {
+          record.cooldownUntil = Math.max(record.cooldownUntil, timestamp + LOSS_COOLDOWN_MS);
+        }
+        changes.push({ uid: String(opponent.uid || ''), result, ...record });
+      }
+      return changes;
+    },
+    blocked(players, timestamp = now()) {
+      if (!Array.isArray(players)) return null;
+      for (const player of players) {
+        const record = records.get(String(player?.uid || ''));
+        if (record && record.cooldownUntil > timestamp) {
+          return { uid: String(player.uid), until: record.cooldownUntil, ...record };
+        }
+      }
+      return null;
+    },
+    snapshot() {
+      return Object.fromEntries([...records.entries()].map(([uid, record]) => [uid, { ...record }]));
+    },
+  };
+}
+
 function validFrameArray(value, size) {
   return Array.isArray(value) && value.length === size && value.every(Number.isFinite);
 }
@@ -25,6 +86,8 @@ function attachStrategy(socket, options = {}) {
   const room = String(options.room || '').trim();
   if (!room) throw new Error('attachStrategy: missing room');
   const log = typeof options.log === 'function' ? options.log : () => {};
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const opponentStats = createOpponentStats(now);
   // The server applies growth and connectivity before broadcasting each
   // update. Waiting for a fixed wall-clock interval lets the next tick arrive
   // first on 4x games, so a move is then planned from a stale frontier and is
@@ -200,6 +263,10 @@ function attachStrategy(socket, options = {}) {
     state.ended = Boolean(payload.game_end);
     if (payload.kills && payload.kills[state.clientId]) state.dead = true;
     if (state.ended) {
+      const changes = opponentStats.record(payload.leaderboard, state.playerId, now());
+      for (const change of changes) {
+        log(`result vs ${change.uid}: ${change.result}, games=${change.games}, wins=${change.wins}, losses=${change.losses}, draws=${change.draws}, streak=${change.consecutiveLosses}`);
+      }
       state.inGame = false;
       state.actionPending = false;
       state.pendingAction = null;
@@ -217,6 +284,15 @@ function attachStrategy(socket, options = {}) {
     const players = Array.isArray(payload.players) ? payload.players : [];
     const me = players.find((entry) => String(entry.sid || entry.client_id || '') === state.clientId);
     if (!me) return;
+    const blocked = opponentStats.blocked(players, now());
+    if (blocked) {
+      const command = `cooldown:${blocked.uid}:${blocked.until}`;
+      if (lastRoomCommand !== command) {
+        lastRoomCommand = command;
+        log(`cooldown vs ${blocked.uid}: ${Math.ceil((blocked.until - now()) / 1000)}s remaining`);
+      }
+      return;
+    }
     const desiredTeam = Number(options.team);
     if (Number.isInteger(desiredTeam) && desiredTeam >= 0 && Number(me.team) !== desiredTeam) {
       const key = `team:${desiredTeam}`;
@@ -311,6 +387,7 @@ function attachStrategy(socket, options = {}) {
   return {
     state,
     controller: () => controller,
+    opponentStats: () => opponentStats.snapshot(),
     stop() {
       if (heartbeat) clearInterval(heartbeat);
       if (decisionTimer) clearTimeout(decisionTimer);
@@ -320,4 +397,4 @@ function attachStrategy(socket, options = {}) {
   };
 }
 
-module.exports = { attachStrategy };
+module.exports = { attachStrategy, createOpponentStats };
