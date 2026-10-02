@@ -84,7 +84,8 @@ async function loadViewer() {
   try {
     var res = await fetch('/api/auth/me');
     if (!res.ok) {
-      location.href = '/login';
+      $('#account-name').hide();
+      $('#login-btn').show();
       return false;
     }
     var data = await res.json();
@@ -93,6 +94,8 @@ async function loadViewer() {
     usernameEnsureColors([currentUsername]);
     return true;
   } catch (e) {
+    $('#account-name').hide();
+    $('#login-btn').show();
     return false;
   }
 }
@@ -125,11 +128,49 @@ async function loadProfile() {
   $('#p-max-rating').text(Math.round(getMaxRating(p.ratingHistory || [], p.rating)));
   $('#p-games').text(p.ratingGames);
   $('#p-days').text(p.registeredDays);
+  $('#p-points').text(Number.isFinite(p.points) ? p.points : 0);
+  $('#p-level').text(p.level && p.level.level ? p.level.level : 1);
+  $('#p-rank').text(p.displayRank || '-');
+  var level = p.level || { points: 0, currentLevelPoints: 0, nextLevelPoints: 16, progress: 0 };
+  $('#p-level-progress').css('width', Math.round((level.progress || 0) * 100) + '%');
+  $('#p-level-next').text(
+    level.nextLevelPoints === null
+      ? '已达到最高等级'
+      : level.points +
+          ' / ' +
+          level.nextLevelPoints +
+          '，距下一级还差 ' +
+          (level.nextLevelPoints - level.points),
+  );
   $('#p-admin').toggle(p.isAdmin === true);
   $('#profile-main').show();
   renderRatingChanges(p.ratingHistory || []);
   renderRatingChart(p.ratingHistory || []);
   return true;
+}
+
+async function loadPointsLeaderboard() {
+  try {
+    var res = await fetch('/api/points-leaderboard?limit=20');
+    if (!res.ok) throw new Error('积分排名加载失败。');
+    var data = await res.json();
+    var items = Array.isArray(data.items) ? data.items : [];
+    var $list = $('#points-leaderboard').empty();
+    $('#points-leaderboard-empty').toggle(items.length === 0);
+    items.forEach(function (item) {
+      var $row = $('<div class="points-rank-item"></div>');
+      $('<span class="points-rank-number"></span>')
+        .text(item.displayRank || item.rawRank)
+        .appendTo($row);
+      usernameLink(item.username).appendTo($row);
+      $('<span class="points-rank-points"></span>')
+        .text(item.points + ' 分')
+        .appendTo($row);
+      $list.append($row);
+    });
+  } catch (e) {
+    $('#points-leaderboard-empty').text('排名暂时无法加载。').show();
+  }
 }
 
 // 新手期未定型（基准分未发完）时，在 rating 数字右侧加小号「?」提示。
@@ -409,16 +450,18 @@ function createPostElement(post) {
   $wrap.appendTo($item);
 
   var $actions = $('<div class="feed-actions"></div>');
-  var $likeBtn = $('<button type="button" class="like-btn"></button>');
-  $likeBtn.toggleClass('liked', post.likes.indexOf(currentUsername) !== -1);
-  $('<span class="heart"></span>')
-    // 自定义 SVG 爱心，避免 ♥ 字符在不同设备上渲染不一致（有的平台会变成 emoji）。
-    .html(
-      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
-    )
-    .appendTo($likeBtn);
-  $('<span class="like-count"></span>').text(post.likes.length).appendTo($likeBtn);
-  $likeBtn.appendTo($actions);
+  if (currentUsername) {
+    var $likeBtn = $('<button type="button" class="like-btn"></button>');
+    $likeBtn.toggleClass('liked', post.likes.indexOf(currentUsername) !== -1);
+    $('<span class="heart"></span>')
+      // 自定义 SVG 爱心，避免 ♥ 字符在不同设备上渲染不一致（有的平台会变成 emoji）。
+      .html(
+        '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+      )
+      .appendTo($likeBtn);
+    $('<span class="like-count"></span>').text(post.likes.length).appendTo($likeBtn);
+    $likeBtn.appendTo($actions);
+  }
   $('<button type="button" class="comment-toggle"></button>')
     .text(commentButtonText(post.comments.length))
     .appendTo($actions);
@@ -434,12 +477,14 @@ function createPostElement(post) {
     $commentList.append(createCommentElement(comment));
   });
   $commentList.appendTo($comments);
-  var $inputRow = $('<div class="comment-input-row"></div>');
-  $('<input type="text" class="comment-input" maxlength="200" placeholder="写下你的评论…" />').appendTo(
-    $inputRow,
-  );
-  $('<button type="button" class="btn btn-primary btn-sm comment-send">回复</button>').appendTo($inputRow);
-  $inputRow.appendTo($comments);
+  if (currentUsername) {
+    var $inputRow = $('<div class="comment-input-row"></div>');
+    $('<input type="text" class="comment-input" maxlength="200" placeholder="写下你的评论…" />').appendTo(
+      $inputRow,
+    );
+    $('<button type="button" class="btn btn-primary btn-sm comment-send">回复</button>').appendTo($inputRow);
+    $inputRow.appendTo($comments);
+  }
   $comments.appendTo($item);
 
   return $item;
@@ -735,16 +780,14 @@ if (match) {
 if (!profileUsername) {
   $('#profile-not-found').show();
 } else {
-  loadViewer().then(function (loggedIn) {
-    if (!loggedIn) {
-      return;
-    }
+  loadViewer().then(function () {
     loadProfile().then(function (ok) {
       if (!ok) {
         return;
       }
       loadFeeds(1);
       loadReplays(0);
+      loadPointsLeaderboard();
     });
   });
 }

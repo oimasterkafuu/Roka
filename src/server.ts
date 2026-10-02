@@ -466,13 +466,12 @@ const boot = async (): Promise<void> => {
 
   app.addHook('onRequest', async (request, reply) => {
     const pathname = request.url.split('?')[0];
-    if (authService.isPublicPath(pathname)) {
-      return;
-    }
-
     const token = authService.getTokenFromCookie(request.headers.cookie);
     const authUser = authService.verifyAuthToken(token);
     if (!authUser) {
+      if (authService.isPublicPath(pathname, request.method)) {
+        return;
+      }
       if (pathname.startsWith('/api/')) {
         return reply.code(401).send({ error: '未登录或登录已失效。' });
       }
@@ -876,15 +875,12 @@ const boot = async (): Promise<void> => {
 
   app.get('/api/feeds', async (request, reply) => {
     const authUser = (request as AuthRequest).authUser;
-    if (!authUser) {
-      return reply.code(401).send({ error: '未登录或登录已失效。' });
-    }
     const query = request.query as { page?: unknown; limit?: unknown };
     const page = Number.parseInt(String(query.page ?? '1'), 10);
     const limit = Number.parseInt(String(query.limit ?? '10'), 10);
     const result = feedStore.listPage(page, limit);
     return reply.send({
-      items: result.items.map((post) => decorateFeedPost(post, authUser.username)),
+      items: result.items.map((post) => decorateFeedPost(post, authUser?.username ?? null)),
       total: result.total,
       page: result.page,
       pages: result.pages,
@@ -1049,14 +1045,17 @@ const boot = async (): Promise<void> => {
     return reply.send({ items });
   });
 
+  app.get('/api/points-leaderboard', async (request, reply) => {
+    const query = request.query as { limit?: unknown };
+    const rawLimit = Number.parseInt(String(query.limit ?? '20'), 10);
+    const limit = Number.isNaN(rawLimit) ? 20 : rawLimit;
+    return reply.send({ items: userStore.listPointsRank(limit) });
+  });
+
   // 按用户名批量查询 rating 颜色（用户名 → colorClass/title），供前端统一用户名组件
   // 为「接口原本不带颜色」的位置（回放列表、对局排行榜、聊天等）补色；一次请求批量查，
   // 避免每个名字单独发请求。users 为逗号分隔的用户名（去重、限量防滥用）。
   app.get('/api/user-colors', async (request, reply) => {
-    const authUser = (request as AuthRequest).authUser;
-    if (!authUser) {
-      return reply.code(401).send({ error: '未登录或登录已失效。' });
-    }
     const query = request.query as { users?: unknown };
     const names = String(query.users ?? '')
       .split(',')
@@ -1243,11 +1242,6 @@ const boot = async (): Promise<void> => {
   });
 
   app.get('/api/replays', async (request, reply) => {
-    const authUser = (request as AuthRequest).authUser;
-    if (!authUser) {
-      return reply.code(401).send({ error: '未登录或登录已失效。' });
-    }
-
     const query = request.query as { offset?: unknown; limit?: unknown };
     const offsetRaw = Number.parseInt(String(query.offset ?? '0'), 10);
     const limitRaw = Number.parseInt(String(query.limit ?? '50'), 10);
@@ -1267,11 +1261,6 @@ const boot = async (): Promise<void> => {
   });
 
   app.get('/api/map-examples', async (request, reply) => {
-    const authUser = (request as AuthRequest).authUser;
-    if (!authUser) {
-      return reply.code(401).send({ error: '未登录或登录已失效。' });
-    }
-
     const query = request.query as { map_mode?: unknown; map_region?: unknown; players?: unknown };
     const mapModeRaw = String(query.map_mode ?? 'random');
     const mapMode = isMapExampleMode(mapModeRaw) ? mapModeRaw : 'random';
@@ -1359,6 +1348,11 @@ const boot = async (): Promise<void> => {
     const authUser = authService.verifyAuthToken(fromHandshake ?? fromCookie);
 
     if (!authUser) {
+      if (socket.handshake.query?.home === '1') {
+        socket.data.homeGuest = true;
+        next();
+        return;
+      }
       next(new Error('未登录或登录已失效。'));
       return;
     }
@@ -1374,8 +1368,12 @@ const boot = async (): Promise<void> => {
 
   io.on('connection', (socket) => {
     const username = String(socket.data.username ?? '');
-    if (!username) {
+    const isHomeGuest = socket.data.homeGuest === true;
+    if (!username && !isHomeGuest) {
       socket.disconnect(true);
+      return;
+    }
+    if (isHomeGuest) {
       return;
     }
 

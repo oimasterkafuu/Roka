@@ -30,19 +30,20 @@ class AuthService {
 
   constructor(private readonly userStore: UserStore) {}
 
-  isPublicPath(pathname: string): boolean {
+  isPublicPath(pathname: string, method = 'GET'): boolean {
     const normalizedPathname =
       pathname.length > 1 && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+    const normalizedMethod = method.toUpperCase();
 
-    if (normalizedPathname === '/login' || normalizedPathname === '/login.html') {
-      return true;
-    }
-    // 部署更新兜底页：Service Worker 离线缓存与直接访问均不需登录。
-    if (normalizedPathname === '/updating.html') {
-      return true;
-    }
     if (normalizedPathname === '/postreceive') {
       return true;
+    }
+    if (
+      normalizedPathname === '/login' ||
+      normalizedPathname === '/login.html' ||
+      normalizedPathname === '/updating.html'
+    ) {
+      return normalizedMethod === 'GET';
     }
     if (
       normalizedPathname === '/api/auth/login' ||
@@ -52,10 +53,52 @@ class AuthService {
     ) {
       return true;
     }
-    if (normalizedPathname.startsWith('/socket.io/')) {
+    if (normalizedPathname === '/socket.io' || normalizedPathname.startsWith('/socket.io/')) {
       return true;
     }
     if (/\.(css|js|png|jpg|jpeg|gif|svg|ico|otf|woff2|mp3)$/i.test(normalizedPathname)) {
+      return normalizedMethod === 'GET';
+    }
+    if (normalizedMethod !== 'GET') {
+      return false;
+    }
+
+    const publicPages = new Set([
+      '/',
+      '/rooms',
+      '/replays',
+      '/games',
+      '/develop',
+      '/develop/bot',
+      '/about',
+      '/tutorial',
+      '/tutorial/interactive',
+    ]);
+    if (publicPages.has(normalizedPathname) || normalizedPathname === '/replays/local') {
+      return true;
+    }
+    if (/^\/u\/[A-Za-z0-9_-]+$/.test(normalizedPathname) || /^\/replays\/[^/]+$/.test(normalizedPathname)) {
+      return true;
+    }
+
+    const publicApiPaths = new Set([
+      '/api/rooms',
+      '/api/replays',
+      '/api/announcement',
+      '/api/leaderboard',
+      '/api/points-leaderboard',
+      '/api/online',
+      '/api/user-colors',
+      '/api/feeds',
+      '/api/map-examples',
+    ]);
+    if (publicApiPaths.has(normalizedPathname)) {
+      return true;
+    }
+    if (
+      /^\/api\/profile\/[A-Za-z0-9_-]+(?:\/feeds|\/replays)?$/.test(normalizedPathname) ||
+      /^\/api\/(?:getreplay|downloadreplay)\/[^/]+$/.test(normalizedPathname)
+    ) {
       return true;
     }
     return false;

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Server as SocketIOServer } from 'socket.io';
-import { UserStore } from '../auth-store';
+import { GAME_POINTS, UserStore } from '../auth-store';
 import { GameDisciplineEvent, GameEngine } from '../game-engine';
 import {
   AFK_WINDOW_MS,
@@ -1043,6 +1043,11 @@ class LobbyService {
    * 单人队退化为成员自身分。得分按队伍位次线性分布，K = 24。
    */
   private async applyGameResult(result: GameResultEntry[]): Promise<void> {
+    const uniqueUsers = [...new Set(result.map((entry) => entry.uid))];
+    await this.userStore
+      .applyPointsUpdates(uniqueUsers.map((username) => ({ username, points: GAME_POINTS })))
+      .catch(() => undefined);
+
     if (result.length < 2) {
       return;
     }

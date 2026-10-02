@@ -42,6 +42,8 @@ interface StoredUser {
   updatedAt: number;
   rating?: number;
   ratingGames?: number;
+  // 对局积分；旧数据缺省时按 0 处理。
+  points?: number;
   isAdmin?: boolean;
   // 超级管理员：仅首个注册用户一人，不可被剥夺、不可被封禁。
   // 旧数据无此字段，启动时由 migrateRoles 把首个用户（原有 admin）升级为超管（向后兼容）。
@@ -64,9 +66,29 @@ export interface PublicProfile {
   rating: number;
   ratingGames: number;
   provisional: boolean;
+  points: number;
+  level: UserLevelProgress;
+  rawRank: number;
+  displayRank: string;
   createdAt: number;
   isAdmin: boolean;
   ratingHistory: RatingHistoryPoint[];
+}
+
+export interface UserLevelProgress {
+  level: number;
+  points: number;
+  currentLevelPoints: number;
+  nextLevelPoints: number | null;
+  progress: number;
+}
+
+export interface PointsRankEntry {
+  username: string;
+  points: number;
+  level: UserLevelProgress;
+  rawRank: number;
+  displayRank: string;
 }
 
 export interface TopRatedEntry {
@@ -118,6 +140,44 @@ interface UserFile {
  * 统一 Rating 初始分（不区分 1v1 与 FFA）。
  */
 const DEFAULT_RATING = 1200;
+
+export const GAME_POINTS = 10;
+export const LEVEL_THRESHOLDS = [0, 16, 108, 288, 1000, 2888] as const;
+
+export const getUserLevelProgress = (rawPoints: number): UserLevelProgress => {
+  const points = Number.isFinite(rawPoints) ? Math.max(0, Math.floor(rawPoints)) : 0;
+  let levelIndex = 0;
+  for (let index = 1; index < LEVEL_THRESHOLDS.length; index += 1) {
+    if (points < LEVEL_THRESHOLDS[index]) {
+      break;
+    }
+    levelIndex = index;
+  }
+  const currentLevelPoints = LEVEL_THRESHOLDS[levelIndex];
+  const nextLevelPoints = LEVEL_THRESHOLDS[levelIndex + 1] ?? null;
+  const progress =
+    nextLevelPoints === null
+      ? 1
+      : (points - currentLevelPoints) / Math.max(1, nextLevelPoints - currentLevelPoints);
+  return {
+    level: levelIndex + 1,
+    points,
+    currentLevelPoints,
+    nextLevelPoints,
+    progress: Math.max(0, Math.min(1, progress)),
+  };
+};
+
+export const displayPointsRank = (rawRank: number): string => {
+  if (!Number.isFinite(rawRank) || rawRank < 1) return '-';
+  const rank = Math.floor(rawRank);
+  if (rank <= 20) return String(rank);
+  if (rank <= 50) return '20+';
+  if (rank <= 100) return '50+';
+  if (rank <= 200) return '100+';
+  if (rank <= 500) return '200+';
+  return '500+';
+};
 
 /**
  * Codeforces 风格新手 Rating：内部从 DEFAULT_RATING 起算并参与 ELO 结算，
@@ -227,6 +287,7 @@ const toStoredUser = (value: unknown): StoredUser | null => {
   const normalizedSessionId: string | null = sessionId === null ? null : (sessionId as string);
   const rating = value.rating;
   const ratingGames = value.ratingGames;
+  const points = value.points;
   const lastSeenAt = value.lastSeenAt;
   const bannedUntil = value.bannedUntil;
   const currentBan = toBanRecord(value.currentBan);
@@ -258,6 +319,7 @@ const toStoredUser = (value: unknown): StoredUser | null => {
     updatedAt,
     rating: typeof rating === 'number' && Number.isFinite(rating) ? rating : undefined,
     ratingGames: typeof ratingGames === 'number' && Number.isFinite(ratingGames) ? ratingGames : undefined,
+    points: typeof points === 'number' && Number.isFinite(points) ? points : undefined,
     isAdmin: value.isAdmin === true ? true : undefined,
     isSuperAdmin: value.isSuperAdmin === true ? true : undefined,
     bannedUntil: typeof bannedUntil === 'number' && Number.isFinite(bannedUntil) ? bannedUntil : undefined,
@@ -359,6 +421,7 @@ export class UserStore {
       updatedAt: Date.now(),
       rating: DEFAULT_RATING,
       ratingGames: 0,
+      points: 0,
       // 首个注册用户 = 超级管理员（同时拥有管理员权限）。
       isAdmin: this.usersByKey.size === 0 ? true : undefined,
       isSuperAdmin: this.usersByKey.size === 0 ? true : undefined,
@@ -435,6 +498,66 @@ export class UserStore {
       rating: toDisplayRating(rating, ratingGames),
       ratingGames,
       provisional: isProvisionalRating(rating, ratingGames),
+    };
+  }
+
+  getPoints(usernameInput: string): number {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    return typeof user?.points === 'number' && Number.isFinite(user.points) ? Math.max(0, user.points) : 0;
+  }
+
+  async applyPointsUpdates(updates: Array<{ username: string; points: number }>): Promise<void> {
+    let changed = false;
+    for (const update of updates) {
+      const user = this.usersByKey.get(this.normalize(update.username));
+      if (!user || !Number.isFinite(update.points)) {
+        continue;
+      }
+      user.points = Math.max(0, this.getPoints(user.username) + update.points);
+      user.updatedAt = Date.now();
+      changed = true;
+    }
+    if (changed) {
+      await this.persist();
+    }
+  }
+
+  listPointsRank(limit = 100): PointsRankEntry[] {
+    const capped = Math.max(1, Math.min(1000, Math.floor(limit) || 100));
+    const users = [...this.usersByKey.values()].sort((a, b) => {
+      const pointDiff = this.getPoints(b.username) - this.getPoints(a.username);
+      return pointDiff || a.username.localeCompare(b.username);
+    });
+    return users.slice(0, capped).map((user, index) => {
+      const points = this.getPoints(user.username);
+      const rawRank = index + 1;
+      return {
+        username: user.username,
+        points,
+        level: getUserLevelProgress(points),
+        rawRank,
+        displayRank: displayPointsRank(rawRank),
+      };
+    });
+  }
+
+  getPointsRank(usernameInput: string): PointsRankEntry | null {
+    const username = this.normalize(usernameInput);
+    const users = [...this.usersByKey.values()].sort((a, b) => {
+      const pointDiff = this.getPoints(b.username) - this.getPoints(a.username);
+      return pointDiff || a.username.localeCompare(b.username);
+    });
+    const index = users.findIndex((user) => this.normalize(user.username) === username);
+    if (index < 0) return null;
+    const user = users[index];
+    const points = this.getPoints(user.username);
+    const rawRank = index + 1;
+    return {
+      username: user.username,
+      points,
+      level: getUserLevelProgress(points),
+      rawRank,
+      displayRank: displayPointsRank(rawRank),
     };
   }
 
@@ -627,11 +750,17 @@ export class UserStore {
     }
     const rating = user.rating ?? DEFAULT_RATING;
     const ratingGames = user.ratingGames ?? 0;
+    const points = this.getPoints(user.username);
+    const pointsRank = this.getPointsRank(user.username);
     return {
       username: user.username,
       rating: toDisplayRating(rating, ratingGames),
       ratingGames,
       provisional: isProvisionalRating(rating, ratingGames),
+      points,
+      level: getUserLevelProgress(points),
+      rawRank: pointsRank?.rawRank ?? 0,
+      displayRank: pointsRank?.displayRank ?? '-',
       createdAt: user.createdAt,
       isAdmin: user.isAdmin === true,
       ratingHistory: Array.isArray(user.ratingHistory) ? [...user.ratingHistory] : [],

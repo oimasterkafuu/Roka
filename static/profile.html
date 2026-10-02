@@ -22,75 +22,103 @@
     <div class="profile-wrap">
       <header class="profile-topbar">
         <button id="back-home-btn" type="button" class="btn btn-ghost btn-sm">← 返回首页</button>
-        <a id="account-name" href="#"></a>
+        <span>
+          <a id="account-name" href="#"></a>
+          <a id="login-btn" href="/login" class="btn btn-primary btn-sm" style="display: none">登录</a>
+        </span>
       </header>
 
       <div id="profile-not-found" class="card" style="display: none">
         <p class="panel-empty">用户不存在。</p>
       </div>
 
-      <div id="profile-main" style="display: none">
-        <section class="card">
-          <div>
-            <span id="p-name" class="profile-name"></span>
-            <span id="p-title" class="profile-title"></span>
-            <span id="p-admin" class="admin-badge" style="display: none">管理员</span>
-          </div>
-          <div class="profile-stats">
-            <div class="profile-stat">
-              <div class="profile-stat-value" id="p-rating">-</div>
-              <div class="profile-stat-label">Rating</div>
+      <div id="profile-main" class="profile-columns" style="display: none">
+        <aside class="profile-column profile-column-left">
+          <section class="card">
+            <div>
+              <span id="p-name" class="profile-name"></span>
+              <span id="p-title" class="profile-title"></span>
+              <span id="p-admin" class="admin-badge" style="display: none">管理员</span>
             </div>
-            <div class="profile-stat">
-              <div class="profile-stat-value" id="p-max-rating">-</div>
-              <div class="profile-stat-label">最高 Rating</div>
+            <div class="profile-stats">
+              <div class="profile-stat">
+                <div class="profile-stat-value" id="p-rating">-</div>
+                <div class="profile-stat-label">Rating</div>
+              </div>
+              <div class="profile-stat">
+                <div class="profile-stat-value" id="p-max-rating">-</div>
+                <div class="profile-stat-label">最高 Rating</div>
+              </div>
+              <div class="profile-stat">
+                <div class="profile-stat-value" id="p-games">-</div>
+                <div class="profile-stat-label">对局数</div>
+              </div>
+              <div class="profile-stat">
+                <div class="profile-stat-value" id="p-days">-</div>
+                <div class="profile-stat-label">注册天数</div>
+              </div>
             </div>
-            <div class="profile-stat">
-              <div class="profile-stat-value" id="p-games">-</div>
-              <div class="profile-stat-label">对局数</div>
+            <div class="points-level-card">
+              <div class="points-level-head">
+                <span class="points-level-title">等级 <strong id="p-level">-</strong></span>
+                <span class="points-total"><strong id="p-points">0</strong> 积分</span>
+              </div>
+              <div class="points-progress"><span id="p-level-progress"></span></div>
+              <div id="p-level-next" class="points-level-next">-</div>
+              <div class="points-rank-line">全站排名：<strong id="p-rank">-</strong></div>
             </div>
-            <div class="profile-stat">
-              <div class="profile-stat-value" id="p-days">-</div>
-              <div class="profile-stat-label">注册天数</div>
+            <div id="rating-changes" class="rating-changes" style="display: none">
+              <div class="rating-changes-title">最近 Rating 变更</div>
+              <ul id="rating-changes-list" class="rating-changes-list"></ul>
             </div>
-          </div>
-          <div id="rating-changes" class="rating-changes" style="display: none">
-            <div class="rating-changes-title">最近 Rating 变更</div>
-            <ul id="rating-changes-list" class="rating-changes-list"></ul>
-          </div>
-        </section>
+          </section>
 
-        <section class="card">
-          <h2 class="card-title">Rating 历史</h2>
-          <div id="rating-chart"></div>
-          <p id="rating-chart-empty" class="panel-empty" style="display: none">暂无 Rating 记录。</p>
-        </section>
+          <section class="card">
+            <h2 class="card-title">Rating 历史</h2>
+            <div id="rating-chart"></div>
+            <p id="rating-chart-empty" class="panel-empty" style="display: none">暂无 Rating 记录。</p>
+          </section>
+        </aside>
 
-        <section class="card">
-          <h2 class="card-title">他的动态</h2>
-          <div id="feed-list"></div>
-          <div id="feed-empty" class="feed-empty" style="display: none">TA 还没有发布动态。</div>
-          <div id="feed-pager" class="feed-pager" style="display: none"></div>
-        </section>
+        <main class="profile-column profile-column-center">
+          <section class="card">
+            <h2 class="card-title">他的动态</h2>
+            <div id="feed-list"></div>
+            <div id="feed-empty" class="feed-empty" style="display: none">TA 还没有发布动态。</div>
+            <div id="feed-pager" class="feed-pager" style="display: none"></div>
+          </section>
+        </main>
 
-        <section class="card">
-          <h2 class="card-title">他的回放</h2>
-          <table class="mini-table">
-            <thead>
-              <tr>
-                <th>时间</th>
-                <th>回合</th>
-                <th>结果</th>
-              </tr>
-            </thead>
-            <tbody id="replays-body"></tbody>
-          </table>
-          <p id="replays-empty" class="panel-empty" style="display: none">暂无回放。</p>
-          <div class="panel-pager">
-            <button id="replays-prev" type="button" class="btn btn-secondary btn-sm" disabled>上一页</button>
-            <button id="replays-next" type="button" class="btn btn-secondary btn-sm" disabled>下一页</button>
-          </div>
-        </section>
+        <aside class="profile-column profile-column-right">
+          <section class="card points-leaderboard-card">
+            <h2 class="card-title">积分排名</h2>
+            <div id="points-leaderboard" class="points-leaderboard"></div>
+            <p id="points-leaderboard-empty" class="panel-empty" style="display: none">暂无积分排名。</p>
+          </section>
+
+          <section class="card">
+            <h2 class="card-title">他的回放</h2>
+            <table class="mini-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>回合</th>
+                  <th>结果</th>
+                </tr>
+              </thead>
+              <tbody id="replays-body"></tbody>
+            </table>
+            <p id="replays-empty" class="panel-empty" style="display: none">暂无回放。</p>
+            <div class="panel-pager">
+              <button id="replays-prev" type="button" class="btn btn-secondary btn-sm" disabled>
+                上一页
+              </button>
+              <button id="replays-next" type="button" class="btn btn-secondary btn-sm" disabled>
+                下一页
+              </button>
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
 
