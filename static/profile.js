@@ -124,13 +124,11 @@ async function loadProfile() {
     .text(p.username)
     .addClass(p.colorClass || 'rt-unrated');
   $('#p-title').text(p.title || '');
-  setRatingWithProvisional($('#p-rating'), p.rating, p.provisional);
   $('#p-max-rating').text(Math.round(getMaxRating(p.ratingHistory || [], p.rating)));
-  $('#p-games').text(p.ratingGames);
   $('#p-days').text(p.registeredDays);
   $('#p-points').text(Number.isFinite(p.points) ? p.points : 0);
-  $('#p-level').text(p.level && p.level.level ? p.level.level : 1);
-  $('#p-rank').text(p.displayRank || '-');
+  $('#p-level, #p-level-label').text(p.level && p.level.level ? p.level.level : 1);
+  $('#p-rating-rank').text(p.ratingDisplayRank || '-');
   var level = p.level || { points: 0, currentLevelPoints: 0, nextLevelPoints: 16, progress: 0 };
   $('#p-level-progress').css('width', Math.round((level.progress || 0) * 100) + '%');
   $('#p-level-next').text(
@@ -147,40 +145,6 @@ async function loadProfile() {
   renderRatingChanges(p.ratingHistory || []);
   renderRatingChart(p.ratingHistory || []);
   return true;
-}
-
-async function loadPointsLeaderboard() {
-  try {
-    var res = await fetch('/api/points-leaderboard?limit=20');
-    if (!res.ok) throw new Error('积分排名加载失败。');
-    var data = await res.json();
-    var items = Array.isArray(data.items) ? data.items : [];
-    var $list = $('#points-leaderboard').empty();
-    $('#points-leaderboard-empty').toggle(items.length === 0);
-    items.forEach(function (item) {
-      var $row = $('<div class="points-rank-item"></div>');
-      $('<span class="points-rank-number"></span>')
-        .text(item.displayRank || item.rawRank)
-        .appendTo($row);
-      usernameLink(item.username).appendTo($row);
-      $('<span class="points-rank-points"></span>')
-        .text(item.points + ' 分')
-        .appendTo($row);
-      $list.append($row);
-    });
-  } catch (e) {
-    $('#points-leaderboard-empty').text('排名暂时无法加载。').show();
-  }
-}
-
-// 新手期未定型（基准分未发完）时，在 rating 数字右侧加小号「?」提示。
-function setRatingWithProvisional($el, rating, provisional) {
-  $el.empty().text(Math.round(rating));
-  if (provisional === true) {
-    $('<span class="rating-provisional">?</span>')
-      .attr('title', '基准分尚未发完，rating 未定型')
-      .appendTo($el);
-  }
 }
 
 // 最高 Rating：历史记录与当前显示分取最大值；无历史时即当前分。
@@ -787,7 +751,6 @@ if (!profileUsername) {
       }
       loadFeeds(1);
       loadReplays(0);
-      loadPointsLeaderboard();
     });
   });
 }

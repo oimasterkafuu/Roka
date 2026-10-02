@@ -78,6 +78,15 @@ export class FeedStore {
     return this.posts.find((item) => item.id === id) ?? null;
   }
 
+  /** 返回供历史迁移使用的只读快照，避免暴露内部动态数组。 */
+  listAll(): FeedPost[] {
+    return this.posts.map((post) => ({
+      ...post,
+      likes: [...post.likes],
+      comments: post.comments.map((comment) => ({ ...comment })),
+    }));
+  }
+
   listPage(pageInput: number, limitInput: number): FeedPage {
     const limit = Math.max(1, Math.min(50, Math.floor(limitInput) || 10));
     const total = this.posts.length;
