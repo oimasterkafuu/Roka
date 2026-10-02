@@ -79,7 +79,8 @@
       <button id="back-home-btn" class="small">返回首页</button>
     </div>
     <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
-      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span>
+      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span
+      ><a id="login-btn" href="/login">登录</a>
     </div>
 
     <div id="app">
@@ -194,11 +195,12 @@
       async function loadUser() {
         const res = await fetch('/api/auth/me');
         if (!res.ok) {
-          location.href = '/login';
+          document.getElementById('account-name').style.display = 'none';
           return false;
         }
         const data = await res.json();
         document.getElementById('account-name').textContent = data.username;
+        document.getElementById('login-btn').style.display = 'none';
         return true;
       }
 
