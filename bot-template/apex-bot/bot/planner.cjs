@@ -278,9 +278,13 @@ function mazeInfrastructureHold(b, m, own, enemies) {
   if (!Number.isFinite(distance)) return false;
   if (m.campaign?.phase !== 'gather' && distance < (b.size >= 800 ? 24 : 8)) return false;
   const anchors = own.filter((at) => ['city', 'crown'].includes(b.kind(at)));
-  const cities = own.filter((at) => b.kind(at) === 'city');
   const requiredAnchors = distance >= 48 ? 4 : distance >= 30 ? 3 : 2;
-  if (anchors.length >= requiredAnchors && cities.length >= 1) return false;
+  // A city is commonly upgraded into a crown immediately after it is
+  // founded.  Requiring a *current* city therefore kept this hold active on
+  // narrow maps even though the crown chain was already anchored.  Crowns
+  // are command anchors too; use the actual anchor count as the readiness
+  // signal so a long campaign can start before the opponent fills the maze.
+  if (anchors.length >= requiredAnchors) return false;
   if (m.campaign?.phase === 'attack' && distance <= 8 &&
       b.army[m.campaign.at] >= Math.max(36, b.army[target] * 1.25 + 12)) return false;
   return true;
@@ -524,7 +528,9 @@ function mazeActionGuard(b, m, decision) {
   const repeated = history.edge === edge ? history.edgeStreak + 1 : 1;
   const emergency = mazeEmergency(b, from, to, decision);
   const cooldown = Number(history.blockedUntil[edge] || 0) > b.turn;
-  if ((!reverse && repeated <= 1 && !cooldown) || emergency) return decision;
+  const openingRepeat = /opening/.test(String(decision.branch || '')) &&
+    !b.enemy(to) && repeated <= 4;
+  if ((!reverse && (repeated <= 1 || openingRepeat) && !cooldown) || emergency) return decision;
 
   history.blockedUntil[edge] = b.turn + (reverse ? 4 : 3);
   const objective = Number.isInteger(m.campaign?.crown) && b.enemy(m.campaign.crown)
@@ -535,7 +541,8 @@ function mazeActionGuard(b, m, decision) {
   const candidates = [];
   const sources = [];
   if (b.own(from) && !b.isolated[from]) sources.push(from);
-  for (let at = 0; at < b.size; at += 1) {
+  const laneBound = /^(march|muster|campaign|route)/.test(String(decision.branch || ''));
+  if (!laneBound) for (let at = 0; at < b.size; at += 1) {
     if (at !== from && b.own(at) && !b.isolated[at]) sources.push(at);
   }
   const recent = new Set(history.recent || []);
@@ -611,7 +618,13 @@ function mazeActionGuard(b, m, decision) {
   return { action: null, branch: 'maze-hold' };
 }
 
-function safeMove(b, from, to, intent = 'move', modes = intent === 'gather' ? [0, 1, 2] : [2, 0, 1]) {
+function safeMove(
+  b,
+  from,
+  to,
+  intent = 'move',
+  modes = intent === 'gather' ? [0, 1, 2] : [2, 0, 1],
+) {
   if (!movable(b, from) || !b.passable(to)) return null;
   const targetArmy = b.army[to];
   const enemy = !b.friendly(to);
@@ -851,6 +864,11 @@ function gather(b, m, root, need, reason, canEnter = at => b.own(at) && !b.isola
 }
 
 function opening(b, m, own, enemyDistance) {
+  const fogged = b.fog.some((value) => Number(value) !== 0);
+  if (fogged) {
+    const scout = fogScout(b, m, own);
+    if (scout) return scout;
+  }
   const options = [];
   const home = m.home;
   const hf = field(b, [home]);
@@ -877,6 +895,80 @@ function opening(b, m, own, enemyDistance) {
     .sort((a,z) => b.army[z]/ef.distance[z] - b.army[a]/ef.distance[a]);
   for (const at of sources) { const a = safeMove(b, at, ef.parent[at]); if (a) return { action: a, branch:'opening-route' }; }
   return null;
+}
+
+// Fog hides ownership and army counts but leaves the terrain graph visible.
+// Prefer a legal step across the visible perimeter into an unseen, passable
+// cell so both sides eventually make contact. The old opening score favored
+// compact cells near home; under fog that made each bot keep circling its own
+// starting basin and spend the whole deadline building locally.
+function fogScout(b, m, own) {
+  const homeField = Number.isInteger(m.home) ? field(b, [m.home]) : null;
+  const options = [];
+  for (const from of own) {
+    if (!movable(b, from)) continue;
+    for (const to of b.neighbors(from)) {
+      if (!b.passable(to) || b.owner(to) !== 0 || Number(b.fog[to]) === 0) continue;
+      const action = safeMove(b, from, to, 'move');
+      if (!action) continue;
+      const hiddenExits = b.neighbors(to).filter((next) =>
+        b.passable(next) && Number(b.fog[next]) !== 0,
+      ).length;
+      const homeDepth = homeField && Number.isFinite(homeField.distance[to])
+        ? homeField.distance[to]
+        : 0;
+      options.push({
+        action,
+        branch: 'fog-scout',
+        score: homeDepth * 8 + hiddenExits * 24 + Math.min(120, b.army[from]) * 0.08 -
+          (b.kind(to) === 'swamp' ? 160 : 0),
+      });
+    }
+  }
+  options.sort((a, z) => z.score - a.score);
+  return options[0] || null;
+}
+
+// A perfect maze is effectively a tree.  A generic perimeter expansion paints
+// whichever branch happens to have the most empty neighbours, so both sides
+// can spend the whole opening growing away from one another.  When the first
+// enemy crown is visible, bias the next neutral capture along the shortest
+// route to that crown.  This is still ordinary expansion (one legal adjacent
+// action per tick); it simply chooses the branch that creates contact and a
+// usable forward build line instead of scattering into dead ends.
+function mazeOpening(b, m, own, enemyDistance) {
+  const target = Number.isInteger(m.enemyHome) && b.enemy(m.enemyHome)
+    ? m.enemyHome
+    : (() => {
+      for (let at = 0; at < b.size; at += 1)
+        if (b.enemy(at) && b.kind(at) === 'crown') return at;
+      return -1;
+    })();
+  if (target < 0) return opening(b, m, own, enemyDistance);
+  const objective = field(b, [target]);
+  const home = Number.isInteger(m.home) ? field(b, [m.home]) : null;
+  const options = [];
+  for (const from of own) {
+    if (!movable(b, from) || !Number.isFinite(objective.distance[from])) continue;
+    for (const to of b.neighbors(from)) {
+      if (!b.passable(to) || b.owner(to) !== 0 || !Number.isFinite(objective.distance[to])) continue;
+      const toward = objective.distance[from] - objective.distance[to];
+      if (toward <= 0) continue;
+      const action = safeMove(b, from, to, 'move');
+      if (!action || routeGuard(b, action).blocked) continue;
+      const exits = b.neighbors(to).filter((next) => b.passable(next) && b.owner(next) === 0).length;
+      const homeDepth = home && Number.isFinite(home.distance[to]) ? home.distance[to] : 0;
+      const enemyNear = Math.max(0, 8 - objective.distance[to]);
+      options.push({
+        action,
+        branch: 'maze-opening',
+        score: toward * 180 + homeDepth * 2 + exits * 12 +
+          Math.min(100, b.army[from]) * 0.08 - enemyNear * 10 - (b.kind(to) === 'swamp' ? 160 : 0),
+      });
+    }
+  }
+  options.sort((a, z) => z.score - a.score);
+  return options[0] || opening(b, m, own, enemyDistance);
 }
 
 function tactical(b, own) {
@@ -1131,6 +1223,7 @@ function economy(b,m,own,ed,goal) {
       const kind = b.kind(at);
       const need = kind === 'city' ? BUILD_COST : BUILD_COST * 2;
       if (b.army[at] >= need) {
+        m.buildPlan.stalled = 0;
         return {
           action: build(b, at, kind === 'city' ? 'c' : 'b'),
           branch: kind === 'city' ? 'cluster-upgrade' : 'cluster-foundation',
@@ -1198,6 +1291,18 @@ function economy(b,m,own,ed,goal) {
   return economy(b, m, own, ed, goal);
 }
 
+// Maze maps have fewer useful build cells than open maps, but every connected
+// crown still adds a full production lane.  Keeping the generic six-crown
+// ceiling on a corridor lets Anti-Human compound its lead while Apex is still
+// marching through neutral cells.  The caller supplies a larger, bounded goal
+// only when the board is actually maze-like.
+function mazeEconomyGoal(b, own, enemies) {
+  const crowns = own.filter((at) => b.kind(at) === 'crown').length;
+  const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+  const territoryGoal = Math.ceil(own.length / 7);
+  return Math.min(12, Math.max(8, crowns + 1, enemyCrowns, territoryGoal));
+}
+
 // Long travel is an investment window. Use only nearby rear troops, with a
 // separate delivery cursor, so construction cannot reverse a military convoy.
 function sustainEconomy(b, m, own, ed, enemies) {
@@ -1229,10 +1334,21 @@ function sustainEconomy(b, m, own, ed, enemies) {
   const infrastructureCap = b.size >= 1600 ? 36 : b.size >= 800 ? 28 : 24;
   const goal = Math.min(infrastructureCap, Math.max(ECON_GOAL, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
   const state = m.rearEconomy || (m.rearEconomy = { site: -1, delivery: null, spent: 0, nextWindow: 0 });
+  const mazeBoard = m.maze ?? isMazeBoard(b);
   if (b.turn < state.nextWindow) return null;
+  // A rear project selected before a maze assault must not keep consuming the
+  // sparse investment windows after the spearhead reaches the corridor.  Let
+  // the next window look for a funded post beside the head instead.
+  if (mazeBoard && m.campaign?.phase === 'attack' && state.site >= 0 && !state.front) {
+    state.site = -1;
+    state.delivery = null;
+    state.spent = 0;
+  }
   const reserved = supplyReservations(m);
   const canEnter = (at) => b.own(at) && !b.isolated[at] && ed.distance[at] >= 4 && !reserved.has(at);
-  const validSite = (at) => canEnter(at) && ed.distance[at] >= (state.front ? 4 : 6) && ['plain', 'city'].includes(b.kind(at));
+  const validSite = (at) => b.own(at) && !b.isolated[at] && !reserved.has(at) &&
+    ed.distance[at] >= (state.front ? (mazeBoard ? 2 : 4) : 6) &&
+    ['plain', 'city'].includes(b.kind(at));
   if (!validSite(state.site)) {
     state.site = -1;
     state.delivery = null;
@@ -1249,12 +1365,15 @@ function sustainEconomy(b, m, own, ed, enemies) {
     // contain enough spare army.  Check the local six-step neighbourhood and
     // use it as a bounded supply tree; this prevents a rear stack from walking
     // the entire campaign corridor just to pay for a city.
+    const frontDistance = mazeBoard ? 2 : 4;
+    const frontCanEnter = (cell) => b.own(cell) && !b.isolated[cell] &&
+      ed.distance[cell] >= frontDistance && !reserved.has(cell);
     const frontCandidates = own
       .filter((at) => !reserved.has(at) && frontField && frontField.distance[at] > 0 && frontField.distance[at] <= 5 &&
-        ed.distance[at] >= 4 && ['plain', 'city'].includes(b.kind(at)))
+        ed.distance[at] >= frontDistance && ['plain', 'city'].includes(b.kind(at)))
       .map((at) => {
         const need = b.kind(at) === 'city' ? BUILD_COST + 1 : BUILD_COST * 2 + 1;
-        const local = field(b, [at], canEnter);
+        const local = field(b, [at], frontCanEnter);
         const localSpare = own.reduce((sum, source) => {
           if (source === at || !Number.isFinite(local.distance[source]) || local.distance[source] > 6) return sum;
           return sum + Math.max(0, b.army[source] - Math.max(1, pressure(b, source)));
@@ -1452,6 +1571,7 @@ function chooseCampaign(b,m,own) {
   const crowns=[];
   for(let i=0;i<b.size;i++)if(b.enemy(i)&&b.kind(i)==='crown')crowns.push(i);
   if(!crowns.length) return null;
+  const mazeBoard = m.maze ?? isMazeBoard(b);
   const maritime = swampRatio(b, m) > 0.3 && swampRatio(b, m) < 0.55;
   const campaignStrength = maritime ? 0.15 : CAMPAIGN_STRENGTH_DEFAULT;
   const campaignReadiness = maritime ? 0.2 : CAMPAIGN_READINESS;
@@ -1484,7 +1604,8 @@ function chooseCampaign(b,m,own) {
       m.campaign.lastProgress = b.turn;
       m.campaign.lastPhase = m.campaign.phase;
     } else if (b.turn - (m.campaign.lastProgress ?? m.campaign.started) > phaseLimit) {
-      m.blocked = { crown: m.campaign.crown, until: b.turn + CAMPAIGN_BLOCK_COOLDOWN };
+      const blockCooldown = mazeBoard ? Math.max(48, CAMPAIGN_BLOCK_COOLDOWN * 3) : CAMPAIGN_BLOCK_COOLDOWN;
+      m.blocked = { crown: m.campaign.crown, until: b.turn + blockCooldown };
       m.campaign = null;
       m.delivery = null;
       return null;
@@ -1528,7 +1649,7 @@ function chooseCampaign(b,m,own) {
           (sum, cell) => sum + (b.friendly(cell) ? 0 : b.army[cell] + 1),
           0,
         );
-        const coreBias = crown === m.enemyHome ? -260 : 0;
+        const coreBias = crown === m.enemyHome ? (mazeBoard ? -1200 : -260) : 0;
         const score = distance * 12 + resistance * 0.35 + b.army[crown] * 0.05 + coreBias;
         if (!next || score < next.score) next = { crown, score, distance };
       }
@@ -1558,7 +1679,7 @@ function chooseCampaign(b,m,own) {
         // core. A moderate bias keeps it ahead of disposable frontier crowns
         // when reachable, while distance and route resistance still prevent
         // an impossible cross-map commitment.
-        const coreBias = crown === m.enemyHome ? 450 : 0;
+        const coreBias = crown === m.enemyHome ? (mazeBoard ? 1800 : 450) : 0;
         const score=-f.distance[at]*2.5-resistance*0.18-b.army[crown]*0.08+
           coreBias + b.army[at]*campaignStrength + Math.max(-120, Math.min(120, readiness))*campaignReadiness;
         const recovery = recoveryField && Number.isFinite(recoveryField.distance[at])
@@ -1579,13 +1700,42 @@ function chooseCampaign(b,m,own) {
   // sending repeated deliveries into a dead corridor.
   const rootArmy = b.army[c.at] || 0;
   const brokenSpearhead = c.phase === 'attack' && rootArmy < 12;
+  const stalledMazeGather = mazeBoard && c.phase === 'gather' && rootArmy < 18 &&
+    b.turn - c.started >= 12 && (c.recoveryRebases || 0) < 3;
+  if (stalledMazeGather) {
+    m.delivery = null;
+    const bestDistance = Number.isFinite(c.bestCrownDistance) ? c.bestCrownDistance : f.distance[c.at];
+    const alternatives = own
+      .filter((at) => at !== c.at && b.army[at] > rootArmy + 20 && Number.isFinite(f.distance[at]))
+      .sort((a, z) => {
+        const zScore = b.army[z] - f.distance[z] * 2;
+        const aScore = b.army[a] - f.distance[a] * 2;
+        return zScore - aScore;
+      });
+    const replacement = alternatives.find((at) =>
+      f.distance[at] + 1 < bestDistance || f.distance[at] <= bestDistance + 36,
+    );
+    if (replacement !== undefined) {
+      c.at = replacement;
+      c.phase = 'gather';
+      c.started = b.turn;
+      c.lastAt = c.at;
+      c.lastProgress = b.turn;
+      c.deliveryBestDistance = Infinity;
+      c.bestCrownDistance = f.distance[c.at];
+      c.recoveryRebases = (c.recoveryRebases || 0) + 1;
+      return chooseCampaign(b, m, own);
+    }
+  }
   if (b.turn - c.started >= CAMPAIGN_REBASE_AFTER &&
       ((c.phase === 'gather' && rootArmy < 18) || brokenSpearhead)) {
     const bestDistance = Number.isFinite(c.bestCrownDistance) ? c.bestCrownDistance : f.distance[c.at];
     const alternatives = own
       .filter((at) => at !== c.at && b.army[at] > rootArmy + 40 && Number.isFinite(f.distance[at]) &&
         (f.distance[at] + 1 < bestDistance ||
-          (brokenSpearhead && (c.recoveryRebases || 0) < 2)))
+          (brokenSpearhead && (c.recoveryRebases || 0) < 2) ||
+          (mazeBoard && c.phase === 'gather' && (c.recoveryRebases || 0) < 3 &&
+            f.distance[at] <= bestDistance + 36)))
       .sort((a, z) => (b.army[z] - f.distance[z] * 2) - (b.army[a] - f.distance[a] * 2));
     if (alternatives.length) {
       c.at = alternatives[0];
@@ -1645,11 +1795,15 @@ function chooseCampaign(b,m,own) {
   // ceiling so a long maze cannot demand the sum of every enemy stack before
   // moving.  This turns a long muster into a staged attack without feeding a
   // twenty-unit spearhead into the first counter-cut.
-  const breakthroughThreshold = Math.min(
-    desired,
-    Math.max(firstContactNeed, Math.min(160, desired * 0.65)),
-  );
-  const breakthroughReady = b.army[c.at] >= breakthroughThreshold && musterTurns >= 2;
+  const breakthroughThreshold = mazeBoard
+    ? Math.min(desired, Math.max(firstContactNeed + 8, Math.min(96, desired * 0.45)))
+    : Math.min(
+      desired,
+      Math.max(firstContactNeed, Math.min(160, desired * 0.65)),
+    );
+  const forcedMazeBreak = mazeBoard && musterTurns >= 36 &&
+    b.army[c.at] >= Math.max(24, firstContactNeed);
+  const breakthroughReady = b.army[c.at] >= breakthroughThreshold && musterTurns >= 2 || forcedMazeBreak;
   if (c.phase === 'gather') {
     c.musterTurns = musterTurns + 1;
     if (breakthroughReady) {
@@ -1660,6 +1814,16 @@ function chooseCampaign(b,m,own) {
     }
   }
   if(c.phase==='gather'&&b.army[c.at]<desired) {
+    // A narrow campaign that has already reached the final approach should
+    // change the enemy graph before paying for another long convoy.  When the
+    // next head move is unavailable, a strategic cut of the opponent's
+    // supply branch is often the only useful action; repeatedly gathering the
+    // same rear route just lets the opponent add another crown.
+    if (mazeBoard && Number.isFinite(c.bestCrownDistance) && c.bestCrownDistance > 10 && c.bestCrownDistance <= 18 &&
+        b.turn - c.started >= 8) {
+      const escapeCut = strategicCut(b, own) || frontierStrike(b, own);
+      if (escapeCut) return { ...escapeCut, branch: 'campaign-cut' };
+    }
     const delivery = gather(b, m, c.at, desired, 'muster');
     if(delivery)return delivery;
     // A severed spearhead can remain technically connected while no source
@@ -1721,9 +1885,17 @@ function chooseCampaign(b,m,own) {
     return {action:a,branch:'march'};
   }
   c.phase='gather';
+  if (mazeBoard && Number.isFinite(c.bestCrownDistance) && c.bestCrownDistance > 10 && c.bestCrownDistance <= 18) {
+    const escapeCut = strategicCut(b, own) || frontierStrike(b, own);
+    if (escapeCut) return { ...escapeCut, branch: 'campaign-cut' };
+  }
   const target = Math.max(desired, b.army[to] * 1.3 + 30);
   const delivery = gather(b, m, c.at, target, 'muster');
   if(delivery)return delivery;
+  if (mazeBoard && Number.isFinite(c.bestCrownDistance) && c.bestCrownDistance > 10 && c.bestCrownDistance <= 18) {
+    const escapeCut = strategicCut(b, own) || frontierStrike(b, own);
+    if (escapeCut) return { ...escapeCut, branch: 'campaign-cut' };
+  }
   return null;
 }
 
@@ -1738,6 +1910,27 @@ function recover(b, m, own) {
   for (let at = 0; at < b.size; at += 1) if (b.enemy(at) && !b.isolated[at]) enemies.push(at);
   const ed = field(b, enemies);
   const assaultRoot = m.campaign?.at;
+  // On a maze, reaching the final approach is expensive.  A stalled tick
+  // near the target must not discard that progress and restart from the rear:
+  // the fresh opening can spend the rest of the game rebuilding the corridor
+  // while the opponent keeps its crown production.  Keep the same campaign
+  // and let chooseCampaign reissue a local muster or march instead.
+  if (
+    m.maze &&
+    m.campaign &&
+    Number.isFinite(m.campaign.bestCrownDistance) &&
+    m.campaign.bestCrownDistance <= 24 &&
+    b.enemy(m.campaign.crown)
+  ) {
+    m.campaign.phase = 'gather';
+    m.campaign.started = b.turn;
+    m.campaign.lastProgress = b.turn;
+    m.campaign.musterTurns = 0;
+    m.delivery = null;
+    const nearCampaign = chooseCampaign(b, m, own);
+    if (nearCampaign) return nearCampaign;
+    return { action: null, branch: 'maze-near-target-hold' };
+  }
   // A healthy spearhead that is already attacking should keep ownership of
   // the action budget.  The recovery hook is for stale logistics, not for
   // replacing a finishing assault with a fresh opening on the other side.
@@ -1753,7 +1946,7 @@ function recover(b, m, own) {
   if (strike) return { ...strike, branch: 'stalled-recovery' };
   const cut = strategicCut(b, own);
   if (cut) return { ...cut, branch: 'stalled-cut' };
-  const expansion = opening(b, m, own, ed);
+  const expansion = m.maze ? mazeOpening(b, m, own, ed) : opening(b, m, own, ed);
   if (expansion) return { ...expansion, branch: 'stalled-expansion' };
   return reposition(b, own) || emergencyProbe(b, own);
 }
@@ -1772,6 +1965,8 @@ function plan(b,m) {
   const explore = !fogged || b.turn < 120 || own.length < 40 || (fogged && b.turn % 5 === 0);
   const ed=field(b,enemies);
   const rushProfile = earlyRushProfile(b, own, enemies);
+  const mazeBoard = m.maze ?? isMazeBoard(b);
+  const mazeGoal = mazeBoard ? mazeEconomyGoal(b, own, enemies) : ECON_GOAL;
   // Do not let a harmlessly distant reserve freeze the whole economy once
   // the sole crown already has enough local guard.  The hold specifically
   // covers the post-build exposure window: fifty units spent on a nearby
@@ -1788,8 +1983,12 @@ function plan(b,m) {
   // spearhead is left uninterrupted so a real breakthrough can finish.
   const largeExpansionRace = b.size >= 800 &&
     (own.length < 80 || own.length + 20 < enemies.length * 0.7);
-  const largeExpansionPause = largeExpansionRace &&
-    (!m.campaign || m.campaign.phase === 'gather') && b.turn % 5 !== 0;
+  // Once a maze campaign has a rally root, its convoy must stay contiguous.
+  // Pausing a gathering campaign on four out of five ticks made the tree
+  // cursor alternate with rear expansion and effectively turned a long
+  // corridor into a permanent muster.  Economy still receives the explicit
+  // sparse window below; do not suspend the active campaign itself.
+  const largeExpansionPause = largeExpansionRace && !m.campaign && b.turn % 5 !== 0;
   if (largeExpansionPause) campaignPaused = true;
   const mazeBuildHold = mazeInfrastructureHold(b, m, own, enemies);
   if (mazeBuildHold) {
@@ -1806,6 +2005,13 @@ function plan(b,m) {
   if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
   if(tactic?.branch==='crown')return tactic;
+  // Before an opponent is visible, reserve a small deterministic share of
+  // the action budget for scouting. This keeps fog games from becoming two
+  // isolated local economies that never discover a crown to attack.
+  if (fogged && !enemies.length && b.turn >= 20 && b.turn % 3 === 0 && !rushBuildHold) {
+    const scout = fogScout(b, m, own);
+    if (scout) return scout;
+  }
   // Once a campaign has a valid rally root, keep its convoy/attack sequence
   // together.  The generic defence and economy passes used to run first on
   // every tick; a harmless nearby pressure signal could therefore steal the
@@ -1825,11 +2031,15 @@ function plan(b,m) {
       // small columns while Anti-Human adds crowns and cities every tick.
       // Once the spearhead is attacking, or our army is safely ahead, keep the
       // campaign contiguous and do not let economy work interrupt a finish.
+      const ownCrowns = own.filter((at) => b.kind(at) === 'crown').length;
+      const crownDeficit = enemyCrowns > ownCrowns;
+      const economyCadence = 8;
       const economyWindow = gatherWindow &&
-        (ownTotal < enemyTotal * 1.15 || enemyCrowns > own.filter((at) => b.kind(at) === 'crown').length) &&
-        b.turn % 8 === 0;
+        (ownTotal < enemyTotal * 1.15 || crownDeficit) &&
+        b.turn % economyCadence === 0;
+      const allowEconomyWindow = economyWindow;
       const latentCrownMove = rushBuildHold && rushOutwardMove(b, campaign.action, rushProfile);
-      if (!campaignPaused && !economyWindow && !latentCrownMove) return campaign;
+      if (!campaignPaused && !allowEconomyWindow && !latentCrownMove) return campaign;
       campaignPaused = true;
     }
   }
@@ -1903,7 +2113,7 @@ function plan(b,m) {
       if (rally) return rally;
       return { action: null, branch: 'delayed-rush-wait' };
     }
-    return opening(b,m,own,ed)||{action:null,branch:'wait'};
+    return (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b, m, own, ed)) || {action:null,branch:'wait'};
   }
   // A failed core route opens a short recovery window.  Spend it on a
   // winnable local border capture instead of immediately rebuilding the same
@@ -1917,8 +2127,9 @@ function plan(b,m) {
   // has turned into infrastructure.  Start the prepared strike immediately;
   // postponing it behind another economy cycle gives the opponent a free
   // window to multiply its core.
-  if (!rushBuildHold && b.turn < ECON_DEADLINE && !(earlyStrike && process.env.APEX_EARLY_MAZE !== '0')) {
-    const invest=economy(b,m,own,ed,ECON_GOAL);
+  if (!rushBuildHold && b.turn < ECON_DEADLINE &&
+      (!earlyStrike || mazeBoard || process.env.APEX_EARLY_MAZE === '0')) {
+    const invest=economy(b,m,own,ed,mazeGoal);
     if(invest)return invest;
   }
   const campaign=(!campaignPaused && (enemyInvested || b.turn >= 70)) ? chooseCampaign(b,m,own) : null;
@@ -1942,12 +2153,18 @@ function plan(b,m) {
     return { action: null, branch: 'muster-wait' };
   }
   m.musterWaitTurns = 0;
-  const investment=rushBuildHold ? null : economy(b,m,own,ed,ECON_GOAL);
-  if(investment && (!enemyInvested || b.turn < 80))return investment;
+  const investment=rushBuildHold ? null : economy(b,m,own,ed,mazeGoal);
+  // On a maze, an active campaign and the construction plan share the same
+  // narrow corridor.  Allow the compact plan to take a bounded turn after the
+  // opponent has invested; otherwise the old `enemyInvested` gate left Apex
+  // at two or three crowns while Anti-Human reached seven.  ConstructionThreat
+  // and the rush guard still veto a build when the home crown is actually in
+  // the kill window.
+  if (investment && (!enemyInvested || b.turn < 80 || mazeBoard)) return investment;
   if(campaign && !(rushBuildHold && rushOutwardMove(b, campaign.action, rushProfile))) return campaign;
-  const growthAction=rushBuildHold ? null : economy(b,m,own,ed,ECON_GOAL);
+  const growthAction=rushBuildHold ? null : economy(b,m,own,ed,mazeGoal);
   if(growthAction)return growthAction;
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
-  return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
+  return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
 module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
