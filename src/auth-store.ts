@@ -153,7 +153,7 @@ export const COMMENT_POINTS = 20;
 export const POINTS_MIGRATION_VERSION = 1;
 /** @deprecated 使用 getGamePoints(place, totalPlayers)。 */
 export const GAME_POINTS = GAME_BASE_POINTS;
-export const LEVEL_THRESHOLDS = [0, 16, 108, 288, 1000, 2888] as const;
+export const LEVEL_THRESHOLDS = [0, 100, 1000, 10000, 30000, 100000] as const;
 
 export const getGamePoints = (place: number, totalPlayers: number): number => {
   const normalizedPlace = Math.max(1, Math.floor(place));
