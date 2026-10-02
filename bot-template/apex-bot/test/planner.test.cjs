@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, sustainEconomy, treeGather, defensiveCut } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, sustainEconomy, treeGather, defensiveCut } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -15,6 +15,84 @@ function corridor(sourceArmy, enemyArmy) {
     leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
   }, 1);
 }
+
+test('recognizes a saved no-build home reserve before it reaches the front', () => {
+  const b = makeBoard({
+    n: 1, m: 8,
+    grid: [101, 1, 1, 1, 1, 2, 2, 102],
+    army: [20, 20, 20, 20, 20, 20, 20, 20],
+    isolated: Array(8).fill(0), fog: Array(8).fill(0), turn: 50,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [0, 1, 2, 3, 4];
+  const enemies = [5, 6, 7];
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+});
+
+test('protects a low crown before letting a saved home reserve trigger a raid', () => {
+  const grid = [101, ...Array(23).fill(1), 102];
+  const army = [80, 120, ...Array(23).fill(20)];
+  for (let at = 19; at < 24; at += 1) grid[at] = 2;
+  for (let at = 19; at < 24; at += 1) army[at] = 25;
+  const b = makeBoard({
+    n: 1, m: 25, grid, army,
+    isolated: Array(25).fill(0), fog: Array(25).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [...Array(19).keys()];
+  const enemies = [...Array(6).keys()].map((at) => at + 19);
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(decision.branch, 'delayed-rush-guard');
+  assert.equal(decision.action.x, 0);
+  assert.equal(decision.action.y, 1);
+  assert.equal(decision.action.dx, 0);
+  assert.equal(decision.action.dy, 0);
+  assert.notEqual(decision.action.kind, 'build');
+});
+
+test('detects an immediate home raid before the first construction window', () => {
+  const grid = [101, ...Array(28).fill(1), 102];
+  const army = [30, ...Array(28).fill(0), 30];
+  for (let at = 24; at < 29; at += 1) grid[at] = 2;
+  for (let at = 24; at < 29; at += 1) army[at] = 30;
+  const b = makeBoard({
+    n: 1, m: 30, grid, army,
+    isolated: Array(30).fill(0), fog: Array(30).fill(0), turn: 30,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [0];
+  const enemies = [...Array(6).keys()].map((at) => at + 24);
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(decision.branch, 'delayed-rush-wait');
+});
+
+test('guards the nearest weak crown when a saved reserve can choose a second crown', () => {
+  const grid = Array(40).fill(1);
+  const army = Array(40).fill(20);
+  grid[0] = 101;
+  grid[25] = 101;
+  army[0] = 200;
+  army[25] = 5;
+  for (let at = 30; at < 39; at += 1) {
+    grid[at] = 2;
+    army[at] = 25;
+  }
+  grid[39] = 102;
+  army[39] = 25;
+  const b = makeBoard({
+    n: 1, m: 40, grid, army,
+    isolated: Array(40).fill(0), fog: Array(40).fill(0), turn: 70,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [...Array(30).keys()];
+  const enemies = [...Array(10).keys()].map((at) => at + 30);
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(decision.branch, 'delayed-rush-guard');
+  assert.equal(decision.action.dy, 25);
+});
 
 test('campaign refuses a safe head move when an older bridge can strand it', () => {
   const b = corridor(100, 80);
