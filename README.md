@@ -16,7 +16,7 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准，未结束局计平局）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（华夏地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准；未结束局在失败率中计失败）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）。
 
 Apex Bot 可独立运行或由服务端托管：
 
@@ -28,7 +28,7 @@ node --test test/*.test.cjs
 node training/long-eval.cjs --help
 ```
 
-离线评测直接加载当前 `src/game-engine.ts`，支持 `worker_threads` 并行、四种地图、换边和失败回放。历史 48 局 Anti-Human 基准曾记录 42 胜、0 负、6 平；实际结果会随种子、尺寸和代码版本变化，应以评测报告为准。评测命令和参数见 [`bot-template/apex-bot/USAGE.md`](bot-template/apex-bot/USAGE.md)。大地图回归使用 `--profile large --turns 1200`，覆盖 0.5、0.68、1 三档尺寸；报告按尺寸和 standard/large 尺寸组给出 120/300/600/900/1200 Tick 的皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的发育指标。`bot-template/apex-bot/test/replay-regression.test.cjs` 固定复现用户提供的 13×17 回放地图，并验证 Apex 对 Anti-Human 在 600 Tick 内结束且获胜。
+离线评测直接加载当前 `src/game-engine.ts`，支持 `worker_threads` 并行、四种地图、换边和失败回放。评测命令和参数见 [`bot-template/apex-bot/USAGE.md`](bot-template/apex-bot/USAGE.md)。大地图回归使用 `--profile large --turns 1200`，覆盖 0.5、0.68、1 三档尺寸；报告按尺寸和 standard/large 尺寸组给出 120/300/600/900/1200 Tick 的皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的发育指标。达到 Tick 上限仍未击杀的对局会在 `draws` 中保留诊断，但在 `losses`/`effectiveLosses` 中按失败计入。`bot-template/apex-bot/test/replay-regression.test.cjs` 固定复现用户提供的 13×17 回放地图，并验证 Apex 对 Anti-Human 在 600 Tick 内结束且获胜。
 
 启动后访问 `http://localhost:23333/` 并注册账号。
 

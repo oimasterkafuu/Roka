@@ -25,7 +25,12 @@ function attachStrategy(socket, options = {}) {
   const room = String(options.room || '').trim();
   if (!room) throw new Error('attachStrategy: missing room');
   const log = typeof options.log === 'function' ? options.log : () => {};
-  const actionDelayMs = Math.max(0, Number(options.actionDelayMs ?? 60) || 0);
+  // The server applies growth and connectivity before broadcasting each
+  // update. Waiting for a fixed wall-clock interval lets the next tick arrive
+  // first on 4x games, so a move is then planned from a stale frontier and is
+  // especially likely to lose its supply line. Decide on the newest frame;
+  // callers can still opt into a delay when debugging.
+  const actionDelayMs = Math.max(0, Number(options.actionDelayMs ?? 0) || 0);
   const state = {
     n: 0,
     m: 0,
@@ -43,6 +48,10 @@ function attachStrategy(socket, options = {}) {
     dead: false,
     ended: false,
     queued: 0,
+    actionPending: false,
+    pendingAction: null,
+    lastActionTurn: -1,
+    queueResets: 0,
   };
   let controller = null;
   let heartbeat = null;
@@ -66,6 +75,10 @@ function attachStrategy(socket, options = {}) {
     state.leaderboard = [];
     state.teams = new Map();
     state.queued = 0;
+    state.actionPending = false;
+    state.pendingAction = null;
+    state.lastActionTurn = -1;
+    state.queueResets = 0;
     state.playerId = ids.indexOf(state.clientId) + 1;
     state.dead = false;
     state.ended = false;
@@ -85,6 +98,7 @@ function attachStrategy(socket, options = {}) {
   }
 
   function decide() {
+    decisionTimer = null;
     if (!state.inGame || state.dead || state.ended || !controller || !state.playerId) return;
     const board = makeBoard(
       {
@@ -104,7 +118,21 @@ function attachStrategy(socket, options = {}) {
     );
     const action = controller.choose(board);
     if (!action) return;
+    // The server executes one queued operation per tick. When a decision was
+    // delayed past the next tick, the old operation can still be at the head
+    // of that queue and would be applied to a stale board. The update payload
+    // acknowledges the previous operation through lst_move/skip; only clear
+    // when that acknowledgement did not arrive, then append the fresh action.
+    if (state.actionPending) {
+      socket.emit('clear_queue');
+      state.queueResets += 1;
+      state.actionPending = false;
+      state.pendingAction = null;
+    }
     state.queued += 1;
+    state.lastActionTurn = state.turn;
+    state.actionPending = true;
+    state.pendingAction = { ...action };
     socket.emit(action.kind === 'build' ? 'build' : 'attack', action);
   }
 
@@ -154,18 +182,33 @@ function attachStrategy(socket, options = {}) {
     state.isolated.splice(0, state.size, ...next.isolated);
     state.fog.splice(0, state.size, ...next.fog);
     updatePlayers(payload);
+    const move = payload.lst_move;
+    if (state.actionPending && move) {
+      const hasMove = Number(move.x) >= 0 && Number(move.y) >= 0;
+      const pending = state.pendingAction;
+      const matches = hasMove && pending &&
+        Number(move.x) === Number(pending.x) && Number(move.y) === Number(pending.y) &&
+        String(move.op || 'm') === (pending.kind === 'build' ? String(pending.op || 'b') : 'm') &&
+        (pending.kind !== 'attack' ||
+          (Number(move.dx) === Number(pending.dx) && Number(move.dy) === Number(pending.dy)));
+      if (matches || (!hasMove && Number(move.skip) > 0)) {
+        state.actionPending = false;
+        state.pendingAction = null;
+      }
+    }
     state.turn = payload.turn;
     state.ended = Boolean(payload.game_end);
     if (payload.kills && payload.kills[state.clientId]) state.dead = true;
     if (state.ended) {
       state.inGame = false;
+      state.actionPending = false;
+      state.pendingAction = null;
       if (decisionTimer) clearTimeout(decisionTimer);
       controller?.reset();
       return;
     }
     if (!state.playerId || state.dead) return;
-    if (decisionTimer) clearTimeout(decisionTimer);
-    decisionTimer = setTimeout(decide, actionDelayMs);
+    if (!decisionTimer) decisionTimer = setTimeout(decide, actionDelayMs);
   }
 
   function onRoomUpdate(payload = {}) {
@@ -214,6 +257,9 @@ function attachStrategy(socket, options = {}) {
 
   function onDisconnect() {
     state.inGame = false;
+    state.actionPending = false;
+    state.pendingAction = null;
+    state.lastActionTurn = -1;
     lastRoomCommand = '';
     if (decisionTimer) clearTimeout(decisionTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -226,12 +272,16 @@ function attachStrategy(socket, options = {}) {
   function onLeft() {
     state.inGame = false;
     state.ended = true;
+    state.actionPending = false;
+    state.pendingAction = null;
     lastRoomCommand = '';
     controller?.reset();
   }
 
   function onKick() {
     state.inGame = false;
+    state.actionPending = false;
+    state.pendingAction = null;
     lastRoomCommand = '';
     if (reconnectTimer) clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(() => {

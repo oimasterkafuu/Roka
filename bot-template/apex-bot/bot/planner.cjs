@@ -1450,6 +1450,7 @@ function recover(b, m, own) {
 
 function plan(b,m) {
   const own=[]; const enemies=[];
+  let campaignPaused = false;
   for(let i=0;i<b.size;i++){if(b.own(i)&&!b.isolated[i])own.push(i);if(b.enemy(i)&&!b.isolated[i])enemies.push(i);}
   if(!Number.isInteger(m.home)||!b.own(m.home))m.home=own.find(i=>b.kind(i)==='crown');
   if(!own.length)return {action:null,branch:'idle'};
@@ -1460,6 +1461,15 @@ function plan(b,m) {
   // switch the action budget to economy, rallying, and visible combat.
   const explore = !fogged || b.turn < 120 || own.length < 40 || (fogged && b.turn % 5 === 0);
   const ed=field(b,enemies);
+  // On large maps a first campaign can monopolize the action budget while
+  // the opponent paints several hundred cells. Pause only a gathering
+  // campaign when the territory gap is structural; an already marching
+  // spearhead is left uninterrupted so a real breakthrough can finish.
+  const largeExpansionRace = b.size >= 800 &&
+    (own.length < 80 || own.length + 20 < enemies.length * 0.7);
+  const largeExpansionPause = largeExpansionRace &&
+    (!m.campaign || m.campaign.phase === 'gather') && b.turn % 5 !== 0;
+  if (largeExpansionPause) campaignPaused = true;
   const anchorGuard = anchorDefense(b);
   if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
@@ -1471,7 +1481,24 @@ function plan(b,m) {
   // same route forever without ever reaching the first hostile cell.
   if (m.campaign && Number.isInteger(m.campaign.at) && b.own(m.campaign.at) && !b.isolated[m.campaign.at]) {
     const campaign = chooseCampaign(b, m, own);
-    if (campaign?.action) return campaign;
+    if (campaign?.action) {
+      const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
+      const enemyTotal = enemies.reduce((sum, at) => sum + b.army[at], 0);
+      const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+      const gatherWindow = campaign.branch === 'muster' || campaign.branch === 'muster-wait';
+      // A rally is a plan, not a permanent lock on the action budget. During
+      // a long gather, spend a deterministic sparse window on a compact city
+      // cluster or a funded frontline post when the opponent has a real army
+      // lead. This prevents the old failure mode where Apex keeps ferrying
+      // small columns while Anti-Human adds crowns and cities every tick.
+      // Once the spearhead is attacking, or our army is safely ahead, keep the
+      // campaign contiguous and do not let economy work interrupt a finish.
+      const economyWindow = gatherWindow &&
+        (ownTotal < enemyTotal * 1.15 || enemyCrowns > own.filter((at) => b.kind(at) === 'crown').length) &&
+        b.turn % 8 === 0;
+      if (!campaignPaused && !economyWindow) return campaign;
+      campaignPaused = true;
+    }
   }
   const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
   const enemyTotal = enemies.reduce((sum, at) => sum + b.army[at], 0);
@@ -1485,14 +1512,14 @@ function plan(b,m) {
     // Once the opposing empire is already collapsing, every spare tick must
     // stay on the shortest crown campaign.  Ordinary cutoff and economy work
     // can otherwise leave a tiny last crown alive indefinitely.
-    const final = chooseCampaign(b, m, own);
+    const final = campaignPaused ? null : chooseCampaign(b, m, own);
     if (final) return final;
-    if (m.campaign?.phase === 'gather' && b.own(m.campaign.at)) return { action: null, branch: 'muster-wait' };
+    if (!campaignPaused && m.campaign?.phase === 'gather' && b.own(m.campaign.at)) return { action: null, branch: 'muster-wait' };
   }
   const coreReady = Number.isInteger(m.enemyHome) && b.enemy(m.enemyHome) && b.kind(m.enemyHome) === 'crown' &&
     b.turn >= 180 && ownTotal >= enemyTotal * 1.1 && enemyCrowns > 1;
   if (coreReady) {
-    const coreCampaign = chooseCampaign(b, m, own);
+    const coreCampaign = campaignPaused ? null : chooseCampaign(b, m, own);
     if (coreCampaign) return coreCampaign;
   }
   // On a large board the original enemy crown can be more than a hundred
@@ -1507,7 +1534,7 @@ function plan(b,m) {
   // immediate defence check above.
   const decisive = enemyCrowns <= 6 && ownTotal >= Math.max(350, enemyTotal * 1.35) && ownTotal > enemyTotal + 150;
   if (decisive) {
-    const assault = chooseCampaign(b, m, own);
+    const assault = campaignPaused ? null : chooseCampaign(b, m, own);
     if (assault) return assault;
   }
   const forward = forwardExpansion(b, m, own, ed, enemies);
@@ -1546,13 +1573,13 @@ function plan(b,m) {
     const invest=economy(b,m,own,ed,ECON_GOAL);
     if(invest)return invest;
   }
-  const campaign=(enemyInvested || b.turn >= 70) ? chooseCampaign(b,m,own) : null;
+  const campaign=(!campaignPaused && (enemyInvested || b.turn >= 70)) ? chooseCampaign(b,m,own) : null;
   if(campaign)return campaign;
   // Once a campaign has a valid rally root but no legal delivery step, keep
   // the root intact and let growth refill it.  Falling back to opening here
   // spends the action on a new frontier and is exactly the oscillation that
   // starves a planned core assault.
-  if (m.campaign && m.campaign.phase === 'gather' && b.own(m.campaign.at) && !b.isolated[m.campaign.at]) {
+  if (!campaignPaused && m.campaign && m.campaign.phase === 'gather' && b.own(m.campaign.at) && !b.isolated[m.campaign.at]) {
     m.musterWaitTurns = (m.musterWaitTurns || 0) + 1;
     if (m.musterWaitTurns >= 8) {
       const blockedCrown = m.campaign.crown;

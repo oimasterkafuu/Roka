@@ -18,7 +18,7 @@ const bot = attachStrategy(socket, {
   room,
   team: Number(process.env.BOT_TEAM || 1),
   autoReady: process.env.BOT_AUTO_READY !== '0',
-  actionDelayMs: Number(process.env.BOT_ACTION_DELAY_MS || 60),
+  actionDelayMs: Number(process.env.BOT_ACTION_DELAY_MS || 0),
   log: (message) => console.log(`[apex] ${message}`),
 });
 
