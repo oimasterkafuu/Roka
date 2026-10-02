@@ -6,7 +6,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
 import { Server as SocketIOServer } from 'socket.io';
 import { Announcement, AnnouncementStore, ANNOUNCEMENT_TEXT_MAX } from './announcement-store';
-import { UserStore } from './auth-store';
+import { formatBanMessage, UserStore } from './auth-store';
 import { FeedCooldownException, FeedStore } from './feed-store';
 import { GameEngine } from './game-engine';
 import { isHuaxiaSeasonActive } from './map/huaxia-season';
@@ -117,13 +117,6 @@ const PRESENCE_SWEEP_INTERVAL_MS = 30_000;
 // 封禁时长入参下限/上限（毫秒）：最短 1 分钟，最长约 100 年（相当于永久之外的极大值）。
 const BAN_DURATION_MIN_MS = 60_000;
 const BAN_DURATION_MAX_MS = 100 * 365 * 24 * 3600_000;
-
-// 封禁解封时间的本地格式化（YYYY-MM-DD HH:mm）。
-const formatBanDeadline = (timestamp: number): string => {
-  const d = new Date(timestamp);
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
 
 // 统一在线状态模型：「用户最近一次有效请求/动作时间」是唯一事实来源——
 // 在线 = 最近 5 分钟内有活动；「最后在线」= 该时间戳；在线人数 = 在线用户去重计数。
@@ -488,7 +481,7 @@ const boot = async (): Promise<void> => {
 
     const banStatus = userStore.getBanStatus(authUser.username);
     if (banStatus.banned) {
-      return reply.code(403).send({ error: '该账号已被封禁。' });
+      return reply.code(403).send({ error: formatBanMessage(banStatus) });
     }
     (request as AuthRequest).authUser = authUser;
     // 任何已认证请求都算一次用户活动；/api/online 自身除外（在线状态查询是被动
@@ -635,11 +628,7 @@ const boot = async (): Promise<void> => {
 
     const banStatus = userStore.getBanStatus(username);
     if (banStatus.banned) {
-      const message =
-        banStatus.bannedUntil === -1
-          ? '该账号已被永久封禁。'
-          : `该账号已被封禁，将于 ${formatBanDeadline(banStatus.bannedUntil ?? 0)} 解除。`;
-      return reply.code(403).send({ error: message });
+      return reply.code(403).send({ error: formatBanMessage(banStatus) });
     }
 
     const sessionId = await userStore.rotateSession(username);
@@ -850,8 +839,9 @@ const boot = async (): Promise<void> => {
       if (!USERNAME_REGEX.test(username) || !userStore.getPublicProfile(username)) {
         return reply.code(404).send({ error: '用户不存在。' });
       }
-      if (userStore.getBanStatus(username).banned) {
-        return reply.code(400).send({ error: '该用户已被封禁，不能用于运行 Bot。' });
+      const banStatus = userStore.getBanStatus(username);
+      if (banStatus.banned) {
+        return reply.code(400).send({ error: `${formatBanMessage(banStatus)}不能用于运行 Bot。` });
       }
       if (room.length === 0 || room.length > 15) {
         return reply.code(400).send({ error: '房间号无效（长度 1~15）。' });
@@ -1372,8 +1362,9 @@ const boot = async (): Promise<void> => {
       next(new Error('未登录或登录已失效。'));
       return;
     }
-    if (userStore.getBanStatus(authUser.username).banned) {
-      next(new Error('该账号已被封禁。'));
+    const banStatus = userStore.getBanStatus(authUser.username);
+    if (banStatus.banned) {
+      next(new Error(formatBanMessage(banStatus)));
       return;
     }
 
@@ -1394,9 +1385,10 @@ const boot = async (): Promise<void> => {
     if (!isBot) {
       recordPresence(username);
       socket.use((_packet, next) => {
-        if (userStore.getBanStatus(username).banned) {
+        const banStatus = userStore.getBanStatus(username);
+        if (banStatus.banned) {
           socket.disconnect(true);
-          next(new Error('该账号已被封禁。'));
+          next(new Error(formatBanMessage(banStatus)));
           return;
         }
         recordPresence(username);
@@ -1419,8 +1411,10 @@ const boot = async (): Promise<void> => {
     socket.join(`sid_${socket.id}`);
     socket.emit('set_id', lobbyService.md5(socket.id));
     const rejectIfBanned = (): boolean => {
-      if (isBot || !userStore.getBanStatus(username).banned) return false;
-      socket.emit('error_message', { error: '该账号已被封禁。' });
+      if (isBot) return false;
+      const banStatus = userStore.getBanStatus(username);
+      if (!banStatus.banned) return false;
+      socket.emit('error_message', { error: formatBanMessage(banStatus) });
       socket.disconnect(true);
       return true;
     };
