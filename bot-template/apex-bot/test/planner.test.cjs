@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, sustainEconomy, treeGather, defensiveCut } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, sustainEconomy, treeGather, defensiveCut } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -158,6 +158,35 @@ test('opens a staged campaign before the full maze resistance is assembled', () 
   const decision = plan(b, memory);
   assert.equal(decision.branch, 'march');
   assert.deepEqual(decision.action, actionCoordinates(b, 1, 2, 2));
+});
+
+test('pauses a long maze campaign after the opponent builds until anchors are funded', () => {
+  const n = 5;
+  const m = 15;
+  const size = n * m;
+  const grid = Array(size).fill(201);
+  const army = Array(size).fill(0);
+  for (let y = 0; y < m; y += 1) {
+    const at = 2 * m + y;
+    grid[at] = y === 1 ? 101 : y === 10 ? 52 : y === 14 ? 102 : 1;
+    army[at] = y === 1 ? 120 : y === 10 ? 40 : y === 14 ? 40 : 30;
+  }
+  const b = makeBoard({
+    n, m, grid, army, isolated: Array(size).fill(0), fog: Array(size).fill(0), turn: 80,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const memory = {
+    playerId: 1, home: 31, enemyHome: 44,
+    campaign: { crown: 44, at: 31, phase: 'gather' },
+    delivery: null, threatDistance: {},
+  };
+  const own = [...Array(size).keys()].filter((at) => b.own(at));
+  const enemies = [...Array(size).keys()].filter((at) => b.enemy(at));
+  assert.equal(mazeInfrastructureHold(b, memory, own, enemies), true);
+  const decision = plan(b, memory);
+  assert.equal(memory.campaign, null);
+  assert.equal(decision.branch, 'cluster-fund');
+  assert.notEqual(decision.branch, 'march');
 });
 
 test('cuts an enemy supply articulation when direct crown defence cannot arrive', () => {
