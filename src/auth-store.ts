@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { serialize } from 'node:v8';
 import type { DisciplineType } from './server/auto-ban-policy';
+import type { FeedPost, ReplayListItem } from './types';
 import {
   CoalescingFileWriter,
   decodeBinary,
@@ -68,8 +69,8 @@ export interface PublicProfile {
   provisional: boolean;
   points: number;
   level: UserLevelProgress;
-  rawRank: number;
-  displayRank: string;
+  ratingRawRank: number;
+  ratingDisplayRank: string;
   createdAt: number;
   isAdmin: boolean;
   ratingHistory: RatingHistoryPoint[];
@@ -134,6 +135,7 @@ export const formatBanMessage = (banStatus: BanStatus): string => {
 
 interface UserFile {
   users: StoredUser[];
+  pointsMigrationVersion?: number;
 }
 
 /**
@@ -141,8 +143,65 @@ interface UserFile {
  */
 const DEFAULT_RATING = 1200;
 
-export const GAME_POINTS = 10;
+export const GAME_BASE_POINTS = 40;
+export const RANK_BONUS_MIN = 40;
+export const RANK_BONUS_MAX = 100;
+export const POST_POINTS = 30;
+export const RECEIVED_INTERACTION_POINTS = 10;
+export const LIKE_POINTS = 10;
+export const COMMENT_POINTS = 20;
+export const POINTS_MIGRATION_VERSION = 1;
+/** @deprecated 使用 getGamePoints(place, totalPlayers)。 */
+export const GAME_POINTS = GAME_BASE_POINTS;
 export const LEVEL_THRESHOLDS = [0, 16, 108, 288, 1000, 2888] as const;
+
+export const getGamePoints = (place: number, totalPlayers: number): number => {
+  const normalizedPlace = Math.max(1, Math.floor(place));
+  const normalizedPlayers = Math.max(normalizedPlace, Math.floor(totalPlayers));
+  const rankBonus = Math.min(
+    RANK_BONUS_MAX,
+    Math.max(RANK_BONUS_MIN, RANK_BONUS_MIN + 10 * (normalizedPlayers - normalizedPlace)),
+  );
+  return GAME_BASE_POINTS + rankBonus;
+};
+
+const addPoints = (points: Map<string, number>, username: string, value: number): void => {
+  const key = username.trim().toLowerCase();
+  if (key) points.set(key, (points.get(key) ?? 0) + value);
+};
+
+export const calculateHistoricalPoints = (
+  replays: ReplayListItem[],
+  posts: FeedPost[],
+): Map<string, number> => {
+  const points = new Map<string, number>();
+  for (const replay of replays) {
+    const players = [
+      ...new Set(
+        (replay.rank ?? [])
+          .filter((username) => typeof username === 'string')
+          .map((username) => username.trim().toLowerCase()),
+      ),
+    ];
+    players.forEach((username, index) =>
+      addPoints(points, username, getGamePoints(index + 1, players.length)),
+    );
+  }
+  for (const post of posts) {
+    addPoints(points, post.author, POST_POINTS);
+    for (const username of post.likes ?? []) {
+      if (username.trim().toLowerCase() !== post.author.trim().toLowerCase()) {
+        addPoints(points, post.author, RECEIVED_INTERACTION_POINTS);
+        addPoints(points, username, LIKE_POINTS);
+      }
+    }
+    for (const comment of post.comments ?? []) {
+      addPoints(points, post.author, RECEIVED_INTERACTION_POINTS);
+      addPoints(points, comment.author, COMMENT_POINTS);
+    }
+  }
+  return points;
+};
 
 export const getUserLevelProgress = (rawPoints: number): UserLevelProgress => {
   const points = Number.isFinite(rawPoints) ? Math.max(0, Math.floor(rawPoints)) : 0;
@@ -177,6 +236,16 @@ export const displayPointsRank = (rawRank: number): string => {
   if (rank <= 200) return '100+';
   if (rank <= 500) return '200+';
   return '500+';
+};
+
+export const displayRatingRank = (rawRank: number): string => {
+  if (!Number.isFinite(rawRank) || rawRank < 1) return '-';
+  const rank = Math.floor(rawRank);
+  if (rank <= 20) return String(rank);
+  if (rank <= 50) return '20+';
+  if (rank <= 100) return '50+';
+  if (rank <= 200) return '100+';
+  return '200+';
 };
 
 /**
@@ -335,7 +404,7 @@ const toStoredUser = (value: unknown): StoredUser | null => {
   };
 };
 
-const parseUserFile = (value: unknown): StoredUser[] => {
+const parseUserFile = (value: unknown): UserFile => {
   if (!isRecord(value) || !Array.isArray(value.users)) {
     throw new Error('用户数据结构无效。');
   }
@@ -346,7 +415,13 @@ const parseUserFile = (value: unknown): StoredUser[] => {
       users.push(parsed);
     }
   }
-  return users;
+  return {
+    users,
+    pointsMigrationVersion:
+      typeof value.pointsMigrationVersion === 'number' && Number.isFinite(value.pointsMigrationVersion)
+        ? value.pointsMigrationVersion
+        : 0,
+  };
 };
 
 const decodeUserFileBinary = async (content: Buffer): Promise<UserFile> => decodeBinary<UserFile>(content);
@@ -355,6 +430,8 @@ export class UserStore {
   private readonly binaryFilePath: string;
 
   private usersByKey = new Map<string, StoredUser>();
+
+  private pointsMigrationVersion = 0;
 
   // 写盘合并串行化：突发连续写入只压缩落盘一次（见 binary-store）。
   private readonly writer: CoalescingFileWriter;
@@ -369,8 +446,9 @@ export class UserStore {
 
     let binaryError: unknown = null;
     try {
-      const users = await this.loadFromBinary();
-      this.replaceUsers(users);
+      const userFile = await this.loadFromBinary();
+      this.replaceUsers(userFile.users);
+      this.pointsMigrationVersion = userFile.pointsMigrationVersion ?? 0;
       if (await this.migrateRoles()) {
         return;
       }
@@ -522,6 +600,18 @@ export class UserStore {
     }
   }
 
+  async initializeHistoricalPoints(replays: ReplayListItem[], posts: FeedPost[]): Promise<void> {
+    if (this.pointsMigrationVersion >= POINTS_MIGRATION_VERSION) {
+      return;
+    }
+    const historicalPoints = calculateHistoricalPoints(replays, posts);
+    for (const user of this.usersByKey.values()) {
+      user.points = Math.max(0, historicalPoints.get(this.normalize(user.username)) ?? 0);
+    }
+    this.pointsMigrationVersion = POINTS_MIGRATION_VERSION;
+    await this.persist();
+  }
+
   listPointsRank(limit = 100): PointsRankEntry[] {
     const capped = Math.max(1, Math.min(1000, Math.floor(limit) || 100));
     const users = [...this.usersByKey.values()].sort((a, b) => {
@@ -559,6 +649,22 @@ export class UserStore {
       rawRank,
       displayRank: displayPointsRank(rawRank),
     };
+  }
+
+  getRatingRank(usernameInput: string): { rawRank: number; displayRank: string } | null {
+    const username = this.normalize(usernameInput);
+    const users = [...this.usersByKey.values()]
+      .filter((user) => (user.ratingGames ?? 0) > 0)
+      .sort((a, b) => {
+        const ratingDiff =
+          toDisplayRating(b.rating ?? DEFAULT_RATING, b.ratingGames ?? 0) -
+          toDisplayRating(a.rating ?? DEFAULT_RATING, a.ratingGames ?? 0);
+        return ratingDiff || a.createdAt - b.createdAt || a.username.localeCompare(b.username);
+      });
+    const index = users.findIndex((user) => this.normalize(user.username) === username);
+    if (index < 0) return null;
+    const rawRank = index + 1;
+    return { rawRank, displayRank: displayRatingRank(rawRank) };
   }
 
   async applyRatingUpdates(updates: Array<{ username: string; delta: number }>): Promise<void> {
@@ -751,7 +857,7 @@ export class UserStore {
     const rating = user.rating ?? DEFAULT_RATING;
     const ratingGames = user.ratingGames ?? 0;
     const points = this.getPoints(user.username);
-    const pointsRank = this.getPointsRank(user.username);
+    const ratingRank = this.getRatingRank(user.username);
     return {
       username: user.username,
       rating: toDisplayRating(rating, ratingGames),
@@ -759,8 +865,8 @@ export class UserStore {
       provisional: isProvisionalRating(rating, ratingGames),
       points,
       level: getUserLevelProgress(points),
-      rawRank: pointsRank?.rawRank ?? 0,
-      displayRank: pointsRank?.displayRank ?? '-',
+      ratingRawRank: ratingRank?.rawRank ?? 0,
+      ratingDisplayRank: ratingRank?.displayRank ?? '-',
       createdAt: user.createdAt,
       isAdmin: user.isAdmin === true,
       ratingHistory: Array.isArray(user.ratingHistory) ? [...user.ratingHistory] : [],
@@ -860,7 +966,7 @@ export class UserStore {
     this.usersByKey = new Map(users.map((user) => [this.normalize(user.username), { ...user }]));
   }
 
-  private async loadFromBinary(): Promise<StoredUser[]> {
+  private async loadFromBinary(): Promise<UserFile> {
     const parsed = await readFileWithBackup(this.binaryFilePath, decodeUserFileBinary);
     return parseUserFile(parsed);
   }
@@ -872,6 +978,7 @@ export class UserStore {
   private persist(): Promise<void> {
     const data: UserFile = {
       users: [...this.usersByKey.values()],
+      pointsMigrationVersion: this.pointsMigrationVersion,
     };
     // serialize 同步执行，调用时即拿到状态快照；brotli 压缩惰性执行，
     // 被合并丢弃的排队写不产生压缩开销。

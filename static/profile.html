@@ -40,32 +40,33 @@
               <span id="p-title" class="profile-title"></span>
               <span id="p-admin" class="admin-badge" style="display: none">管理员</span>
             </div>
-            <div class="profile-stats">
-              <div class="profile-stat">
-                <div class="profile-stat-value" id="p-rating">-</div>
-                <div class="profile-stat-label">Rating</div>
-              </div>
+            <div class="profile-stats profile-stats-peak">
               <div class="profile-stat">
                 <div class="profile-stat-value" id="p-max-rating">-</div>
                 <div class="profile-stat-label">最高 Rating</div>
               </div>
+            </div>
+            <div class="profile-stats">
               <div class="profile-stat">
-                <div class="profile-stat-value" id="p-games">-</div>
-                <div class="profile-stat-label">对局数</div>
+                <div class="profile-stat-value" id="p-level">-</div>
+                <div class="profile-stat-label">级数</div>
               </div>
               <div class="profile-stat">
                 <div class="profile-stat-value" id="p-days">-</div>
                 <div class="profile-stat-label">注册天数</div>
               </div>
+              <div class="profile-stat">
+                <div class="profile-stat-value" id="p-rating-rank">-</div>
+                <div class="profile-stat-label">Rating 排名</div>
+              </div>
             </div>
             <div class="points-level-card">
               <div class="points-level-head">
-                <span class="points-level-title">等级 <strong id="p-level">-</strong></span>
+                <span class="points-level-title">Lv <strong id="p-level-label">-</strong></span>
                 <span class="points-total"><strong id="p-points">0</strong> 积分</span>
               </div>
               <div class="points-progress"><span id="p-level-progress"></span></div>
               <div id="p-level-next" class="points-level-next">-</div>
-              <div class="points-rank-line">全站排名：<strong id="p-rank">-</strong></div>
             </div>
             <div id="rating-changes" class="rating-changes" style="display: none">
               <div class="rating-changes-title">最近 Rating 变更</div>
@@ -90,12 +91,6 @@
         </main>
 
         <aside class="profile-column profile-column-right">
-          <section class="card points-leaderboard-card">
-            <h2 class="card-title">积分排名</h2>
-            <div id="points-leaderboard" class="points-leaderboard"></div>
-            <p id="points-leaderboard-empty" class="panel-empty" style="display: none">暂无积分排名。</p>
-          </section>
-
           <section class="card">
             <h2 class="card-title">他的回放</h2>
             <table class="mini-table">

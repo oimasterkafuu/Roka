@@ -6,7 +6,14 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
 import { Server as SocketIOServer } from 'socket.io';
 import { Announcement, AnnouncementStore, ANNOUNCEMENT_TEXT_MAX } from './announcement-store';
-import { formatBanMessage, UserStore } from './auth-store';
+import {
+  COMMENT_POINTS,
+  formatBanMessage,
+  LIKE_POINTS,
+  POST_POINTS,
+  RECEIVED_INTERACTION_POINTS,
+  UserStore,
+} from './auth-store';
 import { FeedCooldownException, FeedStore } from './feed-store';
 import { GameEngine } from './game-engine';
 import { isHuaxiaSeasonActive } from './map/huaxia-season';
@@ -453,6 +460,7 @@ const boot = async (): Promise<void> => {
   await userStore.ensureReady();
   await feedStore.ensureReady();
   await announcementStore.ensureReady();
+  await userStore.initializeHistoricalPoints(await replayStore.listReplays(), feedStore.listAll());
 
   // 重启恢复：从落盘的 lastSeenAt 重建在线状态内存表。
   presenceService.seed(userStore.listLastSeen());
@@ -873,6 +881,29 @@ const boot = async (): Promise<void> => {
 
   const feedActionRateLimitPreHandler = app.rateLimit({ max: 60, timeWindow: '1 minute' });
 
+  const getPostPointsUpdates = (
+    post: FeedPost,
+    multiplier: number,
+  ): Array<{ username: string; points: number }> => {
+    const updates: Array<{ username: string; points: number }> = [
+      { username: post.author, points: POST_POINTS * multiplier },
+    ];
+    for (const username of post.likes) {
+      if (username.trim().toLowerCase() === post.author.trim().toLowerCase()) continue;
+      updates.push(
+        { username: post.author, points: RECEIVED_INTERACTION_POINTS * multiplier },
+        { username, points: LIKE_POINTS * multiplier },
+      );
+    }
+    for (const comment of post.comments) {
+      updates.push(
+        { username: post.author, points: RECEIVED_INTERACTION_POINTS * multiplier },
+        { username: comment.author, points: COMMENT_POINTS * multiplier },
+      );
+    }
+    return updates;
+  };
+
   app.get('/api/feeds', async (request, reply) => {
     const authUser = (request as AuthRequest).authUser;
     const query = request.query as { page?: unknown; limit?: unknown };
@@ -895,6 +926,7 @@ const boot = async (): Promise<void> => {
     const body = request.body as { text?: unknown };
     try {
       const post = await feedStore.create(authUser.username, String(body?.text ?? ''));
+      await userStore.applyPointsUpdates([{ username: authUser.username, points: POST_POINTS }]);
       io.emit('home_feeds');
       return reply.send({ post: decorateFeedPost(post, authUser.username) });
     } catch (error) {
@@ -941,6 +973,7 @@ const boot = async (): Promise<void> => {
       return reply.code(403).send({ error: '没有权限删除该动态。' });
     }
     await feedStore.remove(post.id);
+    await userStore.applyPointsUpdates(getPostPointsUpdates(post, -1));
     io.emit('home_feeds');
     return reply.send({ ok: true });
   });
@@ -951,9 +984,18 @@ const boot = async (): Promise<void> => {
       return reply.code(401).send({ error: '未登录或登录已失效。' });
     }
     const body = request.body as { id?: unknown };
+    const post = feedStore.getById(String(body?.id ?? ''));
     const result = await feedStore.toggleLike(String(body?.id ?? ''), authUser.username);
-    if (!result) {
+    if (!result || !post) {
       return reply.code(404).send({ error: '动态不存在。' });
+    }
+    const sameAuthor = post.author.trim().toLowerCase() === authUser.username.trim().toLowerCase();
+    if (!sameAuthor) {
+      const points = result.liked ? 1 : -1;
+      await userStore.applyPointsUpdates([
+        { username: post.author, points: RECEIVED_INTERACTION_POINTS * points },
+        { username: authUser.username, points: LIKE_POINTS * points },
+      ]);
     }
     io.emit('home_feeds');
     return reply.send(result);
@@ -966,14 +1008,19 @@ const boot = async (): Promise<void> => {
     }
     const body = request.body as { id?: unknown; text?: unknown };
     try {
+      const post = feedStore.getById(String(body?.id ?? ''));
       const comment = await feedStore.addComment(
         String(body?.id ?? ''),
         authUser.username,
         String(body?.text ?? ''),
       );
-      if (!comment) {
+      if (!comment || !post) {
         return reply.code(404).send({ error: '动态不存在。' });
       }
+      await userStore.applyPointsUpdates([
+        { username: post.author, points: RECEIVED_INTERACTION_POINTS },
+        { username: authUser.username, points: COMMENT_POINTS },
+      ]);
       io.emit('home_feeds');
       return reply.send({ comment: decorateFeedComment(comment, authUser.username) });
     } catch (error) {
@@ -1002,6 +1049,10 @@ const boot = async (): Promise<void> => {
         return reply.code(403).send({ error: '没有权限删除该评论。' });
       }
       await feedStore.removeComment(post.id, comment.id);
+      await userStore.applyPointsUpdates([
+        { username: post.author, points: -RECEIVED_INTERACTION_POINTS },
+        { username: comment.author, points: -COMMENT_POINTS },
+      ]);
       io.emit('home_feeds');
       return reply.send({ ok: true });
     },
@@ -1043,13 +1094,6 @@ const boot = async (): Promise<void> => {
       return { ...entry, colorClass: tier.className, title: tier.title };
     });
     return reply.send({ items });
-  });
-
-  app.get('/api/points-leaderboard', async (request, reply) => {
-    const query = request.query as { limit?: unknown };
-    const rawLimit = Number.parseInt(String(query.limit ?? '20'), 10);
-    const limit = Number.isNaN(rawLimit) ? 20 : rawLimit;
-    return reply.send({ items: userStore.listPointsRank(limit) });
   });
 
   // 按用户名批量查询 rating 颜色（用户名 → colorClass/title），供前端统一用户名组件

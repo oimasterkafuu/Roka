@@ -22,7 +22,6 @@ for (const path of [
   '/api/replays',
   '/api/announcement',
   '/api/leaderboard',
-  '/api/points-leaderboard',
   '/api/online',
   '/api/user-colors',
   '/api/feeds',
