@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, sustainEconomy, treeGather, defensiveCut } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, defensiveCut } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -222,6 +222,53 @@ test('campaign gathers a token spearhead instead of marching it through a corrid
   const decision = plan(b, memory);
   assert.equal(decision.branch, 'muster');
   assert.deepEqual(decision.action, actionCoordinates(b, 0, 1, 0));
+});
+
+test('maze hysteresis reroutes a repeated edge instead of feeding it forever', () => {
+  const b = makeBoard({
+    n: 3, m: 5,
+    grid: [101, 1, 1, 2, 102, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201],
+    army: [30, 20, 20, 4, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    isolated: Array(15).fill(0), fog: Array(15).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  assert.equal(isMazeBoard(b), true);
+  const memory = {
+    mazeHistory: {
+      lastFrom: 1, lastTo: 2, edge: '1:2', edgeStreak: 1,
+      recent: ['1:2'], blockedUntil: Object.create(null), reroutes: 0, holds: 0,
+    },
+  };
+  const decision = mazeActionGuard(b, memory, {
+    action: actionCoordinates(b, 1, 2, 2),
+    branch: 'delayed-rush-guard',
+  });
+  assert.ok(decision.action);
+  assert.notDeepEqual(decision.action, actionCoordinates(b, 1, 2, 2));
+  assert.equal(memory.mazeHistory.reroutes, 1);
+});
+
+test('maze hysteresis blocks an immediate reverse when no alternate corridor is safe', () => {
+  const b = makeBoard({
+    n: 3, m: 3,
+    grid: [101, 1, 201, 201, 201, 201, 201, 201, 201],
+    army: [30, 20, 10, 0, 0, 0, 0, 0, 0],
+    isolated: Array(9).fill(0), fog: Array(9).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const memory = {
+    mazeHistory: {
+      lastFrom: 1, lastTo: 0, edge: '0:1', edgeStreak: 1,
+      recent: ['0:1'], blockedUntil: Object.create(null), reroutes: 0, holds: 0,
+    },
+  };
+  const decision = mazeActionGuard(b, memory, {
+    action: actionCoordinates(b, 0, 1, 2),
+    branch: 'opening',
+  });
+  assert.equal(decision.action, null);
+  assert.equal(decision.branch, 'maze-hold');
+  assert.equal(memory.mazeHistory.holds, 1);
 });
 
 test('stalled campaign recovery clears stale cursors and resumes a safe frontier', () => {

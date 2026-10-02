@@ -477,6 +477,140 @@ function routeGuard(b, action) {
   return { blocked: false, anchor: -1, cut: -1 };
 }
 
+function isMazeBoard(b) {
+  let walls = 0;
+  for (let at = 0; at < b.size; at += 1) if (b.kind(at) === 'mountain') walls += 1;
+  return walls > b.size * 0.12;
+}
+
+function mazeEdgeKey(from, to) {
+  return from < to ? `${from}:${to}` : `${to}:${from}`;
+}
+
+function mazeEmergency(b, from, to, decision) {
+  const branch = String(decision?.branch || '');
+  if (/(defend|supply|anchor|intercept|rescue|cut|crown)/.test(branch)) return true;
+  if (b.enemy(to)) {
+    if (['crown', 'city'].includes(b.kind(to))) return true;
+    if (stranded(b, b.owner(to), to) >= 20) return true;
+  }
+  if (b.own(to)) {
+    const threat = pressure(b, to, from);
+    const deficit = Math.max(0, threat - b.army[to]);
+    // A real reinforcement can override the hysteresis.  A one-unit feed
+    // into a threatened plain is exactly the stalled convoy pattern this
+    // guard is meant to stop.
+    if (deficit > 2 && Math.max(0, b.army[from] - 1) >= Math.max(8, deficit)) return true;
+  }
+  return false;
+}
+
+// Maze corridors have very little room for a bad tick.  The planner used to
+// reselect the same legal edge whenever a convoy could not advance, producing
+// A->B->A or the same command for dozens of server ticks.  Keep the military
+// decision intact when it is making a real cut/defence, but require ordinary
+// movement to make geometric progress or yield the tick to growth.
+function mazeActionGuard(b, m, decision) {
+  if (!(m.maze ?? isMazeBoard(b)) || !decision?.action || decision.action.kind !== 'attack') return decision;
+  const from = b.idx(decision.action.x, decision.action.y);
+  const to = b.idx(decision.action.dx, decision.action.dy);
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return decision;
+  const history = m.mazeHistory || (m.mazeHistory = {
+    lastFrom: -1, lastTo: -1, edge: '', edgeStreak: 0, recent: [],
+    blockedUntil: Object.create(null), reroutes: 0, holds: 0, holdStreak: 0,
+  });
+  const edge = mazeEdgeKey(from, to);
+  const reverse = history.lastFrom === to && history.lastTo === from;
+  const repeated = history.edge === edge ? history.edgeStreak + 1 : 1;
+  const emergency = mazeEmergency(b, from, to, decision);
+  const cooldown = Number(history.blockedUntil[edge] || 0) > b.turn;
+  if ((!reverse && repeated <= 1 && !cooldown) || emergency) return decision;
+
+  history.blockedUntil[edge] = b.turn + (reverse ? 4 : 3);
+  const objective = Number.isInteger(m.campaign?.crown) && b.enemy(m.campaign.crown)
+    ? m.campaign.crown : Number.isInteger(m.enemyHome) && b.enemy(m.enemyHome) ? m.enemyHome : -1;
+  const objectiveField = objective >= 0 ? field(b, [objective]) : null;
+  const rally = Number.isInteger(m.campaign?.at) ? m.campaign.at : -1;
+  const rallyField = rally >= 0 ? field(b, [rally], at => b.own(at) && !b.isolated[at]) : null;
+  const candidates = [];
+  const sources = [];
+  if (b.own(from) && !b.isolated[from]) sources.push(from);
+  for (let at = 0; at < b.size; at += 1) {
+    if (at !== from && b.own(at) && !b.isolated[at]) sources.push(at);
+  }
+  const recent = new Set(history.recent || []);
+  for (const source of sources) {
+    if (!movable(b, source)) continue;
+    for (const target of b.neighbors(source)) {
+      if (!b.passable(target)) continue;
+      const candidateEdge = mazeEdgeKey(source, target);
+      if (candidateEdge === edge || candidateEdge === mazeEdgeKey(to, from)) continue;
+      // Do not replace one blocked edge with the exact edge used on the
+      // preceding tick.  Without this check a cooldown on A-B made the
+      // selector bounce back to the just-used B-C edge on every tick.
+      if (candidateEdge === history.edge) continue;
+      if (Number(history.blockedUntil[candidateEdge] || 0) > b.turn) continue;
+      const candidateEmergency = mazeEmergency(b, source, target, decision);
+      const recentlyUsed = recent.has(candidateEdge) && !candidateEmergency;
+      const intent = b.enemy(target) ? 'cut' : decision.branch === 'march' ? 'campaign' : 'gather';
+      const action = safeMove(b, source, target, intent);
+      if (!action || routeGuard(b, action).blocked) continue;
+      let score = source === from ? 50 : 0;
+      if (recentlyUsed) score -= 18;
+      if (b.owner(target) === 0) score += 16;
+      if (b.kind(target) === 'swamp') score -= 40;
+      if (objectiveField && Number.isFinite(objectiveField.distance[source]) && Number.isFinite(objectiveField.distance[target])) {
+        score += (objectiveField.distance[source] - objectiveField.distance[target]) * 35;
+      }
+      if (rallyField && Number.isFinite(rallyField.distance[source]) && Number.isFinite(rallyField.distance[target])) {
+        score += (rallyField.distance[source] - rallyField.distance[target]) * 18;
+      }
+      if (decision.branch === 'opening' || decision.branch === 'opening-route') {
+        score += b.owner(target) === 0 ? 30 : -10;
+      }
+      if (b.enemy(target)) score += ['crown', 'city'].includes(b.kind(target)) ? 300 : stranded(b, b.owner(target), target);
+      score -= Math.max(0, b.army[source] - b.army[target]) * 0.01;
+      candidates.push({ action, score });
+    }
+    // Prefer a different branch from the same source.  Only search the rest
+    // of the empire when the current corridor has no legal alternative.
+    if (candidates.some(candidate => candidate.action.x === b.xy(from).x && candidate.action.y === b.xy(from).y)) break;
+  }
+  candidates.sort((a, z) => z.score - a.score);
+  if (candidates[0]) {
+    history.holdStreak = 0;
+    history.reroutes += 1;
+    return { ...candidates[0], branch: `${decision.branch || 'move'}-maze-reroute` };
+  }
+  history.holds += 1;
+  history.holdStreak += 1;
+  if (history.holdStreak >= 3) {
+    const own = [];
+    const enemies = [];
+    for (let at = 0; at < b.size; at += 1) {
+      if (b.own(at) && !b.isolated[at]) own.push(at);
+      if (b.enemy(at) && !b.isolated[at]) enemies.push(at);
+    }
+    if (!constructionThreat(b, own, enemies)) {
+      const objective = Number.isInteger(m.campaign?.at) && b.own(m.campaign.at) ? m.campaign.at : m.home;
+      const objectiveField = Number.isInteger(objective) ? field(b, [objective]) : null;
+      const sites = own.filter((at) => b.kind(at) === 'plain' && b.army[at] >= BUILD_COST + 8 &&
+        b.army[at] - BUILD_COST > pressure(b, at) + 2)
+        .map((at) => {
+          const adjacentAnchor = b.neighbors(at).some((next) => b.own(next) && ['city', 'crown'].includes(b.kind(next)));
+          const distance = objectiveField && Number.isFinite(objectiveField.distance[at]) ? objectiveField.distance[at] : 999;
+          return { at, score: (adjacentAnchor ? 80 : 0) - distance + b.army[at] * 0.02 };
+        })
+        .sort((a, z) => z.score - a.score);
+      if (sites[0]) {
+        history.holdStreak = 0;
+        return { action: build(b, sites[0].at), branch: 'maze-anchor-hold' };
+      }
+    }
+  }
+  return { action: null, branch: 'maze-hold' };
+}
+
 function safeMove(b, from, to, intent = 'move', modes = intent === 'gather' ? [0, 1, 2] : [2, 0, 1]) {
   if (!movable(b, from) || !b.passable(to)) return null;
   const targetArmy = b.army[to];
@@ -1816,4 +1950,4 @@ function plan(b,m) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? opening(b,m,own,ed) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut};
