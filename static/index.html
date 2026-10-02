@@ -37,8 +37,11 @@
         <div class="account">
           <span id="online-count" class="online-count" title="当前在线用户数（不含 bot）"></span>
           <a id="account-name" href="#"></a>
+          <a id="login-btn" href="/login" class="btn btn-primary btn-sm" style="display: none">登录</a>
           <a id="admin-entry" href="/admin" class="btn btn-ghost btn-sm" style="display: none"> 后台管理 </a>
-          <button id="logout-btn" type="button" class="btn btn-ghost btn-sm">退出登录</button>
+          <button id="logout-btn" type="button" class="btn btn-ghost btn-sm" style="display: none">
+            退出登录
+          </button>
         </div>
       </header>
 
@@ -67,6 +70,7 @@
               </div>
             </div>
             <a id="me-profile-link" class="profile-card-link" href="#">查看我的主页 →</a>
+            <p id="me-guest" class="panel-empty" style="display: none">登录后查看个人积分、等级与排名。</p>
           </section>
 
           <section class="card">
@@ -151,6 +155,9 @@
           <section class="card feed-card">
             <h2 class="card-title">动态</h2>
             <div class="composer">
+              <div id="feed-guest" class="panel-empty" style="display: none">
+                游客可以浏览动态；<a href="/login">登录后即可发布、点赞和评论。</a>
+              </div>
               <textarea id="feed-input" maxlength="300" placeholder="分享点什么…"></textarea>
               <div class="composer-hint">支持 Markdown 与 LaTeX 语法（如 $x^2$）。</div>
               <div class="composer-footer">
@@ -316,19 +323,36 @@
       }
 
       async function loadUser() {
-        var res = await fetch('/api/auth/me');
-        if (!res.ok) {
-          location.href = '/login';
+        try {
+          var res = await fetch('/api/auth/me');
+          if (!res.ok) {
+            $('#login-btn').show();
+            $('#account-name').hide();
+            $('#logout-btn, #admin-entry').hide();
+            $('#me-card > div, #me-profile-link').hide();
+            $('#me-guest').show();
+            $('#feed-guest').show();
+            $('#feed-input, #feed-count, #feed-post-btn, #feed-cooldown, .composer-hint').hide();
+            return false;
+          }
+          var data = await res.json();
+          currentUsername = data.username;
+          currentIsAdmin = data.isAdmin === true;
+          // 顶栏当前用户：统一用户名组件（rating 颜色 + 点击跳主页），颜色经缓存批量补色。
+          $('#account-name').replaceWith(usernameLink(currentUsername));
+          usernameEnsureColors([currentUsername]);
+          $('#login-btn').hide();
+          $('#logout-btn').show();
+          $('#admin-entry').toggle(currentIsAdmin);
+          return true;
+        } catch (e) {
+          $('#login-btn').show();
+          $('#account-name').hide();
+          $('#logout-btn, #admin-entry').hide();
+          $('#me-guest, #feed-guest').show();
+          $('#feed-input, #feed-count, #feed-post-btn, #feed-cooldown, .composer-hint').hide();
           return false;
         }
-        var data = await res.json();
-        currentUsername = data.username;
-        currentIsAdmin = data.isAdmin === true;
-        // 顶栏当前用户：统一用户名组件（rating 颜色 + 点击跳主页），颜色经缓存批量补色。
-        $('#account-name').replaceWith(usernameLink(currentUsername));
-        usernameEnsureColors([currentUsername]);
-        $('#admin-entry').toggle(currentIsAdmin);
-        return true;
       }
 
       async function loadMyProfile() {
@@ -367,6 +391,10 @@
       }
 
       function gotoRoom() {
+        if (!currentUsername) {
+          window.location.href = '/login';
+          return;
+        }
         var room = normalizeRoomId($('#room-input').val());
         if (!room) {
           window.location.pathname = '/games/';
@@ -845,16 +873,18 @@
         $wrap.appendTo($item);
 
         var $actions = $('<div class="feed-actions"></div>');
-        var $likeBtn = $('<button type="button" class="like-btn"></button>');
-        $likeBtn.toggleClass('liked', post.likes.indexOf(currentUsername) !== -1);
-        $('<span class="heart"></span>')
-          // 自定义 SVG 爱心，避免 ♥ 字符在不同设备上渲染不一致（有的平台会变成 emoji）。
-          .html(
-            '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
-          )
-          .appendTo($likeBtn);
-        $('<span class="like-count"></span>').text(post.likes.length).appendTo($likeBtn);
-        $likeBtn.appendTo($actions);
+        if (currentUsername) {
+          var $likeBtn = $('<button type="button" class="like-btn"></button>');
+          $likeBtn.toggleClass('liked', post.likes.indexOf(currentUsername) !== -1);
+          $('<span class="heart"></span>')
+            // 自定义 SVG 爱心，避免 ♥ 字符在不同设备上渲染不一致（有的平台会变成 emoji）。
+            .html(
+              '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+            )
+            .appendTo($likeBtn);
+          $('<span class="like-count"></span>').text(post.likes.length).appendTo($likeBtn);
+          $likeBtn.appendTo($actions);
+        }
         $('<button type="button" class="comment-toggle"></button>')
           .text(commentButtonText(post.comments.length))
           .appendTo($actions);
@@ -870,14 +900,16 @@
           $commentList.append(createCommentElement(comment));
         });
         $commentList.appendTo($comments);
-        var $inputRow = $('<div class="comment-input-row"></div>');
-        $('<input type="text" class="comment-input" maxlength="200" placeholder="写下你的评论…" />').appendTo(
-          $inputRow,
-        );
-        $('<button type="button" class="btn btn-primary btn-sm comment-send">回复</button>').appendTo(
-          $inputRow,
-        );
-        $inputRow.appendTo($comments);
+        if (currentUsername) {
+          var $inputRow = $('<div class="comment-input-row"></div>');
+          $(
+            '<input type="text" class="comment-input" maxlength="200" placeholder="写下你的评论…" />',
+          ).appendTo($inputRow);
+          $('<button type="button" class="btn btn-primary btn-sm comment-send">回复</button>').appendTo(
+            $inputRow,
+          );
+          $inputRow.appendTo($comments);
+        }
         $comments.appendTo($item);
 
         return $item;
@@ -1181,17 +1213,15 @@
 
       /* ---------- 启动 ---------- */
 
-      // 等用户信息就绪后再加载各面板，保证点赞/高亮按当前用户判断；
-      // 未登录时页面即将跳转 /login，不再触发数据加载。
+      // 登录态是可选的；游客仍加载所有公开只读面板。
       loadUser()
         .catch(function () {})
         .then(function (loggedIn) {
-          if (!loggedIn) {
-            return;
+          if (loggedIn) {
+            // 登录后引导浏览器通知权限（仅 permission 为 default 时弹解释窗）。
+            maybePromptNotificationPermission();
+            loadMyProfile();
           }
-          // 登录后引导浏览器通知权限（仅 permission 为 default 时弹解释窗）。
-          maybePromptNotificationPermission();
-          loadMyProfile();
           loadRooms();
           loadReplays(0);
           loadAnnouncement();
