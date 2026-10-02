@@ -39,7 +39,8 @@ function createController(playerId) {
       history.lastTo = -1;
       history.edge = '';
       history.edgeStreak = 0;
-      history.recent = [];
+      // Preserve recent corridor edges across a build/hold.  Resetting this
+      // list lets a funding branch immediately reverse the same maze lane.
       history.holdStreak = 0;
       return;
     }
@@ -102,9 +103,32 @@ function createController(playerId) {
       memory.rejected += 1;
       return null;
     }
-    if (decision.action.kind === 'attack' && memory.campaign && board.idx(decision.action.x, decision.action.y) === memory.campaign.at) {
-      memory.campaign.at = board.idx(decision.action.dx, decision.action.dy);
-      if (memory.branch !== 'muster') memory.campaign.phase = 'attack';
+    if (decision.action.kind === 'attack' && memory.campaign) {
+      const source = board.idx(decision.action.x, decision.action.y);
+      const target = board.idx(decision.action.dx, decision.action.dy);
+      if (source === memory.campaign.at) {
+        // `preview` is authoritative for the local frame.  Advancing the
+        // campaign cursor merely because an attack was emitted used to leave
+        // it pointing at an enemy cell after a failed corridor push.  The
+        // next plan then treated the stale enemy cell as a valid rally and
+        // could spend the rest of a maze game expanding on a side branch.
+        const hiddenAdvance = Number(board.fog?.[target]) !== 0 && board.passable(target);
+        if ((result.after?.own(target) && !result.after.isolated[target]) || hiddenAdvance) {
+          memory.campaign.at = target;
+          // A maze reroute is evidence that the cached branch was blocked or
+          // became too expensive.  Keep a successful ordinary march locked,
+          // but force a fresh route after this explicit escape so the next
+          // decision cannot continue from a stale branch.
+          if (memory.maze && /maze-reroute/.test(String(memory.branch || ''))) {
+            memory.campaign.route = null;
+          }
+          if (memory.branch !== 'muster') memory.campaign.phase = 'attack';
+        } else if (memory.branch !== 'muster') {
+          memory.campaign.phase = 'gather';
+          memory.delivery = null;
+          if (memory.maze) memory.campaign.route = null;
+        }
+      }
     }
     recordMazeAction(board, decision.action);
     memory.actions += 1;
