@@ -191,3 +191,36 @@ test('rejoin init followed by a full frame establishes a fresh diff baseline', (
   assert.deepEqual(bot.state.grid, [101, 7, 102]);
   bot.stop();
 });
+
+test('replaces an unacknowledged queued action before planning from a newer frame', async () => {
+  const socket = new FakeSocket();
+  const bot = attachStrategy(socket, {
+    room: 'r',
+    autoReady: false,
+    heartbeatIntervalMs: 0,
+    actionDelayMs: 0,
+  });
+  init(socket);
+  const emptyMove = { x: -1, y: -1, dx: -1, dy: -1, mode: 0, op: 'm', skip: 0 };
+  socket.receive('update', frame(1, { lst_move: emptyMove }));
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  const first = socket.outbound.findLast((item) => item.event === 'attack' || item.event === 'build');
+  assert.ok(first);
+
+  // No acknowledgement: the next update is a newer board but the old action
+  // is still pending on the server. It must be removed before the replacement.
+  socket.receive('update', frame(2, { lst_move: emptyMove }));
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.equal(socket.sent('clear_queue').length, 1);
+  assert.equal(bot.state.queueResets, 1);
+
+  const replacement = socket.outbound.findLast((item) => item.event === 'attack' || item.event === 'build');
+  assert.ok(replacement);
+  const acknowledgement = replacement.event === 'build'
+    ? { x: replacement.payload.x, y: replacement.payload.y, dx: -1, dy: -1, mode: 0, op: replacement.payload.op, skip: 0 }
+    : { x: replacement.payload.x, y: replacement.payload.y, dx: replacement.payload.dx, dy: replacement.payload.dy, mode: replacement.payload.mode, op: 'm', skip: 0 };
+  socket.receive('update', frame(3, { lst_move: acknowledgement }));
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.equal(socket.sent('clear_queue').length, 1);
+  bot.stop();
+});

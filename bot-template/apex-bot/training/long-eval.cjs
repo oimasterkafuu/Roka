@@ -164,12 +164,18 @@ function developmentSummary(rows) {
 function aggregate(rows) {
   const completed = rows.filter((row) => !row.error);
   const wins = completed.filter((row) => row.ownWon);
+  const draws = completed.filter((row) => !row.ended);
+  const endedLosses = completed.filter((row) => row.ended && !row.ownWon);
   const winTurns = wins.map((row) => row.turns).sort((a, b) => a - b);
   return {
     matches: rows.length,
     wins: wins.length,
-    losses: completed.filter((row) => row.ended && !row.ownWon).length,
-    draws: completed.filter((row) => !row.ended).length,
+    // A match that reaches the tick limit without a kill is operationally a
+    // loss: the slow-push opponent has survived the required deadline.
+    losses: endedLosses.length + draws.length,
+    endedLosses: endedLosses.length,
+    effectiveLosses: endedLosses.length + draws.length,
+    draws: draws.length,
     errors: rows.length - completed.length,
     hardTimeouts: rows.filter((row) => row.hardTimeout).length,
     winRate: rows.length ? wins.length / rows.length : 0,
