@@ -41,7 +41,9 @@ export interface LobbyPlayer {
   serverBot?: boolean;
   /** 托管 Bot 启动时的组队许可：false 的房间禁止开启组队（change_game_conf 校验）。 */
   serverBotAllowTeam?: boolean;
-  /** 任意 Bot 成员（第三方 bot 令牌或服务端托管）：bot 房禁用迷雾远征（issue #51）。 */
+  /** 托管 Bot 启动时的迷雾许可：false 的房间禁止开启迷雾（change_game_conf 校验）。 */
+  serverBotAllowFog?: boolean;
+  /** 任意 Bot 成员（第三方 bot 令牌或服务端托管）：未允许时禁用迷雾远征。 */
   bot?: boolean;
 }
 
@@ -52,10 +54,12 @@ export interface RoomPlayerView {
   ready: boolean;
   /** 服务端托管策略 Bot（管理后台启动）标记，仅在为 true 时下发。 */
   server_bot?: boolean;
-  /** Bot 成员标记（仅在为 true 时下发）：前端据此禁用迷雾开关。 */
+  /** Bot 成员标记（仅在为 true 时下发）。 */
   bot?: boolean;
   /** 服务端托管策略 Bot 的组队许可（仅在为 true 时下发）：前端据此判断房主是否可开关组队。 */
   server_bot_allow_team?: boolean;
+  /** 服务端托管策略 Bot 的迷雾许可（仅在为 true 时下发）：前端据此判断房主是否可开关迷雾。 */
+  server_bot_allow_fog?: boolean;
 }
 
 export interface RoomUpdatePayload {

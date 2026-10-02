@@ -392,6 +392,9 @@ function renderBots() {
     $('<td></td>')
       .text(bot.allowTeam ? '允许' : '不允许')
       .appendTo($tr);
+    $('<td></td>')
+      .text(bot.allowFog ? '允许' : '不允许')
+      .appendTo($tr);
     $('<td></td>').text(fullTime(bot.startedAt)).appendTo($tr);
     $('<td></td>')
       .append(
@@ -430,6 +433,7 @@ async function startBot() {
   var room = $('#bot-room').val().trim();
   var template = $('#bot-template').val();
   var allowTeam = $('#bot-allow-team').prop('checked');
+  var allowFog = $('#bot-allow-fog').prop('checked');
   if (!username || !room) {
     showBotError('请填写用户名与房间号。');
     return;
@@ -444,9 +448,10 @@ async function startBot() {
       room: room,
       template: template,
       allowTeam: allowTeam,
+      allowFog: allowFog,
     });
     showBotError('');
-    // 保留模板与组队选择，仅清空房间输入便于连续启动。
+    // 保留模板、组队与迷雾选择，仅清空房间输入便于连续启动。
     $('#bot-room').val('');
     loadBots();
   } catch (err) {
