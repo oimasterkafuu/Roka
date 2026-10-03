@@ -873,6 +873,31 @@ export class UserStore {
     };
   }
 
+  /**
+   * 用户名的规范大小写形式（大小写不敏感查找）；用户不存在返回 null。
+   * 供 @ 提及解析时判断提及对象是否存在。
+   */
+  resolveUsername(usernameInput: string): string | null {
+    return this.usersByKey.get(this.normalize(usernameInput))?.username ?? null;
+  }
+
+  /**
+   * 按前缀搜索用户名（大小写不敏感），按用户名升序返回，最多 limit 条。
+   * query 为空时返回前 limit 个用户，供 @ 提及候选列表使用。
+   */
+  searchUsernames(queryInput: string, limit: number): string[] {
+    const query = this.normalize(queryInput);
+    const capped = Math.max(1, Math.min(20, Math.floor(limit) || 8));
+    const matches: string[] = [];
+    for (const user of this.usersByKey.values()) {
+      if (!query || this.normalize(user.username).startsWith(query)) {
+        matches.push(user.username);
+      }
+    }
+    matches.sort((a, b) => a.localeCompare(b));
+    return matches.slice(0, capped);
+  }
+
   listTopRated(limit: number, now: number = Date.now()): TopRatedEntry[] {
     const capped = Math.max(1, Math.min(100, Math.floor(limit) || 10));
     const entries: TopRatedEntry[] = [];

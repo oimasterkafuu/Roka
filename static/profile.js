@@ -57,6 +57,17 @@ function userLink(username, colorClass, title) {
   return usernameLink(username, colorClass ? { colorClass: colorClass, title: title } : null);
 }
 
+// 服务端渲染出的 @提及链接只带 data-username，这里批量补 rating 颜色。
+function ensureUsernameColors($scope) {
+  var names = [];
+  $scope.find('[data-username]').each(function () {
+    names.push($(this).attr('data-username'));
+  });
+  if (names.length) {
+    usernameEnsureColors(names);
+  }
+}
+
 async function apiPost(url, payload) {
   var res = await fetch(url, {
     method: 'POST',
@@ -391,6 +402,7 @@ function createCommentElement(comment) {
     $text.text(comment.text).css('white-space', 'pre-wrap');
   }
   $item.append($text);
+  ensureUsernameColors($text);
   $('<span class="comment-time"></span>')
     .text(relativeTime(comment.time))
     .attr('title', fullTime(comment.time))
@@ -422,7 +434,8 @@ function createPostElement(post) {
 
   var $wrap = $('<div class="feed-body-wrap"></div>');
   // html 字段由服务端渲染并消毒，可直接注入。
-  $('<div class="feed-text"></div>').html(post.html).appendTo($wrap);
+  var $text = $('<div class="feed-text"></div>').html(post.html).appendTo($wrap);
+  ensureUsernameColors($text);
   $wrap.appendTo($item);
 
   var $actions = $('<div class="feed-actions"></div>');
@@ -455,9 +468,9 @@ function createPostElement(post) {
   $commentList.appendTo($comments);
   if (currentUsername) {
     var $inputRow = $('<div class="comment-input-row"></div>');
-    $('<input type="text" class="comment-input" maxlength="200" placeholder="写下你的评论…" />').appendTo(
-      $inputRow,
-    );
+    $(
+      '<input type="text" class="comment-input" maxlength="200" data-mention placeholder="写下你的评论…" />',
+    ).appendTo($inputRow);
     $('<button type="button" class="btn btn-primary btn-sm comment-send">回复</button>').appendTo($inputRow);
     $inputRow.appendTo($comments);
   }
@@ -591,7 +604,11 @@ $('#feed-list')
     sendComment($(this).closest('.feed-item'));
   })
   .on('keypress', '.comment-input', function (e) {
-    if (e.keyCode == 13) {
+    // 提及补全下拉打开时回车用于选中候选，不提交评论。
+    if (
+      e.keyCode == 13 &&
+      !(window.mentionAutocompleteShouldIgnoreEnter && window.mentionAutocompleteShouldIgnoreEnter(this))
+    ) {
       sendComment($(this).closest('.feed-item'));
     }
   })
