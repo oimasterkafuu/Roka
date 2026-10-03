@@ -1,6 +1,7 @@
 import katex from 'katex';
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
+import { MentionRenderResult, renderMentionsInHtml } from './mentions';
 
 /**
  * 服务端富文本渲染：Markdown（marked，GFM + breaks）+ LaTeX（KaTeX）。
@@ -147,3 +148,13 @@ export const renderRichText = (text: string): string => {
   const withMath = restoreMath(markdownHtml, rendered);
   return sanitizeHtml(withMath, sanitizeOptions);
 };
+
+/**
+ * 同 renderRichText，额外把 @提及渲染为用户名链接（动态/评论用）。
+ * resolve 返回用户名规范形式表示存在，返回 null 时降级为普通文本。
+ * 链接在消毒之后插入，避免为 data-username 等属性放宽白名单。
+ */
+export const renderRichTextWithMentions = (
+  text: string,
+  resolve: (token: string) => string | null,
+): MentionRenderResult => renderMentionsInHtml(renderRichText(text), resolve);

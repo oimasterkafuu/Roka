@@ -24,7 +24,7 @@ import { encodeReplayPatchBinary } from './replay-patch-binary';
 import { buildReplayStats } from './server/replay-stats';
 import { isReplayIdValid, ReplayStore } from './replay-store';
 import { ensureRuntimeEnv } from './runtime-env';
-import { renderRichText } from './text-render';
+import { renderRichText, renderRichTextWithMentions } from './text-render';
 import { FeedComment, FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { CaptchaService } from './server/captcha-service';
@@ -216,6 +216,7 @@ interface DecoratedFeedComment {
   text: string;
   time: number;
   html: string;
+  mentions: string[];
   authorInfo: { colorClass: string; title: string };
   canManage: boolean;
 }
@@ -228,16 +229,22 @@ interface DecoratedFeedPost {
   likes: string[];
   comments: DecoratedFeedComment[];
   html: string;
+  mentions: string[];
   authorInfo: { colorClass: string; title: string };
   canManage: boolean;
 }
 
+// @提及解析：用户名存在时返回规范形式，不存在/改名后由渲染层降级为普通文本。
+const resolveFeedMention = (token: string): string | null => userStore.resolveUsername(token);
+
 const decorateFeedComment = (comment: FeedComment, viewer: string | null): DecoratedFeedComment => {
   const { rating, ratingGames } = userStore.getDisplayRating(comment.author);
   const tier = ratingTier(rating, ratingGames);
+  const rendered = renderRichTextWithMentions(comment.text, resolveFeedMention);
   return {
     ...comment,
-    html: renderRichText(comment.text),
+    html: rendered.html,
+    mentions: rendered.mentions,
     authorInfo: { colorClass: tier.className, title: tier.title },
     canManage: viewer !== null && (viewer === comment.author || userStore.isAdminUser(viewer)),
   };
@@ -246,10 +253,12 @@ const decorateFeedComment = (comment: FeedComment, viewer: string | null): Decor
 const decorateFeedPost = (post: FeedPost, viewer: string | null): DecoratedFeedPost => {
   const { rating, ratingGames } = userStore.getDisplayRating(post.author);
   const tier = ratingTier(rating, ratingGames);
+  const rendered = renderRichTextWithMentions(post.text, resolveFeedMention);
   return {
     ...post,
     comments: post.comments.map((comment) => decorateFeedComment(comment, viewer)),
-    html: renderRichText(post.text),
+    html: rendered.html,
+    mentions: rendered.mentions,
     authorInfo: { colorClass: tier.className, title: tier.title },
     canManage: viewer !== null && (viewer === post.author || userStore.isAdminUser(viewer)),
   };
@@ -1094,6 +1103,20 @@ const boot = async (): Promise<void> => {
     const items = userStore.listTopRated(10).map((entry) => {
       const tier = ratingTier(entry.rating, entry.ratingGames);
       return { ...entry, colorClass: tier.className, title: tier.title };
+    });
+    return reply.send({ items });
+  });
+
+  // @提及候选：按前缀搜索用户名（大小写不敏感，最多 10 条），附带 rating 颜色。
+  // q 为空时返回前若干用户；供动态/评论输入框的提及补全使用。
+  app.get('/api/users/search', async (request, reply) => {
+    const query = request.query as { q?: unknown; limit?: unknown };
+    const limit = Number.parseInt(String(query.limit ?? '8'), 10);
+    const names = userStore.searchUsernames(String(query.q ?? ''), limit);
+    const items = names.map((username) => {
+      const { rating, ratingGames } = userStore.getDisplayRating(username);
+      const tier = ratingTier(rating, ratingGames);
+      return { username, colorClass: tier.className, title: tier.title };
     });
     return reply.send({ items });
   });

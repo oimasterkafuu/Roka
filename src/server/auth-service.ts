@@ -88,6 +88,7 @@ class AuthService {
       '/api/leaderboard',
       '/api/online',
       '/api/user-colors',
+      '/api/users/search',
       '/api/feeds',
       '/api/map-examples',
     ]);
