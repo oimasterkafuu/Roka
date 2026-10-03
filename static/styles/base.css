@@ -277,3 +277,55 @@ pre code,
   background-color: transparent;
   padding: 0;
 }
+
+/* @提及补全下拉（见 static/mention-autocomplete.js） */
+.mention-menu {
+  position: absolute;
+  z-index: 2000;
+  max-height: 260px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 4px;
+  background-color: #ffffff;
+  border: 1px solid #d5dce6;
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 8px 24px rgba(24, 39, 75, 0.14);
+}
+.mention-menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 13px;
+  background-color: transparent;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: none;
+  cursor: pointer;
+}
+.mention-menu-item.active,
+.mention-menu-item:hover {
+  background-color: #f3f5f9;
+  box-shadow: none;
+}
+.mention-menu-name {
+  font-weight: 700;
+}
+.mention-menu-title {
+  overflow: hidden;
+  color: #9aa4b2;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 正文里的 @提及链接：沿用 rating 颜色，仅补 hover 下划线 */
+.mention {
+  text-decoration: none;
+}
+.mention:hover {
+  text-decoration: underline;
+}

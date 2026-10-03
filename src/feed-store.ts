@@ -9,6 +9,7 @@ import {
   isMissingFileError,
   readFileWithBackup,
 } from './binary-store';
+import { parseMentionTokens } from './mentions';
 import { FeedComment, FeedPost } from './types';
 
 interface FeedFile {
@@ -118,6 +119,7 @@ export class FeedStore {
         throw new FeedCooldownException(Math.ceil((POST_COOLDOWN_MS - elapsed) / 1000));
       }
     }
+    const mentions = parseMentionTokens(text);
     const post: FeedPost = {
       id: randomBytes(8).toString('hex'),
       author,
@@ -125,6 +127,7 @@ export class FeedStore {
       time: Date.now(),
       likes: [],
       comments: [],
+      mentions: mentions.length ? mentions : undefined,
     };
     this.posts.unshift(post);
     this.lastPostTimeByAuthor.set(author, Date.now());
@@ -142,6 +145,8 @@ export class FeedStore {
       throw new Error(`动态内容需为 1-${POST_TEXT_MAX} 字。`);
     }
     post.text = text;
+    const mentions = parseMentionTokens(text);
+    post.mentions = mentions.length ? mentions : undefined;
     await this.persist();
     return post;
   }
@@ -184,11 +189,13 @@ export class FeedStore {
     if (post.comments.length >= COMMENTS_PER_POST_MAX) {
       throw new Error('评论数量已达上限。');
     }
+    const mentions = parseMentionTokens(text);
     const comment: FeedComment = {
       id: randomBytes(8).toString('hex'),
       author,
       text,
       time: Date.now(),
+      mentions: mentions.length ? mentions : undefined,
     };
     post.comments.push(comment);
     await this.persist();
