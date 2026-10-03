@@ -20,6 +20,7 @@
     <script src="/notify.js"></script>
     <script src="/sw-register.js"></script>
     <script src="/username.js"></script>
+    <script src="/mention-autocomplete.js"></script>
     <link rel="stylesheet" href="/main.css" />
     <link rel="stylesheet" href="/styles/rating.css" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css" />
@@ -158,7 +159,7 @@
               <div id="feed-guest" class="panel-empty" style="display: none">
                 游客可以浏览动态；<a href="/login">登录后即可发布、点赞和评论。</a>
               </div>
-              <textarea id="feed-input" maxlength="300" placeholder="分享点什么…"></textarea>
+              <textarea id="feed-input" maxlength="300" data-mention placeholder="分享点什么…"></textarea>
               <div class="composer-hint">支持 Markdown 与 LaTeX 语法（如 $x^2$）。</div>
               <div class="composer-footer">
                 <span id="feed-count" class="feed-count">0/300</span>
@@ -287,6 +288,17 @@
       // 带 rating 颜色的用户名链接：统一走 /username.js 组件（全局缓存 + 批量补色）。
       function userLink(username, colorClass, title) {
         return usernameLink(username, colorClass ? { colorClass: colorClass, title: title } : null);
+      }
+
+      // 服务端渲染出的 @提及链接只带 data-username，这里批量补 rating 颜色。
+      function ensureUsernameColors($scope) {
+        var names = [];
+        $scope.find('[data-username]').each(function () {
+          names.push($(this).attr('data-username'));
+        });
+        if (names.length) {
+          usernameEnsureColors(names);
+        }
       }
 
       async function apiPost(url, payload) {
@@ -838,6 +850,7 @@
           $text.text(comment.text).css('white-space', 'pre-wrap');
         }
         $item.append($text);
+        ensureUsernameColors($text);
         $('<span class="comment-time"></span>')
           .text(relativeTime(comment.time))
           .attr('title', fullTime(comment.time))
@@ -869,7 +882,8 @@
 
         var $wrap = $('<div class="feed-body-wrap"></div>');
         // html 字段由服务端渲染并消毒，可直接注入。
-        $('<div class="feed-text"></div>').html(post.html).appendTo($wrap);
+        var $text = $('<div class="feed-text"></div>').html(post.html).appendTo($wrap);
+        ensureUsernameColors($text);
         $wrap.appendTo($item);
 
         var $actions = $('<div class="feed-actions"></div>');
@@ -903,7 +917,7 @@
         if (currentUsername) {
           var $inputRow = $('<div class="comment-input-row"></div>');
           $(
-            '<input type="text" class="comment-input" maxlength="200" placeholder="写下你的评论…" />',
+            '<input type="text" class="comment-input" maxlength="200" data-mention placeholder="写下你的评论…" />',
           ).appendTo($inputRow);
           $('<button type="button" class="btn btn-primary btn-sm comment-send">回复</button>').appendTo(
             $inputRow,
@@ -1109,7 +1123,13 @@
           sendComment($(this).closest('.feed-item'));
         })
         .on('keypress', '.comment-input', function (e) {
-          if (e.keyCode == 13) {
+          // 提及补全下拉打开时回车用于选中候选，不提交评论。
+          if (
+            e.keyCode == 13 &&
+            !(
+              window.mentionAutocompleteShouldIgnoreEnter && window.mentionAutocompleteShouldIgnoreEnter(this)
+            )
+          ) {
             sendComment($(this).closest('.feed-item'));
           }
         })

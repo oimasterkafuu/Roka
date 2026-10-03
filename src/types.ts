@@ -258,6 +258,8 @@ export interface FeedComment {
   author: string;
   text: string;
   time: number;
+  /** 正文中解析出的 @提及（原文大小写，去重）；旧数据无此字段。 */
+  mentions?: string[];
 }
 
 export interface FeedPost {
@@ -267,4 +269,6 @@ export interface FeedPost {
   time: number;
   likes: string[];
   comments: FeedComment[];
+  /** 正文中解析出的 @提及（原文大小写，去重）；旧数据无此字段。 */
+  mentions?: string[];
 }
