@@ -24,6 +24,11 @@ const ISOLATED_GRACE_TICKS = 10;
  */
 const FOG_VISION_RADIUS = 1;
 
+/**
+ * 队友间主城转让请求（issue #81）的有效期：超时未答复自动作废。
+ */
+const CROWN_TRANSFER_REQUEST_TTL_MS = 60_000;
+
 export {
   LEFT_GAME,
   AFK_MIN_TURNS,
@@ -32,4 +37,5 @@ export {
   ISOLATED_GRACE_TICKS,
   DISCONNECT_GRACE_MS,
   FOG_VISION_RADIUS,
+  CROWN_TRANSFER_REQUEST_TTL_MS,
 };

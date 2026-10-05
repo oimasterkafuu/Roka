@@ -1947,6 +1947,29 @@ const boot = async (): Promise<void> => {
       lobbyService.gameInstances.get(gid)?.surrender(socket.id);
     });
 
+    // 队友间主城转让（issue #81）：请求方发起 / 拥有者答复，全部校验在引擎内完成。
+    socket.on('transfer_crown', (data: { x: unknown; y: unknown }) => {
+      const gid = lobbyService.gameUid.get(socket.id);
+      if (!gid) {
+        return;
+      }
+      lobbyService.gameInstances
+        .get(gid)
+        ?.requestCrownTransfer(
+          socket.id,
+          Number.parseInt(String(data?.x), 10),
+          Number.parseInt(String(data?.y), 10),
+        );
+    });
+
+    socket.on('transfer_crown_reply', (data: { accept: unknown }) => {
+      const gid = lobbyService.gameUid.get(socket.id);
+      if (!gid) {
+        return;
+      }
+      lobbyService.gameInstances.get(gid)?.replyCrownTransfer(socket.id, data?.accept === true);
+    });
+
     const doReturnRoom = (): void => {
       const changed = lobbyService.returnToRoom(io, socket.id);
       if (changed || lobbyService.lobbyOfSid.has(socket.id)) {

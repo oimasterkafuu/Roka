@@ -37,6 +37,18 @@ var gameLeaderboard = null;
 // 当前帧排序后的排行榜（render-update.js 每帧赋值，隐式全局改为显式声明）。
 var lb = null;
 
+// 主城转让请求（issue #81）：点击队友主城后待确认的目标格 {x, y}；null 表示无待确认请求。
+var crown_transfer_target = null;
+
+// 按座位号（格子归属码 %50）查当前对局排行榜条目；不在对局中或不存在返回 null。
+function findGameLeaderboardEntry(id) {
+  if (!gameLeaderboard) return null;
+  for (var i = 0; i < gameLeaderboard.length; i++) {
+    if (gameLeaderboard[i].id == id) return gameLeaderboard[i];
+  }
+  return null;
+}
+
 function normalizeMapTokenInput(token) {
   return String(token || '').slice(0, map_token_max_length);
 }

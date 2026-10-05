@@ -26,6 +26,7 @@ const buildReplayPlayerOps = (
   playerCount: number,
   replayTurnMoves: Array<Array<QueuedOp | null>>,
   replayTurnSurrenders: Array<Set<number>>,
+  replayTurnTransfers: Array<Map<number, { x: number; y: number }>>,
 ): ReplayPlayerOp[][] => {
   const playerOps: ReplayPlayerOp[][] = Array.from({ length: playerCount }, () => []);
 
@@ -37,8 +38,9 @@ const buildReplayPlayerOps = (
     for (let t = 0; t < replayTurnMoves.length; t += 1) {
       const turn = t + 1;
       const surrendered = replayTurnSurrenders[p].has(turn);
+      const transfer = replayTurnTransfers[p].get(turn);
       const turnOp = replayTurnMoves[t][p];
-      if (!turnOp && !surrendered) {
+      if (!turnOp && !surrendered && !transfer) {
         wait += 1;
         continue;
       }
@@ -52,6 +54,11 @@ const buildReplayPlayerOps = (
         ops.push({ op: 'r' });
         selected = null;
         continue;
+      }
+
+      // 主城转让（issue #81）：自带目标坐标，不影响 selected 链。
+      if (transfer) {
+        ops.push({ op: 't', x: transfer.x, y: transfer.y });
       }
 
       if (!turnOp) {

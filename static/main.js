@@ -363,6 +363,15 @@ function click(x, y) {
   if (x < 0 || y < 0 || x >= n || y >= m) return;
   var ownCell = player > 0 && grid_type[x][y] < 200 && grid_type[x][y] % 50 == player;
   if (!is_replay && !ownCell) {
+    // 点击队友的主城（issue #81）：弹出转让请求确认，保留当前选中；
+    // 是否同队、对方剩余主城数等条件由服务端二次校验。
+    if (in_game && !game_ended && !lost && player > 0) {
+      var code = grid_type[x][y];
+      if (code >= 100 && code < 150 && code % 50 != player && isAliveTeammate(code % 50)) {
+        showCrownTransferAlert(x, y, code % 50);
+        return;
+      }
+    }
     ((selx = -1), (sely = -1));
     render();
     return;
@@ -370,6 +379,13 @@ function click(x, y) {
   // 保留 selt：Z 半兵待发状态只被下一次有效 WASD 消耗
   ((selx = x), (sely = y));
   render();
+}
+
+// 该座位号是否为本队存活队友（以当前对局排行榜的队伍信息为准）。
+function isAliveTeammate(id) {
+  var self = findGameLeaderboardEntry(player);
+  var other = findGameLeaderboardEntry(id);
+  return !!(self && other && other.class_ != 'dead' && self.team == other.team);
 }
 
 function moveSelected(d, shift) {
@@ -648,6 +664,8 @@ socket.on('starting', function () {
   $('#status-alert').css('display', 'none');
   $($('#status-alert').children()[0].children[6]).css('display', 'none');
   hideSurrenderAlert();
+  hideCrownTransferAlert();
+  hideCrownTransferRequestAlert();
   $('#menu').css('display', 'none');
   $('#game-starting').css('display', '');
   starting_audio.play();
@@ -688,6 +706,12 @@ socket.on('set_id', function (data) {
   client_id = data;
 });
 
+// 队友向你发起主城转让请求（issue #81）：弹窗由你确认或拒绝，服务端跟踪待处理请求。
+socket.on('crown_transfer_request', function (data) {
+  if (!in_game || is_replay) return;
+  showCrownTransferRequestAlert(data && data.from ? String(data.from) : '队友');
+});
+
 socket.on('init_map', function (data) {
   init_map(data.n, data.m, data.general);
   in_game = true;
@@ -703,6 +727,8 @@ socket.on('init_map', function (data) {
   refreshDeployBanner();
   $('#status-alert').css('display', 'none');
   hideSurrenderAlert();
+  hideCrownTransferAlert();
+  hideCrownTransferRequestAlert();
   console.log(data);
   for (var i = 0; i < data.player_ids.length; i++) {
     if (data.player_ids[i] == client_id) {
@@ -1059,6 +1085,8 @@ socket.on('left', function () {
   $('#status-alert').css('display', 'none');
   $($('#status-alert').children()[0].children[6]).css('display', 'none');
   hideSurrenderAlert();
+  hideCrownTransferAlert();
+  hideCrownTransferRequestAlert();
   ready_state = 0;
   in_game = false;
   game_ended = false;
@@ -1157,4 +1185,20 @@ $(document).ready(function () {
     socket.emit('surrender');
   });
   $('#surrender-cancel').on('click', hideSurrenderAlert);
+  $('#crown-transfer-confirm').on('click', function () {
+    var target = crown_transfer_target;
+    hideCrownTransferAlert();
+    if (target) {
+      socket.emit('transfer_crown', { x: target.x, y: target.y });
+    }
+  });
+  $('#crown-transfer-cancel').on('click', hideCrownTransferAlert);
+  $('#crown-transfer-accept').on('click', function () {
+    hideCrownTransferRequestAlert();
+    socket.emit('transfer_crown_reply', { accept: true });
+  });
+  $('#crown-transfer-decline').on('click', function () {
+    hideCrownTransferRequestAlert();
+    socket.emit('transfer_crown_reply', { accept: false });
+  });
 });

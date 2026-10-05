@@ -189,3 +189,26 @@ function showSurrenderAlert() {
 function hideSurrenderAlert() {
   $('#surrender-alert').css('display', 'none');
 }
+
+// 主城转让（issue #81）：点击队友主城后弹出的请求确认窗，
+// 与收到队友请求时的确认窗；均复用 .alert.center 弹窗样式。
+function showCrownTransferAlert(x, y, ownerId) {
+  var entry = findGameLeaderboardEntry(ownerId);
+  crown_transfer_target = { x: x, y: y };
+  $('#crown-transfer-target').text(entry ? entry.uid : '队友');
+  $('#crown-transfer-alert').css('display', '');
+}
+
+function hideCrownTransferAlert() {
+  crown_transfer_target = null;
+  $('#crown-transfer-alert').css('display', 'none');
+}
+
+function showCrownTransferRequestAlert(fromName) {
+  $('#crown-transfer-request-from').text(fromName);
+  $('#crown-transfer-request-alert').css('display', '');
+}
+
+function hideCrownTransferRequestAlert() {
+  $('#crown-transfer-request-alert').css('display', 'none');
+}
