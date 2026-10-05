@@ -221,13 +221,21 @@ export interface ReplayPlayerOpSurrender {
   op: 'r';
 }
 
+/** 队友间主城转让（issue #81）：坐标为被转让的主城格。 */
+export interface ReplayPlayerOpCrownTransfer {
+  op: 't';
+  x: number;
+  y: number;
+}
+
 export type ReplayPlayerOp =
   | ReplayPlayerOpSelect
   | ReplayPlayerOpMove
   | ReplayPlayerOpBuild
   | ReplayPlayerOpUpgrade
   | ReplayPlayerOpWait
-  | ReplayPlayerOpSurrender;
+  | ReplayPlayerOpSurrender
+  | ReplayPlayerOpCrownTransfer;
 
 export interface ReplayActionData {
   version: 'ops-v1';

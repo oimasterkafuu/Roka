@@ -281,6 +281,52 @@
       </center>
     </div>
 
+    <div class="alert center" id="crown-transfer-alert" style="display: none">
+      <center>
+        <h1
+          style="
+            margin: 15px 0px 5px;
+            text-align: center;
+            font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+            white-space: nowrap;
+          "
+        >
+          请求转让主城
+        </h1>
+        <p style="text-align: center; margin-bottom: 0">
+          向队友
+          <span id="crown-transfer-target" style="font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span>
+          请求把这座主城转让给你？对方同意且转让后仍保有其他主城时生效。
+        </p>
+        <button id="crown-transfer-confirm" class="small inverted" style="margin-top: 16px">发送请求</button
+        ><br />
+        <button id="crown-transfer-cancel">取消</button>
+      </center>
+    </div>
+
+    <div class="alert center" id="crown-transfer-request-alert" style="display: none">
+      <center>
+        <h1
+          style="
+            margin: 15px 0px 5px;
+            text-align: center;
+            font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+            white-space: nowrap;
+          "
+        >
+          主城转让请求
+        </h1>
+        <p style="text-align: center; margin-bottom: 0">
+          队友
+          <span id="crown-transfer-request-from" style="font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span>
+          请求你转让一座主城。同意后该主城及其产兵将归对方所有。
+        </p>
+        <button id="crown-transfer-accept" class="small inverted" style="margin-top: 16px">同意转让</button
+        ><br />
+        <button id="crown-transfer-decline">拒绝</button>
+      </center>
+    </div>
+
     <div id="replay-top-left" style="display: none">
       <div id="replay-turn-jump" class="background">
         跳转回合：

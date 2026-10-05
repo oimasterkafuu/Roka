@@ -19,6 +19,7 @@ import { ReplayStore } from './replay-store';
 import {
   AFK_MIN_MS,
   AFK_MIN_TURNS,
+  CROWN_TRANSFER_REQUEST_TTL_MS,
   ISOLATED_DECAY_RATIO,
   ISOLATED_GRACE_TICKS,
   LEFT_GAME,
@@ -86,6 +87,8 @@ interface GameCallbacks {
   ) => void;
   endGame: (gid: string, result: GameResultEntry[]) => void;
   disciplineEvent?: (event: GameDisciplineEvent) => void;
+  /** 主城转让请求（issue #81）：转发给主城当前拥有者等待确认。 */
+  crownTransferRequest?: (sid: string, data: { x: number; y: number; from: string }) => void;
   md5: (input: string) => string;
   replayStore: ReplayStore;
 }
@@ -118,6 +121,8 @@ export class GameEngine {
   private readonly endGame: GameCallbacks['endGame'];
 
   private readonly disciplineEvent: NonNullable<GameCallbacks['disciplineEvent']>;
+
+  private readonly crownTransferRequest: NonNullable<GameCallbacks['crownTransferRequest']>;
 
   private readonly md5: GameCallbacks['md5'];
 
@@ -196,6 +201,18 @@ export class GameEngine {
 
   private readonly replayTurnSurrenders: Array<Set<number>>;
 
+  /** 每名玩家（接收方）每回合生效的主城转让：turn → 被转让的主城格坐标（issue #81）。 */
+  private readonly replayTurnTransfers: Array<Map<number, { x: number; y: number }>>;
+
+  /**
+   * 待确认的主城转让请求（issue #81）：键为主城当前拥有者下标，
+   * 每名拥有者同时最多一个待处理请求（防刷），超时自动作废。
+   */
+  private readonly crownTransferPending: Map<
+    number,
+    { from: number; x: number; y: number; timer: NodeJS.Timeout }
+  >;
+
   private readonly externalSpectatorSids: Set<string>;
 
   /**
@@ -265,6 +282,7 @@ export class GameEngine {
     this.chatMessage = callbacks.chatMessage;
     this.endGame = callbacks.endGame;
     this.disciplineEvent = callbacks.disciplineEvent ?? (() => undefined);
+    this.crownTransferRequest = callbacks.crownTransferRequest ?? (() => undefined);
     this.md5 = callbacks.md5;
     this.replayStore = callbacks.replayStore;
 
@@ -326,6 +344,11 @@ export class GameEngine {
     this.deadOrder = Array.from({ length: pcnt }, () => 0);
     this.replayTurnMoves = [];
     this.replayTurnSurrenders = Array.from({ length: pcnt }, () => new Set<number>());
+    this.replayTurnTransfers = Array.from(
+      { length: pcnt },
+      () => new Map<number, { x: number; y: number }>(),
+    );
+    this.crownTransferPending = new Map();
     this.externalSpectatorSids = new Set<string>();
     this.spectatorViewTeams = new Map<string, number>();
     this.afkLastMoveTurn = Array.from({ length: pcnt }, () => 0);
@@ -438,7 +461,8 @@ export class GameEngine {
     await engine.initializeMap();
     engine.selectGenerals();
 
-    const { scheduledMoves, scheduledBuilds, scheduledSurrenders } = buildScheduledReplayActions(replay);
+    const { scheduledMoves, scheduledBuilds, scheduledSurrenders, scheduledTransfers } =
+      buildScheduledReplayActions(replay);
 
     const initial = engine.buildReplayFrame(false);
     let prevFrame = initial;
@@ -450,6 +474,13 @@ export class GameEngine {
           continue;
         }
         engine.surrender(engine.playerSids[p]);
+      }
+      for (let p = 0; p < scheduledTransfers.length; p += 1) {
+        const transfer = scheduledTransfers[p].get(nextTurn);
+        if (!transfer) {
+          continue;
+        }
+        engine.applyCrownTransfer(p, transfer.x, transfer.y);
       }
       for (let p = 0; p < scheduledBuilds.length; p += 1) {
         const build = scheduledBuilds[p].get(nextTurn);
@@ -705,7 +736,12 @@ export class GameEngine {
   }
 
   private buildReplayPlayerOps() {
-    return buildReplayPlayerOps(this.playerSids.length, this.replayTurnMoves, this.replayTurnSurrenders);
+    return buildReplayPlayerOps(
+      this.playerSids.length,
+      this.replayTurnMoves,
+      this.replayTurnSurrenders,
+      this.replayTurnTransfers,
+    );
   }
 
   private buildFinalRank(): string[] {
@@ -1617,6 +1653,107 @@ export class GameEngine {
     this.scheduleImmediateTick();
   }
 
+  /**
+   * 队友间主城转让（issue #81）：请求方点击队友的主城发起请求，
+   * 经拥有者确认后该格主城改属请求方（gridType 保持 -2，只改 owner）。
+   * 核心限制：拥有者转让后必须仍保有至少一座主城（不能转走自己的最后一座）。
+   */
+
+  /** 转让条件校验（实时确认与回放重建共用）：目标格仍是该队友的主城，且其转让后仍剩 ≥1 座。 */
+  private applyCrownTransfer(requester: number, x: number, y: number): boolean {
+    if (this.finished || !this.chkxy(x, y)) {
+      return false;
+    }
+    const giverId = this.owner[x][y];
+    if (giverId <= 0) {
+      return false;
+    }
+    const giver = giverId - 1;
+    if (
+      this.gridType[x][y] !== -2 ||
+      giver === requester ||
+      this.team[giver] !== this.team[requester] ||
+      this.pstat[giver] === LEFT_GAME ||
+      this.pstat[requester] === LEFT_GAME ||
+      this.countCrowns(giverId) < 2
+    ) {
+      return false;
+    }
+    this.owner[x][y] = requester + 1;
+    return true;
+  }
+
+  private notifyPlayerSystemMessage(playerIndex: number, text: string): void {
+    this.chatMessage(this.playerSids[playerIndex], 'sid', '', 0, text);
+  }
+
+  /** 请求方发起主城转让请求：服务端完成全部校验后才转发给拥有者确认。 */
+  requestCrownTransfer(sid: string, x: number, y: number): void {
+    const requester = this.playerSidToIndex.get(sid);
+    if (typeof requester === 'undefined') {
+      return;
+    }
+    if (this.finished || this.team[requester] === 0 || this.pstat[requester] === LEFT_GAME) {
+      return;
+    }
+    if (!this.chkxy(x, y)) {
+      return;
+    }
+    const giverId = this.owner[x][y];
+    if (this.gridType[x][y] !== -2 || giverId <= 0 || giverId === requester + 1) {
+      return;
+    }
+    const giver = giverId - 1;
+    if (this.team[giver] !== this.team[requester] || this.pstat[giver] === LEFT_GAME) {
+      return;
+    }
+    if (this.countCrowns(giverId) < 2) {
+      this.notifyPlayerSystemMessage(requester, '这是对方最后一座主城，不能转让。');
+      return;
+    }
+    if (this.crownTransferPending.has(giver)) {
+      this.notifyPlayerSystemMessage(requester, '对方还有未处理的主城转让请求，请稍后再试。');
+      return;
+    }
+    const timer = setTimeout(() => {
+      const pending = this.crownTransferPending.get(giver);
+      if (!pending || pending.timer !== timer) {
+        return;
+      }
+      this.crownTransferPending.delete(giver);
+      this.notifyPlayerSystemMessage(pending.from, `发给 ${this.names[giver]} 的主城转让请求已超时。`);
+    }, CROWN_TRANSFER_REQUEST_TTL_MS);
+    this.crownTransferPending.set(giver, { from: requester, x, y, timer });
+    this.crownTransferRequest(this.playerSids[giver], { x, y, from: this.names[requester] });
+    this.notifyPlayerSystemMessage(requester, `已向 ${this.names[giver]} 发送主城转让请求，等待对方确认。`);
+  }
+
+  /** 拥有者答复转让请求：接受时重新校验全部条件（目标可能已易主/对局已结束）。 */
+  replyCrownTransfer(sid: string, accept: boolean): void {
+    const giver = this.playerSidToIndex.get(sid);
+    if (typeof giver === 'undefined') {
+      return;
+    }
+    const pending = this.crownTransferPending.get(giver);
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timer);
+    this.crownTransferPending.delete(giver);
+    const requester = pending.from;
+    if (!accept) {
+      this.notifyPlayerSystemMessage(requester, `${this.names[giver]} 拒绝了你的主城转让请求。`);
+      return;
+    }
+    if (!this.applyCrownTransfer(requester, pending.x, pending.y)) {
+      this.notifyPlayerSystemMessage(requester, '主城转让失败：目标主城已易主或不再满足转让条件。');
+      return;
+    }
+    this.replayTurnTransfers[requester].set(this.turn + 1, { x: pending.x, y: pending.y });
+    this.sendSystemMessage(`${this.names[giver]} 将一座主城转让给了队友 ${this.names[requester]}。`);
+    this.scheduleImmediateTick();
+  }
+
   private applyAfkSurrender(nowMs: number): void {
     if (!this.enableAfkSurrender) {
       return;
@@ -1731,6 +1868,11 @@ export class GameEngine {
       clearTimeout(this.tickTimer);
       this.tickTimer = null;
     }
+    // 对局结束：作废所有待确认的主城转让请求。
+    for (const pending of this.crownTransferPending.values()) {
+      clearTimeout(pending.timer);
+    }
+    this.crownTransferPending.clear();
 
     if (endMessage) {
       this.sendSystemMessage(endMessage);
