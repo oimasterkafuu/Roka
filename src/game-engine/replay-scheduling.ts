@@ -13,12 +13,14 @@ interface ScheduledReplayActions {
   scheduledMoves: Array<Map<number, Move>>;
   scheduledBuilds: Array<Map<number, ScheduledBuild>>;
   scheduledSurrenders: Array<Set<number>>;
+  scheduledTransfers: Array<Map<number, { x: number; y: number }>>;
 }
 
 const buildScheduledReplayActions = (replay: ReplayActionData): ScheduledReplayActions => {
   const scheduledMoves = replay.player_ops.map(() => new Map<number, Move>());
   const scheduledBuilds = replay.player_ops.map(() => new Map<number, ScheduledBuild>());
   const scheduledSurrenders = replay.player_ops.map(() => new Set<number>());
+  const scheduledTransfers = replay.player_ops.map(() => new Map<number, { x: number; y: number }>());
 
   for (let p = 0; p < replay.player_ops.length; p += 1) {
     const ops = replay.player_ops[p];
@@ -37,6 +39,12 @@ const buildScheduledReplayActions = (replay: ReplayActionData): ScheduledReplayA
       if (op.op === 'r') {
         scheduledSurrenders[p].add(cursorTurn);
         selected = null;
+        cursorTurn += 1;
+        continue;
+      }
+      // 主城转让（issue #81）：自带目标坐标，不经过 selected。
+      if (op.op === 't') {
+        scheduledTransfers[p].set(cursorTurn, { x: op.x, y: op.y });
         cursorTurn += 1;
         continue;
       }
@@ -63,6 +71,7 @@ const buildScheduledReplayActions = (replay: ReplayActionData): ScheduledReplayA
     scheduledMoves,
     scheduledBuilds,
     scheduledSurrenders,
+    scheduledTransfers,
   };
 };
 

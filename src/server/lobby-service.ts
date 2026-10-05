@@ -632,6 +632,9 @@ class LobbyService {
       disciplineEvent: (event) => {
         void this.handleDisciplineEvent(event).catch(() => undefined);
       },
+      crownTransferRequest: (sid, data) => {
+        io.to(`sid_${sid}`).emit('crown_transfer_request', data);
+      },
       chatMessage: (id, scope, sender, color, text, team = false) => {
         this.sendSystemMessage(io, id, scope, sender, color, text, team);
         if (scope === 'room' && !team && sender.length > 0) {
