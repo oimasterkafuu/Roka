@@ -194,10 +194,10 @@ _一句话：动态帖子/点赞/评论存储（含 @提及落库），带发帖
 _一句话：公告单文件 JSON 存储，原子串行写。_
 
 **src/replay-store.ts** — 回放存取、索引与观看二进制 gzip 缓存（`data/replays/`）。
-原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`（未压缩 v8 serialize，历史格式）启动时载入内存缓存，读路径不再重复读盘反序列化，写路径更新缓存后经 `CoalescingFileWriter` 合并落盘，主文件/备份均损坏时按空索引兜底并告警。索引项 `ReplayListItem` 含 `rank`（终局个人名次）与 `teams`（终局队伍分组 `{members, color}[]`，组序=队伍名次序，旧索引项无此字段前端回退平铺）。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且解压魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB4 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
+原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`（未压缩 v8 serialize，历史格式）启动时载入内存缓存，读路径不再重复读盘反序列化，写路径更新缓存后经 `CoalescingFileWriter` 合并落盘，主文件/备份均损坏时按空索引兜底并告警。索引项 `ReplayListItem` 含 `rank`（终局个人名次）与 `teams`（终局队伍分组 `{members, color}[]`，组序=队伍名次序，旧索引项无此字段前端回退平铺）。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且流式解压前 4 字节（`gunzipPrefix`，不整体解压大缓存）魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB4 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
 _一句话：回放存储与 RPB gzip 缓存，id 为内容哈希。_
 
-**src/replay-patch-binary.ts** — `ReplayData` → RPB4 观看二进制编码器（手写 LE；initial 全量帧 + 逐 patch forward/backward 差分 + 玩家 meta；RPB4 起 meta 末尾追加 fog 标志，供前端回放视角选择器）。仅编码无解码——解码在前端 `static/main/replay-binary.js`；**改格式需同步前端并升魔数**，导出 `REPLAY_BINARY_MAGIC` 供缓存陈旧性校验。
+**src/replay-patch-binary.ts** — `ReplayData` → RPB4 观看二进制编码器（手写 LE；initial 全量帧 + 逐 patch forward/backward 差分 + 玩家 meta；RPB4 起 meta 末尾追加 fog 标志，供前端回放视角选择器）。`ByteWriter` 分块流式写入（1 MiB 块顺序填满后拼接，issue #83：旧的整体字节数组在超长回放编码时 OOM）。仅编码无解码——解码在前端 `static/main/replay-binary.js`；**改格式需同步前端并升魔数**，导出 `REPLAY_BINARY_MAGIC` 供缓存陈旧性校验。
 _一句话：ReplayData → RPB4 观看二进制编码器。_
 
 **src/text-render.ts** — 服务端富文本渲染，公告与动态共用唯一入口 `renderRichText`。
