@@ -3,7 +3,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
-import { gunzip, gzip } from 'node:zlib';
+import { createGunzip, gzip } from 'node:zlib';
 import {
   CoalescingFileWriter,
   decodeBinary,
@@ -15,7 +15,44 @@ import { encodeReplayPatchBinary, REPLAY_BINARY_MAGIC } from './replay-patch-bin
 import { ReplayActionData, ReplayData, ReplayListItem } from './types';
 
 const gzipAsync = promisify(gzip);
-const gunzipAsync = promisify(gunzip);
+
+/**
+ * 流式解压 gzip 数据的前 length 字节，拿到足够内容即销毁流。
+ * 缓存魔数校验只需前 4 字节；完整 gunzip 会把数十 MB 的解压结果整体堆进内存，
+ * 超长回放下与重建/编码叠加容易把进程打到 OOM（issue #83）。
+ */
+const gunzipPrefix = (content: Buffer, length: number): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    const gunzip = createGunzip();
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (error) {
+        reject(error);
+      } else {
+        resolve(Buffer.concat(chunks).subarray(0, length));
+      }
+    };
+    gunzip.on('data', (chunk: Buffer) => {
+      if (settled) {
+        return;
+      }
+      chunks.push(chunk);
+      received += chunk.length;
+      if (received >= length) {
+        gunzip.destroy();
+        finish();
+      }
+    });
+    gunzip.on('error', (error: Error) => finish(error));
+    gunzip.on('end', () => finish());
+    gunzip.end(content);
+  });
 
 const REPLAY_FILENAME_REGEX = /^[0-9A-Za-z+-]+$/;
 const REPLAY_EXT = '.rpl';
@@ -157,8 +194,9 @@ export class ReplayStore {
       const cached = await readFile(cachePath);
       if (cached.length >= 4) {
         // 编码格式升级（如 RPB3→RPB4）后旧缓存作废：校验解压后的魔数，不匹配则重建。
-        const raw = (await gunzipAsync(cached)) as Buffer;
-        if (raw.length >= 4 && raw.subarray(0, 4).toString('latin1') === REPLAY_BINARY_MAGIC) {
+        // 只流式解压前 4 字节，不为校验把几十 MB 的缓存整体解压进内存。
+        const raw = await gunzipPrefix(cached, 4);
+        if (raw.length >= 4 && raw.toString('latin1') === REPLAY_BINARY_MAGIC) {
           return { gzip: cached, size: cached.readUInt32LE(cached.length - 4) };
         }
       }
