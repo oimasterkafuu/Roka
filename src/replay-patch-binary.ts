@@ -15,24 +15,57 @@ const classToCode = (value: string): number => {
   return 0;
 };
 
+// 分块写入：超长回放编码结果可达数十 MB，若像旧实现那样把每个字节压进
+// 同一个 JS 数组（2800 万元素），数组扩容与 Buffer.from 转换会把内存打爆
+// （issue #83：超长对局回放重建时进程被 OOM killer 杀掉）。
+// 改为顺序填满固定大小的块，最后一次性拼接，编码过程只多出最终产物本身的内存。
+const WRITE_CHUNK_SIZE = 1024 * 1024;
+
 class ByteWriter {
-  private readonly bytes: number[] = [];
+  private readonly chunks: Buffer[] = [];
+
+  private current: Buffer = Buffer.allocUnsafe(WRITE_CHUNK_SIZE);
+
+  private offset = 0;
+
+  private ensure(size: number): void {
+    if (this.offset + size > this.current.length) {
+      this.chunks.push(this.current.subarray(0, this.offset));
+      this.current = Buffer.allocUnsafe(WRITE_CHUNK_SIZE);
+      this.offset = 0;
+    }
+  }
 
   writeU8(value: number): void {
-    this.bytes.push(value & 0xff);
+    this.ensure(1);
+    this.current[this.offset] = value & 0xff;
+    this.offset += 1;
   }
 
   writeU16(value: number): void {
-    this.bytes.push(value & 0xff, (value >>> 8) & 0xff);
+    this.ensure(2);
+    this.current.writeUInt16LE(value & 0xffff, this.offset);
+    this.offset += 2;
   }
 
   writeU32(value: number): void {
-    this.bytes.push(value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff);
+    this.ensure(4);
+    this.current.writeUInt32LE(value >>> 0, this.offset);
+    this.offset += 4;
   }
 
   writeBytes(buffer: Uint8Array): void {
-    for (let i = 0; i < buffer.length; i += 1) {
-      this.bytes.push(buffer[i]);
+    let rest = buffer;
+    while (rest.length > 0) {
+      if (this.offset >= this.current.length) {
+        this.chunks.push(this.current);
+        this.current = Buffer.allocUnsafe(WRITE_CHUNK_SIZE);
+        this.offset = 0;
+      }
+      const writable = Math.min(rest.length, this.current.length - this.offset);
+      this.current.set(rest.subarray(0, writable), this.offset);
+      this.offset += writable;
+      rest = rest.subarray(writable);
     }
   }
 
@@ -47,7 +80,10 @@ class ByteWriter {
   }
 
   toBuffer(): Buffer {
-    return Buffer.from(this.bytes);
+    this.chunks.push(this.current.subarray(0, this.offset));
+    this.current = Buffer.allocUnsafe(0);
+    this.offset = 0;
+    return this.chunks.length === 1 ? this.chunks[0] : Buffer.concat(this.chunks);
   }
 }
 
