@@ -643,6 +643,12 @@ function refreshDeployBanner() {
 
 socket.on('update', update);
 
+// 对局结算完成（rating 生效）后服务端广播 home_leaderboard：名字等级色可能变化，
+// 失效用户名颜色缓存并重拉本页已渲染名字的颜色（issue #84；回放模式 socket.on 为空操作）。
+socket.on('home_leaderboard', function () {
+  usernameColorsInvalidate();
+});
+
 // 部署更新排队广播：对局中显示警告横幅，准备阶段禁用开始按钮
 // （room_update 的 update_queued 字段随后会同步完整房间状态）。
 socket.on('deploy_queued', function (data) {
