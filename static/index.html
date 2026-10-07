@@ -1261,6 +1261,8 @@
           });
           socket.on('home_leaderboard', function () {
             loadLeaderboard();
+            // rating 结算完成后名字等级色可能变化，失效缓存并重拉已渲染名字的颜色（issue #84）。
+            usernameColorsInvalidate();
           });
           socket.on('home_online', function () {
             loadOnline();

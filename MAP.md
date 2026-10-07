@@ -266,7 +266,7 @@ _一句话：房间设置 tabs、链接复制、队伍与聊天前缀。_
 **static/main/blink-clock.js** — 全局闪烁时钟：在 `#map` 容器上周期切换 `blink-slow`（1s 衰减期）/`blink-fast`（0.4s 宽限期）/`pulse-soft`（1.2s 教程目标），单元格只挂声明 class，相位统一驱动。
 _一句话：#map 容器级闪烁相位时钟，三种周期。_
 
-**static/profile.html / profile.js** — 个人主页 `/u/:username`：与首页一致的三栏资料卡/积分等级进度、最高 Rating、分段 Rating 排名、最近 rating 变更、手写 SVG rating 历史折线图（峰值金色高亮）、TA 的动态与回放；不展示积分排名。动态部分与首页代码平行（数据源换 `/api/profile/:u/feeds`），游客保留只读展示，登录用户显示已有互动；动态作者/评论与回放名次列的用户名统一走 `username.js` 组件（rating 颜色 + 点击跳主页），正文 @提及链接同样经 `ensureUsernameColors` 补色，评论框带 `data-mention` 支持 @提及补全。
+**static/profile.html / profile.js** — 个人主页 `/u/:username`：与首页一致的三栏资料卡/积分等级进度、最高 Rating、分段 Rating 排名、最近 rating 变更、手写 SVG rating 历史折线图（峰值金色高亮）、TA 的动态与回放；不展示积分排名。动态部分与首页代码平行（数据源换 `/api/profile/:u/feeds`），游客保留只读展示，登录用户显示已有互动；动态作者/评论与回放名次列的用户名统一走 `username.js` 组件（rating 颜色 + 点击跳主页），正文 @提及链接同样经 `ensureUsernameColors` 补色，评论框带 `data-mention` 支持 @提及补全。另以 `?home=1` socket 监听 `home_leaderboard`（rating 结算广播）触发 `usernameColorsInvalidate()` 刷新名字颜色（issue #84）。
 _一句话：个人主页逻辑：积分等级/进度、Rating 排名与 SVG Rating 图 + 动态/回放。_
 
 **static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态）分页展示（每页 20 条，前端即时过滤），顶部搜索框按用户名子串即时筛选并显示用户总数/匹配数；封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框 / 策略 Bot），便于扩展新管理模块。「策略 Bot」分区仅超管可见（`viewerIsSuperAdmin` 门控 + 服务端 403 兜底）：初始化时拉取 `GET /api/admin/bot-templates` 自动填充模板下拉框（无可托管模板时禁用启动按钮并提示），输入用户名 + 房间号、选择模板并勾选是否允许组队后启动（成功后仅清空房间输入），表格展示运行中 bot（用户名/房间/模板/组队/启动时间/连接状态）并可手动停止。
@@ -293,7 +293,7 @@ _一句话：关于与来源致谢静态页。_
 **static/crown.js** — 全局 `crown_html`：主城皇冠内联 SVG（颜色跟随玩家配色）。
 _一句话：皇冠 SVG 字符串常量（crown_html）。_
 
-**static/username.js** — 全站统一用户名渲染组件（首页/个人主页/后台/对局页均加载）：`usernameLink(name, info?, extraClass?, opts?)` 构建带 rating 颜色（rt-*）+ 点击跳 `/u/:username` 的链接；`usernameLinkHtml(name)` 为同源 HTML 字符串版（热路径 innerHTML 重建用，用户名经 htmlescape）；`usernameCacheSeed(map)` 用接口已有 colorClass 数据喂全局缓存（用户名→{colorClass,title}）；`usernameEnsureColors(names)` 批量调 `GET /api/user-colors` 补齐缺失颜色（inflight 去重，未上榜/未定级降级 rt-unrated），回填后经 `data-username` 标记自动刷新已渲染链接。防注入一律 DOM 构建 + `.text()`。与局内配色 `.cN` 职责分开：色块/底色=.cN，名字颜色=本组件。
+**static/username.js** — 全站统一用户名渲染组件（首页/个人主页/后台/对局页均加载）：`usernameLink(name, info?, extraClass?, opts?)` 构建带 rating 颜色（rt-*）+ 点击跳 `/u/:username` 的链接；`usernameLinkHtml(name)` 为同源 HTML 字符串版（热路径 innerHTML 重建用，用户名经 htmlescape）；`usernameCacheSeed(map)` 用接口已有 colorClass 数据喂全局缓存（用户名→{colorClass,title}）；`usernameEnsureColors(names)` 批量调 `GET /api/user-colors` 补齐缺失颜色（inflight 去重，未上榜/未定级降级 rt-unrated），回填后经 `data-username` 标记自动刷新已渲染链接；`usernameColorsInvalidate()` 在 rating 结算后（服务端广播 `home_leaderboard`，首页/个人页/对局页均监听）清空颜色缓存并为当前页所有已渲染链接重拉颜色，保证等级色跨面板及时更新（issue #84）。防注入一律 DOM 构建 + `.text()`。与局内配色 `.cN` 职责分开：色块/底色=.cN，名字颜色=本组件。
 _一句话：统一用户名链接组件 + rating 颜色全局缓存。_
 
 **static/mention-autocomplete.js** — @提及输入补全（首页与个人主页共用，无构建全局脚本）。
