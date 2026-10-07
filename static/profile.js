@@ -783,3 +783,11 @@ if (!profileUsername) {
     });
   });
 }
+
+// 对局结算完成（rating 生效）后服务端广播 home_leaderboard：名字等级色可能变化，
+// 失效用户名颜色缓存并重拉本页已渲染名字的颜色（issue #84）。
+// query.home 标记为监听连接，服务端不会用它参与同账号连接互斥。
+var profileSocket = io({ query: { home: '1' } });
+profileSocket.on('home_leaderboard', function () {
+  usernameColorsInvalidate();
+});

@@ -82,6 +82,23 @@ function usernameEnsureColors(names) {
   return promise;
 }
 
+// rating 结算等颜色可能变化的时刻调用（服务端在结算完成后广播 home_leaderboard）：
+// 清空颜色缓存，并为当前页面所有已渲染的 data-username 链接重新拉取颜色，
+// 保证名字等级色在同一会话内的各个面板及时更新（issue #84）。
+function usernameColorsInvalidate() {
+  usernameColorCache = {};
+  if (typeof $ == 'undefined' || !$.fn) return;
+  var names = [];
+  var seen = {};
+  $('[data-username]').each(function () {
+    var key = usernameColorKey($(this).attr('data-username'));
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    names.push(key);
+  });
+  usernameEnsureColors(names);
+}
+
 // 缓存回填后刷新已渲染链接：所有带 data-username 且类名以 rt- 开头的元素同步颜色/title。
 function usernameRefreshRendered() {
   $('[data-username]').each(function () {
