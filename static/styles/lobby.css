@@ -44,6 +44,16 @@
 #map-token {
   width: min(560px, 95%);
 }
+#map-token.custom-seed {
+  border-color: #e8a33d;
+  background: #fff8ec;
+  box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.18);
+}
+#map-token-custom-hint {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  color: #c47f17;
+}
 
 .custom-queue-page-container {
   background-color: #ffffff;

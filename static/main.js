@@ -838,6 +838,10 @@ socket.on('room_update', function (data) {
   setMapSizeByCode(data.map_size || 'normal');
   refreshMapInputHint();
   $('#map-token').val(normalizeMapTokenInput(data.map_token || ''));
+  // 自定义种子（issue #86）：高亮输入框并显示提示，提醒本房间将重复生成相同地图。
+  var customSeed = data.map_token_custom === true;
+  $('#map-token').toggleClass('custom-seed', customSeed);
+  $('#map-token-custom-hint').css('display', customSeed ? '' : 'none');
   var tmp = Array(max_teams + 1);
   for (var i = 0; i <= max_teams; i++) {
     tmp[i] = '';
