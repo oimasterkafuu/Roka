@@ -25,6 +25,8 @@ export interface LobbyConfig {
   /** 迷雾远征开关：开启后玩家仅可见己方队伍视野范围内的归属与兵力。 */
   fog: boolean;
   map_token: string;
+  /** 种子来源：true = 房主自定义（对局结束后保留沿用）；false/缺省 = 随机生成（每局重随机）。 */
+  map_token_custom?: boolean;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
   /** 华夏模式的地区；旧配置缺省时使用汉。 */
   map_region: MapRegion;
@@ -68,6 +70,8 @@ export interface RoomUpdatePayload {
   /** 迷雾远征开关（房间设置同步给前端展示）。 */
   fog: boolean;
   map_token: string;
+  /** 当前种子是否为房主自定义（自定义种子沿用不重随机，前端据此显示提示）。 */
+  map_token_custom: boolean;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
   /** 华夏模式的地区；旧房间快照缺省时使用汉。 */
   map_region: MapRegion;
