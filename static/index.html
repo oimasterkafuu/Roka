@@ -864,8 +864,9 @@
 
       function createPostElement(post) {
         var $item = $('<div class="feed-item"></div>').attr('data-id', post.id);
-        // 原始 text 缓存在元素上，供内联编辑回填。
+        // 原始 text/html 缓存在元素上，供内联编辑回填与增量更新的变更检测。
         $item.data('raw-text', post.text);
+        $item.data('raw-html', post.html);
 
         var $head = $('<div class="feed-item-head"></div>');
         var $author = userLink(
@@ -945,14 +946,69 @@
         $wrap.after($btn);
       }
 
+      // 单条动态的就地更新（issue #85）：只改有变化的字段，保留评论展开状态、
+      // 正在输入的评论框与内联编辑态，避免 home_feeds 失效通知把整页打断重渲染。
+      function updatePostElement($item, post) {
+        var editing = $item.find('.feed-edit').length > 0;
+        if (!editing) {
+          $item.data('raw-text', post.text);
+          if ($item.data('raw-html') !== post.html) {
+            $item.data('raw-html', post.html);
+            var $text = $item.find('.feed-text');
+            $text.html(post.html);
+            ensureUsernameColors($text);
+          }
+        }
+        $item.find('.feed-time').text(relativeTime(post.time)).attr('title', fullTime(post.time));
+        if (currentUsername) {
+          var $likeBtn = $item.find('.like-btn');
+          $likeBtn.toggleClass('liked', post.likes.indexOf(currentUsername) !== -1);
+          $likeBtn.find('.like-count').text(post.likes.length);
+        }
+        $item.find('.comment-toggle').text(commentButtonText(post.comments.length));
+        // 评论就地 reconcile：新评论按序追加、被删评论移除，已有评论与输入框不动。
+        var $commentList = $item.find('.comment-list');
+        var seenComments = {};
+        post.comments.forEach(function (comment) {
+          var cid = String(comment.id);
+          seenComments[cid] = true;
+          var $existing = $commentList.children().filter(function () {
+            return $(this).attr('data-id') === cid;
+          });
+          // append 对已挂载元素是移动，逐条按序处理即完成重排。
+          $commentList.append($existing.length ? $existing : createCommentElement(comment));
+        });
+        $commentList.children().each(function () {
+          if (!seenComments[$(this).attr('data-id')]) {
+            $(this).remove();
+          }
+        });
+      }
+
       function renderFeedPage(data) {
         var $list = $('#feed-list');
-        $list.empty();
         var items = Array.isArray(data.items) ? data.items : [];
+        // 就地增量更新（issue #85）：已存在的动态在原 DOM 上更新并重排，只增删有变化的项。
+        var seen = {};
         items.forEach(function (post) {
-          var $item = createPostElement(post);
-          $list.append($item);
-          applyCollapse($item);
+          var pid = String(post.id);
+          seen[pid] = true;
+          var $existing = $list.children().filter(function () {
+            return $(this).attr('data-id') === pid;
+          });
+          if ($existing.length) {
+            updatePostElement($existing.first(), post);
+            $list.append($existing.first());
+          } else {
+            var $item = createPostElement(post);
+            $list.append($item);
+            applyCollapse($item);
+          }
+        });
+        $list.children().each(function () {
+          if (!seen[$(this).attr('data-id')]) {
+            $(this).remove();
+          }
         });
         $('#feed-empty').toggle(items.length === 0);
         feedPage = data.page;
@@ -1213,6 +1269,9 @@
             }
             try {
               await apiPost('/api/feeds/edit', { id: id, text: text });
+              // 渲染已改为就地增量更新，保存成功后先退出编辑态再刷新（同取消路径）。
+              $edit.remove();
+              $item.find('.feed-body-wrap, .feed-expand-btn, .feed-actions').show();
               loadFeeds(feedPage);
             } catch (err) {
               alert(err.message);
