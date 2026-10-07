@@ -1861,9 +1861,17 @@ const boot = async (): Promise<void> => {
             nextConf.map_token = mapToken;
             changed.push('map_token');
           }
+          // 自定义标记以原始输入为准（issue #86）：非空输入 = 自定义种子（沿用不重随机），
+          // 清空输入 = 恢复随机（服务端已补随机种子，下一局起每局重随机）。
+          nextConf.map_token_custom = String(payload.map_token ?? '').trim().length > 0;
         }
 
         if (changed.length === 0) {
+          // 仅种子自定义标记变化（输入与当前种子相同）：静默保存标记并同步提示状态。
+          if (nextConf.map_token_custom !== oldConf.map_token_custom) {
+            lobbyService.lobbyConfig.set(gid, nextConf);
+            lobbyService.emitRoomUpdate(io, gid);
+          }
           return;
         }
 
