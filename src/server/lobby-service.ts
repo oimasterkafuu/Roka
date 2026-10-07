@@ -434,6 +434,7 @@ class LobbyService {
       allow_team: conf.allow_team,
       fog: conf.fog === true,
       map_token: conf.map_token,
+      map_token_custom: conf.map_token_custom === true,
       map_mode: mapMode,
       map_region: normalizeMapRegion(conf.map_region),
       map_size: conf.map_size === 'large' ? 'large' : 'normal',
@@ -678,7 +679,10 @@ class LobbyService {
         if (lobby) {
           const lobbyConf = this.lobbyConfig.get(lobby);
           if (lobbyConf) {
-            lobbyConf.map_token = this.normalizeMapToken(this.randomHexToken());
+            // 自定义种子（issue #86）沿用到下一局，不重新随机；随机种子照旧每局重随机。
+            if (lobbyConf.map_token_custom !== true) {
+              lobbyConf.map_token = this.normalizeMapToken(this.randomHexToken());
+            }
             this.lobbyConfig.set(lobby, lobbyConf);
           }
           const lobbyMembers = this.lobbyPlayers.get(lobby);
@@ -960,6 +964,7 @@ class LobbyService {
       allow_team: false,
       fog: false,
       map_token: this.normalizeMapToken(this.randomHexToken()),
+      map_token_custom: false,
       map_mode: 'random',
       map_region: DEFAULT_MAP_REGION,
       map_size: 'normal',
