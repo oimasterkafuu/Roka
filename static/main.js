@@ -208,12 +208,16 @@ function formatReplaySize(bytes) {
 }
 
 function updateReplayLoading(loaded, total) {
+  var $fill = $('#replay-loading-fill');
   var text;
   if (total > 0) {
     var percent = Math.min(100, Math.floor((loaded / total) * 100));
+    $fill.removeClass('indeterminate').css('width', percent + '%');
     text =
       '回放加载中… ' + percent + '%（' + formatReplaySize(loaded) + ' / ' + formatReplaySize(total) + '）';
   } else {
+    // 服务端未给出 X-Replay-Size（仍在转码重建）时进度「虚」显示：填充条往返滑动。
+    $fill.addClass('indeterminate').css('width', '');
     text = '回放加载中… 已下载 ' + formatReplaySize(loaded);
   }
   $('#replay-loading-text').text(text);
@@ -265,6 +269,7 @@ if (location.pathname.substr(0, 8) == '/replays') {
   // pathname 中是 URL 编码后的 id（含 + 的回放 id 会变成 %2B），先解码一次，
   // 后续请求时统一再做一次 encodeURIComponent，避免双重编码导致服务端找不到回放。
   replay_id = decodeURIComponent(location.pathname.substr(9));
+  var replayLoadFailed = false;
   var replayFetch;
   if (replay_id == 'local') {
     // 首页“上传并查看回放”：服务器已把上传的 .rpl 转码为可播放二进制，暂存于 sessionStorage。
@@ -277,7 +282,8 @@ if (location.pathname.substr(0, 8) == '/replays') {
       resolve(base64ToArrayBuffer(b64));
     });
   } else {
-    $('#replay-loading').css('display', '');
+    // 注意：本文件在 <head> 中同步加载，此刻 DOM 尚未解析，不能在这里操作
+    // #replay-loading——显示/失败兜底统一放到 document.ready 的回放分支里。
     replayFetch = fetchReplayWithProgress('/api/getreplay/' + encodeURIComponent(replay_id));
   }
   replayFetch
@@ -286,6 +292,7 @@ if (location.pathname.substr(0, 8) == '/replays') {
       replayStart();
     })
     .catch(function () {
+      replayLoadFailed = true;
       showReplayError();
     });
 }
@@ -293,6 +300,7 @@ if (location.pathname.substr(0, 8) == '/replays') {
 function replayStart() {
   rcnt++;
   if (rcnt == 2) {
+    $('#replay-loading-fill').removeClass('indeterminate').css('width', '0%');
     $('#replay-loading').css('display', 'none');
     init_map(replay_data.n, replay_data.m);
     in_game = true;
@@ -750,6 +758,9 @@ socket.on('init_map', function (data) {
 
 $(document).ready(function () {
   if (is_replay) {
+    // 加载提示在 DOM 就绪后显示：若在就绪前已失败（如 404），直接改显错误弹窗。
+    if (replayLoadFailed) showReplayError();
+    else if (replay_id != 'local') $('#replay-loading').css('display', '');
     $('#replay-top-left').css('display', '');
     $('#replay-bottom').css('display', '');
     $('#replay-turn-jump-input').on('keypress', function (e) {
