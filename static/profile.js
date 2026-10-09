@@ -739,13 +739,27 @@ async function loadReplays(offset) {
         .attr('title', fullTime(item.time * 1000))
         .appendTo($tr);
       $('<td></td>').text(item.turn).appendTo($tr);
-      // 名次列成员名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进回放。
+      // 名次列：有队伍分组（组队局归档写入 teams）时同队合并成一组——
+      // 组内 ', '、组间 ' › '、组序为终局队伍名次序；旧数据无 teams 时回退 rank 平铺
+      // （与首页回放列表同一口径）。成员名统一走 username.js 组件，阻止冒泡避免整行跳转。
       var $rankTd = $('<td></td>').appendTo($tr);
-      usernameEnsureColors(item.rank || []);
-      (item.rank || []).forEach(function (member, mi) {
-        if (mi > 0) $rankTd.append(' › ');
-        usernameLink(member, null, null, { stopPropagation: true }).appendTo($rankTd);
-      });
+      var linkOpts = { stopPropagation: true };
+      var rankNames = Array.isArray(item.rank) ? item.rank : [];
+      usernameEnsureColors(rankNames);
+      if (Array.isArray(item.teams) && item.teams.length) {
+        item.teams.forEach(function (team, index) {
+          if (index > 0) $rankTd.append(' › ');
+          (team.members || []).forEach(function (member, mi) {
+            if (mi > 0) $rankTd.append(', ');
+            usernameLink(member, null, null, linkOpts).appendTo($rankTd);
+          });
+        });
+      } else {
+        rankNames.forEach(function (member, mi) {
+          if (mi > 0) $rankTd.append(' › ');
+          usernameLink(member, null, null, linkOpts).appendTo($rankTd);
+        });
+      }
       $body.append($tr);
     });
     $('#replays-prev').prop('disabled', offset <= 0);
