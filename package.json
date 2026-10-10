@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.58.1",
+  "version": "1.59.0",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -25,6 +25,7 @@
     "test:storage": "node scripts/test-storage.mjs",
     "test:auto-ban-policy": "pnpm exec tsx scripts/test-auto-ban-policy.mjs",
     "test:replay-stats": "node scripts/test-replay-stats.mjs",
+    "test:replay-cache": "node scripts/test-replay-cache.mjs",
     "test:profile-stat-label": "node scripts/test-profile-stat-label.mjs",
     "test:mentions": "node scripts/test-mentions.mjs",
     "test:crown-transfer": "node scripts/test-crown-transfer.mjs",
