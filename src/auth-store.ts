@@ -32,6 +32,8 @@ export interface DisciplineRecord {
   turn: number;
   elapsedMs: number;
   evidence: string;
+  // 本局实际玩家总数；旧数据无此字段按 undefined 兼容（用于区分 1v1 对局的 afk）。
+  playerCount?: number;
 }
 
 interface StoredUser {
@@ -328,6 +330,10 @@ const toDisciplineRecord = (value: unknown): DisciplineRecord | null => {
     turn: value.turn,
     elapsedMs: value.elapsedMs,
     evidence: value.evidence,
+    playerCount:
+      typeof value.playerCount === 'number' && Number.isFinite(value.playerCount)
+        ? value.playerCount
+        : undefined,
   };
 };
 
@@ -802,6 +808,15 @@ export class UserStore {
 
   getAutomaticBanCount(usernameInput: string): number {
     return this.usersByKey.get(this.normalize(usernameInput))?.automaticBanCount ?? 0;
+  }
+
+  /** 连续 14 天无违规时把自动封禁梯度计数重置为 0（下次自动封禁从 1 小时重新算起）。 */
+  async resetAutomaticBanCount(usernameInput: string): Promise<void> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user || !user.automaticBanCount) return;
+    user.automaticBanCount = 0;
+    user.updatedAt = Date.now();
+    await this.persist();
   }
 
   /**
