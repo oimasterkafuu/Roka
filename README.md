@@ -16,7 +16,7 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准；未结束局在失败率中计失败）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）、`pnpm run test:admin-badge`（管理员用户名徽标测试）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准；未结束局在失败率中计失败）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）、`pnpm run test:admin-badge`（管理员用户名外观测试）。
 
 Apex Bot 可独立运行或由服务端托管：
 
@@ -58,7 +58,7 @@ node training/long-eval.cjs --help
 
 ## 平台功能
 
-- 用户系统（注册 / 登录）；首个注册用户自动成为超级管理员（唯一，不可剥夺、不可封禁），可在后台管理页授予/撤销其他用户的管理员权限。
+- 用户系统（注册 / 登录）；首个注册用户自动成为超级管理员（唯一，不可剥夺、不可封禁），可在后台管理页授予/撤销其他用户的管理员权限。管理员（含超管）用户名统一显示为黑色加粗，鼠标悬停显示「Headquarters」头衔，无 rating 档色或额外徽标；普通用户保持原 rating 颜色与头衔。
 - 后台管理页 `/admin`（仅管理员可见入口）：用户列表（rating、注册/最后在线时间、角色、封禁状态）分页展示，顶部支持按用户名即时搜索并显示用户总数；支持按时长封禁（1 小时/1 天/7 天/自定义/永久）与解封；被封禁用户无法登录且已登录的连接会被立即踢下线，封禁到期自动解除；管理员之间不能互相封禁，超级管理员不受限制。超级管理员另有「策略 Bot」分区：指定已注册用户名、房间号并从服务端自动枚举的模板下拉框（`bot-template/` 下带 `strategy.js` 或 `server-bot.js` 的目录）中选择模板，即可在服务器进程内启动托管 Bot（内存临时令牌鉴权，跳过验证码），还可勾选该 Bot 房间是否允许组队、是否支持迷雾远征；同一用户名最多运行一个 Bot，同一房间也只能运行一个 Bot。Bot 自动进房/准备、对局结束后自动重新准备、可随时手动停止；服务器重启后自动按原配置（相同用户名、房间号、模板与组队许可）恢复运行中的托管 Bot（状态持久化在 `data/server-bots.json`，用户失效/封禁或模板缺失时记警告跳过，手动停止即清除不再恢复）；托管 Bot 进房不当房主（房主保留给后续进房的人类用户或第三方 Bot）、豁免房间心跳踢出、不参与单会话顶号互斥；不允许组队的托管 Bot 所在房间禁止组队——Bot 进房时会强制关闭已开启的组队模式，且房主的开启请求会被服务端拒绝（房间消息提示，前端开关锁定）；允许组队的托管 Bot 房间不受此限，组队开关仍由房主自行决定（Bot 进房不自动开启组队）。未勾选“允许迷雾远征”的托管 Bot 与第三方 Bot 一样会关闭并禁止房间迷雾，勾选后则由房主自行决定是否开启；组队模式下服务端不再按机器人/人类分池——进房默认分配到人数最少的队伍、换队请求不做修正、开启组队也不重排，队伍归属完全由成员自行决定（官方 anti-human-bot 固定首选 2 队，检测到人类同队会自主避让换队）。
 - 策略 Bot 模板 `bot-template/simple-strategy-bot`：具备开局发育模拟规划/威胁推演/集结防御/风险感知路径打击/前线突破集结/积极皇冠建设/多源兵力汇集的综合策略（`strategy.js` 管线编排 + `bot/` 纯函数模块），并按双层危险场对咽喉格定量驻军、为被切断的孤军组织走廊救援或止损、行军有纪律（防抖防送兵、打击体检与无望集结弃打）；可独立运行（与 random-patch-bot 相同的 CLI 用法），其 `strategy.js` 同时被服务端托管运行复用。
 - 策略 Bot 模板 `bot-template/apex-bot`：独立于其他策略模板的新一代纯函数策略，逐 tick 预演 mode 0/1/2、建设成本/连通、斩首与切断风险，带有限敌方反击评分和反往返护栏；长距离战役会避免用少量兵力反复深入，推进前会预演供给割点并在确实会被截断时卡极限建造指挥所，前锋崩溃时改用更强后方兵堆，连续集结停滞会自动恢复；大地图会提高后方建设目标和扩张频率，运输距离过长时优先使用已经备足兵力且远离敌人的前线地块建设，减少把兵力从出生点逐格拉到前线的浪费；大规模集结会先冻结目标并把多条支路汇入共享干线，再从叶子向根逐段运输，避免单一起点长征和重复调兵，并在达到首个突破门槛后分阶段推进；迷宫中发现敌方已经建造而本方锚点不足时会挂起旧远征并先完成连续建设，避免用一两个皇冠沿单通道硬冲；迷宫普通移动还会记录最近边并施加短期反向/重复冷却，只在斩首、截断和紧急防守时绕过，停滞时改走可推进支路或建设邻近锚点；检测到敌方扩张后储兵且建设会消耗主城附近的关键守军，或敌人不建造而在本土保存突袭兵力时，会暂缓建设、保护皇冠底线并优先拦截/集结，威胁无法直接防守时改切敌方供给割点，威胁消失后恢复原有紧凑建设计划；服务端运行时还会按用户名记录对手胜负和连续失败，达到阈值后短暂暂停自动准备。可独立运行、被服务端托管，并通过 `node --test bot-template/apex-bot/test/*.test.cjs` 与四地图真实引擎 benchmark 验证。

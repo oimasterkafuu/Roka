@@ -237,33 +237,37 @@ interface DecoratedFeedPost {
 // @提及解析：用户名存在时返回规范形式，不存在/改名后由渲染层降级为普通文本。
 const resolveFeedMention = (token: string): string | null => userStore.resolveUsername(token);
 
+const usernameAppearance = (username: string, rating: number, ratingGames: number) => {
+  const admin = userStore.isAdminUser(username);
+  const tier = ratingTier(rating, ratingGames);
+  return {
+    colorClass: admin ? 'rt-admin' : tier.className,
+    title: admin ? 'Headquarters' : tier.title,
+    admin,
+  };
+};
+
 const decorateFeedComment = (comment: FeedComment, viewer: string | null): DecoratedFeedComment => {
   const { rating, ratingGames } = userStore.getDisplayRating(comment.author);
-  const tier = ratingTier(rating, ratingGames);
   const rendered = renderRichTextWithMentions(comment.text, resolveFeedMention);
   return {
     ...comment,
     html: rendered.html,
     mentions: rendered.mentions,
-    authorInfo: {
-      colorClass: tier.className,
-      title: tier.title,
-      admin: userStore.isAdminUser(comment.author),
-    },
+    authorInfo: usernameAppearance(comment.author, rating, ratingGames),
     canManage: viewer !== null && (viewer === comment.author || userStore.isAdminUser(viewer)),
   };
 };
 
 const decorateFeedPost = (post: FeedPost, viewer: string | null): DecoratedFeedPost => {
   const { rating, ratingGames } = userStore.getDisplayRating(post.author);
-  const tier = ratingTier(rating, ratingGames);
   const rendered = renderRichTextWithMentions(post.text, resolveFeedMention);
   return {
     ...post,
     comments: post.comments.map((comment) => decorateFeedComment(comment, viewer)),
     html: rendered.html,
     mentions: rendered.mentions,
-    authorInfo: { colorClass: tier.className, title: tier.title, admin: userStore.isAdminUser(post.author) },
+    authorInfo: usernameAppearance(post.author, rating, ratingGames),
     canManage: viewer !== null && (viewer === post.author || userStore.isAdminUser(viewer)),
   };
 };
@@ -711,15 +715,12 @@ const boot = async (): Promise<void> => {
     }
     return reply.send({
       items: userStore.listUsersForAdmin().map((entry) => {
-        const tier = ratingTier(entry.rating, entry.ratingGames);
         // 「最后在线」以 presence 内存表为准（落盘值最多滞后一个节流间隔）。
         const lastSeenAt = presenceService.getLastSeen(entry.username) ?? entry.lastSeenAt;
         return {
           ...entry,
           lastSeenAt,
-          colorClass: tier.className,
-          title: tier.title,
-          admin: userStore.isAdminUser(entry.username),
+          ...usernameAppearance(entry.username, entry.rating, entry.ratingGames),
         };
       }),
       viewer: admin.username,
@@ -1110,19 +1111,14 @@ const boot = async (): Promise<void> => {
   });
 
   app.get('/api/leaderboard', async (_request, reply) => {
-    const items = userStore.listTopRated(10).map((entry) => {
-      const tier = ratingTier(entry.rating, entry.ratingGames);
-      return {
-        ...entry,
-        colorClass: tier.className,
-        title: tier.title,
-        admin: userStore.isAdminUser(entry.username),
-      };
-    });
+    const items = userStore.listTopRated(10).map((entry) => ({
+      ...entry,
+      ...usernameAppearance(entry.username, entry.rating, entry.ratingGames),
+    }));
     return reply.send({ items });
   });
 
-  // @提及候选：按前缀搜索用户名（大小写不敏感，最多 10 条），附带 rating 颜色。
+  // @提及候选：按前缀搜索用户名（大小写不敏感，最多 10 条），附带用户名颜色。
   // q 为空时返回前若干用户；供动态/评论输入框的提及补全使用。
   app.get('/api/users/search', async (request, reply) => {
     const query = request.query as { q?: unknown; limit?: unknown };
@@ -1130,18 +1126,12 @@ const boot = async (): Promise<void> => {
     const names = userStore.searchUsernames(String(query.q ?? ''), limit);
     const items = names.map((username) => {
       const { rating, ratingGames } = userStore.getDisplayRating(username);
-      const tier = ratingTier(rating, ratingGames);
-      return {
-        username,
-        colorClass: tier.className,
-        title: tier.title,
-        admin: userStore.isAdminUser(username),
-      };
+      return { username, ...usernameAppearance(username, rating, ratingGames) };
     });
     return reply.send({ items });
   });
 
-  // 按用户名批量查询 rating 颜色（用户名 → colorClass/title），供前端统一用户名组件
+  // 按用户名批量查询颜色与头衔（用户名 → colorClass/title），供前端统一用户名组件
   // 为「接口原本不带颜色」的位置（回放列表、对局排行榜、聊天等）补色；一次请求批量查，
   // 避免每个名字单独发请求。users 为逗号分隔的用户名（去重、限量防滥用）。
   app.get('/api/user-colors', async (request, reply) => {
@@ -1155,8 +1145,7 @@ const boot = async (): Promise<void> => {
     for (const name of names) {
       if (Object.prototype.hasOwnProperty.call(colors, name)) continue;
       const { rating, ratingGames } = userStore.getDisplayRating(name);
-      const tier = ratingTier(rating, ratingGames);
-      colors[name] = { colorClass: tier.className, title: tier.title, admin: userStore.isAdminUser(name) };
+      colors[name] = usernameAppearance(name, rating, ratingGames);
     }
     return reply.send({ colors });
   });
@@ -1164,13 +1153,7 @@ const boot = async (): Promise<void> => {
   app.get('/api/online', async (_request, reply) => {
     const items = presenceService.listByActivity(ONLINE_LIST_LIMIT).map((entry) => {
       const { rating, ratingGames } = userStore.getDisplayRating(entry.username);
-      const tier = ratingTier(rating, ratingGames);
-      return {
-        ...entry,
-        colorClass: tier.className,
-        title: tier.title,
-        admin: userStore.isAdminUser(entry.username),
-      };
+      return { ...entry, ...usernameAppearance(entry.username, rating, ratingGames) };
     });
     return reply.send({ count: presenceService.countOnline(), items });
   });
@@ -1181,12 +1164,9 @@ const boot = async (): Promise<void> => {
     if (!profile) {
       return reply.code(404).send({ error: '用户不存在。' });
     }
-    const tier = ratingTier(profile.rating, profile.ratingGames);
     return reply.send({
       ...profile,
-      colorClass: tier.className,
-      title: tier.title,
-      admin: userStore.isAdminUser(profile.username),
+      ...usernameAppearance(profile.username, profile.rating, profile.ratingGames),
       registeredDays: Math.floor((Date.now() - profile.createdAt) / 86400000),
     });
   });
