@@ -8,7 +8,8 @@
 .rt-blue,
 .rt-violet,
 .rt-orange,
-.rt-red {
+.rt-red,
+.rt-admin {
   font-weight: 700;
   text-decoration: none;
 }
@@ -37,6 +38,26 @@
 .rt-red {
   color: #ff0000 !important;
 }
+/* 管理员（含超管）用户名：黑色加粗 + Headquarters 徽标（issue #92）。 */
+.rt-admin {
+  color: #000000 !important;
+}
+
+/* 管理员名字旁的 Headquarters 徽标：黑底白字小字号，明亮/深色底上均可读。 */
+.hq-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  font-size: 0.65em;
+  font-weight: 700;
+  line-height: 1.6;
+  vertical-align: text-top;
+  color: #ffffff !important;
+  background: #000000;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
 
 a.rt-unrated:hover,
 a.rt-gray:hover,
@@ -45,6 +66,7 @@ a.rt-cyan:hover,
 a.rt-blue:hover,
 a.rt-violet:hover,
 a.rt-orange:hover,
-a.rt-red:hover {
+a.rt-red:hover,
+a.rt-admin:hover {
   text-decoration: underline;
 }
