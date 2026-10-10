@@ -217,7 +217,7 @@ interface DecoratedFeedComment {
   time: number;
   html: string;
   mentions: string[];
-  authorInfo: { colorClass: string; title: string };
+  authorInfo: { colorClass: string; title: string; admin: boolean };
   canManage: boolean;
 }
 
@@ -230,7 +230,7 @@ interface DecoratedFeedPost {
   comments: DecoratedFeedComment[];
   html: string;
   mentions: string[];
-  authorInfo: { colorClass: string; title: string };
+  authorInfo: { colorClass: string; title: string; admin: boolean };
   canManage: boolean;
 }
 
@@ -245,7 +245,11 @@ const decorateFeedComment = (comment: FeedComment, viewer: string | null): Decor
     ...comment,
     html: rendered.html,
     mentions: rendered.mentions,
-    authorInfo: { colorClass: tier.className, title: tier.title },
+    authorInfo: {
+      colorClass: tier.className,
+      title: tier.title,
+      admin: userStore.isAdminUser(comment.author),
+    },
     canManage: viewer !== null && (viewer === comment.author || userStore.isAdminUser(viewer)),
   };
 };
@@ -259,7 +263,7 @@ const decorateFeedPost = (post: FeedPost, viewer: string | null): DecoratedFeedP
     comments: post.comments.map((comment) => decorateFeedComment(comment, viewer)),
     html: rendered.html,
     mentions: rendered.mentions,
-    authorInfo: { colorClass: tier.className, title: tier.title },
+    authorInfo: { colorClass: tier.className, title: tier.title, admin: userStore.isAdminUser(post.author) },
     canManage: viewer !== null && (viewer === post.author || userStore.isAdminUser(viewer)),
   };
 };
@@ -710,7 +714,13 @@ const boot = async (): Promise<void> => {
         const tier = ratingTier(entry.rating, entry.ratingGames);
         // 「最后在线」以 presence 内存表为准（落盘值最多滞后一个节流间隔）。
         const lastSeenAt = presenceService.getLastSeen(entry.username) ?? entry.lastSeenAt;
-        return { ...entry, lastSeenAt, colorClass: tier.className, title: tier.title };
+        return {
+          ...entry,
+          lastSeenAt,
+          colorClass: tier.className,
+          title: tier.title,
+          admin: userStore.isAdminUser(entry.username),
+        };
       }),
       viewer: admin.username,
       viewerIsSuperAdmin: userStore.isSuperAdminUser(admin.username),
@@ -1102,7 +1112,12 @@ const boot = async (): Promise<void> => {
   app.get('/api/leaderboard', async (_request, reply) => {
     const items = userStore.listTopRated(10).map((entry) => {
       const tier = ratingTier(entry.rating, entry.ratingGames);
-      return { ...entry, colorClass: tier.className, title: tier.title };
+      return {
+        ...entry,
+        colorClass: tier.className,
+        title: tier.title,
+        admin: userStore.isAdminUser(entry.username),
+      };
     });
     return reply.send({ items });
   });
@@ -1116,7 +1131,12 @@ const boot = async (): Promise<void> => {
     const items = names.map((username) => {
       const { rating, ratingGames } = userStore.getDisplayRating(username);
       const tier = ratingTier(rating, ratingGames);
-      return { username, colorClass: tier.className, title: tier.title };
+      return {
+        username,
+        colorClass: tier.className,
+        title: tier.title,
+        admin: userStore.isAdminUser(username),
+      };
     });
     return reply.send({ items });
   });
@@ -1131,12 +1151,12 @@ const boot = async (): Promise<void> => {
       .map((name) => name.trim())
       .filter(Boolean)
       .slice(0, 100);
-    const colors: Record<string, { colorClass: string; title: string }> = {};
+    const colors: Record<string, { colorClass: string; title: string; admin: boolean }> = {};
     for (const name of names) {
       if (Object.prototype.hasOwnProperty.call(colors, name)) continue;
       const { rating, ratingGames } = userStore.getDisplayRating(name);
       const tier = ratingTier(rating, ratingGames);
-      colors[name] = { colorClass: tier.className, title: tier.title };
+      colors[name] = { colorClass: tier.className, title: tier.title, admin: userStore.isAdminUser(name) };
     }
     return reply.send({ colors });
   });
@@ -1145,7 +1165,12 @@ const boot = async (): Promise<void> => {
     const items = presenceService.listRecentlySeen(RECENTLY_ONLINE_LIMIT).map((entry) => {
       const { rating, ratingGames } = userStore.getDisplayRating(entry.username);
       const tier = ratingTier(rating, ratingGames);
-      return { ...entry, colorClass: tier.className, title: tier.title };
+      return {
+        ...entry,
+        colorClass: tier.className,
+        title: tier.title,
+        admin: userStore.isAdminUser(entry.username),
+      };
     });
     return reply.send({ count: presenceService.countOnline(), items });
   });
@@ -1161,6 +1186,7 @@ const boot = async (): Promise<void> => {
       ...profile,
       colorClass: tier.className,
       title: tier.title,
+      admin: userStore.isAdminUser(profile.username),
       registeredDays: Math.floor((Date.now() - profile.createdAt) / 86400000),
     });
   });
