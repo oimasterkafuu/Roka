@@ -209,9 +209,9 @@
           </section>
 
           <section class="card">
-            <h2 class="card-title">刚刚在线</h2>
+            <h2 class="card-title">在线</h2>
             <ol class="leaderboard-list" id="recently-online-list"></ol>
-            <p id="recently-online-empty" class="panel-empty" style="display: none">暂无最近下线记录。</p>
+            <p id="recently-online-empty" class="panel-empty" style="display: none">暂无活动记录。</p>
           </section>
 
           <footer class="home-footer">
@@ -571,7 +571,7 @@
             width +
             ' ' +
             height +
-            '" preserveAspectRatio="none" aria-hidden="true">' +
+            '" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' +
             '<line class="replay-stats-axis" x1="' +
             left +
             '" y1="' +
@@ -791,7 +791,7 @@
         }
       }
 
-      /* ---------- 在线人数与「刚刚在线」 ---------- */
+      /* ---------- 在线人数与「在线」列表 ---------- */
 
       // 上一次在线人数快照（null = 尚未完成首次加载），用于检测「有人上线」并在后台弹通知。
       var prevOnlineCount = null;

@@ -120,15 +120,11 @@ class PresenceService {
     return this.records.get(this.normalize(usernameInput))?.lastSeenAt ?? null;
   }
 
-  /** 最近下线用户倒序列表（排除当前在线者），即首页「刚刚在线」。 */
-  listRecentlySeen(limit: number): PresenceSeedEntry[] {
+  /** 全部用户按最后活动时间倒序的列表（含当前在线者），即首页「在线」列表。 */
+  listByActivity(limit: number): PresenceSeedEntry[] {
     const capped = Math.max(1, Math.min(100, Math.floor(limit) || 10));
-    const now = this.now();
     const entries: PresenceSeedEntry[] = [];
-    for (const [key, record] of this.records) {
-      if (this.onlineKeys.has(key) && now - record.lastSeenAt < this.onlineWindowMs) {
-        continue;
-      }
+    for (const record of this.records.values()) {
       entries.push({ username: record.username, lastSeenAt: record.lastSeenAt });
     }
     entries.sort((a, b) => b.lastSeenAt - a.lastSeenAt);
