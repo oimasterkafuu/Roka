@@ -49,6 +49,7 @@
 #game-leaderboard td.leaderboard-name a.rt-violet,
 #game-leaderboard td.leaderboard-name a.rt-orange,
 #game-leaderboard td.leaderboard-name a.rt-red,
+#game-leaderboard td.leaderboard-name a.rt-admin,
 #game-leaderboard td.leaderboard-name a.rt-unrated:hover,
 #game-leaderboard td.leaderboard-name a.rt-gray:hover,
 #game-leaderboard td.leaderboard-name a.rt-green:hover,
@@ -56,7 +57,8 @@
 #game-leaderboard td.leaderboard-name a.rt-blue:hover,
 #game-leaderboard td.leaderboard-name a.rt-violet:hover,
 #game-leaderboard td.leaderboard-name a.rt-orange:hover,
-#game-leaderboard td.leaderboard-name a.rt-red:hover {
+#game-leaderboard td.leaderboard-name a.rt-red:hover,
+#game-leaderboard td.leaderboard-name a.rt-admin:hover {
   color: #ffffff !important;
   text-shadow: 0 0 2px black;
 }

@@ -53,8 +53,11 @@ function fullTime(time) {
 }
 
 // 带 rating 颜色的用户名链接：统一走 /username.js 组件（全局缓存 + 批量补色）。
-function userLink(username, colorClass, title) {
-  return usernameLink(username, colorClass ? { colorClass: colorClass, title: title } : null);
+function userLink(username, colorClass, title, admin) {
+  return usernameLink(
+    username,
+    colorClass ? { colorClass: colorClass, title: title, admin: admin === true } : null,
+  );
 }
 
 // 服务端渲染出的 @提及链接只带 data-username，这里批量补 rating 颜色。
@@ -424,6 +427,7 @@ function createPostElement(post) {
     post.author,
     post.authorInfo && post.authorInfo.colorClass,
     post.authorInfo && post.authorInfo.title,
+    post.authorInfo && post.authorInfo.admin,
   );
   $author.addClass('feed-author').appendTo($head);
   $('<span class="feed-time"></span>')

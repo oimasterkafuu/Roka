@@ -179,8 +179,12 @@ function renderUsers() {
     }
 
     var $name = $('<td></td>');
-    // 用户名：统一用户名组件（/api/admin/users 已附 colorClass/title）。
-    usernameLink(user.username, { colorClass: user.colorClass, title: user.title }).appendTo($name);
+    // 用户名：统一用户名组件（/api/admin/users 已附 colorClass/title/admin）。
+    usernameLink(user.username, {
+      colorClass: user.colorClass,
+      title: user.title,
+      admin: user.admin === true,
+    }).appendTo($name);
     $tr.append($name);
 
     $('<td></td>').text(Math.round(user.rating)).appendTo($tr);
