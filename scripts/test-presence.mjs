@@ -1,7 +1,7 @@
 // Roka 统一在线状态（presence）测试：
 // 第一部分（单元）：假时钟直接驱动 dist/server/presence-service.js，覆盖
 //   活动刷新、过期判离线、去重计数、离线↔在线转换、节流落盘与兜底落盘、
-//   「刚刚在线」列表、seed 重启恢复；
+//   「在线」列表（全员按最后活动倒序，含在线者与自己）、seed 重启恢复；
 // 第二部分（集成）：临时数据目录 + 随机端口启动 dist/server.js，验证
 //   任意 API 请求刷新「最后在线」、socket 连接去重计数、bot 连接不计入在线、
 //   重启后从落盘 lastSeenAt 恢复（seed）。
@@ -212,18 +212,19 @@ async function runUnitTests() {
     'sweep 对掉线用户兜底落盘最后活动时间',
   );
 
-  // 「刚刚在线」：排除当前在线者、按最后在线倒序。
+  // 「在线」列表：全员按最后活动倒序，不排除当前在线者。
   presence.touch('Bob'); // Bob 重新上线（离线→在线）
-  const recent = presence.listRecentlySeen(8);
-  assert(recent.length === 1 && recent[0].username === 'Alice', '「刚刚在线」排除当前在线用户');
-  assert(recent[0].lastSeenAt === aliceLastSeen, '「刚刚在线」条目的时间为最后活动时间');
+  const recent = presence.listByActivity(8);
+  assert(recent.length === 2, '「在线」列表包含全部有记录用户（含在线者）');
+  assert(recent[0].username === 'Bob' && recent[1].username === 'Alice', '「在线」列表按最后活动倒序');
+  assert(recent[1].lastSeenAt === aliceLastSeen, '「在线」列表条目的时间为最后活动时间');
 
   // 过期后再次 touch 重新判为上线转换。
   now += WINDOW + 1_000;
   presence.sweep();
   assert(presence.touch('Alice') === true, '过期后再次 touch 重新返回上线转换');
 
-  // seed 重启恢复：窗口内的记录恢复为在线，窗口外的进「刚刚在线」。
+  // seed 重启恢复：窗口内的记录恢复为在线；「在线」列表含全部记录（含在线者）。
   const restored = new PresenceService({ onlineWindowMs: WINDOW, now: () => now });
   restored.seed([
     { username: 'Carol', lastSeenAt: now - 1_000 },
@@ -231,8 +232,11 @@ async function runUnitTests() {
   ]);
   assert(restored.isOnline('Carol') && restored.countOnline() === 1, 'seed 恢复窗口内用户为在线');
   assert(!restored.isOnline('Dave'), 'seed 恢复窗口外用户为离线');
-  const restoredRecent = restored.listRecentlySeen(8);
-  assert(restoredRecent.length === 1 && restoredRecent[0].username === 'Dave', 'seed 后「刚刚在线」只含离线用户');
+  const restoredRecent = restored.listByActivity(8);
+  assert(
+    restoredRecent.length === 2 && restoredRecent[0].username === 'Carol' && restoredRecent[1].username === 'Dave',
+    'seed 后「在线」列表含在线与离线用户并按活动倒序',
+  );
 }
 
 // ---------- 第二部分：集成测试（真实服务器） ----------
@@ -252,7 +256,7 @@ async function prepareUsers(dir) {
   await store.register(ALICE, 'presence-pass-1');
   await store.register(BOB, 'presence-pass-2');
   await store.register(CAROL, 'presence-pass-3');
-  // Carol 历史上活跃过（2 小时前），用于验证 seed 恢复 + 「刚刚在线」列表。
+  // Carol 历史上活跃过（2 小时前），用于验证 seed 恢复 + 「在线」列表。
   await store.setLastSeenAt(CAROL, Date.now() - 2 * 3600_000);
   const aliceSid = await store.rotateSession(ALICE);
   const bobSid = await store.rotateSession(BOB);
@@ -313,12 +317,12 @@ async function runIntegrationTests() {
   await waitTcpReady(port, SERVER_READY_TIMEOUT_MS);
   log(`测试服务器已启动：${baseUrl}`);
 
-  // seed 恢复：Carol 从未在本次启动后活动，但应出现在「刚刚在线」。
+  // seed 恢复：Carol 从未在本次启动后活动，但应出现在「在线」列表。
   const initial = await onlineCount(baseUrl, aliceToken);
   assert(initial.count === 0, '启动后无任何活动时在线人数为 0（/api/online 自身不计活动）');
   assert(
     Array.isArray(initial.items) && initial.items.some((item) => item.username === CAROL),
-    '重启后从落盘 lastSeenAt 恢复「刚刚在线」（seed）',
+    '重启后从落盘 lastSeenAt 恢复「在线」列表（seed）',
   );
 
   // 任意 API 请求刷新「最后在线」。
@@ -330,10 +334,16 @@ async function runIntegrationTests() {
   assert(typeof after === 'number' && (before === null || after > before), 'API 请求刷新「最后在线」时间');
 
   // 在线人数：Alice（刚才的 API 活动）+ Bob 各计一次；多连接去重。
+  // 「在线」列表全员按最后活动倒序：Bob 最后活动，排最前；自己（Alice）不再被隐藏。
   await api(baseUrl, bobToken, 'GET', '/api/auth/me');
   let data = await onlineCount(baseUrl, aliceToken);
   assert(data.count === 2, '两个活跃用户在线人数为 2');
-  assert(!data.items.some((item) => item.username === ALICE), '在线用户不出现在「刚刚在线」');
+  assert(data.items.some((item) => item.username === ALICE), '在线用户（含自己）也出现在「在线」列表');
+  assert(data.items[0]?.username === BOB, '「在线」列表按最后活动倒序（Bob 最后活动排最前）');
+  assert(
+    data.items.every((item, index) => index === 0 || item.lastSeenAt <= data.items[index - 1].lastSeenAt),
+    '「在线」列表整体按 lastSeenAt 倒序',
+  );
 
   const aliceSocket = await connectSocket(baseUrl, aliceToken, 'Alice');
   data = await onlineCount(baseUrl, aliceToken);
