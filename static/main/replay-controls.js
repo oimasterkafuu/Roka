@@ -1,4 +1,4 @@
-function backTurn() {
+function backTurn(silent = false) {
   if (is_autoplaying) switchAutoplay();
   if (!replay_data || !replay_data.patches || cur_turn <= 0) {
     return false;
@@ -7,12 +7,12 @@ function backTurn() {
   if (!patch || !patch.backward) {
     return false;
   }
-  update(patch.backward);
+  update(patch.backward, silent ? { silent: true } : undefined);
   cur_turn -= 1;
   return true;
 }
 
-function nextTurn(ignore = false) {
+function nextTurn(ignore = false, silent = false) {
   if (is_autoplaying && !ignore) return false;
   if (!replay_data || !replay_data.patches || cur_turn >= replay_data.patches.length) {
     return false;
@@ -21,7 +21,7 @@ function nextTurn(ignore = false) {
   if (!patch || !patch.forward) {
     return false;
   }
-  update(patch.forward);
+  update(patch.forward, silent ? { silent: true } : undefined);
   cur_turn += 1;
   return true;
 }
@@ -71,11 +71,13 @@ function jumpToFrame(targetFrame) {
     return;
   }
   if (is_autoplaying) switchAutoplay();
+  // 中间帧走静默路径（issue #87）：只应用局面补丁，跳过迷雾重算/render()/
+  // 排行榜/统计图等界面刷新；落点帧走完整 update() 一次，保证视角与界面正确。
   while (cur_turn < targetFrame) {
-    if (!nextTurn(true)) break;
+    if (!nextTurn(true, cur_turn + 1 < targetFrame)) break;
   }
   while (cur_turn > targetFrame) {
-    if (!backTurn()) break;
+    if (!backTurn(cur_turn - 1 > targetFrame)) break;
   }
 }
 

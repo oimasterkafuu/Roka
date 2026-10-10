@@ -156,6 +156,9 @@ var grid_type,
   fog,
   have_build,
   have_route = Array(4);
+// 格子 DOM 元素缓存与内容影子表（init_map 随 n/m 重建；render() 热路径
+// 免选择器查找与 innerHTML 序列化读取，issue #87）。
+var cell_elems, cell_html;
 var route;
 var general_order = Array();
 
@@ -354,6 +357,19 @@ function init_map(_n, _m, general) {
     ts += '</tr>';
   }
   $('#map').html('<table><tbody>' + ts + '</table></tbody>');
+  // 格子元素一次性缓存（render() 是唯一写者）：避免每帧 n·m 次 id 选择器
+  // 查找；cell_html 记录各格上次写入的 innerHTML，免每帧序列化读取比对。
+  cell_elems = Array(n);
+  cell_html = Array(n);
+  var tds = $('#map td');
+  for (var i = 0, t = 0; i < n; i++) {
+    cell_elems[i] = Array(m);
+    cell_html[i] = Array(m);
+    for (var j = 0; j < m; j++) {
+      cell_elems[i][j] = tds[t++];
+      cell_html[i][j] = '';
+    }
+  }
 
   if (!general || general[0] == -1) {
     general = [n / 2 - 0.5, m / 2 - 0.5];
@@ -362,7 +378,7 @@ function init_map(_n, _m, general) {
   $('#map').css('top', $(document).height() / 2 + (n / 2 - general[0] - 0.5) * scale_sizes[scale] + 'px');
   for (var i = 0; i < n; i++) {
     for (var j = 0; j < m; j++) {
-      $('#t' + i + '_' + j).on('click', Function('click(' + i + ',' + j + ')'));
+      $(cell_elems[i][j]).on('click', Function('click(' + i + ',' + j + ')'));
     }
   }
 }
