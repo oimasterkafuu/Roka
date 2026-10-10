@@ -69,6 +69,8 @@ export interface GameDisciplineEvent {
   turn: number;
   elapsedMs: number;
   occurredAt: number;
+  /** 本局实际玩家总数（参赛者席位数，不含观战者）。 */
+  playerCount: number;
 }
 
 interface GameCallbacks {
@@ -1804,6 +1806,7 @@ export class GameEngine {
       turn: this.turn,
       elapsedMs: Date.now() - this.startAt,
       occurredAt: Date.now(),
+      playerCount: this.playerSids.length,
     });
     return true;
   }
