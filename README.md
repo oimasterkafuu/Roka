@@ -16,7 +16,7 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准；未结束局在失败率中计失败）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准；未结束局在失败率中计失败）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）、`pnpm run test:admin-badge`（管理员用户名徽标测试）。
 
 Apex Bot 可独立运行或由服务端托管：
 

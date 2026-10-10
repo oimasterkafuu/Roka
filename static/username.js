@@ -1,18 +1,25 @@
 // 全站统一用户名渲染组件：带 rating 颜色（rt-* 色阶，与排行榜同源）的可点击用户名链接。
 // 用法：
-//   var $a = usernameLink(name, info);   // info 可选 {colorClass, title}；缺省时查全局缓存，再缺省 rt-unrated
-//   usernameCacheSeed({name: {colorClass, title}});  // 用接口已有数据（排行榜/feed authorInfo 等）喂缓存
+//   var $a = usernameLink(name, info);   // info 可选 {colorClass, title, admin}；缺省时查全局缓存，再缺省 rt-unrated
+//   usernameCacheSeed({name: {colorClass, title, admin}});  // 用接口已有数据（排行榜/feed authorInfo 等）喂缓存
 //   usernameEnsureColors([name, ...]);   // 批量拉取缺失名字的颜色（/api/user-colors），返回 Promise
 // 缓存回填后，已渲染的链接（带 data-username 标记）会自动刷新颜色与 title。
+// 管理员账号（含超管，info.admin === true）统一渲染为 rt-admin（黑色加粗）+ 名字旁
+// 可见的 Headquarters 徽标（span.hq-badge）；rating 头衔仍保留在 title tooltip。
 // 防注入：一律 jQuery DOM 构建 + .text() 插入用户名，不拼 HTML 字符串。
 
-// 用户名 → {colorClass, title} 全局缓存；null 表示「已问过接口，确认按未定级显示」。
+// 用户名 → {colorClass, title, admin} 全局缓存；null 表示「已问过接口，确认按未定级显示」。
 var usernameColorCache = {};
 // 进行中的批量请求去重（key = 排序后的名字列表 join）。
 var usernameColorInflight = {};
 
 function usernameColorKey(username) {
   return String(username);
+}
+
+// 缓存条目是否管理员（含超管）：管理员名字统一 rt-admin + Headquarters 徽标（issue #92）。
+function usernameInfoIsAdmin(info) {
+  return !!info && info.admin === true;
 }
 
 // 用调用方已有数据（排行榜条目、feed authorInfo、profile 响应等）喂缓存，并刷新已渲染链接。
@@ -26,6 +33,7 @@ function usernameCacheSeed(map) {
     usernameColorCache[usernameColorKey(name)] = {
       colorClass: info.colorClass,
       title: info.title || '',
+      admin: info.admin === true,
     };
     seeded = true;
   }
@@ -68,6 +76,7 @@ function usernameEnsureColors(names) {
         usernameColorCache[key] = {
           colorClass: colors[key].colorClass || 'rt-unrated',
           title: colors[key].title || '',
+          admin: colors[key].admin === true,
         };
       }
       usernameRefreshRendered();
@@ -99,18 +108,32 @@ function usernameColorsInvalidate() {
   usernameEnsureColors(names);
 }
 
-// 缓存回填后刷新已渲染链接：所有带 data-username 且类名以 rt- 开头的元素同步颜色/title。
+// Headquarters 徽标 DOM（管理员名字旁的可见标注；rating 头衔仍由 title tooltip 承担）。
+function usernameHqBadge() {
+  return $('<span class="hq-badge"></span>').text('Headquarters');
+}
+
+// 缓存回填后刷新已渲染链接：所有带 data-username 且类名以 rt- 开头的元素同步颜色/title，
+// 管理员标记变化时同步补/摘 Headquarters 徽标。
 function usernameRefreshRendered() {
   $('[data-username]').each(function () {
     var key = usernameColorKey($(this).attr('data-username'));
     var info = usernameColorCache[key];
     if (!info) return;
     var $el = $(this);
-    // 先褪掉旧 rt-* 档，再上新档，避免跨档残留。
-    $el.removeClass('rt-unrated rt-gray rt-green rt-cyan rt-blue rt-violet rt-orange rt-red');
-    $el.addClass(info.colorClass || 'rt-unrated');
+    // 先褪掉旧 rt-* 档（含 rt-admin），再上新档，避免跨档残留。
+    $el.removeClass('rt-unrated rt-gray rt-green rt-cyan rt-blue rt-violet rt-orange rt-red rt-admin');
+    $el.addClass(usernameInfoIsAdmin(info) ? 'rt-admin' : info.colorClass || 'rt-unrated');
     if (info.title) {
       $el.attr('title', info.title);
+    }
+    var $badge = $el.children('.hq-badge');
+    if (usernameInfoIsAdmin(info)) {
+      if (!$badge.length) {
+        $el.append(usernameHqBadge());
+      }
+    } else {
+      $badge.remove();
     }
   });
 }
@@ -121,8 +144,10 @@ function usernameRefreshRendered() {
 function usernameLinkHtml(username) {
   var key = usernameColorKey(username);
   var cached = usernameColorCache[key] || null;
-  var cls = (cached && cached.colorClass) || 'rt-unrated';
+  var isAdmin = usernameInfoIsAdmin(cached);
+  var cls = isAdmin ? 'rt-admin' : (cached && cached.colorClass) || 'rt-unrated';
   var titleAttr = cached && cached.title ? ' title="' + htmlescape(cached.title) + '"' : '';
+  var badge = isAdmin ? '<span class="hq-badge">Headquarters</span>' : '';
   return (
     '<a href="/u/' +
     encodeURIComponent(username) +
@@ -134,28 +159,38 @@ function usernameLinkHtml(username) {
     htmlescape(username) +
     '">' +
     htmlescape(username) +
+    badge +
     '</a>'
   );
 }
 
 // 构建统一用户名链接：<a href="/u/名字" class="rt-*" data-username="名字">名字</a>
-// info 可选 {colorClass, title}；不传时查全局缓存，未命中按 rt-unrated 降级（可后续批量补色刷新）。
+// （管理员为 class="rt-admin" 且名字后追加 <span class="hq-badge">Headquarters</span>）。
+// info 可选 {colorClass, title, admin}；不传时查全局缓存，未命中按 rt-unrated 降级（可后续批量补色刷新）。
 // extraClass 可选，如调用方自己的样式类（feed-author 等）。
 // opts 可选 {stopPropagation: true}：给链接绑 click 阻止冒泡（用于整行可点的表格，点名字跳主页、点行其余进房间/回放）。
 function usernameLink(username, info, extraClass, opts) {
   var key = usernameColorKey(username);
   if (info && info.colorClass) {
-    usernameColorCache[key] = { colorClass: info.colorClass, title: info.title || '' };
+    usernameColorCache[key] = {
+      colorClass: info.colorClass,
+      title: info.title || '',
+      admin: info.admin === true,
+    };
   }
   var cached = usernameColorCache[key] || null;
+  var isAdmin = usernameInfoIsAdmin(cached);
   var $a = $('<a></a>')
     .attr('href', '/u/' + encodeURIComponent(username))
     .attr('data-username', username)
-    .addClass((cached && cached.colorClass) || 'rt-unrated')
+    .addClass(isAdmin ? 'rt-admin' : (cached && cached.colorClass) || 'rt-unrated')
     .text(username);
   var title = (info && info.title) || (cached && cached.title) || '';
   if (title) {
     $a.attr('title', title);
+  }
+  if (isAdmin) {
+    $a.append(usernameHqBadge());
   }
   if (extraClass) {
     $a.addClass(extraClass);
