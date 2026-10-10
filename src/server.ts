@@ -115,8 +115,8 @@ const RATE_LIMIT_REAL_IP_HEADERS = [
   'forwarded',
 ] as const;
 const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
-// 「刚刚在线」列表展示条数（参考排行榜前 10，取 8）。
-const RECENTLY_ONLINE_LIMIT = 8;
+// 首页「在线」列表展示条数（参考排行榜前 10，取 8）。
+const ONLINE_LIST_LIMIT = 8;
 // 连接/断开频繁，home_online 失效通知做简单节流合并。
 const HOME_ONLINE_NOTIFY_DELAY_MS = 2000;
 // 在线状态会随时间自然过期（无事件触发），周期扫描掉线用户并补广播。
@@ -1162,7 +1162,7 @@ const boot = async (): Promise<void> => {
   });
 
   app.get('/api/online', async (_request, reply) => {
-    const items = presenceService.listRecentlySeen(RECENTLY_ONLINE_LIMIT).map((entry) => {
+    const items = presenceService.listByActivity(ONLINE_LIST_LIMIT).map((entry) => {
       const { rating, ratingGames } = userStore.getDisplayRating(entry.username);
       const tier = ratingTier(rating, ratingGames);
       return {
