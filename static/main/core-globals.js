@@ -37,6 +37,13 @@ var gameLeaderboard = null;
 // 当前帧排序后的排行榜（render-update.js 每帧赋值，隐式全局改为显式声明）。
 var lb = null;
 
+// 排行榜兵力/领土列宽锁定（issue #93）：记录本局显示过的最大位数
+// （封顶 LB_LOCK_DIGITS_MAX），列宽据此只增不减，数值跌回更少位数也不回缩，
+// 防止列宽随回合跳动；实时对局由 render-update.js 逐帧维护，
+// 回放在 initReplayStats 预处理时一次锁定到全程最大值。
+const LB_LOCK_DIGITS_MAX = 6;
+var lb_lock_digits = { army: 0, land: 0 };
+
 // 主城转让请求（issue #81）：点击队友主城后待确认的目标格 {x, y}；null 表示无待确认请求。
 var crown_transfer_target = null;
 

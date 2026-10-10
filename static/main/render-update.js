@@ -37,6 +37,36 @@ function applyReplayFogView() {
   }
 }
 
+// 排行榜兵力/领土列宽锁定（issue #93）：把本帧显示的最大位数并入锁定值
+// （只增不减、封顶 LB_LOCK_DIGITS_MAX），锁定值变化时经 CSS 变量下发列宽。
+function lockLeaderboardColumnDigits(armyDigits, landDigits) {
+  var a = Math.min(LB_LOCK_DIGITS_MAX, Math.max(lb_lock_digits.army, armyDigits));
+  var l = Math.min(LB_LOCK_DIGITS_MAX, Math.max(lb_lock_digits.land, landDigits));
+  if (a == lb_lock_digits.army && l == lb_lock_digits.land) return;
+  lb_lock_digits.army = a;
+  lb_lock_digits.land = l;
+  applyLeaderboardColumnLock();
+}
+
+// 按锁定位数下发列宽：ch 以数字「0」宽度计，另加 0.5ch 抵消非等宽字体
+// 数字的宽度差（最宽数字通常为 0/8），宁可略宽不要跳动。
+function applyLeaderboardColumnLock() {
+  var el = document.getElementById('game-leaderboard');
+  if (!el) return;
+  el.style.setProperty('--lb-army-w', lb_lock_digits.army + 0.5 + 'ch');
+  el.style.setProperty('--lb-land-w', lb_lock_digits.land + 0.5 + 'ch');
+}
+
+// 新对局/新回放开局时清除锁定（main.js init_map 统一调用）。
+function resetLeaderboardColumnLock() {
+  lb_lock_digits.army = 0;
+  lb_lock_digits.land = 0;
+  var el = document.getElementById('game-leaderboard');
+  if (!el) return;
+  el.style.removeProperty('--lb-army-w');
+  el.style.removeProperty('--lb-land-w');
+}
+
 function render() {
   setRoomTopLeftVisible(false);
   $('#menu').css('display', 'none');
@@ -295,6 +325,10 @@ function update(data, options) {
   // 组队局回放：团队合并展示——每队一个整体条目显示团队总兵力并
   // 按总兵力排序，队内成员按兵力排序紧随其后（成员行显示真实用户名）。
   var mergeTeams = is_replay && !fogTeamGameView && fogTeamGame(lb);
+  // 本帧实际显示数值的最大位数（issue #93 列宽锁定）：组队合并局按团队合计
+  // 统计（成员行数值不超过本队合计），非合并局按个人条目统计。
+  var frameArmyDigits = 1,
+    frameLandDigits = 1;
   if (mergeTeams) {
     var teamGroups = [];
     var teamGroupIndex = {};
@@ -323,6 +357,8 @@ function update(data, options) {
         if (a.land != b.land) return b.land - a.land;
         return a.id - b.id;
       });
+      frameArmyDigits = Math.max(frameArmyDigits, String(g.army).length);
+      frameLandDigits = Math.max(frameLandDigits, String(g.land).length);
       th +=
         '<tr class="lb-team' +
         (g.allDead ? ' dead' : '') +
@@ -332,9 +368,9 @@ function update(data, options) {
         g.colorId +
         '">' +
         fogTeamName(g.team) +
-        '</td><td>' +
+        '</td><td class="lb-army">' +
         g.army +
-        '</td><td>' +
+        '</td><td class="lb-land">' +
         g.land +
         '</td></tr>';
       for (var j = 0; j < g.members.length; j++) {
@@ -347,9 +383,9 @@ function update(data, options) {
           mb.id +
           '">' +
           usernameLinkHtml(mb.uid) +
-          '</td><td>' +
+          '</td><td class="lb-army">' +
           mb.army +
-          '</td><td>' +
+          '</td><td class="lb-land">' +
           mb.land +
           '</td></tr>';
       }
@@ -361,6 +397,8 @@ function update(data, options) {
       var nameCell = fogTeamGameView
         ? htmlescape(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView))
         : usernameLinkHtml(lb[i].uid);
+      frameArmyDigits = Math.max(frameArmyDigits, String(lb[i].army).length);
+      frameLandDigits = Math.max(frameLandDigits, String(lb[i].land).length);
       th +=
         '<tr class="' +
         lb[i].class_ +
@@ -370,13 +408,15 @@ function update(data, options) {
         lb[i].id +
         '">' +
         nameCell +
-        '</td><td>' +
+        '</td><td class="lb-army">' +
         lb[i].army +
-        '</td><td>' +
+        '</td><td class="lb-land">' +
         lb[i].land +
         '</td></tr>';
     }
   }
+  // 兵力/领土列宽锁定（issue #93）：并入本帧最大位数，只增不减。
+  lockLeaderboardColumnDigits(frameArmyDigits, frameLandDigits);
   $('#game-leaderboard').html(th);
   $('#game-leaderboard').css('display', '');
   // 回放统计图：逐帧刷新进度游标并把面板贴到排行榜正下方（见 replay-stats.js）。
