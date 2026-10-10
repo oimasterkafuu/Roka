@@ -139,17 +139,21 @@ function render() {
         if (hasB) txt += '<div class="build-badge build-b' + (hasC ? ' with-c' : '') + '"></div>';
         if (hasC) txt += '<div class="build-badge build-c"></div>';
       }
-      if ($('#t' + i + '_' + j).attr('class') != cls) {
-        $('#t' + i + '_' + j).attr('class', cls);
+      // 格子元素走 init_map 构建的缓存表（issue #87）：避免每帧每格两次
+      // id 选择器查找；cell_html 影子表避免每帧 innerHTML 序列化读取。
+      var cell = cell_elems[i][j];
+      if (cell.className != cls) {
+        cell.className = cls;
       }
-      if ($('#t' + i + '_' + j).html() != txt) {
-        $('#t' + i + '_' + j).html(txt);
+      if (cell_html[i][j] != txt) {
+        cell.innerHTML = txt;
+        cell_html[i][j] = txt;
       }
     }
   }
 }
 
-function update(data) {
+function update(data, options) {
   if (typeof data.replay != 'undefined') replay_id = data.replay;
   if (!is_replay) {
     game_ended = Boolean(data.game_end);
@@ -202,6 +206,12 @@ function update(data) {
         }
       }
     }
+  }
+  if (options && options.silent) {
+    // 回放跳转的中间帧（issue #87）：只应用上面的局面补丁，迷雾重算、
+    // render()、排行榜/统计图/回合计数器等界面刷新留待落点帧的完整
+    // update() 一次处理（见 replay-controls.js jumpToFrame）。
+    return;
   }
   if (is_replay) {
     // 回放帧不带 fog 字段：按当前视角（全知/队伍）重算迷雾遮罩。
