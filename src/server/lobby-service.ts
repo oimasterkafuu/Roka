@@ -7,6 +7,7 @@ import {
   evaluateAutomaticDiscipline,
   isRapidSurrender,
   RAPID_SURRENDER_WINDOW_MS,
+  shouldResetAutomaticBanCount,
 } from './auto-ban-policy';
 import { DISCONNECT_GRACE_MS } from '../game-engine/constants';
 import { isHuaxiaSeasonActive } from '../map/huaxia-season';
@@ -126,6 +127,7 @@ class LobbyService {
         turn: item.turn,
         elapsedMs: item.elapsedMs,
         occurredAt: item.occurredAt,
+        playerCount: item.playerCount,
       }));
     await this.userStore.recordDisciplineEvent(event.username, {
       occurredAt: event.occurredAt,
@@ -133,8 +135,13 @@ class LobbyService {
       turn: event.turn,
       elapsedMs: event.elapsedMs,
       evidence: `${event.cause} at turn ${event.turn}`,
+      playerCount: event.playerCount,
     });
     if (type !== 'afk' && type !== 'rapid_surrender') return;
+    // 梯度重置：不含当前事件的历史中，最近一次违规距今满 14 天则清零重新累计。
+    if (shouldResetAutomaticBanCount(previous, event.occurredAt)) {
+      await this.userStore.resetAutomaticBanCount(event.username);
+    }
     const decision = evaluateAutomaticDiscipline(
       event,
       previous,
