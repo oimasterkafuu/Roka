@@ -1,7 +1,7 @@
 export const RAPID_SURRENDER_TURNS = 20;
 export const RAPID_SURRENDER_WINDOW_MS = 24 * 60 * 60 * 1000;
-export const RAPID_SURRENDER_TRIGGER_COUNT = 3;
-export const AFK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+export const RAPID_SURRENDER_TRIGGER_COUNT = 10;
+export const AFK_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const AFK_TRIGGER_COUNT = 2;
 export const AUTO_BAN_BASE_MS = 60 * 60 * 1000;
 export const AUTO_BAN_MAX_MS = 7 * 24 * 60 * 60 * 1000;
