@@ -4,6 +4,9 @@
 
 // 统计图内部分组序列：组队局按队伍聚合，非组队局按玩家各自成组。
 var replay_stats_groups = null;
+// 全程兵力/领土最大位数（buildReplayStatsGroups 预计算，issue #93）：
+// 供排行榜列宽预锁定（initReplayStats）与统计图数值标注的预留排版。
+var replay_stats_max_digits = { army: 1, land: 1 };
 // 当前帧游标位置对应的缓存画布（坐标轴与曲线只需画一次，逐帧只补游标竖线）。
 var replay_stats_base = null;
 var replay_stats_seeking = false;
@@ -107,6 +110,15 @@ function buildReplayStatsGroups() {
   for (var f = 1; f < frames; f++) {
     absorb(replay_data.patches[f - 1].forward.leaderboard || [], f);
   }
+  // 顺手统计全程兵力/领土最大位数（issue #93）：分组口径与排行榜显示一致
+  // （组队局=团队合计、非组队局=个人），供列宽预锁定与数值标注排版。
+  replay_stats_max_digits = { army: 1, land: 1 };
+  for (var i = 0; i < groups.length; i++) {
+    for (var f = 0; f < frames; f++) {
+      replay_stats_max_digits.army = Math.max(replay_stats_max_digits.army, String(groups[i].army[f]).length);
+      replay_stats_max_digits.land = Math.max(replay_stats_max_digits.land, String(groups[i].land[f]).length);
+    }
+  }
   return groups;
 }
 
@@ -209,7 +221,17 @@ function drawReplayStatsBase() {
   }
   ctx.fillStyle = 'rgba(37, 48, 66, 0.55)';
   ctx.font = '10px Quicksand, sans-serif';
-  ctx.fillText(formatReplayStatsValue(maxVal), padL + 2, padT - 4);
+  // 顶部最大值标注按预计算的最大位数预留宽度排版（issue #93）：非等宽字体以
+  // 最宽数字「8」估算占位，标注过宽时向右收进绘图区，避免探出边界挤压曲线。
+  var maxLabel = formatReplayStatsValue(maxVal);
+  var reservedDigits = metric == 'land' ? replay_stats_max_digits.land : replay_stats_max_digits.army;
+  var labelW = Math.max(
+    ctx.measureText(maxLabel).width,
+    ctx.measureText(new Array(reservedDigits + 1).join('8')).width,
+  );
+  var labelX = padL + 2;
+  if (labelX + labelW > padL + plotW) labelX = padL + plotW - labelW;
+  ctx.fillText(maxLabel, labelX, padT - 4);
   for (i = 0; i < replay_stats_groups.length; i++) {
     g = replay_stats_groups[i];
     var color = replayPlayerColor(g.colorId);
@@ -295,6 +317,11 @@ function initReplayStats() {
   if (window.innerWidth <= 1000) return;
   replay_stats_groups = buildReplayStatsGroups();
   if (!replay_stats_groups.length) return;
+  // 排行榜兵力/领土列宽一次锁定到全程最大位数（issue #93），
+  // 回放跳转/倒退也不会引起列宽变化（逐帧 update() 的锁定只增不减）。
+  lb_lock_digits.army = Math.min(LB_LOCK_DIGITS_MAX, replay_stats_max_digits.army);
+  lb_lock_digits.land = Math.min(LB_LOCK_DIGITS_MAX, replay_stats_max_digits.land);
+  applyLeaderboardColumnLock();
   var legend = [];
   var legendTeamGame = fogTeamGame(replay_data.initial.leaderboard || []);
   for (var i = 0; i < replay_stats_groups.length; i++) {

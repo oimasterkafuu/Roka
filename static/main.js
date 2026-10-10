@@ -318,6 +318,8 @@ function replayStart() {
 function init_map(_n, _m, general) {
   chat_focus = false;
   $('#chatroom-input').blur();
+  // 排行榜列宽锁定（issue #93）按对局重置，新局从实际位数重新累积。
+  resetLeaderboardColumnLock();
   ((n = _n), (m = _m));
   grid_type = Array(n);
   for (var i = 0; i < n; i++) {

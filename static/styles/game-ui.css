@@ -26,6 +26,14 @@
 #game-leaderboard td:not(.leaderboard-name) {
   color: #253042;
 }
+/* 兵力/领土列宽锁定（issue #93）：min-width 由 JS 按锁定最大位数经 CSS 变量
+   下发（只增不减）；ch 以「0」宽度计，JS 侧另加 0.5ch 抵消非等宽数字宽度差。 */
+#game-leaderboard td.lb-army {
+  min-width: var(--lb-army-w, auto);
+}
+#game-leaderboard td.lb-land {
+  min-width: var(--lb-land-w, auto);
+}
 #game-leaderboard tr.afk td {
   background: rgba(255, 255, 255, 0.75);
 }
@@ -126,7 +134,8 @@
   }
 }
 
-/* 回放局势统计图：固定于右上角排行榜正下方（top 由 replay-stats.js 逐帧对齐） */
+/* 回放局势统计图：固定于右上角排行榜正下方（top 由 replay-stats.js 逐帧对齐）；
+   左上与左下均圆角，与上方排行榜的左下圆角沿左缘衔接（issue #93） */
 #replay-stats {
   position: fixed;
   right: 0;
@@ -135,7 +144,7 @@
   box-sizing: border-box;
   padding: 6px 8px 8px;
   background: #ffffff;
-  border-radius: 0 0 0 8px;
+  border-radius: 8px 0 0 8px;
   box-shadow: 0 2px 8px rgba(37, 48, 66, 0.15);
 }
 #replay-stats .tabs {
