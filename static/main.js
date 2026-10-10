@@ -233,8 +233,12 @@ function fetchReplayWithProgress(url) {
       throw new Error('load failed');
     }
     var total = Number(res.headers.get('X-Replay-Size')) || 0;
+    var metadata = { etag: res.headers.get('ETag'), lastModified: res.headers.get('Last-Modified') };
     if (!res.body || !res.body.getReader) {
-      return res.arrayBuffer();
+      return res.arrayBuffer().then(function (buffer) {
+        updateReplayLoading(buffer.byteLength, total || buffer.byteLength);
+        return { buffer: buffer, etag: metadata.etag, lastModified: metadata.lastModified };
+      });
     }
     var reader = res.body.getReader();
     var chunks = [];
@@ -248,7 +252,7 @@ function fetchReplayWithProgress(url) {
           buf.set(chunks[i], offset);
           offset += chunks[i].byteLength;
         }
-        return buf.buffer;
+        return { buffer: buf.buffer, etag: metadata.etag, lastModified: metadata.lastModified };
       }
       chunks.push(result.value);
       loaded += result.value.byteLength;
@@ -267,6 +271,35 @@ function base64ToArrayBuffer(b64) {
   return bytes.buffer;
 }
 
+function loadServerReplay(id) {
+  var url = '/api/getreplay/' + encodeURIComponent(id);
+  function fromNetwork() {
+    return fetchReplayWithProgress(url).then(function (result) {
+      var decoded = decodeReplayBinary(result.buffer);
+      // 存储失败（隐私模式、配额不足等）不影响本次观看。
+      replayCachePut(id, result).catch(function () {});
+      return decoded;
+    });
+  }
+  return replayCacheGet(id)
+    .catch(function () {
+      return null;
+    })
+    .then(function (entry) {
+      if (!entry) return fromNetwork();
+      try {
+        var decoded = decodeReplayBinary(entry.buffer);
+        updateReplayLoading(entry.size, entry.size);
+        return decoded;
+      } catch {
+        // 魔数通过但内容损坏：删掉坏条目，并且只回源一次。
+        return replayCacheDelete(id)
+          .catch(function () {})
+          .then(fromNetwork);
+      }
+    });
+}
+
 if (location.pathname.substr(0, 8) == '/replays') {
   is_replay = true;
   // pathname 中是 URL 编码后的 id（含 + 的回放 id 会变成 %2B），先解码一次，
@@ -282,16 +315,16 @@ if (location.pathname.substr(0, 8) == '/replays') {
         reject(new Error('missing local replay'));
         return;
       }
-      resolve(base64ToArrayBuffer(b64));
+      resolve(decodeReplayBinary(base64ToArrayBuffer(b64)));
     });
   } else {
     // 注意：本文件在 <head> 中同步加载，此刻 DOM 尚未解析，不能在这里操作
     // #replay-loading——显示/失败兜底统一放到 document.ready 的回放分支里。
-    replayFetch = fetchReplayWithProgress('/api/getreplay/' + encodeURIComponent(replay_id));
+    replayFetch = loadServerReplay(replay_id);
   }
   replayFetch
-    .then(function (buf) {
-      replay_data = decodeReplayBinary(buf);
+    .then(function (decoded) {
+      replay_data = decoded;
       replayStart();
     })
     .catch(function () {
