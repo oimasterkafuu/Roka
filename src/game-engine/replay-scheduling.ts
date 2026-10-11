@@ -42,7 +42,7 @@ const buildScheduledReplayActions = (replay: ReplayActionData): ScheduledReplayA
         cursorTurn += 1;
         continue;
       }
-      // 主城转让（issue #81）：自带目标坐标，不经过 selected。
+      // 历史 ops-v1 显式转让记录：自带目标坐标，不经过 selected。
       if (op.op === 't') {
         scheduledTransfers[p].set(cursorTurn, { x: op.x, y: op.y });
         cursorTurn += 1;
