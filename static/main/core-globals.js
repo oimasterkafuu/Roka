@@ -44,9 +44,6 @@ var lb = null;
 const LB_LOCK_DIGITS_MAX = 6;
 var lb_lock_digits = { army: 0, land: 0 };
 
-// 主城转让请求（issue #81）：点击队友主城后待确认的目标格 {x, y}；null 表示无待确认请求。
-var crown_transfer_target = null;
-
 // 按座位号（格子归属码 %50）查当前对局排行榜条目；不在对局中或不存在返回 null。
 function findGameLeaderboardEntry(id) {
   if (!gameLeaderboard) return null;

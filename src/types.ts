@@ -156,6 +156,8 @@ export interface GameConfig extends LobbyConfig {
   player_names: string[];
   player_teams: number[];
   map_size_version?: 1 | 2;
+  /** 仅供回放重建选择历史规则；实时对局始终启用。 */
+  auto_crown_transfer?: boolean;
 }
 
 export interface ReplayMeta {
@@ -166,6 +168,8 @@ export interface ReplayMeta {
   swamp_ratio: number;
   speed: number;
   allow_team: boolean;
+  /** 新回放启用推兵自动转属；旧回放缺省时沿用原推兵语义。 */
+  auto_crown_transfer?: boolean;
   /** 对局是否开启迷雾远征（仅作元信息记录；回放始终全视野）。 */
   fog?: boolean;
   map_token: string;
@@ -225,7 +229,7 @@ export interface ReplayPlayerOpSurrender {
   op: 'r';
 }
 
-/** 队友间主城转让（issue #81）：坐标为被转让的主城格。 */
+/** 历史 ops-v1 显式主城转让记录；新对局不再写入。 */
 export interface ReplayPlayerOpCrownTransfer {
   op: 't';
   x: number;

@@ -601,7 +601,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               半兵（智能分兵理论推出量减半取整，一次性）、<code>0</code>
               智能分兵（为其他三方向的非己方相邻格（山脉除外）保留「兵力-1」之和 + 1）。<code>half</code>
               保留作兼容：仅当 <code>mode</code> 缺失或无效时，<code>half=true</code> 才回退为
-              <code>mode=1</code>；有效的 <code>mode</code> 始终优先。
+              <code>mode=1</code>；有效的
+              <code>mode</code>
+              始终优先。有效推兵进入存活队友主城时会累兵；若该队友执行当刻拥有至少两座主城，目标主城还会自动转属出兵玩家（保持建筑及后续产兵），最后一座只累兵不转属。空推兵或点击不能转属，无需额外事件。
             </td>
           </tr>
           <tr>
@@ -635,26 +637,6 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>surrender</code></th>
             <td>
               投降并转观战：立即放弃所有控制权（有存活队友时领土转移给队友，主城降级为指挥所；否则锚点拆除、领土兵力减半后沦为孤军衰减）。
-            </td>
-          </tr>
-          <tr>
-            <th><code>transfer_crown</code></th>
-            <td>
-              <code>{ x, y }</code>。请求队友把 <code>(x,y)</code> 的主城转让给自己（issue
-              #81）。服务端校验：目标是同队存活队友的主城、自己存活、
-              对方转让后仍保有至少一座主城（不能转走对方最后一座）、对方没有未处理的转让请求；
-              全部通过后向对方连接下发 <code>crown_transfer_request</code> 事件
-              <code>{ x, y, from }</code>（<code>from</code> 为请求方用户名）等待确认， 请求 60
-              秒未答复自动作废。校验结果通过 <code>chat_message</code> 系统消息单独告知请求方。
-            </td>
-          </tr>
-          <tr>
-            <th><code>transfer_crown_reply</code></th>
-            <td>
-              <code>{ accept }</code>。拥有者答复收到的 <code>crown_transfer_request</code>：
-              <code>accept=true</code> 同意（服务端接受时重新校验全部条件，目标易主或对局结束则失败），
-              <code>false</code> 拒绝。同意后该格主城立即改属请求方（建筑不摧毁、兵力不变）， 结果以
-              <code>chat_message</code> 系统消息广播。
             </td>
           </tr>
           <tr>
