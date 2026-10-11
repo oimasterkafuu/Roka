@@ -217,7 +217,7 @@ interface DecoratedFeedComment {
   time: number;
   html: string;
   mentions: string[];
-  authorInfo: { colorClass: string; title: string; admin: boolean };
+  authorInfo: { colorClass: string; title: string; admin: boolean; banned: boolean };
   canManage: boolean;
 }
 
@@ -230,7 +230,7 @@ interface DecoratedFeedPost {
   comments: DecoratedFeedComment[];
   html: string;
   mentions: string[];
-  authorInfo: { colorClass: string; title: string; admin: boolean };
+  authorInfo: { colorClass: string; title: string; admin: boolean; banned: boolean };
   canManage: boolean;
 }
 
@@ -239,11 +239,13 @@ const resolveFeedMention = (token: string): string | null => userStore.resolveUs
 
 const usernameAppearance = (username: string, rating: number, ratingGames: number) => {
   const admin = userStore.isAdminUser(username);
+  const banned = userStore.getBanStatus(username).banned;
   const tier = ratingTier(rating, ratingGames);
   return {
-    colorClass: admin ? 'rt-admin' : tier.className,
-    title: admin ? 'Headquarters' : tier.title,
+    colorClass: banned ? 'rt-banned' : admin ? 'rt-admin' : tier.className,
+    title: banned ? '已封禁' : admin ? 'Headquarters' : tier.title,
     admin,
+    banned,
   };
 };
 
@@ -772,6 +774,7 @@ const boot = async (): Promise<void> => {
     // 踢下线：清空会话使旧 JWT 立即失效，并断开该用户全部 socket 连接。
     await userStore.clearSession(target);
     authService.disconnectUserSockets(target);
+    io.emit('home_leaderboard');
     return reply.send({ ok: true, bannedUntil });
   });
 
@@ -786,6 +789,7 @@ const boot = async (): Promise<void> => {
       return reply.code(404).send({ error: '用户不存在。' });
     }
     await userStore.unbanUser(target);
+    io.emit('home_leaderboard');
     return reply.send({ ok: true });
   });
 
@@ -808,6 +812,7 @@ const boot = async (): Promise<void> => {
     } catch (error) {
       return reply.code(400).send({ error: error instanceof Error ? error.message : '操作失败。' });
     }
+    io.emit('home_leaderboard');
     return reply.send({ ok: true });
   });
 
@@ -1141,7 +1146,7 @@ const boot = async (): Promise<void> => {
       .map((name) => name.trim())
       .filter(Boolean)
       .slice(0, 100);
-    const colors: Record<string, { colorClass: string; title: string; admin: boolean }> = {};
+    const colors: Record<string, { colorClass: string; title: string; admin: boolean; banned: boolean }> = {};
     for (const name of names) {
       if (Object.prototype.hasOwnProperty.call(colors, name)) continue;
       const { rating, ratingGames } = userStore.getDisplayRating(name);
