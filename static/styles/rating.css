@@ -42,6 +42,13 @@
 .rt-admin {
   color: #000000 !important;
 }
+/* 有效封禁优先于管理员和 rating；覆盖父级粗体及独立的 Bold 字体。 */
+.rt-banned {
+  color: #a52a2a !important;
+  font-weight: 400 !important;
+  font-family: var(--font-main) !important;
+  text-decoration: none;
+}
 
 a.rt-unrated:hover,
 a.rt-gray:hover,
@@ -51,6 +58,7 @@ a.rt-blue:hover,
 a.rt-violet:hover,
 a.rt-orange:hover,
 a.rt-red:hover,
-a.rt-admin:hover {
+a.rt-admin:hover,
+a.rt-banned:hover {
   text-decoration: underline;
 }

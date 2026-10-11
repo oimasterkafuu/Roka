@@ -1,29 +1,32 @@
 // 全站统一用户名渲染组件：带 rating 颜色（rt-* 色阶，与排行榜同源）的可点击用户名链接。
 // 用法：
-//   var $a = usernameLink(name, info);   // info 可选 {colorClass, title, admin}；缺省时查全局缓存，再缺省 rt-unrated
-//   usernameCacheSeed({name: {colorClass, title, admin}});  // 用接口已有数据（排行榜/feed authorInfo 等）喂缓存
+//   var $a = usernameLink(name, info);   // info 可选 {colorClass, title, admin, banned}；缺省时查全局缓存
+//   usernameCacheSeed({name: {colorClass, title, admin, banned}});  // 用接口已有数据喂缓存
 //   usernameEnsureColors([name, ...]);   // 批量拉取缺失名字的颜色（/api/user-colors），返回 Promise
 // 缓存回填后，已渲染的链接（带 data-username 标记）会自动刷新颜色与 title。
-// 管理员账号（含超管，info.admin === true）统一渲染为 rt-admin（黑色加粗），
-// title tooltip 为 Headquarters；无可见徽标。
-// 防注入：一律 jQuery DOM 构建 + .text() 插入用户名，不拼 HTML 字符串。
+// 有效封禁优先渲染为 rt-banned（棕色正常字重）；未封禁管理员使用 rt-admin
+// （黑色加粗）及 Headquarters tooltip；无可见徽标。
+// 防注入：DOM 版用 .text()，HTML 版转义用户名。
 
-// 用户名 → {colorClass, title, admin} 全局缓存；null 表示「已问过接口，确认按未定级显示」。
+// 用户名 → {colorClass, title, admin, banned} 全局缓存。
 var usernameColorCache = {};
-// 进行中的批量请求去重（key = 排序后的名字列表 join）。
+// 进行中的批量请求去重；失效代数防止旧请求覆盖解除封禁后的新数据。
 var usernameColorInflight = {};
+var usernameColorGeneration = 0;
 
 function usernameColorKey(username) {
   return String(username);
 }
 
-// 即使调用方带着旧 rating 信息，admin 标记仍优先决定颜色与 tooltip。
+// 即使调用方带着旧 rating 信息，有效封禁仍优先于管理员与 rating。
 function usernameNormalizeInfo(info) {
   var admin = info.admin === true;
+  var banned = info.banned === true;
   return {
-    colorClass: admin ? 'rt-admin' : info.colorClass || 'rt-unrated',
-    title: admin ? 'Headquarters' : info.title || '',
+    colorClass: banned ? 'rt-banned' : admin ? 'rt-admin' : info.colorClass || 'rt-unrated',
+    title: banned ? '已封禁' : admin ? 'Headquarters' : info.title || '',
     admin: admin,
+    banned: banned,
   };
 }
 
@@ -63,12 +66,14 @@ function usernameEnsureColors(names) {
   if (usernameColorInflight[inflightKey]) {
     return usernameColorInflight[inflightKey];
   }
+  var generation = usernameColorGeneration;
   var promise = fetch('/api/user-colors?users=' + encodeURIComponent(missing.join(',')))
     .then(function (res) {
       if (!res.ok) throw new Error('user-colors failed');
       return res.json();
     })
     .then(function (data) {
+      if (generation !== usernameColorGeneration) return;
       var colors = (data && data.colors) || {};
       // 接口没返回的名字（异常数据）按未定级落缓存，避免反复请求。
       for (var i = 0; i < missing.length; i++) {
@@ -82,17 +87,17 @@ function usernameEnsureColors(names) {
       /* 拉取失败静默：保持 rt-unrated 降级显示，下次渲染再试。 */
     })
     .then(function () {
-      delete usernameColorInflight[inflightKey];
+      if (generation === usernameColorGeneration) delete usernameColorInflight[inflightKey];
     });
   usernameColorInflight[inflightKey] = promise;
   return promise;
 }
 
-// rating 结算等颜色可能变化的时刻调用（服务端在结算完成后广播 home_leaderboard）：
-// 清空颜色缓存，并为当前页面所有已渲染的 data-username 链接重新拉取颜色，
-// 保证名字等级色在同一会话内的各个面板及时更新（issue #84）。
+// rating 结算、封禁/解封及管理员权限变动时（home_leaderboard 广播）重新拉取。
 function usernameColorsInvalidate() {
+  usernameColorGeneration++;
   usernameColorCache = {};
+  usernameColorInflight = {};
   if (typeof $ == 'undefined' || !$.fn) return;
   var names = [];
   var seen = {};
@@ -112,8 +117,10 @@ function usernameRefreshRendered() {
     var info = usernameColorCache[key];
     if (!info) return;
     var $el = $(this);
-    // 先褪掉旧 rt-* 档（含 rt-admin），再上新档，避免跨档残留。
-    $el.removeClass('rt-unrated rt-gray rt-green rt-cyan rt-blue rt-violet rt-orange rt-red rt-admin');
+    // 先褪掉旧 rt-* 档（含管理员和封禁），再上新档。
+    $el.removeClass(
+      'rt-unrated rt-gray rt-green rt-cyan rt-blue rt-violet rt-orange rt-red rt-admin rt-banned',
+    );
     $el.addClass(info.colorClass);
     $el.attr('title', info.title);
   });
@@ -143,8 +150,8 @@ function usernameLinkHtml(username) {
 }
 
 // 构建统一用户名链接：<a href="/u/名字" class="rt-*" data-username="名字">名字</a>
-// 管理员为 class="rt-admin"、title="Headquarters"，名字后不追加徽标。
-// info 可选 {colorClass, title, admin}；不传时查全局缓存，未命中按 rt-unrated 降级（可后续批量补色刷新）。
+// 封禁为 rt-banned/已封禁；未封禁管理员为 rt-admin/Headquarters，均无可见徽标。
+// info 可选 {colorClass, title, admin, banned}；不传时查全局缓存，未命中按 rt-unrated 降级。
 // extraClass 可选，如调用方自己的样式类（feed-author 等）。
 // opts 可选 {stopPropagation: true}：给链接绑 click 阻止冒泡（用于整行可点的表格，点名字跳主页、点行其余进房间/回放）。
 function usernameLink(username, info, extraClass, opts) {
