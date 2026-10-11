@@ -54,7 +54,6 @@
             <div>
               <a id="me-name" class="profile-card-name" href="#"></a>
               <span id="me-title" class="profile-card-title"></span>
-              <span id="me-admin" class="admin-badge" style="display: none">管理员</span>
             </div>
             <div class="profile-stats">
               <div class="profile-stat">
@@ -286,10 +285,12 @@
       }
 
       // 带 rating 颜色的用户名链接：统一走 /username.js 组件（全局缓存 + 批量补色）。
-      function userLink(username, colorClass, title, admin) {
+      function userLink(username, colorClass, title, admin, banned) {
         return usernameLink(
           username,
-          colorClass ? { colorClass: colorClass, title: title, admin: admin === true } : null,
+          colorClass
+            ? { colorClass: colorClass, title: title, admin: admin === true, banned: banned === true }
+            : null,
         );
       }
 
@@ -378,18 +379,23 @@
           }
           var p = await res.json();
           var seed = {};
-          seed[p.username] = { colorClass: p.colorClass, title: p.title, admin: p.admin === true };
+          seed[p.username] = {
+            colorClass: p.colorClass,
+            title: p.title,
+            admin: p.admin === true,
+            banned: p.banned === true,
+          };
           usernameCacheSeed(seed);
-          // 顶栏链接已在 loadUser 经组件渲染；seed 缓存后由 usernameRefreshRendered 统一刷新颜色。
+          // 顶栏链接已在 loadUser 经组件渲染；个人卡名字也由同一缓存刷新。
           $('#me-name')
+            .attr('data-username', p.username)
             .text(p.username)
-            .addClass(p.colorClass || 'rt-unrated')
             .attr('href', '/u/' + encodeURIComponent(p.username));
-          $('#me-title').text(p.title || '');
+          usernameRefreshRendered();
+          $('#me-title').text(p.banned ? '' : p.title || '');
           setRatingWithProvisional($('#me-rating'), p.rating, p.provisional);
           $('#me-games').text(p.ratingGames);
           $('#me-days').text(p.registeredDays);
-          $('#me-admin').toggle(p.isAdmin === true);
           $('#me-profile-link').attr('href', '/u/' + encodeURIComponent(p.username));
         } catch (e) {
           // 个人信息卡加载失败不阻塞首页其余功能
@@ -781,7 +787,7 @@
               .text(index + 1)
               .appendTo($li);
             var $name = $('<span class="lb-name"></span>').appendTo($li);
-            userLink(item.username, item.colorClass, item.title, item.admin).appendTo($name);
+            userLink(item.username, item.colorClass, item.title, item.admin, item.banned).appendTo($name);
             var $rating = $('<span class="lb-rating"></span>').appendTo($li);
             setRatingWithProvisional($rating, item.rating, item.provisional);
             $list.append($li);
@@ -816,7 +822,7 @@
           items.forEach(function (item) {
             var $li = $('<li></li>');
             var $name = $('<span class="lb-name"></span>').appendTo($li);
-            userLink(item.username, item.colorClass, item.title, item.admin).appendTo($name);
+            userLink(item.username, item.colorClass, item.title, item.admin, item.banned).appendTo($name);
             $('<span class="lb-time"></span>')
               .text(relativeTime(item.lastSeenAt))
               .attr('title', fullTime(item.lastSeenAt))
@@ -877,6 +883,7 @@
           post.authorInfo && post.authorInfo.colorClass,
           post.authorInfo && post.authorInfo.title,
           post.authorInfo && post.authorInfo.admin,
+          post.authorInfo && post.authorInfo.banned,
         );
         $author.addClass('feed-author').appendTo($head);
         $('<span class="feed-time"></span>')
@@ -1324,8 +1331,9 @@
           });
           socket.on('home_leaderboard', function () {
             loadLeaderboard();
-            // rating 结算完成后名字等级色可能变化，失效缓存并重拉已渲染名字的颜色（issue #84）。
+            // rating 与身份外观变更后刷新用户名和个人卡片头衔。
             usernameColorsInvalidate();
+            if (currentUsername) loadMyProfile();
           });
           socket.on('home_online', function () {
             loadOnline();
