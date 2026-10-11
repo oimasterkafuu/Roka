@@ -179,11 +179,12 @@ function renderUsers() {
     }
 
     var $name = $('<td></td>');
-    // 用户名：统一用户名组件（/api/admin/users 已附 colorClass/title/admin）。
+    // 用户名：统一用户名组件（/api/admin/users 已附有效封禁状态）。
     usernameLink(user.username, {
       colorClass: user.colorClass,
       title: user.title,
       admin: user.admin === true,
+      banned: user.banned === true,
     }).appendTo($name);
     $tr.append($name);
 

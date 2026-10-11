@@ -208,7 +208,7 @@ _一句话：Markdown+KaTeX 渲染并消毒为安全 HTML（+可选 @提及链�
 `parseMentionTokens` 按 `(?<![A-Za-z0-9_@])@([A-Za-z0-9_]{3,20})(?![A-Za-z0-9_])`（与注册用户名规则一致）提取候选，按出现顺序去重、保留原文大小写；写入时由 feed-store 落库。`renderMentionsInHtml` 在消毒后的 HTML 上按「标签/文本」切分，只在非 code/pre/a 文本里替换：resolve 返回规范用户名则生成 `<a class="mention rt-unrated" data-username>`（链接在消毒后插入，无需放宽白名单），返回 null（用户不存在/改名）则保持普通文本。用户名受正则约束 + HTML 转义，无注入面。
 _一句话：@提及解析 + 消毒后 HTML 的安全链接渲染（不存在降级文本）。_
 
-**src/rating-color.ts** — `ratingTier(rating, ratingGames)` → `{className: 'rt-*', title}`，阈值仿 Codeforces（<1200 gray … ≥2400 red），无对局为 unrated；`src/server.ts` 的 `usernameAppearance` 对管理员统一覆盖为 `rt-admin` / `Headquarters`。CSS 类对应 `static/styles/rating.css`。
+**src/rating-color.ts** — `ratingTier(rating, ratingGames)` → `{className: 'rt-*', title}`，阈值仿 Codeforces（<1200 gray … ≥2400 red），无对局为 unrated；`src/server.ts` 的 `usernameAppearance` 先以有效封禁覆盖为 `rt-banned` / `已封禁`，再对未封禁管理员覆盖为 `rt-admin` / `Headquarters`。CSS 类对应 `static/styles/rating.css`。
 _一句话：Codeforces 式 rating 段位颜色映射。_
 
 **src/runtime-env.ts** — 启动期 `.env` 自解析（不依赖 dotenv），`JWT_SECRET`/`WEBHOOK_SECRET` 缺失则自动生成并回写 `.env`。
@@ -296,7 +296,7 @@ _一句话：关于与来源致谢静态页。_
 **static/crown.js** — 全局 `crown_html`：主城皇冠内联 SVG（颜色跟随玩家配色）。
 _一句话：皇冠 SVG 字符串常量（crown_html）。_
 
-**static/username.js** — 全站统一用户名渲染组件（首页/个人主页/后台/对局页均加载）：`usernameLink(name, info?, extraClass?, opts?)` 构建带 rating 颜色（rt-*）+ 点击跳 `/u/:username` 的链接；`usernameLinkHtml(name)` 为同源 HTML 字符串版（热路径 innerHTML 重建用，用户名经 htmlescape）；`usernameCacheSeed(map)` 用接口已有 colorClass 数据喂全局缓存（用户名→{colorClass,title,admin}）；`usernameEnsureColors(names)` 批量调 `GET /api/user-colors` 补齐缺失颜色（inflight 去重，未上榜/未定级降级 rt-unrated），回填后经 `data-username` 标记自动刷新已渲染链接；`usernameColorsInvalidate()` 在 rating 结算后（服务端广播 `home_leaderboard`，首页/个人页/对局页均监听）清空颜色缓存并为当前页所有已渲染链接重拉颜色，保证等级色跨面板及时更新（issue #84）。管理员账号（含超管，所有产 colorClass/title 的接口出口统一附 `admin` 布尔字段，经 `userStore.isAdminUser` 判定）一律返回 rt-admin（黑色加粗）与 Headquarters 头衔，仅在 title tooltip 显示、无可见徽标（issue #95）；`usernameRefreshRendered` 褪旧档列表含 rt-admin，并同步更新颜色与 tooltip。防注入一律 DOM 构建 + `.text()`。与局内配色 `.cN` 职责分开：色块/底色=.cN，名字颜色=本组件。
+**static/username.js** — 全站统一用户名渲染组件（首页/个人主页/后台/对局页均加载）：`usernameLink(name, info?, extraClass?, opts?)` 构建带 rating 颜色（rt-*）+ 点击跳 `/u/:username` 的链接；`usernameLinkHtml(name)` 为同源 HTML 字符串版（热路径 innerHTML 重建用，用户名经 htmlescape）；`usernameCacheSeed(map)` 用接口已有 colorClass 数据喂全局缓存（用户名→{colorClass,title,admin,banned}）；`usernameEnsureColors(names)` 批量调 `GET /api/user-colors` 补齐缺失颜色（inflight 去重，未上榜/未定级降级 rt-unrated），回填后经 `data-username` 标记自动刷新已渲染链接；`usernameColorsInvalidate()` 在 rating 结算或封禁/解封/管理员权限变更后（服务端广播 `home_leaderboard`，首页/个人页/对局页均监听）清空颜色缓存并为当前页所有已渲染链接重拉颜色，保证等级色跨面板及时更新（issue #84）。所有公开用户名外观出口附 `banned`（由 `userStore.getBanStatus` 判定有效封禁）及 `admin`；有效封禁优先返回 rt-banned（棕色、正常字重、中性 tooltip），未封禁管理员为 rt-admin（黑色加粗）及 Headquarters，首页和个人页不再展示重复管理员标签（issue #97）；`usernameRefreshRendered` 褪旧档列表含 rt-admin/rt-banned，并同步更新颜色与 tooltip。DOM 用 `.text()`，HTML 版用转义防注入。与局内配色 `.cN` 职责分开：色块/底色=.cN，名字颜色=本组件。
 _一句话：统一用户名链接组件 + rating 颜色全局缓存。_
 
 **static/mention-autocomplete.js** — @提及输入补全（首页与个人主页共用，无构建全局脚本）。
@@ -322,7 +322,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **profile.css** — 个人主页，与 home.css 平行的卡片语言 + rating 变更/历史图。**改 feed/评论样式需与 home.css 双改。\***个人主页样式（与首页平行）。\*
 - **admin.css** — 后台管理页：用户表格、搜索/分页工具栏、角色徽标、封禁行高亮、封禁对话框、策略 Bot 分区表单。_后台管理页样式。_
 - **lobby.css** — 房间页：邀请链接卡、队伍分组色块、房主滑条设置。_大厅链接/队伍/滑条设置样式。_
-- **rating.css** — `.rt-*` 八档 rating 用户名颜色（后端 `rating-color.ts` 注入类名）+ `.rt-admin` 管理员黑色加粗（issue #95）。_Codeforces 八档 rating 颜色类 + 管理员姓名样式。_
+- **rating.css** — `.rt-*` 八档 rating 用户名颜色（后端 `rating-color.ts` 注入类名）+ `.rt-admin` 管理员黑色加粗与 `.rt-banned` 有效封禁棕色正常字重（issue #97）；`game-ui.css` 局内排行榜仍压为白字保证底色可读。_Rating 与身份姓名样式。_
 - **tables-and-inputs.css** — 通用表格、`.mobile` 移动端紧凑模式、跨浏览器 range 滑条。_通用表格/移动端/滑条样式。_
 - **tutorial.css** — 教程步骤横幅、地图平移缩放、目标高亮。_教程页样式。_
 
@@ -362,7 +362,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **scripts/test-mentions.mjs** — `pnpm run test:mentions`：@提及回归（issue #74）——`parseMentionTokens` 边界（去重/邮箱/短于 3 位/长于 20 位/`@@`/词内）与 `renderMentionsInHtml` 行为（命中渲染链接、未命中降级文本、code/pre/a 内不替换、邮箱样文本不替换）＋ `renderRichTextWithMentions` 消毒集成；再用临时数据目录驱动 dist `FeedStore` 验证动态/评论 mentions 落库、重启保留，并手写不含 mentions 的旧格式 `feeds.bin` 验证向后兼容；需先 `pnpm run build`。
 
 - **scripts/test-crown-transfer.mjs** — `pnpm run test:crown-transfer`：队友间主城转让（issue #81）单元冒烟——直接驱动 dist `GameEngine`（运行时访问 private 字段布置棋盘），覆盖敌方主城静默忽略、最后一座主城拒转、请求登记与 `crown_transfer_request` 回调、同拥有者防刷去重、拒绝/同意路径（建筑保留兵力不变 + 回放 op 't' 记录 + 系统消息）、接受时目标易主重校验失败、对局结束静默忽略；需先 `pnpm run build`。
-- **scripts/test-admin-badge.mjs** — `pnpm run test:admin-badge`：管理员用户名外观（issue #95）回归——第一部分用 node vm + 最小 jQuery/fetch 桩驱动 `static/username.js`（管理员 rt-admin + Headquarters tooltip、无徽标、普通用户不变、撤权恢复 rating）；第二部分临时数据目录起 dist 服务，断言 /api/user-colors、/api/users/search、/api/profile、/api/leaderboard、/api/online、/api/feeds 帖子与评论、/api/admin/users 的管理员与普通用户外观；需先 `pnpm run build`。
+- **scripts/test-admin-badge.mjs** — `pnpm run test:admin-badge`：管理员与封禁用户名外观（issue #95/#97）回归——第一部分用 node vm + 最小 jQuery/fetch 桩驱动 `static/username.js`（管理员 rt-admin + Headquarters tooltip、无徽标、普通用户不变、撤权恢复 rating）；第二部分临时数据目录起 dist 服务，断言 /api/user-colors、/api/users/search、/api/profile、/api/leaderboard、/api/online、/api/feeds 帖子与评论、/api/admin/users 的管理员与普通用户外观；需先 `pnpm run build`。
 - **scripts/analyze-replay-compression.mjs** — 回放存储压缩评估（issue #67）：扫描 `data/replays/*.rpl` 统计操作流特征（op 类型分布、选中切换占比）并对比候选编码体积（现状 v8+brotli q6 / q11 / 文本 DSL / 二进制打包）；`--limit=N` 限定扫描数量。
 - **scripts/observe-bot-match.mjs** — `pnpm run observe:bot`：对局观测/病理分析——临时数据目录起 dist 服务 + 进程内观战 recorder 逐 turn 录完整盘面（`frames.jsonl`），按 `OBS_BOTS` 启动 bot 组合（`strategy:`/`random:`/`legacy:` 前缀，`legacy` 从 git main 导出旧版做 A/B 基准），赛后生成 `report.txt`（往返抖动/送兵/前线停滞/切断无救援/主城沦陷时闲散兵力）；环境变量 `OBS_SPEED`/`OBS_MAP_TOKEN`/`OBS_MAP_MODE`/`OBS_OUT`/`OBS_MAX_MS`，输出默认 `data/observe-*/`（gitignored）。
 - **scripts/replay-bot-decisions.mjs** — bot 决策离线复盘：假 socket 驱动真实 `strategy.js` 逐 turn 重放观测目录的 `frames.jsonl`（队列执行按服务端 `chkMove`/`chkBuild` 语义模拟），完整复现跨 tick 决策状态；支持 `--validate`（与 bot 日志逐 op 比对）、`--from/--to`、`--board`、`--cell` 盘面解释；配 `BOT_TRACE=1/2` 输出进攻评估/焦点/候选榜。

@@ -53,10 +53,12 @@ function fullTime(time) {
 }
 
 // 带 rating 颜色的用户名链接：统一走 /username.js 组件（全局缓存 + 批量补色）。
-function userLink(username, colorClass, title, admin) {
+function userLink(username, colorClass, title, admin, banned) {
   return usernameLink(
     username,
-    colorClass ? { colorClass: colorClass, title: title, admin: admin === true } : null,
+    colorClass
+      ? { colorClass: colorClass, title: title, admin: admin === true, banned: banned === true }
+      : null,
   );
 }
 
@@ -134,10 +136,12 @@ async function loadProfile() {
   var p = await res.json();
   profileUsername = p.username;
   document.title = 'Roka - ' + p.username;
-  $('#p-name')
-    .text(p.username)
-    .addClass(p.colorClass || 'rt-unrated');
-  $('#p-title').text(p.title || '');
+  var seed = {};
+  seed[p.username] = p;
+  usernameCacheSeed(seed);
+  $('#p-name').attr('data-username', p.username).text(p.username);
+  usernameRefreshRendered();
+  $('#p-title').text(p.banned ? '' : p.title || '');
   $('#p-max-rating').text(Math.round(getMaxRating(p.ratingHistory || [], p.rating)));
   setRatingWithProvisional($('#p-rating'), p.rating, p.provisional);
   $('#p-days').text(p.registeredDays);
@@ -156,7 +160,6 @@ async function loadProfile() {
           '，距下一级还差 ' +
           (level.nextLevelPoints - level.points),
   );
-  $('#p-admin').toggle(p.isAdmin === true);
   $('#profile-main').show();
   renderRatingChanges(p.ratingHistory || []);
   renderRatingChart(p.ratingHistory || []);
@@ -428,6 +431,7 @@ function createPostElement(post) {
     post.authorInfo && post.authorInfo.colorClass,
     post.authorInfo && post.authorInfo.title,
     post.authorInfo && post.authorInfo.admin,
+    post.authorInfo && post.authorInfo.banned,
   );
   $author.addClass('feed-author').appendTo($head);
   $('<span class="feed-time"></span>')
@@ -802,10 +806,10 @@ if (!profileUsername) {
   });
 }
 
-// 对局结算完成（rating 生效）后服务端广播 home_leaderboard：名字等级色可能变化，
-// 失效用户名颜色缓存并重拉本页已渲染名字的颜色（issue #84）。
+// rating 或身份外观变更后，重拉名字颜色及主页头衔。
 // query.home 标记为监听连接，服务端不会用它参与同账号连接互斥。
 var profileSocket = io({ query: { home: '1' } });
 profileSocket.on('home_leaderboard', function () {
   usernameColorsInvalidate();
+  loadProfile();
 });
