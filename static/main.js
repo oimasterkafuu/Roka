@@ -652,6 +652,8 @@ if (!is_replay) {
 
 // 房间心跳：每 30 秒上报一次，证明标签页仍然开启；后台标签页定时器会被浏览器节流，
 // 但节流后的频率仍远高于服务端 600 秒的超时阈值。对局中也照常上报，无副作用。
+// 仅在确认是房间成员后启动（room_update 只发给房内 socket）：未进房的挂着标签页
+// 不再发心跳，服务端对房外心跳也不计入在线状态。
 var room_heartbeat_timer = null;
 function sendRoomHeartbeat() {
   socket.emit('room_heartbeat', {
@@ -662,6 +664,12 @@ function sendRoomHeartbeat() {
 function startRoomHeartbeat() {
   if (is_replay || room_heartbeat_timer !== null) return;
   room_heartbeat_timer = setInterval(sendRoomHeartbeat, 30000);
+}
+function stopRoomHeartbeat() {
+  if (room_heartbeat_timer !== null) {
+    clearInterval(room_heartbeat_timer);
+    room_heartbeat_timer = null;
+  }
 }
 
 async function loadAccountProfile() {
@@ -849,8 +857,6 @@ $(document).ready(function () {
 socket.on('connect', function () {
   $('#disconnect-banner').css('display', 'none');
   joinGameRoom();
-  sendRoomHeartbeat();
-  startRoomHeartbeat();
 });
 
 socket.on('connect_error', function () {
@@ -858,9 +864,12 @@ socket.on('connect_error', function () {
 });
 // 房间准备阶段超过 600 秒无心跳，被服务器移出房间：重定向回首页。
 socket.on('room_kick', function () {
+  stopRoomHeartbeat();
   location.href = '/';
 });
 socket.on('disconnect', function (reason) {
+  // 断线后房间成员身份待重连确认，先停心跳；重连成功收到 room_update 后重启。
+  stopRoomHeartbeat();
   if (reason == 'io server disconnect') {
     location.href = '/';
     return;
@@ -872,6 +881,9 @@ socket.on('disconnect', function (reason) {
 });
 
 socket.on('room_update', function (data) {
+  // room_update 只发给房间内 socket：收到即确认成员身份，启动房间心跳。
+  sendRoomHeartbeat();
+  startRoomHeartbeat();
   setTabVal('game-speed', data.speed + 'x');
   setAllowTeamModeByCode(Boolean(data.allow_team));
   setFogModeByCode(Boolean(data.fog));
