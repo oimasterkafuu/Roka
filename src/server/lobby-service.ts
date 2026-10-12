@@ -39,6 +39,9 @@ const RATING_K = 128;
 const LOBBY_HEARTBEAT_TIMEOUT_MS = 600_000;
 /** 心跳扫描周期：每分钟检查一次全部房间成员的最后心跳时间。 */
 const LOBBY_HEARTBEAT_SWEEP_MS = 60_000;
+/** 房间停留上限：成员（含观战）单次在房累计超过 12 小时即移出（对局进行中除外），
+ * 防止挂着的浏览器标签页靠心跳长期占用房间席位并维持在线状态。 */
+const LOBBY_MAX_DWELL_MS = 12 * 3600_000;
 
 const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
@@ -78,6 +81,8 @@ class LobbyService {
 
   /** 房间成员的最后心跳时间（sid → ms 时间戳）；仅用于准备阶段的掉线检测。 */
   private readonly lobbyHeartbeats = new Map<string, number>();
+  /** 房间成员本次进房的时间（sid → ms 时间戳）；重进房间时重置，用于停留上限检测。 */
+  private readonly lobbyJoinedAt = new Map<string, number>();
   /** 豁免心跳踢出的 sid（ROKA_BOT_TOKENS 鉴权的 bot 连接，由 server.ts 维护）。 */
   readonly heartbeatExempt = new Set<string>();
   private heartbeatSweepTimer?: NodeJS.Timeout;
@@ -257,8 +262,9 @@ class LobbyService {
     },
   ): void {
     this.lobbyOfSid.set(sid, gid);
-    // 进房本身即是「标签页开启」的证明，作为心跳基线。
+    // 进房本身即是「标签页开启」的证明，作为心跳基线；同时记录进房时间作为停留上限基线。
     this.lobbyHeartbeats.set(sid, Date.now());
+    this.lobbyJoinedAt.set(sid, Date.now());
     const existingPlayers = this.lobbyPlayers.get(gid);
     const isNewRoom = !existingPlayers || existingPlayers.length === 0;
 
@@ -348,8 +354,9 @@ class LobbyService {
 
   /**
    * 启动房间心跳扫描（全局单一定时器）：每分钟检查一次，准备阶段超过
-   * LOBBY_HEARTBEAT_TIMEOUT_MS 无心跳的成员被自动移出房间并收到 room_kick
-   * 事件（前端据此跳转首页）；heartbeatExempt 中的 bot 连接不受影响。
+   * LOBBY_HEARTBEAT_TIMEOUT_MS 无心跳、或在房停留累计超过 LOBBY_MAX_DWELL_MS
+   * 的成员被自动移出房间并收到 room_kick 事件（前端据此跳转首页）；
+   * heartbeatExempt 中的 bot 连接与对局进行中的房间不受影响。
    */
   startLobbyHeartbeatSweep(io: SocketIOServer): void {
     if (this.heartbeatSweepTimer) {
@@ -367,13 +374,16 @@ class LobbyService {
       const lobbyId = this.lobbyOfSid.get(sid);
       if (!lobbyId) {
         this.lobbyHeartbeats.delete(sid);
+        this.lobbyJoinedAt.delete(sid);
         continue;
       }
-      // 仅针对房间准备阶段：对局进行中的断线由 pendingRejoins 宽限期机制处理。
+      // 仅针对房间准备阶段：对局进行中的断线由 pendingRejoins 宽限期机制处理，
+      // 停留超限同样等本局结束回到准备阶段后再移出。
       if (this.heartbeatExempt.has(sid) || this.isLobbyGameRunning(lobbyId)) {
         continue;
       }
-      if (now - lastHeartbeat <= LOBBY_HEARTBEAT_TIMEOUT_MS) {
+      const dwellExceeded = now - (this.lobbyJoinedAt.get(sid) ?? now) > LOBBY_MAX_DWELL_MS;
+      if (!dwellExceeded && now - lastHeartbeat <= LOBBY_HEARTBEAT_TIMEOUT_MS) {
         continue;
       }
       this.kickFromLobby(io, sid, lobbyId);
@@ -386,6 +396,7 @@ class LobbyService {
    */
   private kickFromLobby(io: SocketIOServer, sid: string, lobbyId: string): void {
     this.lobbyHeartbeats.delete(sid);
+    this.lobbyJoinedAt.delete(sid);
     this.lobbyOfSid.delete(sid);
     const roomVal = this.getLobbyVal(lobbyId);
     io.sockets.sockets.get(sid)?.leave(`game_${roomVal}`);
@@ -771,6 +782,7 @@ class LobbyService {
     isBot = false,
   ): void {
     this.lobbyHeartbeats.delete(sid);
+    this.lobbyJoinedAt.delete(sid);
     const lobbyId = this.lobbyOfSid.get(sid);
     const gameId = this.gameUid.get(sid);
 
@@ -875,6 +887,11 @@ class LobbyService {
     if (lastHeartbeat !== undefined) {
       this.lobbyHeartbeats.delete(oldSid);
       this.lobbyHeartbeats.set(sid, lastHeartbeat);
+    }
+    const joinedAt = this.lobbyJoinedAt.get(oldSid);
+    if (joinedAt !== undefined) {
+      this.lobbyJoinedAt.delete(oldSid);
+      this.lobbyJoinedAt.set(sid, joinedAt);
     }
 
     if (!game.rebindPlayer(oldSid, sid)) {
