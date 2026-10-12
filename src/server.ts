@@ -128,7 +128,9 @@ const BAN_DURATION_MAX_MS = 100 * 365 * 24 * 3600_000;
 // 统一在线状态模型：「用户最近一次有效请求/动作时间」是唯一事实来源——
 // 在线 = 最近 5 分钟内有活动；「最后在线」= 该时间戳；在线人数 = 在线用户去重计数。
 // 任何已认证 HTTP 请求（/api/online 自身除外）与任何 socket 事件都经 recordPresence
-// 刷新活动时间；bot 连接（ROKA_BOT_TOKENS 合成用户 / 服务端托管 bot）不计入。
+// 刷新活动时间，唯一例外是纯机械保活的 room_heartbeat：它只在 socket 确为某房间
+// 成员时才计入（见 room_heartbeat 处理器），防止未进房的挂着标签页靠心跳永久在线。
+// bot 连接（ROKA_BOT_TOKENS 合成用户 / 服务端托管 bot）不计入。
 const presenceService = new PresenceService({
   persist: (username, lastSeenAt) => {
     void userStore.setLastSeenAt(username, lastSeenAt).catch(() => undefined);
@@ -1459,18 +1461,22 @@ const boot = async (): Promise<void> => {
     }
 
     const isBot = socket.data.isBot === true;
-    // 统一 presence：连接建立与任何入站 socket 事件（对局操作、房间心跳、聊天等）
-    // 都算用户活动；bot 连接不计入在线（ROKA_BOT_TOKENS 合成用户 / 服务端托管 bot）。
+    // 统一 presence：连接建立与任何入站 socket 事件（对局操作、聊天等）都算用户活动；
+    // room_heartbeat 是纯机械保活包，在此排除——房内成员的心跳由 room_heartbeat
+    // 处理器单独计入，房外 socket 的心跳不刷新在线状态。
+    // bot 连接不计入在线（ROKA_BOT_TOKENS 合成用户 / 服务端托管 bot）。
     if (!isBot) {
       recordPresence(username);
-      socket.use((_packet, next) => {
+      socket.use((packet, next) => {
         const banStatus = userStore.getBanStatus(username);
         if (banStatus.banned) {
           socket.disconnect(true);
           next(new Error(formatBanMessage(banStatus)));
           return;
         }
-        recordPresence(username);
+        if (packet[0] !== 'room_heartbeat') {
+          recordPresence(username);
+        }
         next();
       });
     }
@@ -1504,8 +1510,13 @@ const boot = async (): Promise<void> => {
     }
 
     // 房间页心跳：证明标签页仍然开启；准备阶段超时未上报会被移出房间。
+    // 仅当 socket 确为某房间成员时心跳才计入 presence——房外的机械心跳是噪声
+    // （挂着的游戏页标签页不得借此维持「在线」），其 presence 随 5 分钟窗口自然过期。
     socket.on('room_heartbeat', () => {
       lobbyService.recordLobbyHeartbeat(socket.id);
+      if (!isBot && lobbyService.hasLobbyMember(socket.id)) {
+        recordPresence(username);
+      }
     });
 
     socket.on(
