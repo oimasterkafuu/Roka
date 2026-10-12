@@ -4,6 +4,7 @@
 //   「在线」列表（全员按最后活动倒序，含在线者与自己）、seed 重启恢复；
 // 第二部分（集成）：临时数据目录 + 随机端口启动 dist/server.js，验证
 //   任意 API 请求刷新「最后在线」、socket 连接去重计数、bot 连接不计入在线、
+//   房外 socket 的 room_heartbeat 不刷新在线、房间成员的心跳刷新在线、
 //   重启后从落盘 lastSeenAt 恢复（seed）。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 60 秒（不跑对局）。
 
@@ -349,11 +350,41 @@ async function runIntegrationTests() {
   data = await onlineCount(baseUrl, aliceToken);
   assert(data.count === 2, '同一用户加开 socket 连接后人数不变（按用户去重）');
 
-  // socket 事件（房间心跳）也算活动：Bob 仅靠 socket 事件维持在线。
+  // (a) 房外 socket 的机械心跳不算活动：Bob 连接 socket（连接建立本身计入 presence），
+  // 不进房直接发 room_heartbeat，其「最后在线」不得被心跳刷新（防挂着标签页永久在线）。
   const bobSocket = await connectSocket(baseUrl, bobToken, 'Bob');
+  data = await onlineCount(baseUrl, aliceToken);
+  assert(data.count === 2, 'Bob 加开 socket 连接后人数不变（连接计入 presence，按用户去重）');
+  const bobSeenAtConnect = data.items.find((item) => item.username === BOB)?.lastSeenAt;
+  assert(typeof bobSeenAtConnect === 'number', 'Bob 连接建立后有「最后在线」时间');
+  await sleep(1200);
   bobSocket.emit('room_heartbeat');
   await sleep(300);
   data = await onlineCount(baseUrl, aliceToken);
+  assert(
+    data.items.find((item) => item.username === BOB)?.lastSeenAt === bobSeenAtConnect,
+    '房外 socket 的 room_heartbeat 不刷新「最后在线」',
+  );
+
+  // (b) 房间成员的心跳算活动：Bob 进房（join_game_room 等普通事件仍刷新 presence），
+  // 成为房间成员后再发 room_heartbeat，「最后在线」被刷新。
+  bobSocket.emit('join_game_room', { room: 'hb-presence' });
+  await sleep(500);
+  const bobSeenAtJoin = (await onlineCount(baseUrl, aliceToken)).items.find(
+    (item) => item.username === BOB,
+  )?.lastSeenAt;
+  assert(
+    typeof bobSeenAtJoin === 'number' && bobSeenAtJoin > bobSeenAtConnect,
+    'join_game_room 等普通 socket 事件仍刷新「最后在线」',
+  );
+  await sleep(1200);
+  bobSocket.emit('room_heartbeat');
+  await sleep(300);
+  data = await onlineCount(baseUrl, aliceToken);
+  assert(
+    (data.items.find((item) => item.username === BOB)?.lastSeenAt ?? 0) > bobSeenAtJoin,
+    '房间成员的 room_heartbeat 刷新「最后在线」',
+  );
   assert(data.count === 2, 'socket 事件刷新活动后人数保持去重计数');
 
   // bot 连接不计入在线。
