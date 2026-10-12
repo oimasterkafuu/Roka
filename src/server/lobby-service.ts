@@ -342,12 +342,17 @@ class LobbyService {
     return removed.uid;
   }
 
+  /** 判断 sid 当前是否为某房间成员（与 recordLobbyHeartbeat/停留计时同一口径）。 */
+  hasLobbyMember(sid: string): boolean {
+    return this.lobbyOfSid.has(sid);
+  }
+
   /**
    * 房间页心跳：sid 位于某房间时刷新最后心跳时间。对局进行中也照常记录
    * （扫描时会跳过对局中的房间），保证对局结束回到准备阶段后时间戳仍然新鲜。
    */
   recordLobbyHeartbeat(sid: string): void {
-    if (this.lobbyOfSid.has(sid)) {
+    if (this.hasLobbyMember(sid)) {
       this.lobbyHeartbeats.set(sid, Date.now());
     }
   }
