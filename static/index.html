@@ -481,7 +481,10 @@
             var $tr = $('<tr></tr>').on('click', function () {
               location.href = '/games/' + encodeURIComponent(item.room);
             });
-            $('<td></td>').text(item.room).appendTo($tr);
+            var $roomTd = $('<td></td>').text(item.room).appendTo($tr);
+            if (item.multi_line) {
+              $roomTd.append(' ').append($('<span class="room-tag">多线</span>'));
+            }
             var $hostTd = $('<td></td>').appendTo($tr);
             if (item.host) {
               // 房主名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进房。

@@ -76,6 +76,7 @@ function render() {
     for (var i = 0; i < n; i++) {
       for (var j = 0; j < m; j++) {
         have_route[d][i][j] = false;
+        route_line[d][i][j] = -1;
       }
     }
   }
@@ -84,13 +85,20 @@ function render() {
       have_build[i][j] = '';
     }
   }
-  for (var i = 0; i < route.length; i++) {
-    if (route[i].build) {
-      // 同一格可能同时排有“建指挥所 + 升级主城”两步，角标需要累积
-      var prevBuild = have_build[route[i].x][route[i].y];
-      if (prevBuild.indexOf(route[i].build) < 0)
-        have_build[route[i].x][route[i].y] = prevBuild + route[i].build;
-    } else have_route[route[i].d][route[i].x][route[i].y] = true;
+  // 多线争锋：逐战线绘制队列箭头并记录战线编号（route_line），箭头按战线着色；
+  // 单线对局 routes 只有一条，等价于原单队列渲染。
+  for (var l = 0; l < routes.length; l++) {
+    for (var i = 0; i < routes[l].length; i++) {
+      var queued = routes[l][i];
+      if (queued.build) {
+        // 同一格可能同时排有“建指挥所 + 升级主城”两步，角标需要累积
+        var prevBuild = have_build[queued.x][queued.y];
+        if (prevBuild.indexOf(queued.build) < 0) have_build[queued.x][queued.y] = prevBuild + queued.build;
+      } else {
+        have_route[queued.d][queued.x][queued.y] = true;
+        route_line[queued.d][queued.x][queued.y] = l;
+      }
+    }
   }
   var displayGrid = grid_type;
   var displayArmy = army_cnt;
@@ -160,8 +168,18 @@ function render() {
       if (txt.length > 0 && scale == 1) txt = '<div class="txt">' + txt + '</div>';
       for (var d = 0; d < 4; d++)
         if (have_route[d][i][j]) {
-          if (scale > 1) txt += '<div class="' + dire_class[d] + '">' + dire_char[d] + '</div>';
-          else txt += '<div class="' + dire_class[d] + '"><div class="txt">' + dire_char[d] + '</div></div>';
+          // 多线争锋：非首战线的队列箭头带战线着色类（map.css route-line-N）。
+          var lineCls =
+            multi_line_mode && route_line[d][i][j] > 0 ? ' route-line-' + route_line[d][i][j] : '';
+          if (scale > 1) txt += '<div class="' + dire_class[d] + lineCls + '">' + dire_char[d] + '</div>';
+          else
+            txt +=
+              '<div class="' +
+              dire_class[d] +
+              lineCls +
+              '"><div class="txt">' +
+              dire_char[d] +
+              '</div></div>';
         }
       if (have_build[i][j]) {
         var hasB = have_build[i][j].indexOf('b') >= 0;
@@ -265,43 +283,49 @@ function update(data, options) {
     }
     general_order = general_kept.concat(general_new);
   }
-  if (route.length) {
-    // 服务器每 Tick 会丢弃队首的失效操作（skip 个），本地队列严格按 skip 同步，
-    // 然后再匹配本 Tick 实际执行的那一条操作。
+  // 服务器每 Tick 会丢弃所调度队列队首的失效操作（skip 个），本地队列严格按 skip
+  // 同步，然后再匹配本 Tick 实际执行的那一条操作。多线争锋对局按 lst_move.line
+  // 定位本 Tick 被调度的战线队列；单线对局沿用唯一队列。
+  var syncLine = multi_line_mode && typeof data.lst_move.line == 'number' ? data.lst_move.line : cur_line;
+  if (syncLine < 0 || syncLine >= routes.length) syncLine = cur_line;
+  var syncQueue = routes[syncLine];
+  if (syncQueue.length) {
     var skipOps = data.lst_move.skip | 0;
-    if (skipOps > route.length) skipOps = route.length;
-    if (skipOps > 0) route = route.slice(skipOps);
-    if (data.lst_move.x != -1 && route.length) {
+    if (skipOps > syncQueue.length) skipOps = syncQueue.length;
+    if (skipOps > 0) syncQueue = syncQueue.slice(skipOps);
+    if (data.lst_move.x != -1 && syncQueue.length) {
       if (data.lst_move.op == 'b' || data.lst_move.op == 'c') {
-        for (var i = 0; i < route.length; i++) {
+        for (var i = 0; i < syncQueue.length; i++) {
           if (
-            route[i].build == data.lst_move.op &&
-            route[i].x == data.lst_move.x &&
-            route[i].y == data.lst_move.y
+            syncQueue[i].build == data.lst_move.op &&
+            syncQueue[i].x == data.lst_move.x &&
+            syncQueue[i].y == data.lst_move.y
           ) {
-            route.splice(i, 1);
+            syncQueue.splice(i, 1);
             break;
           }
         }
       } else {
-        while (route.length) {
-          if (route[0].build) {
-            route = route.splice(1);
+        while (syncQueue.length) {
+          if (syncQueue[0].build) {
+            syncQueue = syncQueue.slice(1);
             continue;
           }
           var t1 = data.lst_move,
             t2 = {
-              x: route[0].x,
-              y: route[0].y,
-              dx: route[0].x + dire[route[0].d].x,
-              dy: route[0].y + dire[route[0].d].y,
-              half: route[0].mode == 1,
+              x: syncQueue[0].x,
+              y: syncQueue[0].y,
+              dx: syncQueue[0].x + dire[syncQueue[0].d].x,
+              dy: syncQueue[0].y + dire[syncQueue[0].d].y,
+              half: syncQueue[0].mode == 1,
             };
-          route = route.splice(1);
+          syncQueue = syncQueue.slice(1);
           if (t1.x == t2.x && t1.y == t2.y && t1.dx == t2.dx && t1.dy == t2.dy && t1.half == t2.half) break;
         }
       }
     }
+    routes[syncLine] = syncQueue;
+    if (syncLine == cur_line) route = syncQueue;
   }
   render();
   lb = data.leaderboard.sort(function (a, b) {
@@ -376,12 +400,14 @@ function update(data, options) {
       for (var j = 0; j < g.members.length; j++) {
         var mb = g.members[j];
         // 成员名：统一用户名组件（rating 颜色 + 点击跳主页）；td 保留 .cN 作局内配色色块。
+        // 未经真人客户端认证的连接显示「[AI] 」前缀（仅实时对局帧携带该标记）。
         th +=
           '<tr class="lb-member ' +
           mb.class_ +
           '"><td></td><td class="leaderboard-name c' +
           mb.id +
           '">' +
+          (mb.ai ? '[AI] ' : '') +
           usernameLinkHtml(mb.uid) +
           '</td><td class="lb-army">' +
           mb.army +
@@ -394,9 +420,10 @@ function update(data, options) {
     for (var i = 0; i < lb.length; i++) {
       // 名字列：统一用户名组件（rating 颜色 + 点击跳主页）；td 保留 .cN 作局内配色色块。
       // 迷雾组队局的实时观战显示队名（非用户名），保持纯文本；回放一律显示真实用户名。
+      // 未经真人客户端认证的连接显示「[AI] 」前缀（仅实时对局帧携带该标记）。
       var nameCell = fogTeamGameView
         ? htmlescape(fogDisplayName(lb[i].uid, lb[i].team, fogTeamGameView))
-        : usernameLinkHtml(lb[i].uid);
+        : (lb[i].ai ? '[AI] ' : '') + usernameLinkHtml(lb[i].uid);
       frameArmyDigits = Math.max(frameArmyDigits, String(lb[i].army).length);
       frameLandDigits = Math.max(frameLandDigits, String(lb[i].land).length);
       th +=
@@ -441,7 +468,7 @@ function update(data, options) {
   var wasParticipant = player > 0;
   if (typeof data.kills[client_id] != 'undefined') {
     player = 0;
-    route = Array();
+    clearAllRoutes();
     var killerName = String(data.kills[client_id] || '');
     var killerCode = killerName.trim();
     var lostText = '';
@@ -464,10 +491,12 @@ function update(data, options) {
     $('#status-alert').css('display', '');
     hideSurrenderAlert();
     lost = true;
+    refreshLineHud();
   }
   if (data.game_end) {
     player = 0;
-    route = Array();
+    clearAllRoutes();
+    refreshLineHud();
     if ($('#status-alert').css('display') == 'none') {
       if (!wasParticipant) {
         $($('#status-alert').children()[0].children[0]).html('本局已结束');

@@ -166,6 +166,14 @@ function setFogModeByCode(fog) {
   setTabVal('fog-mode', fog ? '开启' : '关闭');
 }
 
+function getMultiLineModeCode() {
+  return getTabVal('multi-line-mode') == '开启';
+}
+
+function setMultiLineModeByCode(multiLine) {
+  setTabVal('multi-line-mode', multiLine ? '开启' : '关闭');
+}
+
 function getMapSizeCode() {
   return getTabVal('map-size') == '大地图' ? 'large' : 'normal';
 }

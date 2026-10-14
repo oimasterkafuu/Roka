@@ -25,7 +25,8 @@ import {
   RoomUpdatePayload,
 } from '../types';
 
-type EditableLobbyKey = 'speed' | 'allow_team' | 'fog' | 'map_mode' | 'map_region' | 'map_token' | 'map_size';
+type EditableLobbyKey =
+  'speed' | 'allow_team' | 'fog' | 'multi_line' | 'map_mode' | 'map_region' | 'map_token' | 'map_size';
 
 const FIXED_WIDTH_RATIO = 0.5;
 const FIXED_HEIGHT_RATIO = 0.5;
@@ -47,6 +48,7 @@ const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
   allow_team: '允许组队',
   fog: '迷雾远征',
+  multi_line: '多线争锋',
   map_mode: '地图类型',
   map_region: '华夏地区',
   map_token: '地图随机种子',
@@ -85,6 +87,11 @@ class LobbyService {
   private readonly lobbyJoinedAt = new Map<string, number>();
   /** 豁免心跳踢出的 sid（ROKA_BOT_TOKENS 鉴权的 bot 连接，由 server.ts 维护）。 */
   readonly heartbeatExempt = new Set<string>();
+  /**
+   * 已通过真人客户端认证的连接 sid 集合（由 server.ts 在常规事件校验后写入）。
+   * 仅用于对局内的 [AI] 身份标识展示，不落库、不影响账号数据。
+   */
+  readonly humanVerified = new Set<string>();
   private heartbeatSweepTimer?: NodeJS.Timeout;
 
   /** 对局全部结束时触发（例如让推迟中的自动更新继续执行）。 */
@@ -258,6 +265,7 @@ class LobbyService {
       serverBot?: boolean;
       serverBotAllowTeam?: boolean;
       serverBotAllowFog?: boolean;
+      serverBotAllowMultiLine?: boolean;
       bot?: boolean;
     },
   ): void {
@@ -303,6 +311,10 @@ class LobbyService {
       if (conf.fog && (options?.serverBot !== true || options.serverBotAllowFog !== true)) {
         conf.fog = false;
       }
+      // 多线争锋同理：第三方 Bot 与未允许多线的托管 Bot 进房时强制关闭多线争锋。
+      if (conf.multi_line && (options?.serverBot !== true || options.serverBotAllowMultiLine !== true)) {
+        conf.multi_line = false;
+      }
     }
     if (options?.serverBot) {
       // 托管策略 Bot 的组队语义由启动参数决定（serverBotAllowTeam）：
@@ -311,6 +323,7 @@ class LobbyService {
       player.serverBot = true;
       player.serverBotAllowTeam = options.serverBotAllowTeam === true;
       player.serverBotAllowFog = options.serverBotAllowFog === true;
+      player.serverBotAllowMultiLine = options.serverBotAllowMultiLine === true;
       if (options.serverBotAllowTeam !== true && conf.allow_team) {
         // 不允许组队的托管 bot：进房强制关闭组队并规整队伍。
         conf.allow_team = false;
@@ -402,6 +415,7 @@ class LobbyService {
   private kickFromLobby(io: SocketIOServer, sid: string, lobbyId: string): void {
     this.lobbyHeartbeats.delete(sid);
     this.lobbyJoinedAt.delete(sid);
+    this.humanVerified.delete(sid);
     this.lobbyOfSid.delete(sid);
     const roomVal = this.getLobbyVal(lobbyId);
     io.sockets.sockets.get(sid)?.leave(`game_${roomVal}`);
@@ -447,7 +461,12 @@ class LobbyService {
       ...(player.serverBot === true ? { server_bot: true } : {}),
       ...(player.serverBot === true ? { server_bot_allow_team: player.serverBotAllowTeam === true } : {}),
       ...(player.serverBot === true ? { server_bot_allow_fog: player.serverBotAllowFog === true } : {}),
+      ...(player.serverBot === true
+        ? { server_bot_allow_multi_line: player.serverBotAllowMultiLine === true }
+        : {}),
       ...(player.bot === true ? { bot: true } : {}),
+      // 未经真人客户端认证的连接在房间列表中带 ai 标记（前端显示「[AI] 」前缀）。
+      ...(this.humanVerified.has(player.sid) ? {} : { ai: true }),
     }));
 
     const ready = players.filter((player) => player.ready && player.team !== 0).length;
@@ -456,6 +475,7 @@ class LobbyService {
       speed: conf.speed,
       allow_team: conf.allow_team,
       fog: conf.fog === true,
+      multi_line: conf.multi_line === true,
       map_token: conf.map_token,
       map_token_custom: conf.map_token_custom === true,
       map_mode: mapMode,
@@ -489,6 +509,7 @@ class LobbyService {
         ready,
         need: this.getReq(players),
         running: this.isLobbyGameRunning(room),
+        ...(this.lobbyConfig.get(room)?.multi_line === true ? { multi_line: true } : {}),
       });
     }
 
@@ -552,6 +573,9 @@ class LobbyService {
       return value ? '允许' : '不允许';
     }
     if (key === 'fog') {
+      return value ? '开启' : '关闭';
+    }
+    if (key === 'multi_line') {
       return value ? '开启' : '关闭';
     }
     if (key === 'map_mode') {
@@ -635,8 +659,15 @@ class LobbyService {
       return teamId;
     });
 
+    // 全官方 Bot 房（所有对战席位均为官方 bot——服务端托管或 ROKA_BOT_TOKENS 令牌接入，
+    // 观战者不计入）强制 4 倍速，不受房间速度设置影响；一旦有真人参赛席位即不强制。
+    // 托管 bot 同房间限一个，故多 bot 房通常由令牌 bot 组成。
+    const participants = players.filter((player) => player.team !== 0);
+    const allBots = participants.length > 0 && participants.every((player) => player.bot === true);
+
     const gameConf: GameConfig = {
       ...conf,
+      speed: allBots ? 4 : conf.speed,
       map_mode: conf.map_mode === 'huaxia' && !isHuaxiaSeasonActive(new Date()) ? 'random' : conf.map_mode,
       ...this.getMapSizeConfigByPlayers(players, conf),
       player_names: playerNames,
@@ -644,14 +675,26 @@ class LobbyService {
     };
 
     io.to(`game_${gameId}`).emit('starting', {});
+    if (allBots) {
+      this.sendLobbySystemMessage(io, gameId, '房间内全部为官方策略 Bot，本局强制以 4x 速度进行。');
+    }
     this.emitRoomUpdate(io, lobbyId);
 
+    let gameRef: GameEngine | null = null;
     const game = await GameEngine.create(gameConf, playerSids, playerIds, gameId, {
       update: (sid, data) => {
         io.to(`sid_${sid}`).emit('update', data);
       },
       emitInitMap: (sid, data) => {
         io.to(`sid_${sid}`).emit('init_map', data);
+      },
+      // 实时帧排行榜装饰：未经真人客户端认证的连接标记 ai（前端显示「[AI] 」前缀）。
+      // 仅当前对局生效——回放重建不经过此回调，账号数据不受影响。
+      annotateLeaderboard: (entries) => {
+        for (const entry of entries) {
+          const sid = gameRef?.playerSidAt(entry.id - 1);
+          entry.ai = !sid || !this.humanVerified.has(sid);
+        }
       },
       disciplineEvent: (event) => {
         void this.handleDisciplineEvent(event).catch(() => undefined);
@@ -722,6 +765,7 @@ class LobbyService {
       md5: (input: string): string => this.md5(input),
       replayStore: this.replayStore,
     });
+    gameRef = game;
 
     game.startGame();
     this.gameInstances.set(gameId, game);
@@ -788,6 +832,7 @@ class LobbyService {
   ): void {
     this.lobbyHeartbeats.delete(sid);
     this.lobbyJoinedAt.delete(sid);
+    this.humanVerified.delete(sid);
     const lobbyId = this.lobbyOfSid.get(sid);
     const gameId = this.gameUid.get(sid);
 
@@ -888,6 +933,9 @@ class LobbyService {
     }
     this.lobbyOfSid.delete(oldSid);
     this.lobbyOfSid.set(sid, room);
+    // 真人认证标记不随换绑继承：新连接需在常规事件流中重新完成校验。
+    this.humanVerified.delete(oldSid);
+    this.humanVerified.delete(sid);
     const lastHeartbeat = this.lobbyHeartbeats.get(oldSid);
     if (lastHeartbeat !== undefined) {
       this.lobbyHeartbeats.delete(oldSid);
@@ -989,6 +1037,7 @@ class LobbyService {
       speed: 1,
       allow_team: false,
       fog: false,
+      multi_line: false,
       map_token: this.normalizeMapToken(this.randomHexToken()),
       map_token_custom: false,
       map_mode: 'random',
