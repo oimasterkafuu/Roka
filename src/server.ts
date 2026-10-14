@@ -687,6 +687,7 @@ const boot = async (): Promise<void> => {
       rating: userStore.getDisplayRating(authUser.username),
       isAdmin: userStore.isAdminUser(authUser.username),
       isSuperAdmin: userStore.isSuperAdminUser(authUser.username),
+      stamp: authUser.sid ? authService.sessionStamp(authUser.sid) : undefined,
     });
   });
 
@@ -850,8 +851,8 @@ const boot = async (): Promise<void> => {
     return reply.send({ items: serverBotManager.listTemplates() });
   });
 
-  // 启动：{ username, room, template, allowTeam, allowFog }。Bot 在服务器进程内
-  // 以该用户身份连接本服务器，按所选模板加入房间并自动准备。
+  // 启动：{ username, room, template, allowTeam, allowFog, allowMultiLine }。Bot 在服务器
+  // 进程内以该用户身份连接本服务器，按所选模板加入房间并自动准备。
   app.post(
     '/api/admin/bots/start',
     { preHandler: adminActionRateLimitPreHandler },
@@ -866,12 +867,14 @@ const boot = async (): Promise<void> => {
         template?: unknown;
         allowTeam?: unknown;
         allowFog?: unknown;
+        allowMultiLine?: unknown;
       };
       const username = String(body?.username ?? '').trim();
       const room = String(body?.room ?? '').trim();
       const template = String(body?.template ?? '').trim();
       const allowTeam = body?.allowTeam === true;
       const allowFog = body?.allowFog === true;
+      const allowMultiLine = body?.allowMultiLine === true;
       if (!USERNAME_REGEX.test(username) || !userStore.getPublicProfile(username)) {
         return reply.code(404).send({ error: '用户不存在。' });
       }
@@ -886,7 +889,7 @@ const boot = async (): Promise<void> => {
         return reply.code(400).send({ error: '模板不存在或不可托管。' });
       }
       try {
-        const bot = serverBotManager.start(username, room, template, allowTeam, allowFog);
+        const bot = serverBotManager.start(username, room, template, allowTeam, allowFog, allowMultiLine);
         return reply.send({ ok: true, bot });
       } catch (error) {
         return reply.code(409).send({ error: error instanceof Error ? error.message : '启动失败。' });
@@ -1414,7 +1417,7 @@ const boot = async (): Promise<void> => {
 
       // 服务端托管策略 Bot：命中管理器生成的内存临时令牌时以指定用户放行，
       // 额外标记 isServerBot（进房不当房主，见 lobby-service.joinLobby）并记录
-      // 启动时的组队与迷雾许可。
+      // 启动时的组队、迷雾与多线许可。
       const serverBot = serverBotManager.resolveToken(fromHandshake);
       if (serverBot) {
         socket.data.username = serverBot.username;
@@ -1422,6 +1425,7 @@ const boot = async (): Promise<void> => {
         socket.data.isServerBot = true;
         socket.data.serverBotAllowTeam = serverBot.allowTeam;
         socket.data.serverBotAllowFog = serverBot.allowFog;
+        socket.data.serverBotAllowMultiLine = serverBot.allowMultiLine;
         next();
         return;
       }
@@ -1446,6 +1450,7 @@ const boot = async (): Promise<void> => {
     }
 
     socket.data.username = authUser.username;
+    socket.data.sessionSid = authUser.sid;
     next();
   });
 
@@ -1512,16 +1517,39 @@ const boot = async (): Promise<void> => {
     // 房间页心跳：证明标签页仍然开启；准备阶段超时未上报会被移出房间。
     // 仅当 socket 确为某房间成员时心跳才计入 presence——房外的机械心跳是噪声
     // （挂着的游戏页标签页不得借此维持「在线」），其 presence 随 5 分钟窗口自然过期。
-    socket.on('room_heartbeat', () => {
+    socket.on('room_heartbeat', (data?: { sig?: unknown }) => {
       lobbyService.recordLobbyHeartbeat(socket.id);
       if (!isBot && lobbyService.hasLobbyMember(socket.id)) {
         recordPresence(username);
       }
+      // 连接级会话校验：随常规心跳上报的派生值命中即视为真人客户端连接。
+      const sessionSid = socket.data.sessionSid;
+      if (
+        typeof sessionSid === 'string' &&
+        typeof data?.sig === 'string' &&
+        authService.verifyClientSig(sessionSid, lobbyService.md5(socket.id), data.sig)
+      ) {
+        lobbyService.humanVerified.add(socket.id);
+      }
     });
+
+    // 多线争锋的可选战线编号解析：缺省/非法时按 undefined 处理（引擎回退战线 0）。
+    const parseLine = (value: unknown): number | undefined => {
+      const parsed = Number.parseInt(String(value), 10);
+      return Number.isNaN(parsed) ? undefined : parsed;
+    };
 
     socket.on(
       'attack',
-      (data: { x: unknown; y: unknown; dx: unknown; dy: unknown; half: unknown; mode: unknown }) => {
+      (data: {
+        x: unknown;
+        y: unknown;
+        dx: unknown;
+        dy: unknown;
+        half: unknown;
+        mode: unknown;
+        line?: unknown;
+      }) => {
         const gid = lobbyService.gameUid.get(socket.id);
         if (!gid) {
           return;
@@ -1544,11 +1572,12 @@ const boot = async (): Promise<void> => {
             Number.parseInt(String(data.dx), 10),
             Number.parseInt(String(data.dy), 10),
             mode,
+            parseLine(data.line),
           );
       },
     );
 
-    socket.on('build', (data: { x: unknown; y: unknown; op: unknown }) => {
+    socket.on('build', (data: { x: unknown; y: unknown; op: unknown; line?: unknown }) => {
       const gid = lobbyService.gameUid.get(socket.id);
       if (!gid) {
         return;
@@ -1559,23 +1588,29 @@ const boot = async (): Promise<void> => {
       }
       lobbyService.gameInstances
         .get(gid)
-        ?.addBuild(socket.id, Number.parseInt(String(data.x), 10), Number.parseInt(String(data.y), 10), op);
+        ?.addBuild(
+          socket.id,
+          Number.parseInt(String(data.x), 10),
+          Number.parseInt(String(data.y), 10),
+          op,
+          parseLine(data.line),
+        );
     });
 
-    socket.on('clear_queue', () => {
+    socket.on('clear_queue', (data?: { line?: unknown }) => {
       const gid = lobbyService.gameUid.get(socket.id);
       if (!gid) {
         return;
       }
-      lobbyService.gameInstances.get(gid)?.clearQueue(socket.id);
+      lobbyService.gameInstances.get(gid)?.clearQueue(socket.id, parseLine(data?.line));
     });
 
-    socket.on('pop_queue', () => {
+    socket.on('pop_queue', (data?: { line?: unknown }) => {
       const gid = lobbyService.gameUid.get(socket.id);
       if (!gid) {
         return;
       }
-      lobbyService.gameInstances.get(gid)?.popQueue(socket.id);
+      lobbyService.gameInstances.get(gid)?.popQueue(socket.id, parseLine(data?.line));
     });
 
     // 观战视角切换（迷雾对局）：观战者请求按某队伍的迷雾视野观战，team<=0 恢复全图。
@@ -1613,10 +1648,12 @@ const boot = async (): Promise<void> => {
       if (!lobbyService.lobbyOfSid.has(socket.id)) {
         const hadAllowTeam = lobbyService.lobbyConfig.get(room)?.allow_team === true;
         const hadFog = lobbyService.lobbyConfig.get(room)?.fog === true;
+        const hadMultiLine = lobbyService.lobbyConfig.get(room)?.multi_line === true;
         lobbyService.joinLobby(socket.id, username, room, {
           serverBot: socket.data.isServerBot === true,
           serverBotAllowTeam: socket.data.serverBotAllowTeam === true,
           serverBotAllowFog: socket.data.serverBotAllowFog === true,
+          serverBotAllowMultiLine: socket.data.serverBotAllowMultiLine === true,
           bot: socket.data.isBot === true,
         });
         socket.join(`game_${roomVal}`);
@@ -1639,6 +1676,15 @@ const boot = async (): Promise<void> => {
           lobbyService.lobbyConfig.get(room)?.fog === false
         ) {
           lobbyService.sendLobbySystemMessage(io, roomVal, 'Bot 进入房间，迷雾远征已关闭。');
+        }
+        // 不允许多线的 Bot 进房会强制关闭多线争锋（见 lobby-service.joinLobby），补充提示。
+        if (
+          socket.data.isBot === true &&
+          socket.data.serverBotAllowMultiLine !== true &&
+          hadMultiLine &&
+          lobbyService.lobbyConfig.get(room)?.multi_line === false
+        ) {
+          lobbyService.sendLobbySystemMessage(io, roomVal, 'Bot 进入房间，多线争锋已关闭。');
         }
         lobbyService.emitHomeRooms(io);
         if (lobbyService.isLobbyGameRunning(room)) {
@@ -1829,6 +1875,31 @@ const boot = async (): Promise<void> => {
             } else {
               nextConf.fog = fog;
               changed.push('fog');
+            }
+          }
+        }
+
+        if (hasOwn('multi_line')) {
+          const multiLineRaw = payload.multi_line;
+          const multiLine = Boolean(
+            multiLineRaw === true || multiLineRaw === 1 || multiLineRaw === '1' || multiLineRaw === 'true',
+          );
+          if (multiLine !== (oldConf.multi_line === true)) {
+            if (
+              multiLine &&
+              players.some(
+                (player) =>
+                  player.bot === true &&
+                  (player.serverBot !== true || player.serverBotAllowMultiLine !== true),
+              )
+            ) {
+              // 房间内有不支持多线争锋的 Bot（第三方或未允许多线的官方托管）时禁止开启：
+              // 拒绝改动并回发房间状态复位前端开关。
+              lobbyService.sendLobbySystemMessage(io, roomVal, '房间内有 Bot 不支持多线争锋，无法开启。');
+              lobbyService.emitRoomUpdate(io, gid);
+            } else {
+              nextConf.multi_line = multiLine;
+              changed.push('multi_line');
             }
           }
         }
