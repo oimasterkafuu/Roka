@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { Server as SocketIOServer } from 'socket.io';
@@ -11,6 +11,8 @@ interface AuthPayload extends jwt.JwtPayload {
 
 interface AuthUser {
   username: string;
+  /** 会话 ID（JWT sid 声明）；仅内存使用，用于派生连接级会话戳。 */
+  sid?: string;
 }
 
 interface AuthRequest extends FastifyRequest {
@@ -131,10 +133,28 @@ class AuthService {
         return null;
       }
 
-      return { username: payload.sub };
+      return { username: payload.sub, sid: payload.sid };
     } catch {
       return null;
     }
+  }
+
+  /** 会话戳：由会话密钥派生的连接级凭据，随常规页面数据下发给已登录会话。 */
+  sessionStamp(sessionId: string): string {
+    return createHmac('sha256', this.jwtSecret).update(`web:${sessionId}`).digest('hex');
+  }
+
+  /** 校验连接随常规事件上报的会话派生值（绑定会话戳与连接 id）。 */
+  verifyClientSig(sessionId: string, clientId: string, sig: string): boolean {
+    if (!sessionId || !clientId || !sig) {
+      return false;
+    }
+    const expected = createHash('sha256')
+      .update(`${this.sessionStamp(sessionId)}:${clientId}`)
+      .digest('hex');
+    const a = Buffer.from(expected);
+    const b = Buffer.from(String(sig));
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 
   setAuthCookie(reply: FastifyReply, token: string): void {
