@@ -120,7 +120,7 @@
     },
     {
       title: '操作队列',
-      body: '快速连按两次 D（或 →）：推兵指令会进入操作队列，每 Tick 自动执行一条，格子上的小箭头标示排队方向。实战中可按 R 清空队列、按 F 撤销队尾一条。',
+      body: '快速连按两次 D（或 →）：推兵指令会进入操作队列，每 Tick 自动执行一条，格子上的小箭头标示排队方向。实战中可按 R（或 Q）清空队列、按 F（或 E）撤销队尾一条。',
       hint: '连按排队，占领高亮格。',
       targets: [POS.queueTarget],
     },
@@ -150,15 +150,15 @@
       manual: true,
     },
     {
-      title: 'X / Q 建造指挥所',
-      body: '在己方普通地块（兵力 ≥ 50）按 X 或 Q，消耗 50 兵建造指挥所，下一 Tick 建成。建造与推兵共用操作队列：入队只校验地形，执行时才校验归属与兵力，条件不满足会自动跳过；排队时格子右下角会显示小角标。指挥所每 50 Tick +1 兵，更是关键的连通锚点。',
-      hint: '把 50 兵调到高亮空地（或任意己方空地），按 X 或 Q 建造。',
+      title: 'X 建造指挥所',
+      body: '在己方普通地块（兵力 ≥ 50）按 X，消耗 50 兵建造指挥所，下一 Tick 建成。建造与推兵共用操作队列：入队只校验地形，执行时才校验归属与兵力，条件不满足会自动跳过；排队时格子右下角会显示小角标。指挥所每 50 Tick +1 兵，更是关键的连通锚点。',
+      hint: '把 50 兵调到高亮空地（或任意己方空地），按 X 建造。',
       targets: [POS.buildPlain],
     },
     {
-      title: 'C / E 升级主城',
-      body: '选中己方指挥所（兵力 ≥ 50）按 C 或 E，再消耗 50 兵升级为主城——每多一座主城，每 Tick 多产 1 兵。进阶技巧：在普通空地直接按 C / E 会自动连排「建指挥所 + 升级主城」两步，两个 Tick 建成，两个角标并排显示（共需 100 兵）。',
-      hint: '给高亮指挥所补足 50 兵后，选中它按 C 或 E 升级。',
+      title: 'C 升级主城',
+      body: '选中己方指挥所（兵力 ≥ 50）按 C，再消耗 50 兵升级为主城——每多一座主城，每 Tick 多产 1 兵。进阶技巧：在普通空地直接按 C 会自动连排「建指挥所 + 升级主城」两步，两个 Tick 建成，两个角标并排显示（共需 100 兵）。',
+      hint: '给高亮指挥所补足 50 兵后，选中它按 C 升级。',
       targets: [],
       dynamic: 'playerCity',
     },
@@ -1279,13 +1279,13 @@
       return;
     }
     if (op === 'b') {
-      // X/Q 建指挥所：普通地块（已有建筑则无效）
+      // X 建指挥所：普通地块（已有建筑则无效）
       if (tile.terrain !== 'plain') {
         return;
       }
       addQueueCommand({ kind: 'b', x: sx, y: sy });
     } else {
-      // C/E：己方指挥所直接升级主城；其余可建地块连续入队「建 + 升」两步
+      // C：己方指挥所直接升级主城；其余可建地块连续入队「建 + 升」两步
       if (tile.terrain === 'crown') {
         return;
       }
@@ -1535,12 +1535,12 @@
       }
     }
 
-    if (key === 'r') {
+    if (key === 'r' || key === 'q') {
       event.preventDefault();
       clearQueue();
       return;
     }
-    if (key === 'f') {
+    if (key === 'f' || key === 'e') {
       event.preventDefault();
       popQueue();
       return;
@@ -1559,12 +1559,12 @@
       renderAll();
       return;
     }
-    if (key === 'x' || key === 'q') {
+    if (key === 'x') {
       event.preventDefault();
       enqueueBuild('b');
       return;
     }
-    if (key === 'c' || key === 'e') {
+    if (key === 'c') {
       event.preventDefault();
       enqueueBuild('c');
     }
