@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.60.5",
+  "version": "1.61.0",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -18,6 +18,7 @@
     "test:points": "node scripts/test-points.mjs",
     "test:deploy-update": "node scripts/test-deploy-update.mjs",
     "test:fog": "node scripts/test-fog.mjs",
+    "test:multiline": "node scripts/test-multiline.mjs",
     "test:presence": "node scripts/test-presence.mjs",
     "test:map-generation": "pnpm exec tsx scripts/test-map-generation.mjs",
     "test:huaxia-season": "pnpm exec tsx scripts/test-huaxia-season.mjs",
