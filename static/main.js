@@ -548,9 +548,9 @@ function keypress(key, shift) {
       buildSelected('b');
     } else if (key == 'c') {
       buildSelected('c');
-    } else if (key == 'r' || key == 'q') {
+    } else if (key == 'q') {
       clear_queue();
-    } else if (key == 'f' || key == 'e') {
+    } else if (key == 'e') {
       pop_queue();
     } else if (key == 't') {
       if (!chat_focus) {
