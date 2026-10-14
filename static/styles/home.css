@@ -745,3 +745,16 @@ body.home .replay-modal-card p {
     flex-direction: column;
   }
 }
+
+/* 房间列表模式标识（多线争锋等）。 */
+body.home .room-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: 2px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #ffffff;
+  background: var(--color-primary);
+  border-radius: 4px;
+  vertical-align: middle;
+}

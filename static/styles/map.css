@@ -290,3 +290,21 @@
   transform: translateY(-50%);
   right: 0;
 }
+
+/* 多线争锋：非首战线的队列箭头按战线编号着色（render-update.js 附加 route-line-N），
+   带深色描边保证在浅色格子上也可辨；首战线（route-line-0）保持默认白字。 */
+.route-line-1,
+.route-line-1 .txt {
+  color: #ffd23f !important;
+  text-shadow: 0 0 0.14em rgba(0, 0, 0, 0.9);
+}
+.route-line-2,
+.route-line-2 .txt {
+  color: #4dd8ff !important;
+  text-shadow: 0 0 0.14em rgba(0, 0, 0, 0.9);
+}
+.route-line-3,
+.route-line-3 .txt {
+  color: #ff8ae2 !important;
+  text-shadow: 0 0 0.14em rgba(0, 0, 0, 0.9);
+}

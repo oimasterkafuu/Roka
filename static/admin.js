@@ -400,6 +400,9 @@ function renderBots() {
     $('<td></td>')
       .text(bot.allowFog ? '允许' : '不允许')
       .appendTo($tr);
+    $('<td></td>')
+      .text(bot.allowMultiLine ? '允许' : '不允许')
+      .appendTo($tr);
     $('<td></td>').text(fullTime(bot.startedAt)).appendTo($tr);
     $('<td></td>')
       .append(
@@ -439,6 +442,7 @@ async function startBot() {
   var template = $('#bot-template').val();
   var allowTeam = $('#bot-allow-team').prop('checked');
   var allowFog = $('#bot-allow-fog').prop('checked');
+  var allowMultiLine = $('#bot-allow-multi-line').prop('checked');
   if (!username || !room) {
     showBotError('请填写用户名与房间号。');
     return;
@@ -454,9 +458,10 @@ async function startBot() {
       template: template,
       allowTeam: allowTeam,
       allowFog: allowFog,
+      allowMultiLine: allowMultiLine,
     });
     showBotError('');
-    // 保留模板、组队与迷雾选择，仅清空房间输入便于连续启动。
+    // 保留模板、组队、迷雾与多线选择，仅清空房间输入便于连续启动。
     $('#bot-room').val('');
     loadBots();
   } catch (err) {
