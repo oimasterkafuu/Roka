@@ -24,6 +24,12 @@ const ISOLATED_GRACE_TICKS = 10;
  */
 const FOG_VISION_RADIUS = 1;
 
+/**
+ * 多线争锋的战线队列数：开启后每名玩家维护该数量的并行战线队列，
+ * 引擎每 Tick 按轮转顺序调度一条非空战线（执行其队首首个有效操作）。
+ */
+const MULTI_LINE_COUNT = 4;
+
 export {
   LEFT_GAME,
   AFK_MIN_TURNS,
@@ -32,4 +38,5 @@ export {
   ISOLATED_GRACE_TICKS,
   DISCONNECT_GRACE_MS,
   FOG_VISION_RADIUS,
+  MULTI_LINE_COUNT,
 };
