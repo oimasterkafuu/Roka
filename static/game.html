@@ -52,6 +52,21 @@
 
     <div id="turn-counter" style="display: none"></div>
 
+    <div id="multi-line-hud" class="fixed-center-horizontal" style="display: none">
+      <div class="background" style="padding: 4px 8px; white-space: nowrap">
+        <span class="unselectable" style="font-size: 12px; color: #253042"
+          >多线争锋 · 当前战线（数字键切换）：</span
+        >
+        <div id="tabs-battle-line" class="tabs unselectable">
+          <input type="hidden" value="1" />
+          <div class="inline-button inverted">1</div>
+          <div class="inline-button">2</div>
+          <div class="inline-button">3</div>
+          <div class="inline-button">4</div>
+        </div>
+      </div>
+    </div>
+
     <div id="spectate-mode" class="fixed-center-horizontal" style="display: none">
       <div id="spectate-mode-box" class="background" style="padding: 4px 8px; white-space: nowrap">
         <span class="unselectable" style="font-size: 12px; color: #253042">下局模式：</span>
@@ -184,6 +199,16 @@
           </div>
           <p>开启后仅可见己方队伍周围一圈的归属与兵力，其余地块加暗色遮罩。</p>
           <p id="fog-mode-bot-hint" style="display: none">Bot 对局不支持迷雾远征。</p>
+        </div>
+        <div id="multi-line-mode-section">
+          <h3>多线争锋：</h3>
+          <div id="tabs-multi-line-mode" class="tabs background unselectable">
+            <input type="hidden" value="关闭" />
+            <div class="inline-button inverted">关闭</div>
+            <div class="inline-button">开启</div>
+          </div>
+          <p>开启后每名玩家可同时维护 4 条战线队列（数字键 1-4 切换），系统每 Tick 轮转调度各战线。</p>
+          <p id="multi-line-mode-bot-hint" style="display: none">Bot 对局不支持多线争锋。</p>
         </div>
         <div id="team-select-section">
           <h3>选择队伍：</h3>

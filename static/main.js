@@ -156,10 +156,21 @@ var grid_type,
   fog,
   have_build,
   have_route = Array(4);
+// 各方向箭头所属的战线编号（多线争锋着色用；-1 = 无箭头），与 have_route 平行。
+var route_line = Array(4);
 // 格子 DOM 元素缓存与内容影子表（init_map 随 n/m 重建；render() 热路径
 // 免选择器查找与 innerHTML 序列化读取，issue #87）。
 var cell_elems, cell_html;
 var route;
+// 多线争锋（房间设置开启后由 init_map 下发 multi_line/line_count）：每名玩家维护
+// line_count 条并行战线队列，数字键 1-4 或底部 tabs 切换当前战线；route 始终指向
+// 当前战线队列（routes[cur_line]）。单线对局 line_count=1，routes 只有一条。
+var multi_line_mode = false,
+  line_count = 1,
+  cur_line = 0;
+var routes = [[]];
+// 各战线的光标位置（切换战线时保存/恢复）。
+var line_cursors = [];
 var general_order = Array();
 
 var room_id = '',
@@ -375,11 +386,19 @@ function init_map(_n, _m, general) {
   }
   for (var d = 0; d < 4; d++) {
     have_route[d] = Array(n);
+    route_line[d] = Array(n);
     for (var i = 0; i < n; i++) {
       have_route[d][i] = Array(m);
+      route_line[d][i] = Array(m);
     }
   }
   route = Array();
+  // 默认单线；多线对局由 init_map 消息处理器随后调用 resetBattleLines 覆盖。
+  multi_line_mode = false;
+  line_count = 1;
+  routes = [route];
+  cur_line = 0;
+  line_cursors = [];
   general_order = Array();
   ((selx = -1), (sely = -1), (selt = 1));
 
@@ -552,6 +571,10 @@ function keypress(key, shift) {
       clear_queue();
     } else if (key == 'e') {
       pop_queue();
+    } else if (key == '1' || key == '2' || key == '3' || key == '4' || (key >= 49 && key <= 52)) {
+      // 多线争锋：数字键 1-4 切换当前战线（单线对局 switchLine 直接忽略）。
+      var digit = typeof key == 'number' ? key - 48 : parseInt(key);
+      if (!chat_focus) switchLine(digit - 1);
     } else if (key == 't') {
       if (!chat_focus) {
         is_team = true;
@@ -655,11 +678,29 @@ if (!is_replay) {
 // 仅在确认是房间成员后启动（room_update 只发给房内 socket）：未进房的挂着标签页
 // 不再发心跳，服务端对房外心跳也不计入在线状态。
 var room_heartbeat_timer = null;
+var session_stamp = '';
 function sendRoomHeartbeat() {
-  socket.emit('room_heartbeat', {
+  var payload = {
     visible: document.visibilityState != 'hidden',
     focused: document.hasFocus(),
-  });
+  };
+  if (!session_stamp || !client_id || !window.crypto || !crypto.subtle) {
+    socket.emit('room_heartbeat', payload);
+    return;
+  }
+  crypto.subtle
+    .digest('SHA-256', new TextEncoder().encode(session_stamp + ':' + client_id))
+    .then(function (buf) {
+      payload.sig = Array.from(new Uint8Array(buf))
+        .map(function (b) {
+          return b.toString(16).padStart(2, '0');
+        })
+        .join('');
+      socket.emit('room_heartbeat', payload);
+    })
+    .catch(function () {
+      socket.emit('room_heartbeat', payload);
+    });
 }
 function startRoomHeartbeat() {
   if (is_replay || room_heartbeat_timer !== null) return;
@@ -678,6 +719,7 @@ async function loadAccountProfile() {
     if (!res.ok) throw '';
     const data = await res.json();
     account_name = data.username;
+    session_stamp = typeof data.stamp == 'string' ? data.stamp : '';
   } catch {
     location.href = '/login';
   }
@@ -730,31 +772,84 @@ socket.on('starting', function () {
 
 function addroute(x, y, d, mode) {
   route.push({ x: x, y: y, d: d, mode: mode });
-  socket.emit('attack', { x: x, y: y, dx: x + dire[d].x, dy: y + dire[d].y, mode: mode, half: mode == 1 });
+  var payload = { x: x, y: y, dx: x + dire[d].x, dy: y + dire[d].y, mode: mode, half: mode == 1 };
+  if (multi_line_mode) payload.line = cur_line;
+  socket.emit('attack', payload);
   render();
 }
 
 function addbuild(x, y, op) {
   route.push({ x: x, y: y, build: op });
-  socket.emit('build', { x: x, y: y, op: op });
+  var payload = { x: x, y: y, op: op };
+  if (multi_line_mode) payload.line = cur_line;
+  socket.emit('build', payload);
   render();
 }
 
 function clear_queue() {
-  route = Array();
-  socket.emit('clear_queue');
+  routes[cur_line] = [];
+  route = routes[cur_line];
+  socket.emit('clear_queue', multi_line_mode ? { line: cur_line } : {});
   render();
 }
 
 function pop_queue() {
   if (route.length) {
     var tmp = route.pop();
-    socket.emit('pop_queue');
+    socket.emit('pop_queue', multi_line_mode ? { line: cur_line } : {});
     if (!tmp.build && tmp.x + dire[tmp.d].x == selx && tmp.y + dire[tmp.d].y == sely) {
       ((selx = tmp.x), (sely = tmp.y));
     }
     render();
   }
+}
+
+// 多线争锋：按 init_map 下发的战线数重置全部战线队列（单线对局恒为 1 条）。
+function resetBattleLines(multiLine, lineCount) {
+  multi_line_mode = multiLine === true && lineCount > 1;
+  line_count = multi_line_mode ? lineCount : 1;
+  routes = [];
+  for (var i = 0; i < line_count; i++) routes.push(Array());
+  cur_line = 0;
+  route = routes[0];
+  line_cursors = [];
+  refreshLineHud();
+}
+
+// 清空全部战线队列镜像（战败/终局时调用，不改变模式与当前战线）。
+function clearAllRoutes() {
+  for (var i = 0; i < routes.length; i++) routes[i] = Array();
+  route = routes[cur_line];
+}
+
+// 底部战线指示条：仅多线对局中的存活参赛者可见。
+function refreshLineHud() {
+  var show = multi_line_mode && in_game && !is_replay && player > 0 && !game_ended && !lost;
+  $('#multi-line-hud').css('display', show ? '' : 'none');
+  if (!show) return;
+  var tabs = $('#tabs-battle-line')[0];
+  if (!tabs) return;
+  for (var i = 1; i < tabs.children.length; i++) {
+    $(tabs.children[i]).css('display', i <= line_count ? '' : 'none');
+  }
+  setTabVal('battle-line', String(cur_line + 1));
+}
+
+// 切换当前战线：保存/恢复各战线光标；目标战线有队列时光标跳到队尾目标格。
+function switchLine(k) {
+  if (!multi_line_mode || k == cur_line || k < 0 || k >= line_count) return;
+  line_cursors[cur_line] = [selx, sely];
+  cur_line = k;
+  route = routes[cur_line];
+  if (line_cursors[k]) {
+    ((selx = line_cursors[k][0]), (sely = line_cursors[k][1]));
+  } else if (route.length > 0) {
+    var tail = route[route.length - 1];
+    if (tail.build) ((selx = tail.x), (sely = tail.y));
+    else ((selx = tail.x + dire[tail.d].x), (sely = tail.y + dire[tail.d].y));
+  }
+  refreshLineHud();
+  render();
 }
 
 socket.on('set_id', function (data) {
@@ -782,6 +877,8 @@ socket.on('init_map', function (data) {
       player = i + 1;
     }
   }
+  // 多线争锋对局：按服务端下发的战线数重建本地战线队列（含断线重连补发场景）。
+  resetBattleLines(data.multi_line, data.line_count);
   // 开局默认选中己方主城，无需先按空格即可直接操作。
   if (player > 0 && data.general && data.general[0] >= 0) {
     ((selx = data.general[0]), (sely = data.general[1]), (selt = 1));
@@ -887,6 +984,7 @@ socket.on('room_update', function (data) {
   setTabVal('game-speed', data.speed + 'x');
   setAllowTeamModeByCode(Boolean(data.allow_team));
   setFogModeByCode(Boolean(data.fog));
+  setMultiLineModeByCode(Boolean(data.multi_line));
   setMapModeByCode(data.map_mode || 'random');
   setMapRegionByCode(data.map_region || 'china');
   setMapSizeByCode(data.map_size || 'normal');
@@ -905,6 +1003,7 @@ socket.on('room_update', function (data) {
   var roomRunning = Boolean(data.in_game);
   var hasServerBotForbiddingTeam = false;
   var hasBotForbiddingFog = false;
+  var hasBotForbiddingMultiLine = false;
   for (var i = 0; i < data.players.length; i++) {
     var p = data.players[i];
     if (p.server_bot && p.server_bot_allow_team !== true) {
@@ -916,7 +1015,13 @@ socket.on('room_update', function (data) {
     ) {
       hasBotForbiddingFog = true;
     }
-    if (hasServerBotForbiddingTeam && hasBotForbiddingFog) {
+    if (
+      (p.bot && !(p.server_bot && p.server_bot_allow_multi_line === true)) ||
+      (p.server_bot && p.server_bot_allow_multi_line !== true)
+    ) {
+      hasBotForbiddingMultiLine = true;
+    }
+    if (hasServerBotForbiddingTeam && hasBotForbiddingFog && hasBotForbiddingMultiLine) {
       break;
     }
   }
@@ -926,8 +1031,10 @@ socket.on('room_update', function (data) {
   setTabGroupReadonly('tabs-map-size', roomRunning || !isHost);
   setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBotForbiddingTeam);
   setTabGroupReadonly('tabs-fog-mode', roomRunning || !isHost || hasBotForbiddingFog);
+  setTabGroupReadonly('tabs-multi-line-mode', roomRunning || !isHost || hasBotForbiddingMultiLine);
   $('#team-mode-bot-hint').css('display', hasServerBotForbiddingTeam ? '' : 'none');
   $('#fog-mode-bot-hint').css('display', hasBotForbiddingFog ? '' : 'none');
+  $('#multi-line-mode-bot-hint').css('display', hasBotForbiddingMultiLine ? '' : 'none');
   $('#team-mode-section').css('display', isHost && !roomRunning ? '' : 'none');
   if (isHost && !roomRunning) $('#map-token').removeAttr('disabled');
   else $('#map-token').attr('disabled', '');
@@ -967,7 +1074,9 @@ socket.on('room_update', function (data) {
     if (i == 0) tmp[groupId] += '<b>';
     // 成员名：统一用户名组件（rating 颜色 + 点击跳主页），接口不带颜色时先 rt-unrated 渲染。
     // ready（已准备）用内联 underline 表达：rt-* 的 text-decoration:none 会盖掉 <u> 继承的下划线。
+    // 未经真人客户端认证的连接显示「[AI] 」前缀（仅当前对局的房间视图生效）。
     var memberLink = usernameLinkHtml(data.players[i].uid);
+    if (data.players[i].ai) memberLink = '[AI] ' + memberLink;
     if (data.players[i].ready) {
       memberLink = memberLink.replace('<a ', '<a style="text-decoration: underline" ');
     }
@@ -1100,6 +1209,20 @@ $(document).ready(function () {
       });
     }
   });
+  $('#tabs-multi-line-mode').each(function () {
+    for (var i = 1; i < this.children.length; i++) {
+      initTab(this, this.children[i], function () {
+        updateConfPatch({ multi_line: getMultiLineModeCode() });
+      });
+    }
+  });
+  $('#tabs-battle-line').each(function () {
+    for (var i = 1; i < this.children.length; i++) {
+      initTab(this, this.children[i], function () {
+        switchLine(parseInt(getTabVal('battle-line')) - 1);
+      });
+    }
+  });
   $('#tabs-map-size').each(function () {
     for (var i = 1; i < this.children.length; i++) {
       initTab(this, this.children[i], function () {
@@ -1139,6 +1262,7 @@ socket.on('left', function () {
   $('#game').css('display', 'none');
   $('#game-leaderboard').css('display', 'none');
   $('#turn-counter').css('display', 'none');
+  $('#multi-line-hud').css('display', 'none');
   $('#chat-messages-container').html('');
   $('#status-alert').css('display', 'none');
   $($('#status-alert').children()[0].children[6]).css('display', 'none');

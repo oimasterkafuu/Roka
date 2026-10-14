@@ -259,6 +259,10 @@
   bottom: 8px;
   z-index: 20;
 }
+#multi-line-hud {
+  bottom: 8px;
+  z-index: 20;
+}
 #replay-bottom-bar {
   display: inline-block;
   margin: 5px;
