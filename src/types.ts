@@ -24,6 +24,8 @@ export interface LobbyConfig {
   allow_team: boolean;
   /** 迷雾远征开关：开启后玩家仅可见己方队伍视野范围内的归属与兵力。 */
   fog: boolean;
+  /** 多线争锋开关：开启后每名玩家维护多条战线队列，每 Tick 轮转调度。 */
+  multi_line: boolean;
   map_token: string;
   /** 种子来源：true = 房主自定义（对局结束后保留沿用）；false/缺省 = 随机生成（每局重随机）。 */
   map_token_custom?: boolean;
@@ -45,6 +47,8 @@ export interface LobbyPlayer {
   serverBotAllowTeam?: boolean;
   /** 托管 Bot 启动时的迷雾许可：false 的房间禁止开启迷雾（change_game_conf 校验）。 */
   serverBotAllowFog?: boolean;
+  /** 托管 Bot 启动时的多线争锋许可：false 的房间禁止开启多线争锋（change_game_conf 校验）。 */
+  serverBotAllowMultiLine?: boolean;
   /** 任意 Bot 成员（第三方 bot 令牌或服务端托管）：未允许时禁用迷雾远征。 */
   bot?: boolean;
 }
@@ -62,6 +66,10 @@ export interface RoomPlayerView {
   server_bot_allow_team?: boolean;
   /** 服务端托管策略 Bot 的迷雾许可（仅在为 true 时下发）：前端据此判断房主是否可开关迷雾。 */
   server_bot_allow_fog?: boolean;
+  /** 服务端托管策略 Bot 的多线争锋许可（仅在为 true 时下发）：前端据此判断房主是否可开关多线争锋。 */
+  server_bot_allow_multi_line?: boolean;
+  /** 未经真人客户端认证的对局连接标记（仅在为 true 时下发）：前端为名字加「[AI] 」前缀。 */
+  ai?: boolean;
 }
 
 export interface RoomUpdatePayload {
@@ -69,6 +77,8 @@ export interface RoomUpdatePayload {
   allow_team: boolean;
   /** 迷雾远征开关（房间设置同步给前端展示）。 */
   fog: boolean;
+  /** 多线争锋开关（房间设置同步给前端展示）。 */
+  multi_line: boolean;
   map_token: string;
   /** 当前种子是否为房主自定义（自定义种子沿用不重随机，前端据此显示提示）。 */
   map_token_custom: boolean;
@@ -98,6 +108,11 @@ export interface MovePayload {
    * 客户端用它精确同步本地队列显示。
    */
   skip?: number;
+  /**
+   * 多线争锋对局中本 Tick 所调度战线的编号（0 起）；skip 与执行操作均属于该战线。
+   * 仅多线对局下发，单线对局无此字段。
+   */
+  line?: number;
 }
 
 export interface LeaderboardEntry {
@@ -108,6 +123,8 @@ export interface LeaderboardEntry {
   class_: string;
   dead: number;
   id: number;
+  /** 未经真人客户端认证的连接（仅实时对局帧下发，回放不含）：前端为名字加「[AI] 」前缀。 */
+  ai?: boolean;
 }
 
 export interface UpdatePayload {
@@ -172,6 +189,8 @@ export interface ReplayMeta {
   auto_crown_transfer?: boolean;
   /** 对局是否开启迷雾远征（仅作元信息记录；回放始终全视野）。 */
   fog?: boolean;
+  /** 对局是否开启多线争锋（仅作元信息记录；回放操作流与单线局同构）。 */
+  multi_line?: boolean;
   map_token: string;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
   /** 新回放写入地区；旧回放缺省时按汉重建。 */
@@ -261,6 +280,8 @@ export interface RoomListItem {
   ready: number;
   need: number;
   running: boolean;
+  /** 多线争锋房间标记（仅在为 true 时下发）：首页房间列表据此显示模式标识。 */
+  multi_line?: boolean;
 }
 
 export interface GameResultEntry {
