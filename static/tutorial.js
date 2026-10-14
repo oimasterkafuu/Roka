@@ -120,7 +120,7 @@
     },
     {
       title: '操作队列',
-      body: '快速连按两次 D（或 →）：推兵指令会进入操作队列，每 Tick 自动执行一条，格子上的小箭头标示排队方向。实战中可按 R（或 Q）清空队列、按 F（或 E）撤销队尾一条。',
+      body: '快速连按两次 D（或 →）：推兵指令会进入操作队列，每 Tick 自动执行一条，格子上的小箭头标示排队方向。实战中可按 Q 清空队列、按 E 撤销队尾一条。',
       hint: '连按排队，占领高亮格。',
       targets: [POS.queueTarget],
     },
@@ -1535,12 +1535,12 @@
       }
     }
 
-    if (key === 'r' || key === 'q') {
+    if (key === 'q') {
       event.preventDefault();
       clearQueue();
       return;
     }
-    if (key === 'f' || key === 'e') {
+    if (key === 'e') {
       event.preventDefault();
       popQueue();
       return;
