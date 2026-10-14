@@ -626,7 +626,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th><code>50..99</code></th>
             <td>
               指挥所，owner id = code - 50（内部 <code>-1</code>）。只能由玩家建造（<code>build</code>
-              操作，相当于 X / Q 键，消耗 50 兵），地图不再预置；与普通地块一样每 50 Tick +1
+              操作，相当于 X 键，消耗 50 兵），地图不再预置；与普通地块一样每 50 Tick +1
               兵（不享受爆发期加成），是连通锚点。
             </td>
           </tr>
@@ -841,26 +841,26 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
 
         <h3>6.2 <code>build</code>（建造）</h3>
         <p>
-          <code>{ x, y, op }</code>。<code>op='b'</code> 建造指挥所（相当于 X / Q 键），<code>op='c'</code>
-          升级主城（相当于 C / E 键），均消耗 50 兵；其他 <code>op</code> 值直接被忽略。与
+          <code>{ x, y, op }</code>。<code>op='b'</code> 建造指挥所（相当于 X 键），<code>op='c'</code>
+          升级主城（相当于 C 键），均消耗 50 兵；其他 <code>op</code> 值直接被忽略。与
           <code>attack</code> 共用同一队列，每 Tick
           每玩家最多执行一条队列操作，队列长度无上限。服务端入队只记录合法的
           <code>op</code>
           与坐标，不校验地形、归属、兵力或连通，可排在队列很靠后的未来位置；执行时才校验（指挥所须建在己方普通地块、主城须由己方指挥所升级、兵力
           ≥ 50、非孤军），条件不满足会自动跳过（通过
           <code>lst_move.skip</code> 告知丢弃数量），不会产生消耗。在普通地块上连发 <code>b</code> +
-          <code>c</code> 两条即可两 Tick 后建成主城（相当于在普通地块按 C / E 键）。
+          <code>c</code> 两条即可两 Tick 后建成主城（相当于在普通地块按 C 键）。
         </p>
 
         <h3>6.3 队列管理</h3>
         <table class="protocol-table">
           <tr>
             <th><code>clear_queue</code></th>
-            <td>清空当前玩家待执行操作队列（R 键）。</td>
+            <td>清空当前玩家待执行操作队列（R / Q 键）。</td>
           </tr>
           <tr>
             <th><code>pop_queue</code></th>
-            <td>删除队尾一条待执行操作（F 键）。</td>
+            <td>删除队尾一条待执行操作（F / E 键）。</td>
           </tr>
         </table>
 
