@@ -1,11 +1,11 @@
-// 多线争锋 v2（spec-multi-line-v2.md）引擎级单元测试：直接驱动 dist/game-engine.js，
-// 逐条验收 R1~R4，另附单线对局回归（v2 不得改变单线行为）。
+// 多线争锋 v2（spec-multi-line-v2.md，issue #107 修订）引擎级单元测试：直接驱动
+// dist/game-engine.js，逐条验收 R1~R4，另附单线对局回归（v2 不得改变单线行为）。
 //   R1 战线数量不设上限：连续开辟 7 条战线（> v1 的 4 条上限），显式 line 参数被忽略；
 //   R2 Q/E 全局撤回：retractLast 按入队的全局时间序跨战线撤回最后一条指令；
-//   R3 起始点覆盖：发「从 A 移到 B」再发「从 B 移到 C」，B→C 被覆盖——逐 Tick 逐格
-//      断言 B→C 未执行（C 始终中立、lst_move 无 B→C），只执行 A→B；起始点推进到 B
-//      之后再发 B→C 则可正常入队并执行（正对照，证明先前丢弃是覆盖而非全局封禁）；
-//   R4 分兵：同一出发点的两个不同方向指令各自成立战线，轮转调度各自执行；
+//   R3 链式挂尾：发「从 A 移到 B」再发「从 B 移到 C」，B→C 挂到同一战线队尾——
+//      逐 Tick 断言第 1 Tick 只执行 A→B、第 2 Tick 链式推进执行 B→C（C 变为己方）；
+//   R4 分兵 + 真并行调度：同一出发点的两个不同方向指令各自成立战线，
+//      两条非空战线在同一 Tick 各执行一条（不再轮转 1/N）；
 //   回归：单线对局的链式入队（A→B→C 依次执行）、popQueue/clearQueue 行为不变。
 // 成功 exit 0，失败 exit 1。
 
@@ -237,52 +237,46 @@ async function scenarioR2(GameEngine) {
 }
 
 async function scenarioR3(GameEngine) {
-  console.log('R3：队列起始点覆盖语义（A→B 后再发 B→C，B→C 不执行）');
+  console.log('R3：链式挂尾（A→B 未执行时再发 B→C，挂同一战线队尾接续执行）');
   const { engine, cb } = await newEngine(GameEngine, true, 'mlv2-r3');
   const run = pickStraightRun(engine, 3);
   const [ax, ay] = run.cells[0];
   const [bx, by] = run.cells[1];
   const [cx, cy] = run.cells[2];
-  own(engine, ax, ay, 10); // A：己方，兵力 10
+  own(engine, ax, ay, 40); // A：己方，兵力充足（两次全冲后仍 > 0）
   neutral(engine, bx, by); // B：中立
   neutral(engine, cx, cy); // C：中立
   engine.addMove('sidA', ax, ay, bx, by, 2); // 从 A 移到 B
   engine.addMove('sidA', bx, by, cx, cy, 2); // 从 B 移到 C —— B 已是 A→B 的到达格（非起始点）
   check(
-    'B→C 被 A→B 覆盖：不形成新队列（仍 1 条战线、仅 1 条待发指令）',
-    engine.pmove[0].length === 1 && queuedTotal(engine, 0) === 1,
-    `战线数 ${engine.pmove[0].length}，待发 ${queuedTotal(engine, 0)}`,
+    'B→C 链式挂尾：A→B 未执行时 B→C 入队同一战线（仍 1 条战线、2 条待发指令）',
+    engine.pmove[0].length === 1 && engine.pmove[0][0].length === 2 && queuedTotal(engine, 0) === 2,
+    `战线数 ${engine.pmove[0].length}，各线 ${JSON.stringify(engine.pmove[0].map((q) => q.length))}`,
   );
   await tick(engine, 1);
   check('第 1 Tick 执行 A→B：B 变为己方', engine.owner[bx][by] === 1);
-  check('第 1 Tick 后 C 仍为中立（B→C 未执行）', engine.owner[cx][cy] === 0);
+  check('第 1 Tick 后 C 仍为中立（挂尾的 B→C 尚未轮到）', engine.owner[cx][cy] === 0);
   check(
     '起始点随执行推进：战线 0 起始点由 A 推进到 B',
     engine.pqueueHead[0][0] && engine.pqueueHead[0][0].x === bx && engine.pqueueHead[0][0].y === by,
   );
-  // 逐格断言：随后 5 个 Tick，B→C 始终未执行——C 保持中立，lst_move 中无 B→C。
-  await tick(engine, 5);
-  check('第 2~6 Tick：C 始终保持中立（B→C 逐格断言未执行）', engine.owner[cx][cy] === 0);
-  const bcExecuted = executedMoves(cb).some(
-    (mv) => mv.x === bx && mv.y === by && mv.dx === cx && mv.dy === cy,
+  await tick(engine, 1);
+  check('第 2 Tick 链式推进：挂尾的 B→C 执行，C 变为己方', engine.owner[cx][cy] === 1);
+  check(
+    '起始点继续推进到 C',
+    engine.pqueueHead[0][0] && engine.pqueueHead[0][0].x === cx && engine.pqueueHead[0][0].y === cy,
   );
-  check('全部帧的 lst_move 中没有 B→C 执行记录', !bcExecuted);
   const abExecuted = executedMoves(cb).some(
     (mv) => mv.x === ax && mv.y === ay && mv.dx === bx && mv.dy === by,
   );
-  check('lst_move 中仅有 A→B 被执行（只执行 A→B）', abExecuted);
-  // 正对照：起始点已推进到 B，此时再发 B→C 应正常入队并执行。
-  engine.addMove('sidA', bx, by, cx, cy, 2);
-  check(
-    '正对照：起始点推进到 B 后重发 B→C，正常入队（战线 0 队尾）',
-    engine.pmove[0].length === 1 && engine.pmove[0][0].length === 1,
+  const bcExecuted = executedMoves(cb).some(
+    (mv) => mv.x === bx && mv.y === by && mv.dx === cx && mv.dy === cy,
   );
-  await tick(engine, 1);
-  check('正对照：重发的 B→C 被执行，C 变为己方', engine.owner[cx][cy] === 1);
+  check('lst_move 中 A→B 与 B→C 依次各执行一次', abExecuted && bcExecuted);
 }
 
 async function scenarioR4(GameEngine) {
-  console.log('R4：同一出发点多方向指令分兵，各自成队、轮转执行');
+  console.log('R4：同一出发点多方向指令分兵，各自成队、真并行调度');
   const { engine, cb } = await newEngine(GameEngine, true, 'mlv2-r4');
   const run = pickStraightRun(engine, 2);
   const [ax, ay] = run.cells[0];
@@ -306,13 +300,30 @@ async function scenarioR4(GameEngine) {
     engine.pmove[0].length === 2 && engine.pmove[0][0].length === 2 && engine.pmove[0][1].length === 2,
     `战线数 ${engine.pmove[0].length}，各线 ${JSON.stringify(engine.pmove[0].map((q) => q.length))}`,
   );
-  await tick(engine, 2);
-  const lines = executedMoves(cb)
-    .filter((mv) => mv.x === ax && mv.y === ay)
-    .map((mv) => mv.line);
-  check('两个方向的操作在 2 个 Tick 内被两条战线轮转调度', lines.includes(0) && lines.includes(1), JSON.stringify(lines));
-  check('分兵方向 1 已执行：B 变为己方', engine.owner[bx][by] === 1);
-  check('分兵方向 2 已执行：D 变为己方', engine.owner[dx][dy] === 1);
+  await tick(engine, 1);
+  check(
+    '真并行：同一 Tick 两条非空战线各走一步（B 与 D 在同一 Tick 变为己方）',
+    engine.owner[bx][by] === 1 && engine.owner[dx][dy] === 1,
+    `B=${engine.owner[bx][by]} D=${engine.owner[dx][dy]}`,
+  );
+  // lst_move 每 Tick 只汇报一条：两条战线均有活动时汇报最后一条活动战线（line=1）。
+  const firstTickMoves = executedMoves(cb);
+  check(
+    'lst_move 汇报最后活动战线（第 1 Tick line=1）',
+    firstTickMoves.length === 1 && firstTickMoves[0].line === 1,
+    JSON.stringify(firstTickMoves),
+  );
+  await tick(engine, 1);
+  check(
+    '第 2 Tick 两战线继续并行：起始点分别推进到 B 与 D',
+    engine.pqueueHead[0][0] &&
+      engine.pqueueHead[0][0].x === bx &&
+      engine.pqueueHead[0][0].y === by &&
+      engine.pqueueHead[0][1] &&
+      engine.pqueueHead[0][1].x === dx &&
+      engine.pqueueHead[0][1].y === dy,
+  );
+  check('两条战线第 2 Tick 后均排空', queuedTotal(engine, 0) === 0);
 }
 
 async function scenarioSingleLineRegression(GameEngine) {
@@ -364,7 +375,7 @@ async function main() {
     console.error(`多线争锋 v2 引擎测试失败：${failures} 项断言未通过`);
     process.exit(1);
   }
-  console.log('测试通过：R1 动态战线、R2 全局撤回、R3 起始点覆盖、R4 分兵与单线回归全部符合预期');
+  console.log('测试通过：R1 动态战线、R2 全局撤回、R3 链式挂尾、R4 分兵真并行与单线回归全部符合预期');
   process.exit(0);
 }
 

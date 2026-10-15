@@ -3,7 +3,8 @@
 // 2) 多线房间：房主 change_game_conf { multi_line: true } 后开局，校验
 //    a. init_map 携带 multi_line=true、line_count=1（v2 战线数从 1 条起按需动态增长）；
 //    b. 同一点两个不同方向的 attack 自动分兵成两条战线（R4；v2 忽略 attack 携带的
-//       line 参数，战线由服务端按起始点路由），lst_move.line 随 Tick 在两条战线间轮转；
+//       line 参数，战线由服务端按起始点路由），两条非空战线真并行：同一 Tick 各执行
+//       一条、队列快速排空（不再轮转 1/N）；
 //    c. 全新出发点排一条无效操作自成新战线，lst_move 的 skip>=1 且归属该新战线；
 // 3) 对照房间：默认配置开局，init_map 不带 multi_line，lst_move 不带 line 字段。
 // 4) Bot 房间：第三方 bot 进房后多线被强制关闭，房主再次开启请求被拒绝。
@@ -284,18 +285,25 @@ async function main() {
   log('init_map 携带 multi_line=true、line_count=1（v2 动态战线从 1 条起）');
 
   // A 从主城向两个不同方向各排 4 条操作（v2：attack 的 line 参数被忽略，
-  // 同出发点多方向自动分兵成两条战线；无效也无妨：调度与 skip 归属照样轮转）。
+  // 同出发点多方向自动分兵成两条战线；无效也无妨：调度与 skip 归属照样并行汇报）。
   const [gx, gy] = a.general;
   for (let i = 0; i < 4; i++) {
     a.socket.emit('attack', { x: gx, y: gy, dx: gx + 1, dy: gy, mode: 2 });
     a.socket.emit('attack', { x: gx, y: gy, dx: gx, dy: gy + 1, mode: 2 });
   }
-  await waitFor(() => a.lstMoves.length >= 8, 15_000, 'lst_move 轮转采样');
-  const servedLines = new Set(a.lstMoves.slice(0, 8).map((mv) => mv.line));
-  if (!servedLines.has(0) || !servedLines.has(1)) {
-    throw new Error(`多线调度未轮转：前 8 Tick 的 lst_move.line 集合=${JSON.stringify([...servedLines])}`);
+  // 真并行（issue #107）：两条非空战线同一 Tick 各弹一条（执行或丢弃），
+  // 各 4 条指令最迟约 5 Tick 同时排空；轮转 1/N 需 8 Tick 才能排空。
+  await waitFor(() => a.lstMoves.length >= 10, 20_000, 'lst_move 并行采样');
+  const isActive = (mv) => mv.x !== -1 || (mv.skip | 0) > 0;
+  const firstAct = a.lstMoves.findIndex(isActive);
+  const lastAct = a.lstMoves.map(isActive).lastIndexOf(true);
+  if (firstAct === -1) {
+    throw new Error('未观察到任何战线活动帧（lst_move 无执行/丢弃记录）');
   }
-  log('同点双向操作自动分兵为战线 0/1 并随 Tick 轮转调度');
+  if (lastAct - firstAct > 5) {
+    throw new Error(`战线排空耗时 ${lastAct - firstAct + 1} Tick，疑似仍为轮转调度（真并行应 ≤6）`);
+  }
+  log('同点双向操作自动分兵为战线 0/1 并真并行调度（队列 ≤6 Tick 排空）');
 
   // skip 归属：等既有队列自然耗尽（8 Tick 足够），再从一个全新出发点排一条
   // 无效操作（非邻接，必被丢弃）——自成新战线 2，skip 应归属该战线。
