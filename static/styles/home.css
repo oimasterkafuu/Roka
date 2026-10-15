@@ -359,10 +359,18 @@ body.home .rating-provisional {
   cursor: help;
 }
 
-/* 页脚入口 */
+/* 页脚入口：链接组居中，版本号链接靠右（margin-left:auto）；窄屏允许折行不溢出。 */
 body.home .home-footer {
-  text-align: center;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
   font-size: 13px;
+}
+body.home .home-footer > :first-child {
+  margin-left: auto;
+}
+body.home .home-footer #footer-version {
+  margin-left: auto;
 }
 body.home .home-footer a {
   color: #6b7686;

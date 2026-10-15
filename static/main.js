@@ -709,6 +709,28 @@ function stopRoomHeartbeat() {
   }
 }
 
+// 连接级真人验证（幂等，可重复调用）：session_stamp、client_id 与 WebCrypto 齐备时
+// 才计算 sig 并上报 client_verify，否则静默不发。目标是在进房之前完成验证——
+// 任何开局时序（含 set_id 晚到的竞态）都不会再把真人误标为 [AI]。
+function sendClientVerify() {
+  if (!session_stamp || !client_id || !window.crypto || !crypto.subtle) {
+    return;
+  }
+  crypto.subtle
+    .digest('SHA-256', new TextEncoder().encode(session_stamp + ':' + client_id))
+    .then(function (buf) {
+      var sig = Array.from(new Uint8Array(buf))
+        .map(function (b) {
+          return b.toString(16).padStart(2, '0');
+        })
+        .join('');
+      socket.emit('client_verify', { sig: sig });
+    })
+    .catch(function () {
+      // 签名失败时静默：room_heartbeat 的常规路径仍会周期重试。
+    });
+}
+
 async function loadAccountProfile() {
   try {
     const res = await fetch('/api/auth/me');
@@ -716,6 +738,8 @@ async function loadAccountProfile() {
     const data = await res.json();
     account_name = data.username;
     session_stamp = typeof data.stamp == 'string' ? data.stamp : '';
+    // 拿到 stamp 立即验证一次（早于 joinGameRoom），消除进房瞬间开局的误标竞态。
+    sendClientVerify();
   } catch {
     location.href = '/login';
   }
@@ -924,6 +948,8 @@ function clearAllRoutes() {
 
 socket.on('set_id', function (data) {
   client_id = data;
+  // 覆盖 set_id 晚到的竞态：stamp 已就绪时立即补一次验证。
+  sendClientVerify();
 });
 
 socket.on('init_map', function (data) {
@@ -1023,6 +1049,8 @@ $(document).ready(function () {
 
 socket.on('connect', function () {
   $('#disconnect-banner').css('display', 'none');
+  // 断线重连后 stamp 仍在本地，先补验证再进房。
+  sendClientVerify();
   joinGameRoom();
 });
 
