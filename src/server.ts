@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { isIP } from 'node:net';
 import fastifyRateLimit from '@fastify/rate-limit';
@@ -35,6 +37,26 @@ import { WebhookUpdater } from './server/webhook-updater';
 
 const runtimeEnv = ensureRuntimeEnv();
 const app = Fastify({ logger: true });
+
+// 版本信息（/api/version）：version 读 package.json；commit 为启动时的 git HEAD
+// （部署流程是 webhook git reset --hard + 重启，天然准确），非 git 环境取不到时为空字符串。
+const packageVersion = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    return typeof pkg?.version === 'string' ? pkg.version : '';
+  } catch {
+    return '';
+  }
+})();
+const gitCommit = (() => {
+  try {
+    return execSync('git rev-parse HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return '';
+  }
+})();
 
 // 回放上传：接收原始 .rpl 文件（ops-v1 操作流，通常仅几百字节）。
 app.addContentTypeParser(
@@ -1100,6 +1122,11 @@ const boot = async (): Promise<void> => {
     return reply.send(decorateAnnouncement(announcementStore.get()));
   });
 
+  // 版本信息（公开）：首页页脚右下角版本号链接到 GitHub 对应 commit。
+  app.get('/api/version', async (_request, reply) => {
+    return reply.send({ version: packageVersion, commit: gitCommit });
+  });
+
   app.post('/api/announcement', { preHandler: feedActionRateLimitPreHandler }, async (request, reply) => {
     const authUser = (request as AuthRequest).authUser;
     if (!authUser) {
@@ -1514,6 +1541,21 @@ const boot = async (): Promise<void> => {
       lobbyService.heartbeatExempt.add(socket.id);
     }
 
+    // 连接级会话校验（真人客户端标记，幂等）：上报的派生值命中即把本连接记入
+    // humanVerified。room_heartbeat 与 client_verify 共用同一校验入口——
+    // client_verify 在进房之前完成验证（消除「进房瞬间开局」首帧误标与
+    // set_id 晚到的时序竞态），room_heartbeat 保留为常规周期路径。
+    const markHumanVerified = (data?: { sig?: unknown }): void => {
+      const sessionSid = socket.data.sessionSid;
+      if (
+        typeof sessionSid === 'string' &&
+        typeof data?.sig === 'string' &&
+        authService.verifyClientSig(sessionSid, lobbyService.md5(socket.id), data.sig)
+      ) {
+        lobbyService.humanVerified.add(socket.id);
+      }
+    };
+
     // 房间页心跳：证明标签页仍然开启；准备阶段超时未上报会被移出房间。
     // 仅当 socket 确为某房间成员时心跳才计入 presence——房外的机械心跳是噪声
     // （挂着的游戏页标签页不得借此维持「在线」），其 presence 随 5 分钟窗口自然过期。
@@ -1523,14 +1565,12 @@ const boot = async (): Promise<void> => {
         recordPresence(username);
       }
       // 连接级会话校验：随常规心跳上报的派生值命中即视为真人客户端连接。
-      const sessionSid = socket.data.sessionSid;
-      if (
-        typeof sessionSid === 'string' &&
-        typeof data?.sig === 'string' &&
-        authService.verifyClientSig(sessionSid, lobbyService.md5(socket.id), data.sig)
-      ) {
-        lobbyService.humanVerified.add(socket.id);
-      }
+      markHumanVerified(data);
+    });
+
+    // 进房前的提前真人验证（独立于心跳周期，幂等可重复），校验逻辑与心跳路径一致。
+    socket.on('client_verify', (data?: { sig?: unknown }) => {
+      markHumanVerified(data);
     });
 
     // 多线争锋的可选战线编号解析：缺省/非法时按 undefined 处理（引擎回退战线 0）。
@@ -1667,13 +1707,20 @@ const boot = async (): Promise<void> => {
         const hadAllowTeam = lobbyService.lobbyConfig.get(room)?.allow_team === true;
         const hadFog = lobbyService.lobbyConfig.get(room)?.fog === true;
         const hadMultiLine = lobbyService.lobbyConfig.get(room)?.multi_line === true;
-        lobbyService.joinLobby(socket.id, username, room, {
+        const joinResult = lobbyService.joinLobby(socket.id, username, room, {
           serverBot: socket.data.isServerBot === true,
           serverBotAllowTeam: socket.data.serverBotAllowTeam === true,
           serverBotAllowFog: socket.data.serverBotAllowFog === true,
           serverBotAllowMultiLine: socket.data.serverBotAllowMultiLine === true,
           bot: socket.data.isBot === true,
         });
+        // 非官方 Bot 当日在官方 Bot 房间的累计停留已达上限：拒绝进房——
+        // 不加入房间组、不发 room_update 与加入广播，仅向房间提示原因。
+        if (joinResult.blocked) {
+          lobbyService.sendLobbySystemMessage(io, roomVal, joinResult.blocked);
+          lobbyService.emitHomeRooms(io);
+          return;
+        }
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         lobbyService.sendLobbySystemMessage(io, roomVal, `${username} 加入了自定义房间。`);

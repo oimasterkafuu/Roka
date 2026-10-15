@@ -44,6 +44,10 @@ const LOBBY_HEARTBEAT_SWEEP_MS = 60_000;
  * 防止挂着的浏览器标签页靠心跳长期占用房间席位并维持在线状态。 */
 const LOBBY_MAX_DWELL_MS = 12 * 3600_000;
 
+/** 非官方 Bot（ROKA_BOT_TOKENS 接入）每日（服务器本地日历日）在官方 Bot 房间的
+ * 累计停留上限；达到上限后当日无法再进入任何官方 Bot 房间。人类与官方托管 Bot 不受影响。 */
+const BOT_DWELL_DAILY_LIMIT_MS = 3 * 3600_000;
+
 const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
   allow_team: '允许组队',
@@ -85,6 +89,14 @@ class LobbyService {
   private readonly lobbyHeartbeats = new Map<string, number>();
   /** 房间成员本次进房的时间（sid → ms 时间戳）；重进房间时重置，用于停留上限检测。 */
   private readonly lobbyJoinedAt = new Map<string, number>();
+
+  /** 非官方 Bot 在官方 Bot 房间的进行中计时段（sid → {uid, gid, sinceMs}）；
+   * 只记进房时房内已有托管 Bot 成员的记录（快照判定，进入后官方 Bot 离开不追溯）。 */
+  private readonly botDwell = new Map<string, { uid: string; gid: string; sinceMs: number }>();
+
+  /** 非官方 Bot 每日（服务器本地日历日 YYYY-MM-DD）在官方 Bot 房间的累计停留毫秒数；
+   * 每次读写时惰性 rollover（date 不同即重置该 uid 桶）。内存态，服务器重启清零。 */
+  private readonly botDwellDaily = new Map<string, { date: string; ms: number }>();
   /** 豁免心跳踢出的 sid（ROKA_BOT_TOKENS 鉴权的 bot 连接，由 server.ts 维护）。 */
   readonly heartbeatExempt = new Set<string>();
   /**
@@ -268,7 +280,16 @@ class LobbyService {
       serverBotAllowMultiLine?: boolean;
       bot?: boolean;
     },
-  ): void {
+  ): { blocked?: string } {
+    // 非官方 Bot 的官方 Bot 房每日停留上限：官方 Bot 房按进房时刻快照判定
+    // （房内已有任一托管 Bot 成员即为官方 Bot 房；进入后官方 Bot 离开不追溯），
+    // 该 uid 当日累计停留达到上限后拒绝进入任何官方 Bot 房间（人类与托管 Bot 不受限）。
+    const isUserBot = options?.bot === true && options?.serverBot !== true;
+    const isServerBotRoom = (this.lobbyPlayers.get(gid) ?? []).some((player) => player.serverBot === true);
+    if (isUserBot && isServerBotRoom && this.botDwellDailyMs(uid) >= BOT_DWELL_DAILY_LIMIT_MS) {
+      return { blocked: `${uid} 今日在官方 Bot 房间的累计停留已达 3 小时上限，暂时无法进入。` };
+    }
+
     this.lobbyOfSid.set(sid, gid);
     // 进房本身即是「标签页开启」的证明，作为心跳基线；同时记录进房时间作为停留上限基线。
     this.lobbyHeartbeats.set(sid, Date.now());
@@ -286,7 +307,7 @@ class LobbyService {
     const players = this.lobbyPlayers.get(gid);
     const conf = this.lobbyConfig.get(gid);
     if (!players || !conf) {
-      return;
+      return {};
     }
 
     const isBot = options?.serverBot === true || options?.bot === true;
@@ -332,7 +353,7 @@ class LobbyService {
       // 服务端托管 bot 永远排在普通成员之后：房主（players[0]）保留给
       // 人类用户或第三方 bot。bot 单独在房时暂居首位，任何普通成员进房即接任。
       players.push(player);
-      return;
+      return {};
     }
     // 普通成员插入到首个服务端托管 bot 之前（无 bot 时等价于末尾追加，保持 FIFO）。
     let insertIndex = 0;
@@ -340,9 +361,17 @@ class LobbyService {
       insertIndex += 1;
     }
     players.splice(insertIndex, 0, player);
+    if (isUserBot && isServerBotRoom) {
+      // 非官方 Bot 进入官方 Bot 房：开始计时段（退出时由 leaveLobby 结算进当日桶）。
+      this.botDwell.set(sid, { uid, gid, sinceMs: Date.now() });
+    }
+    return {};
   }
 
   leaveLobby(sid: string, gid: string): string {
+    // 官方 Bot 房停留计时结算：所有退出路径（checkLeave/kickFromLobby/断线宽限到期/
+    // 对局结束清理）都汇聚到本方法，有计时段则累加进当日桶并清除。
+    this.settleBotDwell(sid);
     const players = this.lobbyPlayers.get(gid);
     if (!players) {
       return '';
@@ -353,6 +382,44 @@ class LobbyService {
     }
     const [removed] = players.splice(index, 1);
     return removed.uid;
+  }
+
+  /** 服务器本地时区的日历日键（YYYY-MM-DD），用于每日停留桶的惰性 rollover。 */
+  private localDateKey(): string {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${now.getFullYear()}-${month}-${day}`;
+  }
+
+  /** 某 uid 当日在官方 Bot 房间的累计停留毫秒数（date 不同即视为 0，惰性 rollover）。 */
+  private botDwellDailyMs(uid: string): number {
+    const bucket = this.botDwellDaily.get(uid);
+    if (!bucket || bucket.date !== this.localDateKey()) {
+      return 0;
+    }
+    return bucket.ms;
+  }
+
+  /** 把一段停留累加进某 uid 的当日桶（date 不同即重置该桶后再累加，惰性 rollover）。 */
+  private addBotDwellDaily(uid: string, ms: number): void {
+    const date = this.localDateKey();
+    const bucket = this.botDwellDaily.get(uid);
+    if (bucket && bucket.date === date) {
+      bucket.ms += ms;
+    } else {
+      this.botDwellDaily.set(uid, { date, ms });
+    }
+  }
+
+  /** 结算 sid 的官方 Bot 房计时段（若有）：累加进当日桶并删除记录。 */
+  private settleBotDwell(sid: string): void {
+    const record = this.botDwell.get(sid);
+    if (!record) {
+      return;
+    }
+    this.botDwell.delete(sid);
+    this.addBotDwellDaily(record.uid, Date.now() - record.sinceMs);
   }
 
   /** 判断 sid 当前是否为某房间成员（与 recordLobbyHeartbeat/停留计时同一口径）。 */
@@ -945,6 +1012,13 @@ class LobbyService {
     if (joinedAt !== undefined) {
       this.lobbyJoinedAt.delete(oldSid);
       this.lobbyJoinedAt.set(sid, joinedAt);
+    }
+    // 非官方 Bot 的官方 Bot 房计时段随换绑转移到新 sid 且保留 sinceMs
+    // （对局中断线重连不丢计时段）；旧 sid 无记录则不新建。
+    const botDwellRecord = this.botDwell.get(oldSid);
+    if (botDwellRecord) {
+      this.botDwell.delete(oldSid);
+      this.botDwell.set(sid, botDwellRecord);
     }
 
     if (!game.rebindPlayer(oldSid, sid)) {

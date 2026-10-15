@@ -93,6 +93,7 @@ class AuthService {
       '/api/users/search',
       '/api/feeds',
       '/api/map-examples',
+      '/api/version',
     ]);
     if (publicApiPaths.has(normalizedPathname)) {
       return true;
