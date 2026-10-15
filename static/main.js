@@ -156,28 +156,23 @@ var grid_type,
   fog,
   have_build,
   have_route = Array(4);
-// 各方向箭头所属的战线编号（多线争锋着色用；-1 = 无箭头），与 have_route 平行。
-var route_line = Array(4);
 // 格子 DOM 元素缓存与内容影子表（init_map 随 n/m 重建；render() 热路径
 // 免选择器查找与 innerHTML 序列化读取，issue #87）。
 var cell_elems, cell_html;
 var route;
 // 多线争锋 v2（房间设置开启后由 init_map 下发 multi_line/line_count）：战线队列按需
-// 动态增长、条数不设上限。指令不再绑定数字键选定的战线，而是由服务端按起始点/
-// 覆盖规则自动路由（同点同向并入、同点多向分兵、到达格上的新指令被覆盖）；
-// 本地 routes[]/line_heads[]/route_order 镜像同一份规则用于箭头显示与光标。
-// 数字键 1-9 或 [ ] 切换查看的战线（仅视角锚点），Q/E 全局撤回最后一条指令。
+// 动态增长、条数不设上限。指令由服务端按起始点/覆盖规则自动路由（同点同向并入、
+// 同点多向分兵、到达格上的新指令被覆盖）；本地 routes[]/line_heads[]/route_order
+// 镜像同一份规则用于箭头显示与 Q/E 全局撤回。客户端不区分战线：无切换按键、
+// 无战线 UI，界面与普通对局完全一致。
 // 单线对局 line_count=1，routes 只有一条，行为与旧版一致。
 var multi_line_mode = false,
-  line_count = 1,
-  cur_line = 0;
+  line_count = 1;
 var routes = [[]];
 // 各战线的起始点镜像（[x,y] 或 null），与服务端 pqueueHead 平行。
 var line_heads = [null];
 // 全局入队时间序镜像（元素 = 战线编号），Q/E 全局撤回据此定位。
 var route_order = [];
-// 各战线的光标位置（切换战线时保存/恢复）。
-var line_cursors = [];
 var general_order = Array();
 
 var room_id = '',
@@ -393,10 +388,8 @@ function init_map(_n, _m, general) {
   }
   for (var d = 0; d < 4; d++) {
     have_route[d] = Array(n);
-    route_line[d] = Array(n);
     for (var i = 0; i < n; i++) {
       have_route[d][i] = Array(m);
-      route_line[d][i] = Array(m);
     }
   }
   route = Array();
@@ -404,10 +397,8 @@ function init_map(_n, _m, general) {
   multi_line_mode = false;
   line_count = 1;
   routes = [route];
-  cur_line = 0;
   line_heads = [null];
   route_order = [];
-  line_cursors = [];
   general_order = Array();
   ((selx = -1), (sely = -1), (selt = 1));
 
@@ -580,15 +571,6 @@ function keypress(key, shift) {
       clear_queue();
     } else if (key == 'e') {
       pop_queue();
-    } else if ((key >= '1' && key <= '9') || (key >= 49 && key <= 57)) {
-      // 多线争锋 v2：数字键 1-9 切换查看的战线（单线对局 switchLine 直接忽略）。
-      var digit = typeof key == 'number' ? key - 48 : parseInt(key);
-      if (!chat_focus) switchLine(digit - 1);
-    } else if (key == '[') {
-      // 战线超过 9 条时用 [ / ] 循环切换（条数不设上限，不受数字键限制）。
-      if (!chat_focus) switchLine((cur_line + line_count - 1) % line_count);
-    } else if (key == ']') {
-      if (!chat_focus) switchLine((cur_line + 1) % line_count);
     } else if (key == 't') {
       if (!chat_focus) {
         is_team = true;
@@ -832,7 +814,7 @@ function routeBuildTargetLine(x, y) {
   return line_count;
 }
 
-// 入队到目标战线（必要时开辟新战线），并把当前查看战线切到该战线。
+// 入队到目标战线（必要时开辟新战线）。
 function pushToLine(l, item) {
   if (l >= line_count) {
     routes.push(Array());
@@ -842,13 +824,6 @@ function pushToLine(l, item) {
   if (!line_heads[l]) line_heads[l] = [item.x, item.y];
   routes[l].push(item);
   route_order.push(l);
-  if (l != cur_line) {
-    line_cursors[cur_line] = [selx, sely];
-    cur_line = l;
-    route = routes[cur_line];
-    delete line_cursors[cur_line];
-  }
-  refreshLineHud();
 }
 
 function addroute(x, y, d, mode) {
@@ -902,8 +877,8 @@ function clear_queue() {
     retract_last();
     return;
   }
-  routes[cur_line] = [];
-  route = routes[cur_line];
+  routes[0] = [];
+  route = routes[0];
   route_order = [];
   socket.emit('clear_queue', {});
   render();
@@ -937,58 +912,14 @@ function resetBattleLines(multiLine, lineCount) {
     line_heads.push(null);
   }
   route_order = [];
-  cur_line = 0;
   route = routes[0];
-  line_cursors = [];
-  refreshLineHud();
 }
 
-// 清空全部战线队列镜像（战败/终局时调用，不改变模式与当前战线）。
+// 清空全部战线队列镜像（战败/终局时调用，不改变模式）。
 function clearAllRoutes() {
   for (var i = 0; i < routes.length; i++) routes[i] = Array();
-  route = routes[cur_line];
+  route = routes[0];
   route_order = [];
-}
-
-// 底部战线指示条：仅多线对局中的存活参赛者可见；v2 战线条数动态增长，
-// tabs 按当前条数动态重建（超出 9 条时仍可用 [ / ] 键循环切换）。
-function refreshLineHud() {
-  var show = multi_line_mode && in_game && !is_replay && player > 0 && !game_ended && !lost;
-  $('#multi-line-hud').css('display', show ? '' : 'none');
-  if (!show) return;
-  var tabs = $('#tabs-battle-line')[0];
-  if (!tabs) return;
-  if (tabs.children.length - 1 != line_count) {
-    var html = '<input type="hidden" value="' + String(cur_line + 1) + '" />';
-    for (var i = 1; i <= line_count; i++) {
-      html += '<div class="inline-button">' + i + '</div>';
-    }
-    $(tabs).html(html);
-    for (i = 1; i < tabs.children.length; i++) {
-      initTab(tabs, tabs.children[i], function () {
-        switchLine(parseInt(getTabVal('battle-line')) - 1);
-      });
-    }
-  }
-  setTabVal('battle-line', String(cur_line + 1));
-}
-
-// 切换查看的战线：保存/恢复各战线光标；目标战线有队列时光标跳到队尾目标格。
-// v2 中战线由服务端按起始点自动路由，数字键/[ ] 仅切换视角锚点。
-function switchLine(k) {
-  if (!multi_line_mode || k == cur_line || k < 0 || k >= line_count) return;
-  line_cursors[cur_line] = [selx, sely];
-  cur_line = k;
-  route = routes[cur_line];
-  if (line_cursors[k]) {
-    ((selx = line_cursors[k][0]), (sely = line_cursors[k][1]));
-  } else if (route.length > 0) {
-    var tail = route[route.length - 1];
-    if (tail.build) ((selx = tail.x), (sely = tail.y));
-    else ((selx = tail.x + dire[tail.d].x), (sely = tail.y + dire[tail.d].y));
-  }
-  refreshLineHud();
-  render();
 }
 
 socket.on('set_id', function (data) {
@@ -1016,7 +947,7 @@ socket.on('init_map', function (data) {
       player = i + 1;
     }
   }
-  // 多线争锋对局：按服务端下发的战线数重建本地战线队列（含断线重连补发场景）。
+  // 多线争锋对局：按服务端下发的战线数重建本地队列镜像（含断线重连补发场景）。
   resetBattleLines(data.multi_line, data.line_count);
   // 开局默认选中己方主城，无需先按空格即可直接操作。
   if (player > 0 && data.general && data.general[0] >= 0) {
@@ -1355,13 +1286,6 @@ $(document).ready(function () {
       });
     }
   });
-  $('#tabs-battle-line').each(function () {
-    for (var i = 1; i < this.children.length; i++) {
-      initTab(this, this.children[i], function () {
-        switchLine(parseInt(getTabVal('battle-line')) - 1);
-      });
-    }
-  });
   $('#tabs-map-size').each(function () {
     for (var i = 1; i < this.children.length; i++) {
       initTab(this, this.children[i], function () {
@@ -1401,7 +1325,6 @@ socket.on('left', function () {
   $('#game').css('display', 'none');
   $('#game-leaderboard').css('display', 'none');
   $('#turn-counter').css('display', 'none');
-  $('#multi-line-hud').css('display', 'none');
   $('#chat-messages-container').html('');
   $('#status-alert').css('display', 'none');
   $($('#status-alert').children()[0].children[6]).css('display', 'none');
