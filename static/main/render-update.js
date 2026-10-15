@@ -76,7 +76,6 @@ function render() {
     for (var i = 0; i < n; i++) {
       for (var j = 0; j < m; j++) {
         have_route[d][i][j] = false;
-        route_line[d][i][j] = -1;
       }
     }
   }
@@ -85,7 +84,7 @@ function render() {
       have_build[i][j] = '';
     }
   }
-  // 多线争锋：逐战线绘制队列箭头并记录战线编号（route_line），箭头按战线着色；
+  // 多线争锋：逐条队列绘制待发箭头，着色与普通对局完全一致（不区分战线）；
   // 单线对局 routes 只有一条，等价于原单队列渲染。
   for (var l = 0; l < routes.length; l++) {
     for (var i = 0; i < routes[l].length; i++) {
@@ -96,7 +95,6 @@ function render() {
         if (prevBuild.indexOf(queued.build) < 0) have_build[queued.x][queued.y] = prevBuild + queued.build;
       } else {
         have_route[queued.d][queued.x][queued.y] = true;
-        route_line[queued.d][queued.x][queued.y] = l;
       }
     }
   }
@@ -108,7 +106,7 @@ function render() {
     player > 0 &&
     displayGrid[selx][sely] < 200 &&
     displayGrid[selx][sely] % 50 == player;
-  var canAttackFromSelected = selx >= 0 && sely >= 0 && (ownSelected || route.length > 0);
+  var canAttackFromSelected = selx >= 0 && sely >= 0 && (ownSelected || anyRouteQueued());
   for (var i = 0; i < n; i++) {
     for (var j = 0; j < m; j++) {
       var cls = 's' + scale,
@@ -168,15 +166,11 @@ function render() {
       if (txt.length > 0 && scale == 1) txt = '<div class="txt">' + txt + '</div>';
       for (var d = 0; d < 4; d++)
         if (have_route[d][i][j]) {
-          // 多线争锋：非首战线的队列箭头带战线着色类（map.css route-line-N）。
-          var lineCls =
-            multi_line_mode && route_line[d][i][j] > 0 ? ' route-line-' + route_line[d][i][j] : '';
-          if (scale > 1) txt += '<div class="' + dire_class[d] + lineCls + '">' + dire_char[d] + '</div>';
+          if (scale > 1) txt += '<div class="' + dire_class[d] + '">' + dire_char[d] + '</div>';
           else
             txt +=
               '<div class="' +
               dire_class[d] +
-              lineCls +
               '"><div class="txt">' +
               dire_char[d] +
               '</div></div>';
@@ -285,14 +279,19 @@ function update(data, options) {
   }
   // 服务器每 Tick 会丢弃所调度队列队首的失效操作（skip 个），本地队列严格按 skip
   // 同步，然后再匹配本 Tick 实际执行的那一条操作。多线争锋对局按 lst_move.line
-  // 定位本 Tick 被调度的战线队列；单线对局沿用唯一队列。
-  var syncLine = multi_line_mode && typeof data.lst_move.line == 'number' ? data.lst_move.line : cur_line;
-  if (syncLine < 0 || syncLine >= routes.length) syncLine = cur_line;
+  // 定位本 Tick 被调度的战线队列；单线对局沿用唯一队列。v2：同步的同时维护
+  // route_order 全局入队序镜像，并在确认执行的移动指令上推进 line_heads 起始点镜像。
+  var syncLine = multi_line_mode && typeof data.lst_move.line == 'number' ? data.lst_move.line : 0;
+  if (syncLine < 0 || syncLine >= routes.length) syncLine = 0;
   var syncQueue = routes[syncLine];
   if (syncQueue.length) {
+    var removedOps = 0;
     var skipOps = data.lst_move.skip | 0;
     if (skipOps > syncQueue.length) skipOps = syncQueue.length;
-    if (skipOps > 0) syncQueue = syncQueue.slice(skipOps);
+    if (skipOps > 0) {
+      syncQueue = syncQueue.slice(skipOps);
+      removedOps += skipOps;
+    }
     if (data.lst_move.x != -1 && syncQueue.length) {
       if (data.lst_move.op == 'b' || data.lst_move.op == 'c') {
         for (var i = 0; i < syncQueue.length; i++) {
@@ -302,6 +301,7 @@ function update(data, options) {
             syncQueue[i].y == data.lst_move.y
           ) {
             syncQueue.splice(i, 1);
+            removedOps += 1;
             break;
           }
         }
@@ -309,6 +309,7 @@ function update(data, options) {
         while (syncQueue.length) {
           if (syncQueue[0].build) {
             syncQueue = syncQueue.slice(1);
+            removedOps += 1;
             continue;
           }
           var t1 = data.lst_move,
@@ -320,12 +321,24 @@ function update(data, options) {
               half: syncQueue[0].mode == 1,
             };
           syncQueue = syncQueue.slice(1);
-          if (t1.x == t2.x && t1.y == t2.y && t1.dx == t2.dx && t1.dy == t2.dy && t1.half == t2.half) break;
+          removedOps += 1;
+          if (t1.x == t2.x && t1.y == t2.y && t1.dx == t2.dx && t1.dy == t2.dy && t1.half == t2.half) {
+            // R3 起始点镜像推进：确认执行的移动指令从当前起始点出发时，起始点前进一格。
+            var head = line_heads[syncLine];
+            if (head && head[0] == t1.x && head[1] == t1.y) line_heads[syncLine] = [t1.dx, t1.dy];
+            break;
+          }
         }
       }
     }
+    // route_order 与队列内容一一对应：按队首移除数同步摘除该战线最早的登记。
+    for (var k = 0; k < removedOps; k++) {
+      var orderIdx = route_order.indexOf(syncLine);
+      if (orderIdx < 0) break;
+      route_order.splice(orderIdx, 1);
+    }
     routes[syncLine] = syncQueue;
-    if (syncLine == cur_line) route = syncQueue;
+    if (syncLine == 0) route = syncQueue;
   }
   render();
   lb = data.leaderboard.sort(function (a, b) {
@@ -491,12 +504,10 @@ function update(data, options) {
     $('#status-alert').css('display', '');
     hideSurrenderAlert();
     lost = true;
-    refreshLineHud();
   }
   if (data.game_end) {
     player = 0;
     clearAllRoutes();
-    refreshLineHud();
     if ($('#status-alert').css('display') == 'none') {
       if (!wasParticipant) {
         $($('#status-alert').children()[0].children[0]).html('本局已结束');
