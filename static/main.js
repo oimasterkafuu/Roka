@@ -161,8 +161,8 @@ var grid_type,
 var cell_elems, cell_html;
 var route;
 // 多线争锋 v2（房间设置开启后由 init_map 下发 multi_line/line_count）：战线队列按需
-// 动态增长、条数不设上限。指令由服务端按起始点/覆盖规则自动路由（同点同向并入、
-// 同点多向分兵、到达格上的新指令被覆盖）；本地 routes[]/line_heads[]/route_order
+// 动态增长、条数不设上限。指令由服务端按起始点/链式挂尾规则自动路由（同点同向并入、
+// 同点多向分兵、到达格上的新指令挂到第一条匹配战线队尾）；本地 routes[]/line_heads[]/route_order
 // 镜像同一份规则用于箭头显示与 Q/E 全局撤回。客户端不区分战线：无切换按键、
 // 无战线 UI，界面与普通对局完全一致。
 // 单线对局 line_count=1，routes 只有一条，行为与旧版一致。
@@ -798,8 +798,9 @@ function anyRouteQueued() {
 
 // 多线争锋 v2 的移动指令本地路由镜像（与服务端 routeMoveLine 同规则）：
 // 出发格是某战线起始点 → 方向一致并入该战线、方向不同分兵另立战线；
-// 出发格是某战线待发指令的到达格（非任何起始点）→ 被覆盖（返回 null）；
-// 其余开辟新战线。返回 { line, isNew } 或 null。
+// 出发格是某战线待发指令的到达格（非任何起始点）→ 挂到第一条匹配战线的队尾
+// （链式挂尾，issue #107，不再丢弃）；
+// 其余开辟新战线。返回 { line, isNew }。
 function routeTargetLine(x, y, d) {
   var l, i, q;
   var headMatched = false;
@@ -819,17 +820,18 @@ function routeTargetLine(x, y, d) {
     if (compatible) return { line: l, isNew: false };
   }
   if (headMatched) return { line: line_count, isNew: true };
+  // R3 链式挂尾镜像：到达格命中第一条匹配战线即挂其队尾。
   for (l = 0; l < line_count; l++) {
     for (i = 0; i < routes[l].length; i++) {
       q = routes[l][i];
-      if (!q.build && q.x + dire[q.d].x == x && q.y + dire[q.d].y == y) return null;
+      if (!q.build && q.x + dire[q.d].x == x && q.y + dire[q.d].y == y) return { line: l, isNew: false };
     }
   }
   return { line: line_count, isNew: true };
 }
 
 // 多线争锋 v2 的建造指令本地路由镜像（与服务端 routeBuildLine 同规则）：
-// 建造格是某战线起始点则并入，否则另立战线；建造不参与覆盖判定。
+// 建造格是某战线起始点则并入，否则另立战线；建造不参与链式挂尾判定。
 function routeBuildTargetLine(x, y) {
   for (var l = 0; l < line_count; l++) {
     var h = line_heads[l];
@@ -853,12 +855,8 @@ function pushToLine(l, item) {
 function addroute(x, y, d, mode) {
   var payload = { x: x, y: y, dx: x + dire[d].x, dy: y + dire[d].y, mode: mode, half: mode == 1 };
   if (multi_line_mode) {
-    // v2：本地先按起始点/覆盖规则路由（与服务端一致）；被覆盖的指令不入队、不发送。
+    // v2：本地先按起始点/链式挂尾规则路由（与服务端一致）。
     var routed = routeTargetLine(x, y, d);
-    if (!routed) {
-      render();
-      return;
-    }
     pushToLine(routed.line, { x: x, y: y, d: d, mode: mode });
   } else {
     route.push({ x: x, y: y, d: d, mode: mode });
