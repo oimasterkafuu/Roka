@@ -76,7 +76,6 @@ function render() {
     for (var i = 0; i < n; i++) {
       for (var j = 0; j < m; j++) {
         have_route[d][i][j] = false;
-        route_line[d][i][j] = -1;
       }
     }
   }
@@ -85,7 +84,7 @@ function render() {
       have_build[i][j] = '';
     }
   }
-  // 多线争锋：逐战线绘制队列箭头并记录战线编号（route_line），箭头按战线着色；
+  // 多线争锋：逐条队列绘制待发箭头，着色与普通对局完全一致（不区分战线）；
   // 单线对局 routes 只有一条，等价于原单队列渲染。
   for (var l = 0; l < routes.length; l++) {
     for (var i = 0; i < routes[l].length; i++) {
@@ -96,7 +95,6 @@ function render() {
         if (prevBuild.indexOf(queued.build) < 0) have_build[queued.x][queued.y] = prevBuild + queued.build;
       } else {
         have_route[queued.d][queued.x][queued.y] = true;
-        route_line[queued.d][queued.x][queued.y] = l;
       }
     }
   }
@@ -168,16 +166,11 @@ function render() {
       if (txt.length > 0 && scale == 1) txt = '<div class="txt">' + txt + '</div>';
       for (var d = 0; d < 4; d++)
         if (have_route[d][i][j]) {
-          // 多线争锋：非首战线的队列箭头带战线着色类（map.css route-line-1/2/3）。
-          // v2 战线条数不设上限，着色按 (战线-1)%3+1 循环复用三种配色。
-          var rl = route_line[d][i][j];
-          var lineCls = multi_line_mode && rl > 0 ? ' route-line-' + String(((rl - 1) % 3) + 1) : '';
-          if (scale > 1) txt += '<div class="' + dire_class[d] + lineCls + '">' + dire_char[d] + '</div>';
+          if (scale > 1) txt += '<div class="' + dire_class[d] + '">' + dire_char[d] + '</div>';
           else
             txt +=
               '<div class="' +
               dire_class[d] +
-              lineCls +
               '"><div class="txt">' +
               dire_char[d] +
               '</div></div>';
@@ -288,8 +281,8 @@ function update(data, options) {
   // 同步，然后再匹配本 Tick 实际执行的那一条操作。多线争锋对局按 lst_move.line
   // 定位本 Tick 被调度的战线队列；单线对局沿用唯一队列。v2：同步的同时维护
   // route_order 全局入队序镜像，并在确认执行的移动指令上推进 line_heads 起始点镜像。
-  var syncLine = multi_line_mode && typeof data.lst_move.line == 'number' ? data.lst_move.line : cur_line;
-  if (syncLine < 0 || syncLine >= routes.length) syncLine = cur_line;
+  var syncLine = multi_line_mode && typeof data.lst_move.line == 'number' ? data.lst_move.line : 0;
+  if (syncLine < 0 || syncLine >= routes.length) syncLine = 0;
   var syncQueue = routes[syncLine];
   if (syncQueue.length) {
     var removedOps = 0;
@@ -345,7 +338,7 @@ function update(data, options) {
       route_order.splice(orderIdx, 1);
     }
     routes[syncLine] = syncQueue;
-    if (syncLine == cur_line) route = syncQueue;
+    if (syncLine == 0) route = syncQueue;
   }
   render();
   lb = data.leaderboard.sort(function (a, b) {
@@ -511,12 +504,10 @@ function update(data, options) {
     $('#status-alert').css('display', '');
     hideSurrenderAlert();
     lost = true;
-    refreshLineHud();
   }
   if (data.game_end) {
     player = 0;
     clearAllRoutes();
-    refreshLineHud();
     if ($('#status-alert').css('display') == 'none') {
       if (!wasParticipant) {
         $($('#status-alert').children()[0].children[0]).html('本局已结束');
