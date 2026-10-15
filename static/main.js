@@ -156,21 +156,23 @@ var grid_type,
   fog,
   have_build,
   have_route = Array(4);
-// 各方向箭头所属的战线编号（多线争锋着色用；-1 = 无箭头），与 have_route 平行。
-var route_line = Array(4);
 // 格子 DOM 元素缓存与内容影子表（init_map 随 n/m 重建；render() 热路径
 // 免选择器查找与 innerHTML 序列化读取，issue #87）。
 var cell_elems, cell_html;
 var route;
-// 多线争锋（房间设置开启后由 init_map 下发 multi_line/line_count）：每名玩家维护
-// line_count 条并行战线队列，数字键 1-4 或底部 tabs 切换当前战线；route 始终指向
-// 当前战线队列（routes[cur_line]）。单线对局 line_count=1，routes 只有一条。
+// 多线争锋 v2（房间设置开启后由 init_map 下发 multi_line/line_count）：战线队列按需
+// 动态增长、条数不设上限。指令由服务端按起始点/覆盖规则自动路由（同点同向并入、
+// 同点多向分兵、到达格上的新指令被覆盖）；本地 routes[]/line_heads[]/route_order
+// 镜像同一份规则用于箭头显示与 Q/E 全局撤回。客户端不区分战线：无切换按键、
+// 无战线 UI，界面与普通对局完全一致。
+// 单线对局 line_count=1，routes 只有一条，行为与旧版一致。
 var multi_line_mode = false,
-  line_count = 1,
-  cur_line = 0;
+  line_count = 1;
 var routes = [[]];
-// 各战线的光标位置（切换战线时保存/恢复）。
-var line_cursors = [];
+// 各战线的起始点镜像（[x,y] 或 null），与服务端 pqueueHead 平行。
+var line_heads = [null];
+// 全局入队时间序镜像（元素 = 战线编号），Q/E 全局撤回据此定位。
+var route_order = [];
 var general_order = Array();
 
 var room_id = '',
@@ -386,10 +388,8 @@ function init_map(_n, _m, general) {
   }
   for (var d = 0; d < 4; d++) {
     have_route[d] = Array(n);
-    route_line[d] = Array(n);
     for (var i = 0; i < n; i++) {
       have_route[d][i] = Array(m);
-      route_line[d][i] = Array(m);
     }
   }
   route = Array();
@@ -397,8 +397,8 @@ function init_map(_n, _m, general) {
   multi_line_mode = false;
   line_count = 1;
   routes = [route];
-  cur_line = 0;
-  line_cursors = [];
+  line_heads = [null];
+  route_order = [];
   general_order = Array();
   ((selx = -1), (sely = -1), (selt = 1));
 
@@ -459,10 +459,10 @@ function moveSelected(d, shift) {
   // 山脉不可通行；迷雾格中除山脉、沼泽外均已抹成空地，故 201 只代表
   // 真实山脉，无需额外区分——非迷雾的真实山脉直接阻断入队。
   if (grid_type[nx][ny] == 201 && !fog[nx][ny]) return;
-  // 命令可能有效时才入队：链式入队（队列非空，由服务器执行时校验），或当前选中
+  // 命令可能有效时才入队：链式入队（任一战线队列非空，由服务器执行时校验），或当前选中
   // 己方正常领土且兵力 > 1（兵力 ≤ 1 时三种模式推出量均为 0；孤军不可推兵）。
   // 即使不入队、不显示箭头，光标也始终跟随移动——光标保持“活着”。
-  if (route.length > 0 || (ownSelected && !isolated[selx][sely] && army_cnt[selx][sely] > 1)) {
+  if (anyRouteQueued() || (ownSelected && !isolated[selx][sely] && army_cnt[selx][sely] > 1)) {
     // 默认全兵（A-1）；Shift = 智能分兵；Z 待发时半兵。Shift 优先且不消耗 Z 待发状态。
     var mode = shift ? 0 : selt == 2 ? 1 : 2;
     addroute(selx, sely, d, mode);
@@ -571,10 +571,6 @@ function keypress(key, shift) {
       clear_queue();
     } else if (key == 'e') {
       pop_queue();
-    } else if (key == '1' || key == '2' || key == '3' || key == '4' || (key >= 49 && key <= 52)) {
-      // 多线争锋：数字键 1-4 切换当前战线（单线对局 switchLine 直接忽略）。
-      var digit = typeof key == 'number' ? key - 48 : parseInt(key);
-      if (!chat_focus) switchLine(digit - 1);
     } else if (key == 't') {
       if (!chat_focus) {
         is_team = true;
@@ -770,33 +766,133 @@ socket.on('starting', function () {
   notifyEvent('room-start-' + room_id, 'Roka', '你所在的房间「' + room_id + '」游戏开始了！');
 });
 
+// 任一战线是否有待发指令（多线争锋 v2 链式入队门闸：光标链不绑定单一战线）。
+function anyRouteQueued() {
+  for (var l = 0; l < routes.length; l++) if (routes[l].length > 0) return true;
+  return false;
+}
+
+// 多线争锋 v2 的移动指令本地路由镜像（与服务端 routeMoveLine 同规则）：
+// 出发格是某战线起始点 → 方向一致并入该战线、方向不同分兵另立战线；
+// 出发格是某战线待发指令的到达格（非任何起始点）→ 被覆盖（返回 null）；
+// 其余开辟新战线。返回 { line, isNew } 或 null。
+function routeTargetLine(x, y, d) {
+  var l, i, q;
+  var headMatched = false;
+  for (l = 0; l < line_count; l++) {
+    var h = line_heads[l];
+    if (!h || h[0] != x || h[1] != y) continue;
+    headMatched = true;
+    // 同一起始点可能挂多条战线（分兵）：归入方向相容的第一条，都不相容才另立。
+    var compatible = true;
+    for (i = 0; i < routes[l].length; i++) {
+      q = routes[l][i];
+      if (!q.build && q.x == x && q.y == y && q.d != d) {
+        compatible = false;
+        break;
+      }
+    }
+    if (compatible) return { line: l, isNew: false };
+  }
+  if (headMatched) return { line: line_count, isNew: true };
+  for (l = 0; l < line_count; l++) {
+    for (i = 0; i < routes[l].length; i++) {
+      q = routes[l][i];
+      if (!q.build && q.x + dire[q.d].x == x && q.y + dire[q.d].y == y) return null;
+    }
+  }
+  return { line: line_count, isNew: true };
+}
+
+// 多线争锋 v2 的建造指令本地路由镜像（与服务端 routeBuildLine 同规则）：
+// 建造格是某战线起始点则并入，否则另立战线；建造不参与覆盖判定。
+function routeBuildTargetLine(x, y) {
+  for (var l = 0; l < line_count; l++) {
+    var h = line_heads[l];
+    if (h && h[0] == x && h[1] == y) return l;
+  }
+  return line_count;
+}
+
+// 入队到目标战线（必要时开辟新战线）。
+function pushToLine(l, item) {
+  if (l >= line_count) {
+    routes.push(Array());
+    line_heads.push(null);
+    line_count++;
+  }
+  if (!line_heads[l]) line_heads[l] = [item.x, item.y];
+  routes[l].push(item);
+  route_order.push(l);
+}
+
 function addroute(x, y, d, mode) {
-  route.push({ x: x, y: y, d: d, mode: mode });
   var payload = { x: x, y: y, dx: x + dire[d].x, dy: y + dire[d].y, mode: mode, half: mode == 1 };
-  if (multi_line_mode) payload.line = cur_line;
+  if (multi_line_mode) {
+    // v2：本地先按起始点/覆盖规则路由（与服务端一致）；被覆盖的指令不入队、不发送。
+    var routed = routeTargetLine(x, y, d);
+    if (!routed) {
+      render();
+      return;
+    }
+    pushToLine(routed.line, { x: x, y: y, d: d, mode: mode });
+  } else {
+    route.push({ x: x, y: y, d: d, mode: mode });
+    route_order.push(0);
+  }
   socket.emit('attack', payload);
   render();
 }
 
 function addbuild(x, y, op) {
-  route.push({ x: x, y: y, build: op });
   var payload = { x: x, y: y, op: op };
-  if (multi_line_mode) payload.line = cur_line;
+  if (multi_line_mode) {
+    pushToLine(routeBuildTargetLine(x, y), { x: x, y: y, build: op });
+  } else {
+    route.push({ x: x, y: y, build: op });
+    route_order.push(0);
+  }
   socket.emit('build', payload);
   render();
 }
 
+// 多线争锋 v2 的 Q/E 撤回（R2）：不区分战线，按入队的全局时间序撤回最后一条指令。
+function retract_last() {
+  while (route_order.length > 0) {
+    var l = route_order.pop();
+    if (!routes[l] || routes[l].length == 0) continue;
+    var tmp = routes[l].pop();
+    socket.emit('pop_queue', {});
+    if (!tmp.build && tmp.x + dire[tmp.d].x == selx && tmp.y + dire[tmp.d].y == sely) {
+      ((selx = tmp.x), (sely = tmp.y));
+    }
+    render();
+    return;
+  }
+}
+
 function clear_queue() {
-  routes[cur_line] = [];
-  route = routes[cur_line];
-  socket.emit('clear_queue', multi_line_mode ? { line: cur_line } : {});
+  if (multi_line_mode) {
+    // v2（R2）：Q 与 E 同为全局撤回最后一条指令，不再清空当前战线。
+    retract_last();
+    return;
+  }
+  routes[0] = [];
+  route = routes[0];
+  route_order = [];
+  socket.emit('clear_queue', {});
   render();
 }
 
 function pop_queue() {
+  if (multi_line_mode) {
+    retract_last();
+    return;
+  }
   if (route.length) {
     var tmp = route.pop();
-    socket.emit('pop_queue', multi_line_mode ? { line: cur_line } : {});
+    route_order.pop();
+    socket.emit('pop_queue', {});
     if (!tmp.build && tmp.x + dire[tmp.d].x == selx && tmp.y + dire[tmp.d].y == sely) {
       ((selx = tmp.x), (sely = tmp.y));
     }
@@ -804,52 +900,26 @@ function pop_queue() {
   }
 }
 
-// 多线争锋：按 init_map 下发的战线数重置全部战线队列（单线对局恒为 1 条）。
+// 多线争锋 v2：按 init_map 下发的当前战线数重置本地战线镜像；v2 开战恒为 1 条，
+// 之后随指令路由动态增长（条数不设上限）。单线对局恒为 1 条。
 function resetBattleLines(multiLine, lineCount) {
-  multi_line_mode = multiLine === true && lineCount > 1;
-  line_count = multi_line_mode ? lineCount : 1;
+  multi_line_mode = multiLine === true;
+  line_count = multi_line_mode ? Math.max(1, lineCount | 0) : 1;
   routes = [];
-  for (var i = 0; i < line_count; i++) routes.push(Array());
-  cur_line = 0;
+  line_heads = [];
+  for (var i = 0; i < line_count; i++) {
+    routes.push(Array());
+    line_heads.push(null);
+  }
+  route_order = [];
   route = routes[0];
-  line_cursors = [];
-  refreshLineHud();
 }
 
-// 清空全部战线队列镜像（战败/终局时调用，不改变模式与当前战线）。
+// 清空全部战线队列镜像（战败/终局时调用，不改变模式）。
 function clearAllRoutes() {
   for (var i = 0; i < routes.length; i++) routes[i] = Array();
-  route = routes[cur_line];
-}
-
-// 底部战线指示条：仅多线对局中的存活参赛者可见。
-function refreshLineHud() {
-  var show = multi_line_mode && in_game && !is_replay && player > 0 && !game_ended && !lost;
-  $('#multi-line-hud').css('display', show ? '' : 'none');
-  if (!show) return;
-  var tabs = $('#tabs-battle-line')[0];
-  if (!tabs) return;
-  for (var i = 1; i < tabs.children.length; i++) {
-    $(tabs.children[i]).css('display', i <= line_count ? '' : 'none');
-  }
-  setTabVal('battle-line', String(cur_line + 1));
-}
-
-// 切换当前战线：保存/恢复各战线光标；目标战线有队列时光标跳到队尾目标格。
-function switchLine(k) {
-  if (!multi_line_mode || k == cur_line || k < 0 || k >= line_count) return;
-  line_cursors[cur_line] = [selx, sely];
-  cur_line = k;
-  route = routes[cur_line];
-  if (line_cursors[k]) {
-    ((selx = line_cursors[k][0]), (sely = line_cursors[k][1]));
-  } else if (route.length > 0) {
-    var tail = route[route.length - 1];
-    if (tail.build) ((selx = tail.x), (sely = tail.y));
-    else ((selx = tail.x + dire[tail.d].x), (sely = tail.y + dire[tail.d].y));
-  }
-  refreshLineHud();
-  render();
+  route = routes[0];
+  route_order = [];
 }
 
 socket.on('set_id', function (data) {
@@ -877,7 +947,7 @@ socket.on('init_map', function (data) {
       player = i + 1;
     }
   }
-  // 多线争锋对局：按服务端下发的战线数重建本地战线队列（含断线重连补发场景）。
+  // 多线争锋对局：按服务端下发的战线数重建本地队列镜像（含断线重连补发场景）。
   resetBattleLines(data.multi_line, data.line_count);
   // 开局默认选中己方主城，无需先按空格即可直接操作。
   if (player > 0 && data.general && data.general[0] >= 0) {
@@ -1216,13 +1286,6 @@ $(document).ready(function () {
       });
     }
   });
-  $('#tabs-battle-line').each(function () {
-    for (var i = 1; i < this.children.length; i++) {
-      initTab(this, this.children[i], function () {
-        switchLine(parseInt(getTabVal('battle-line')) - 1);
-      });
-    }
-  });
   $('#tabs-map-size').each(function () {
     for (var i = 1; i < this.children.length; i++) {
       initTab(this, this.children[i], function () {
@@ -1262,7 +1325,6 @@ socket.on('left', function () {
   $('#game').css('display', 'none');
   $('#game-leaderboard').css('display', 'none');
   $('#turn-counter').css('display', 'none');
-  $('#multi-line-hud').css('display', 'none');
   $('#chat-messages-container').html('');
   $('#status-alert').css('display', 'none');
   $($('#status-alert').children()[0].children[6]).css('display', 'none');
