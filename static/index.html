@@ -219,6 +219,7 @@
             <a href="/tutorial">教程</a>
             <span class="dot">·</span>
             <a href="/about">关于</a>
+            <a id="footer-version" target="_blank" rel="noopener" style="display: none"></a>
           </footer>
         </div>
       </div>
@@ -482,9 +483,6 @@
               location.href = '/games/' + encodeURIComponent(item.room);
             });
             var $roomTd = $('<td></td>').text(item.room).appendTo($tr);
-            if (item.multi_line) {
-              $roomTd.append(' ').append($('<span class="room-tag">多线</span>'));
-            }
             var $hostTd = $('<td></td>').appendTo($tr);
             if (item.host) {
               // 房主名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进房。
@@ -1305,6 +1303,22 @@
       }
 
       /* ---------- 启动 ---------- */
+
+      // 页脚版本号：取 /api/version，成功且 commit 非空时显示 v{version} 并链接到
+      // GitHub 对应 commit（title 为 commit 短串）；失败或非 git 部署保持隐藏。
+      fetch('/api/version')
+        .then(function (res) {
+          return res.ok ? res.json() : null;
+        })
+        .then(function (data) {
+          if (!data || typeof data.commit !== 'string' || !data.commit) return;
+          var $v = $('#footer-version');
+          $v.text('v' + (typeof data.version === 'string' ? data.version : ''));
+          $v.attr('title', data.commit.slice(0, 7));
+          $v.attr('href', 'https://github.com/oimasterkafuu/Roka/commit/' + data.commit);
+          $v.show();
+        })
+        .catch(function () {});
 
       // 登录态是可选的；游客仍加载所有公开只读面板。
       loadUser()
