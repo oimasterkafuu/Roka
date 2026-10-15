@@ -72,7 +72,7 @@ async function scenarioUserStore() {
       recovered.listUsersForAdmin().length === bak.users.length && bak.users.length >= 1,
     );
   } finally {
-    await rm(dataDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
@@ -112,7 +112,7 @@ async function scenarioLegacyCompat() {
     const roundTrip = await decodeLegacy(path.join(dataDir, 'users.bin'));
     check('新代码写回后仍为旧格式可解码', roundTrip.users[0].username === 'legacy_user');
   } finally {
-    await rm(dataDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
@@ -152,7 +152,7 @@ async function scenarioDisciplineStorage() {
     });
     check('到期惰性恢复但保留历史', !restarted.getBanStatus('discipline_user').banned && restarted.listUsersForAdmin().find((item) => item.username === 'discipline_user').banHistory.length >= 2);
   } finally {
-    await rm(dataDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
@@ -180,7 +180,7 @@ async function scenarioFeedStore() {
     await recovered.ensureReady();
     check('feeds.bin 损坏后从 .bak 恢复', recovered.getById(post.id) !== null);
   } finally {
-    await rm(dataDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
@@ -247,7 +247,7 @@ async function scenarioAnnouncement() {
     await recovered.ensureReady();
     check('announcement.json 损坏后从 .bak 恢复', recovered.get().text === '第一条公告');
   } finally {
-    await rm(dataDir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
