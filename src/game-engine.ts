@@ -180,7 +180,7 @@ export class GameEngine {
 
   /**
    * 多线争锋开关（房间设置）。v2 语义：开启后每名玩家的战线队列按需动态增长
-   * （条数不设上限），新指令按起始点/覆盖规则自动路由到战线（R1/R3/R4），
+   * （条数不设上限），新指令按起始点/链式挂尾规则自动路由到战线（R1/R3/R4），
    * Q/E 撤回全局最后一条指令（R2）；关闭时恒为单条战线，行为与单线完全一致。
    */
   private readonly multiLine: boolean;
@@ -201,7 +201,7 @@ export class GameEngine {
 
   /**
    * 每条战线的起始点（队列第一条待发指令的出发格，随已执行指令链逐格推进）。
-   * 与 pmove[player] 平行；多线路由（覆盖/分兵）只发生在多线对局。
+   * 与 pmove[player] 平行；多线路由（链式挂尾/分兵）只发生在多线对局。
    */
   private readonly pqueueHead: Array<Array<{ x: number; y: number } | null>>;
 
@@ -211,12 +211,13 @@ export class GameEngine {
    */
   private readonly pmoveOrder: number[][];
 
-  /** 多线轮转游标：每 Tick 从该战线起寻找第一条非空战线调度。 */
-  private readonly pmoveCursor: number[];
-
   private readonly lstMove: Array<QueuedOp | null>;
 
-  /** 本 Tick 实际调度的战线编号（多线对局随 lst_move 下发，供客户端按战线同步队列）。 */
+  /**
+   * 本 Tick 汇报的战线编号（多线对局随 lst_move 下发，供客户端按战线同步队列）：
+   * 并行调度下每 Tick 可能多条战线各执行一条，协议只汇报最后一条有活动
+   * （执行或丢弃）的战线，lst_move/lst_skip/line 三者始终归属同一战线。
+   */
   private readonly lstMoveLine: number[];
 
   /**
@@ -373,7 +374,6 @@ export class GameEngine {
     this.pmove = Array.from({ length: pcnt }, () => (this.multiLine ? [] : [[] as QueuedOp[]]));
     this.pqueueHead = Array.from({ length: pcnt }, () => (this.multiLine ? [] : [null]));
     this.pmoveOrder = Array.from({ length: pcnt }, () => [] as number[]);
-    this.pmoveCursor = Array.from({ length: pcnt }, () => 0);
     this.lstMove = Array.from({ length: pcnt }, () => null);
     this.lstMoveLine = Array.from({ length: pcnt }, () => 0);
     this.lstSkip = Array.from({ length: pcnt }, () => 0);
@@ -1080,12 +1080,13 @@ export class GameEngine {
    * - 出发格是某条战线的起始点：该起始点上待发指令方向一致则并入该战线；
    *   方向不同则分兵、另立战线（R4）。起始点上的指令永远不被覆盖。
    * - 出发格不是任何战线的起始点、但已是某条战线待发指令的到达格：
-   *   被既有指令覆盖——不形成新队列、不执行（R3，验收例：A→B 后再发 B→C，
-   *   B 是 A→B 的到达格而非起始点，B→C 被覆盖）。
+   *   挂到第一条匹配战线的队尾等待接续（R3 链式挂尾，issue #107——不再覆盖
+   *   丢弃；连点画链 A→B、B→C 依次入队同一条战线，与单线手动排队语义一致）。
+   *   到达格同时匹配多条战线时挂第一条匹配的战线。
    * - 其余情况开辟新战线。
-   * 返回目标战线编号（可能等于当前条数 = 待开辟的新战线）；被覆盖返回 null。
+   * 返回目标战线编号（可能等于当前条数 = 待开辟的新战线）。
    */
-  private routeMoveLine(player: number, x: number, y: number, dx: number, dy: number): number | null {
+  private routeMoveLine(player: number, x: number, y: number, dx: number, dy: number): number {
     const lines = this.pmove[player];
     const heads = this.pqueueHead[player];
     const dirx = dx - x;
@@ -1101,10 +1102,7 @@ export class GameEngine {
       // 或没有从该点出发的待发指令）的第一条战线即归属；都不相容才另立战线。
       const compatible = lines[l].every(
         (op) =>
-          op.kind !== 'm' ||
-          op.x !== x ||
-          op.y !== y ||
-          (op.dx - op.x === dirx && op.dy - op.y === diry),
+          op.kind !== 'm' || op.x !== x || op.y !== y || (op.dx - op.x === dirx && op.dy - op.y === diry),
       );
       if (compatible) {
         return l;
@@ -1113,10 +1111,11 @@ export class GameEngine {
     if (headMatched) {
       return lines.length; // R4：起始点上的新方向，分兵另立战线（起始点指令不被覆盖）。
     }
+    // R3 链式挂尾：出发格是某条战线待发指令的到达格时，挂到第一条匹配的战线队尾。
     for (let l = 0; l < lines.length; l += 1) {
       for (const op of lines[l]) {
         if (op.kind === 'm' && op.dx === x && op.dy === y) {
-          return null;
+          return l;
         }
       }
     }
@@ -1125,7 +1124,7 @@ export class GameEngine {
 
   /**
    * 多线争锋 v2 的建造指令路由：建造格是某条战线起始点则并入该战线，否则另立
-   * 战线（建造无方向，不参与 R3 覆盖判定，也不产生覆盖）。
+   * 战线（建造无方向，不参与 R3 链式挂尾判定）。
    */
   private routeBuildLine(player: number, x: number, y: number): number {
     const lines = this.pmove[player];
@@ -1163,11 +1162,8 @@ export class GameEngine {
       this.markEnqueue(player, 0);
       return;
     }
-    // 多线争锋 v2：忽略客户端携带的 line，按起始点/覆盖规则自动路由（R1/R3/R4）。
+    // 多线争锋 v2：忽略客户端携带的 line，按起始点/链式挂尾规则自动路由（R1/R3/R4）。
     const routed = this.routeMoveLine(player, x, y, dx, dy);
-    if (routed === null) {
-      return; // R3：出发格是既有战线的到达格（非起始点），被覆盖，不形成新队列、不执行。
-    }
     const target = routed < this.pmove[player].length ? routed : this.openLine(player, { x, y });
     this.pmove[player][target].push(op);
     if (!this.pqueueHead[player][target]) {
@@ -1191,7 +1187,7 @@ export class GameEngine {
       this.markEnqueue(player, 0);
       return;
     }
-    // 多线争锋 v2：忽略 line，按起始点归属自动路由（建造不参与覆盖判定）。
+    // 多线争锋 v2：忽略 line，按起始点归属自动路由（建造不参与链式挂尾判定）。
     const routed = this.routeBuildLine(player, x, y);
     const target = routed < this.pmove[player].length ? routed : this.openLine(player, { x, y });
     this.pmove[player][target].push(op);
@@ -1399,7 +1395,6 @@ export class GameEngine {
     this.afkLastMoveTurn[id] = this.turn;
     this.afkLastMoveAt[id] = Date.now();
     this.resetLines(id);
-    this.pmoveCursor[id] = 0;
     this.emitInitMap(newSid, {
       n: this.n,
       m: this.m,
@@ -1831,25 +1826,21 @@ export class GameEngine {
       if (this.pstat[p] === LEFT_GAME) {
         continue;
       }
-      // 多线争锋：从轮转游标起找第一条非空战线，本 Tick 只调度该战线
-      // （弹出其队首失效操作并执行首条有效操作），随后游标前进一格。
-      // 空战线不消耗 Tick——只有一条战线有操作时调度频率与单线完全一致。
-      // v2：战线条数随路由动态增长，轮转范围取当前实际条数；单线对局恒为 1 条。
-      let line = -1;
-      const lineCount = this.pmove[p].length;
-      for (let step = 0; step < lineCount; step += 1) {
-        const candidate = (this.pmoveCursor[p] + step) % lineCount;
-        if (this.pmove[p][candidate].length > 0) {
-          line = candidate;
-          break;
-        }
-      }
-      let skipped = 0;
-      if (line >= 0) {
-        // 本 Tick 调度战线先行记录：即使队首全部失效（只有 skip、无执行操作），
-        // 客户端也能把丢弃数同步到正确的战线。
-        this.lstMoveLine[p] = line;
+      // 多线争锋真并行（issue #107）：每 Tick 遍历该玩家全部战线，每条非空战线
+      // 各自弹出失效队首并执行首条有效操作（不再从轮转游标起只调度一条战线）。
+      // 空战线不消耗 Tick——只有一条战线有操作时节奏与单线完全一致。
+      // lst_move/lst_skip/lst_move.line 每 Tick 只能汇报一条：记录最后一条有活动
+      // （执行或丢弃）的战线，三者始终归属同一战线；单线对局恒为战线 0，行为不变。
+      let lastActiveLine = -1;
+      let lastActiveSkipped = 0;
+      let lastActiveOp: QueuedOp | null = null;
+      for (let line = 0; line < this.pmove[p].length; line += 1) {
         const queue = this.pmove[p][line];
+        if (queue.length === 0) {
+          continue;
+        }
+        let skipped = 0;
+        let executed: QueuedOp | null = null;
         while (queue.length > 0) {
           const op = queue.shift();
           this.markDequeue(p, line);
@@ -1888,14 +1879,23 @@ export class GameEngine {
           if (op.kind === 'm' && head && head.x === op.x && head.y === op.y) {
             this.pqueueHead[p][line] = { x: op.dx, y: op.dy };
           }
-          this.lstMove[p] = op;
-          this.lstMoveLine[p] = line;
+          executed = op;
           movedThisTurn[p] = true;
           break;
         }
-        this.pmoveCursor[p] = (line + 1) % this.pmove[p].length;
+        if (executed || skipped > 0) {
+          lastActiveLine = line;
+          lastActiveSkipped = skipped;
+          lastActiveOp = executed;
+        }
       }
-      this.lstSkip[p] = skipped;
+      if (lastActiveLine >= 0) {
+        this.lstMoveLine[p] = lastActiveLine;
+        if (lastActiveOp) {
+          this.lstMove[p] = lastActiveOp;
+        }
+      }
+      this.lstSkip[p] = lastActiveSkipped;
     }
 
     this.applyConnectivity();
