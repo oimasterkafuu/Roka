@@ -1,9 +1,10 @@
-// 多线争锋（issue #105）冒烟测试：
+// 多线争锋冒烟测试（v1.62 起为 v2 语义）：
 // 1) 临时数据目录 + 随机端口启动 dist/server.js，注册用户（首个 = 超管）；
 // 2) 多线房间：房主 change_game_conf { multi_line: true } 后开局，校验
-//    a. init_map 携带 multi_line=true、line_count=4；
-//    b. attack 带 line 0/1 入队后，lst_move.line 随 Tick 在两条战线间轮转调度；
-//    c. 只在战线 2 排一条无效操作，lst_move 的 line=2 且 skip>=1（丢弃归属正确战线）；
+//    a. init_map 携带 multi_line=true、line_count=1（v2 战线数从 1 条起按需动态增长）；
+//    b. 同一点两个不同方向的 attack 自动分兵成两条战线（R4；v2 忽略 attack 携带的
+//       line 参数，战线由服务端按起始点路由），lst_move.line 随 Tick 在两条战线间轮转；
+//    c. 全新出发点排一条无效操作自成新战线，lst_move 的 skip>=1 且归属该新战线；
 // 3) 对照房间：默认配置开局，init_map 不带 multi_line，lst_move 不带 line 字段。
 // 4) Bot 房间：第三方 bot 进房后多线被强制关闭，房主再次开启请求被拒绝。
 // 5) [AI] 标识：未随心跳上报会话派生值的连接在 leaderboard/room_update 中带 ai 标记，
@@ -272,42 +273,41 @@ async function main() {
   b.socket.emit('change_ready', { ready: true });
 
   await waitFor(() => a.initMap && b.initMap, 15_000, '多线对局开局');
-  if (a.initMap.multi_line !== true || a.initMap.line_count !== 4) {
+  if (a.initMap.multi_line !== true || a.initMap.line_count !== 1) {
     throw new Error(`多线对局 init_map 缺少 multi_line/line_count：${JSON.stringify({
       multi_line: a.initMap.multi_line,
       line_count: a.initMap.line_count,
     })}`);
   }
-  log('init_map 携带 multi_line=true、line_count=4');
+  log('init_map 携带 multi_line=true、line_count=1（v2 动态战线从 1 条起）');
 
-  // A 在战线 0 与战线 1 各排 4 条操作（无效也无妨：调度与 skip 归属照样轮转）。
+  // A 从主城向两个不同方向各排 4 条操作（v2：attack 的 line 参数被忽略，
+  // 同出发点多方向自动分兵成两条战线；无效也无妨：调度与 skip 归属照样轮转）。
   const [gx, gy] = a.general;
   for (let i = 0; i < 4; i++) {
-    a.socket.emit('attack', { x: gx, y: gy, dx: gx + 1, dy: gy, mode: 2, line: 0 });
-    a.socket.emit('attack', { x: gx, y: gy, dx: gx + 1, dy: gy, mode: 2, line: 1 });
+    a.socket.emit('attack', { x: gx, y: gy, dx: gx + 1, dy: gy, mode: 2 });
+    a.socket.emit('attack', { x: gx, y: gy, dx: gx, dy: gy + 1, mode: 2 });
   }
   await waitFor(() => a.lstMoves.length >= 8, 15_000, 'lst_move 轮转采样');
   const servedLines = new Set(a.lstMoves.slice(0, 8).map((mv) => mv.line));
   if (!servedLines.has(0) || !servedLines.has(1)) {
     throw new Error(`多线调度未轮转：前 8 Tick 的 lst_move.line 集合=${JSON.stringify([...servedLines])}`);
   }
-  log('战线 0/1 的操作随 Tick 轮转调度');
+  log('同点双向操作自动分兵为战线 0/1 并随 Tick 轮转调度');
 
-  // skip 归属：清空全部战线后只在战线 2 排一条无效操作。
-  a.socket.emit('clear_queue', {});
-  await sleep(600);
+  // skip 归属：等既有队列自然耗尽（8 Tick 足够），再从一个全新出发点排一条
+  // 无效操作（非邻接，必被丢弃）——自成新战线 2，skip 应归属该战线。
+  await sleep(5000);
+  for (let i = 0; i < 4; i++) a.socket.emit('pop_queue', {}); // 清理可能残余（v2：全局撤回）
+  await sleep(300);
   a.lstMoves = [];
-  a.socket.emit('attack', { x: gx, y: gy, dx: gx + 3, dy: gy, mode: 2, line: 2 }); // 非邻接，必被丢弃
+  a.socket.emit('attack', { x: gx + 5, y: gy, dx: gx + 8, dy: gy, mode: 2 });
   await waitFor(
-    () => a.lstMoves.some((mv) => mv.skip >= 1),
+    () => a.lstMoves.some((mv) => mv.skip >= 1 && mv.line === 2),
     10_000,
-    '战线 2 的无效操作被丢弃',
+    '新战线的无效操作被丢弃（skip 归属战线 2）',
   );
-  const skipMove = a.lstMoves.find((mv) => mv.skip >= 1);
-  if (skipMove.line !== 2) {
-    throw new Error(`skip 归属战线错误：期望 line=2，实际 ${JSON.stringify(skipMove)}`);
-  }
-  log('skip 丢弃数归属正确的战线（line=2）');
+  log('skip 丢弃数归属正确的新战线（line=2）');
 
   // 场景 1b：[AI] 标识——双方都未上报会话派生值，leaderboard 应带 ai 标记；
   // A 上报正确派生值后标记消除，B 保持。
