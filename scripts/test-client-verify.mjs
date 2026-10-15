@@ -73,7 +73,7 @@ function finish(code, message) {
   finished = true;
   cleanup();
   log(message);
-  setTimeout(() => process.exit(code), 300).unref();
+  setTimeout(() => process.exit(code), 300);
 }
 
 process.on('SIGINT', () => finish(1, '收到 SIGINT，中止测试'));
