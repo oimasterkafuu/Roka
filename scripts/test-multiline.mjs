@@ -10,6 +10,8 @@
 // 5) [AI] 标识：未随心跳上报会话派生值的连接在 leaderboard/room_update 中带 ai 标记，
 //    上报正确派生值后标记消除；bot 连接恒带 ai 标记。
 // 6) 全官方 bot 房：两个令牌 bot 开局强制 4x（帧率判定；中途进房的人类为观战者不受影响）。
+// 7) v3 静态断言：对局页不存在战线区分 UI（battle-line/multi-line-hud 元素、
+//    数字键 1-9 / [ ] 切战线绑定、route-line-N 箭头着色类），界面与普通对局一致。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 120 秒。
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -412,7 +414,27 @@ async function main() {
   }
   log(`场景 4 通过：全官方 bot 对局强制 4x（2 秒 ${spec.frames} 帧）`);
 
-  finish(0, '测试通过：多线调度、单线兼容、bot 房禁用、[AI] 标识与全 bot 4x 均符合预期');
+  // (7) v3 静态断言：客户端不存在任何战线区分 UI（界面与普通对局完全一致）。
+  {
+    const mustBeAbsent = (content, needle, label) => {
+      if (content.includes(needle)) throw new Error(`v3: ${label} 不应残留「${needle}」`);
+    };
+    const gameHtml = fs.readFileSync(path.join(rootDir, 'static', 'game.html'), 'utf8');
+    mustBeAbsent(gameHtml, 'battle-line', 'game.html 战线 tab');
+    mustBeAbsent(gameHtml, 'multi-line-hud', 'game.html 战线指示条');
+    const mainJs = fs.readFileSync(path.join(rootDir, 'static', 'main.js'), 'utf8');
+    mustBeAbsent(mainJs, 'switchLine', 'main.js 战线切换函数');
+    if (/key\s*>=\s*'1'\s*&&\s*key\s*<=\s*'9'/.test(mainJs)) {
+      throw new Error('v3: main.js 不应残留数字键 1-9 切战线绑定');
+    }
+    const renderJs = fs.readFileSync(path.join(rootDir, 'static', 'main', 'render-update.js'), 'utf8');
+    const mapCss = fs.readFileSync(path.join(rootDir, 'static', 'styles', 'map.css'), 'utf8');
+    mustBeAbsent(renderJs, 'route-line-', 'render-update.js 按战线着色类');
+    mustBeAbsent(mapCss, 'route-line-', 'map.css 战线着色规则');
+    log('场景 5 通过：v3 静态断言（无 battle-line UI、无数字键切战线绑定、无按战线着色）');
+  }
+
+  finish(0, '测试通过：多线调度、单线兼容、bot 房禁用、[AI] 标识、全 bot 4x 与 v3 无战线 UI 均符合预期');
 }
 
 main().catch((error) => finish(1, `测试异常：${error.stack || error.message}`));
