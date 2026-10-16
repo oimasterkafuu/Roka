@@ -10,7 +10,11 @@
 // 4) Bot 房间：第三方 bot 进房后多线被强制关闭，房主再次开启请求被拒绝。
 // 5) [AI] 标识：未随心跳上报会话派生值的连接在 leaderboard/room_update 中带 ai 标记，
 //    上报正确派生值后标记消除；bot 连接恒带 ai 标记。
-// 6) 全官方 bot 房：两个令牌 bot 开局强制 4x（帧率判定；中途进房的人类为观战者不受影响）。
+// 6) 全 AI 房强制 4x 统一判定（humanVerified 口径）：
+//    a. 两个令牌 bot 开局强制 4x（帧率判定；中途进房的人类为观战者不受影响）；
+//    b. 未验证的第三方连接（模拟 JWT 接入的用户 bot）+ 令牌 bot 的全 AI 房同样强制 4x；
+//    c. 验证真人 + bot 的混编房不强制（按房间速度 1x 走帧）；
+//    d. 房主三档优先：bot 独居当房主，验证真人进房后接任房主（players[0] 换人）。
 // 7) v3 静态断言：对局页不存在战线区分 UI（battle-line/multi-line-hud 元素、
 //    数字键 1-9 / [ ] 切战线绑定、route-line-N 箭头着色类），界面与普通对局一致。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 120 秒。
@@ -37,6 +41,9 @@ const ROOM_MULTI = 'mlroom';
 const ROOM_PLAIN = 'mlplain';
 const ROOM_BOT = 'mlbotroom';
 const ROOM_ALLBOTS = 'mlallbots';
+const ROOM_ALLAI = 'mlallai';
+const ROOM_MIXED = 'mlmixed';
+const ROOM_HOST = 'mlhost';
 const BOT_TOKEN = 'test-token-multiline';
 const BOT_TOKEN_2 = 'test-token-multiline-2';
 
@@ -143,7 +150,7 @@ async function signUser(store, jwtSecret, username, password) {
  * 最小对局客户端：进房自动准备；记录 init_map 元数据与逐 Tick 的
  * lst_move（含 line/skip）与 leaderboard 快照供断言。
  */
-function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botToken }) {
+function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botToken, human }) {
   const socket = ioClient(baseUrl, {
     transports: ['websocket', 'polling'],
     extraHeaders: cookie ? { cookie: `auth_token=${encodeURIComponent(cookie)}` } : undefined,
@@ -169,6 +176,12 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
 
   socket.on('set_id', (id) => {
     client.clientId = String(id || '');
+    if (human) {
+      // 模拟真实浏览器：进房前先 client_verify 完成真人校验（消除时序竞态）。
+      socket.emit('client_verify', { sig: clientSig(human.secret, human.sid, client.clientId) });
+      setTimeout(() => socket.emit('join_game_room', { room }), 150);
+      return;
+    }
     socket.emit('join_game_room', { room });
   });
   socket.on('init_map', (data) => {
@@ -252,7 +265,7 @@ async function main() {
     env: {
       ...process.env,
       ROKA_DATA_DIR: dataDir,
-      ROKA_BOT_TOKENS: `${BOT_TOKEN}:bot_ml,${BOT_TOKEN_2}:bot_ml2,test-token-ml-3:bot_mlp,test-token-ml-4:bot_mlq`,
+      ROKA_BOT_TOKENS: `${BOT_TOKEN}:bot_ml,${BOT_TOKEN_2}:bot_ml2,test-token-ml-3:bot_mlp,test-token-ml-4:bot_mlq,test-token-ml-5:bot_ml5,test-token-ml-6:bot_ml6,test-token-ml-7:bot_ml7`,
     },
   });
   children.add(server);
@@ -421,6 +434,70 @@ async function main() {
     throw new Error(`全 bot 对局未以 4x 运行：2 秒仅 ${spec.frames} 帧（4x 应约 16 帧）`);
   }
   log(`场景 4 通过：全官方 bot 对局强制 4x（2 秒 ${spec.frames} 帧）`);
+
+  // 场景 5：统一 AI 判定（humanVerified 口径）与房主三档优先。
+  log('场景 5：统一 AI 判定与房主优先级');
+
+  // 5a：令牌 bot 独居时为房主；验证真人进房后接任房主（players[0] 换人）。
+  const hostBot = createGameClient(baseUrl, {
+    botToken: 'test-token-ml-5',
+    room: ROOM_HOST,
+    name: 'HOSTBOT',
+    autoReady: false,
+  });
+  await waitFor(() => hostBot.clientId !== '', 5000, 'HostBot 进房');
+  await waitFor(() => hostBot.roomPlayers[0]?.uid === 'bot_ml5', 5000, 'bot 独居时为房主');
+  const hostHuman = createGameClient(baseUrl, {
+    cookie: userE.token,
+    room: ROOM_HOST,
+    name: 'HOSTHUMAN',
+    autoReady: false,
+    human: { secret: env.jwtSecret, sid: userE.sid },
+  });
+  await waitFor(() => hostHuman.clientId !== '', 5000, '验证真人进房');
+  await waitFor(
+    () => hostBot.roomPlayers[0]?.uid === 'ml_e',
+    5000,
+    '真人进房后接任房主（players[0]=ml_e）',
+  );
+  log('场景 5a 通过：bot 独居当房主，验证真人进房后接任');
+
+  // 5b：未验证第三方连接（模拟 JWT 用户 bot）+ 令牌 bot 的全 AI 房强制 4x。
+  const aiUser = createGameClient(baseUrl, { cookie: userB.token, room: ROOM_ALLAI, name: 'AIUSER' });
+  await waitFor(() => aiUser.clientId !== '', 5000, '未验证第三方连接进房');
+  const aiBot = createGameClient(baseUrl, { botToken: 'test-token-ml-6', room: ROOM_ALLAI, name: 'AIBOT' });
+  await waitFor(() => aiUser.initMap && aiBot.initMap, 30_000, '全 AI 房开局');
+  await waitFor(() => aiUser.frames >= 3, 15_000, '全 AI 房帧流出');
+  aiUser.frames = 0;
+  await sleep(2000);
+  if (aiUser.frames < 10) {
+    throw new Error(`全 AI 房（含未验证第三方连接）未以 4x 运行：2 秒仅 ${aiUser.frames} 帧`);
+  }
+  log(`场景 5b 通过：全 AI 房（含第三方连接）强制 4x（2 秒 ${aiUser.frames} 帧）`);
+  aiUser.socket.disconnect();
+  aiBot.socket.disconnect();
+
+  // 5c：验证真人 + bot 的混编房不强制，按房间默认 1x 走帧。
+  const mixHuman = createGameClient(baseUrl, {
+    cookie: userD.token,
+    room: ROOM_MIXED,
+    name: 'MIXHUMAN',
+    human: { secret: env.jwtSecret, sid: userD.sid },
+  });
+  await waitFor(() => mixHuman.clientId !== '', 5000, '混编房真人进房');
+  const mixBot = createGameClient(baseUrl, { botToken: 'test-token-ml-7', room: ROOM_MIXED, name: 'MIXBOT' });
+  await waitFor(() => mixHuman.initMap && mixBot.initMap, 30_000, '混编房开局');
+  await waitFor(() => mixHuman.frames >= 2, 15_000, '混编房帧流出');
+  mixHuman.frames = 0;
+  await sleep(2000);
+  if (mixHuman.frames > 9) {
+    throw new Error(`混编房不应强制 4x：2 秒 ${mixHuman.frames} 帧（1x 应约 4 帧）`);
+  }
+  log(`场景 5c 通过：真人混编房不强制 4x（2 秒 ${mixHuman.frames} 帧）`);
+  mixHuman.socket.disconnect();
+  mixBot.socket.disconnect();
+  hostBot.socket.disconnect();
+  hostHuman.socket.disconnect();
 
   // (7) v3 静态断言：客户端不存在任何战线区分 UI（界面与普通对局完全一致）。
   {
