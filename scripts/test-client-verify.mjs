@@ -2,8 +2,10 @@
 // 临时数据目录起 dist 服务 + socket.io-client 真实连接，覆盖
 //   1) 真人 JWT 连接按公式算 sig 后发 client_verify（不进房、不等心跳）→
 //      进房后房间列表（room_update）该成员不带 ai 标记；
-//   2) 不发 sig 的对照连接带 ai 标记；
-//   3) 回归：room_heartbeat 携带 sig 的老路径仍生效。
+//   2) 不发 sig 的普通连接不带 ai 标记，仍正常参战；
+//   3) 回归：room_heartbeat 携带 sig 的老路径仍生效；
+//   4) bot 令牌连接带 ai；聚焦测试覆盖全 bot 加速与排行榜身份；
+//   5) 混合房准备门槛、真实 socket 开局与离开等待房不影响 rating。
 // 运行：pnpm run test:client-verify（需 dist 产物，缺失时自动 pnpm run build）。
 
 import assert from 'node:assert/strict';
@@ -186,6 +188,177 @@ const USER_VERIFY = 'verify_alice'; // 首个注册 = 超管（走 client_verify
 const USER_PLAIN = 'verify_bob'; // 对照连接（不发 sig）
 const USER_HEARTBEAT = 'verify_carol'; // 回归连接（走 room_heartbeat 老路径）
 
+// 只替换引擎创建边界，直接检查 LobbyService 传入的速度与排行榜回调，避免计时断言。
+async function testGameAIClassification(store) {
+  const { LobbyService } = await import(
+    pathToFileURL(path.join(rootDir, 'dist/server/lobby-service.js')).href
+  );
+  const { GameEngine } = await import(pathToFileURL(path.join(rootDir, 'dist/game-engine.js')).href);
+  const originalCreate = GameEngine.create;
+  let captured;
+  GameEngine.create = async (conf, _sids, _ids, _gid, callbacks) => {
+    captured = { conf, callbacks };
+    return { startGame() {} };
+  };
+  const io = {
+    emit() {},
+    to() {
+      return this;
+    },
+  };
+  try {
+    for (const browserParticipant of [true, false]) {
+      const lobby = new LobbyService({}, store);
+      lobby.joinLobby('bot-a', 'bot_a', 'ai-test', { bot: true });
+      lobby.joinLobby('bot-b', 'bot_b', 'ai-test', { bot: true });
+      lobby.joinLobby('browser', USER_PLAIN, 'ai-test');
+      const players = lobby.lobbyPlayers.get('ai-test');
+      players.find((player) => player.sid === 'browser').team = browserParticipant ? 1 : 0;
+      lobby.lobbyConfig.get('ai-test').speed = 2;
+      // 真人验证集合不能覆盖已确认的 bot 身份。
+      lobby.humanVerified.add('bot-a');
+      await lobby.startGame(io, 'ai-test');
+      assert.equal(
+        captured.conf.speed,
+        browserParticipant ? 2 : 4,
+        '普通未验证参战者阻止强制加速，纯 bot 参战时才强制 4x（观战者不计）',
+      );
+      const entries = players.map((_, index) => ({ id: index + 1 }));
+      entries.push({ id: 999 });
+      captured.callbacks.annotateLeaderboard(entries);
+      assert.deepEqual(
+        entries.map((entry) => entry.ai),
+        [true, true, false, false],
+        '排行榜只标记已确认 bot，普通玩家与未知席位均不标记',
+      );
+    }
+    log('场景 5 通过：混合对局保持 2x，纯 bot 参战强制 4x，排行榜仅标记 bot');
+  } finally {
+    GameEngine.create = originalCreate;
+  }
+}
+
+// 聚焦准备门槛，不替换 checkReady；捕获其真正发出的 startGame 调用。
+async function testReadyPolicy(store) {
+  const { LobbyService } = await import(
+    pathToFileURL(path.join(rootDir, 'dist/server/lobby-service.js')).href
+  );
+  const io = {
+    emit() {},
+    to() {
+      return this;
+    },
+  };
+  for (const kind of ['mixed', 'pure-bot', 'spectator', 'pure-human', 'majority', 'mixed-majority']) {
+    const lobby = new LobbyService({}, store);
+    const bot = kind === 'mixed' || kind === 'pure-bot' || kind === 'spectator' || kind === 'mixed-majority';
+    lobby.joinLobby('a', 'bot_a', kind, { bot });
+    lobby.joinLobby('b', 'bot_b', kind, { bot });
+    if (kind !== 'pure-bot') lobby.joinLobby('ordinary', USER_PLAIN, kind);
+    const players = lobby.lobbyPlayers.get(kind);
+    players.forEach((player) => {
+      player.ready = player.sid !== 'ordinary';
+    });
+    if (kind === 'spectator') players.find((player) => player.sid === 'ordinary').team = 0;
+    if (kind === 'majority' || kind === 'mixed-majority') {
+      players.forEach((player) => {
+        player.ready = false;
+      });
+      players.find((player) => player.sid === 'ordinary').ready = true;
+    }
+    let starts = 0;
+    lobby.startGame = async () => {
+      starts++;
+    };
+    lobby.checkReady(io, kind);
+    assert.equal(
+      starts,
+      kind === 'mixed' || kind === 'majority' || kind === 'mixed-majority' ? 0 : 1,
+      `${kind}: two ready bots must not start around an unready ordinary player; preserve other rules`,
+    );
+    if (kind === 'mixed') {
+      players.find((player) => player.sid === 'ordinary').ready = true;
+      lobby.checkReady(io, kind);
+      assert.equal(starts, 1, '普通玩家准备后允许开局');
+    }
+  }
+  log('场景 6 通过：混合房普通玩家全员准备 + 原有多数门槛，纯 bot/观战/纯人类规则保持');
+}
+
+function waitSocket(socket, event, predicate = () => true) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off(event, handler);
+      reject(new Error(`等待 ${event} 超时`));
+    }, 10000);
+    function handler(data) {
+      if (!predicate(data)) return;
+      clearTimeout(timer);
+      socket.off(event, handler);
+      resolve(data);
+    }
+    socket.on(event, handler);
+  });
+}
+
+async function testMixedReadySockets(baseUrl, token) {
+  const before = (await api(baseUrl, token, '/api/auth/me')).data.rating;
+  for (const leaveWaiting of [true, false]) {
+    const room = leaveWaiting ? 'guardleave' : 'guardready';
+    const { socket: ordinary, setIdPromise } = await connectSocket(baseUrl, token, 'Guard ordinary');
+    const id = await setIdPromise;
+    let initCount = 0;
+    ordinary.on('init_map', () => {
+      initCount++;
+    });
+    const joined = waitRoomUpdateFor(ordinary, id);
+    ordinary.emit('join_game_room', { room });
+    await joined;
+    const bots = [];
+    for (const botToken of ['verify-bot-token', 'verify-bot-token-2']) {
+      const { socket, setIdPromise: botId } = await connectSocket(baseUrl, botToken, 'Guard bot');
+      const entered = waitRoomUpdateFor(socket, await botId);
+      socket.emit('join_game_room', { room });
+      await entered;
+      bots.push(socket);
+    }
+    // 先等待两个 bot 的准备状态回显，确保服务端确实处理了多数票。
+    const readyEcho = waitSocket(
+      ordinary,
+      'room_update',
+      (data) => data.players.filter((player) => player.bot && player.ready).length === 2,
+    );
+    bots.forEach((socket) => socket.emit('change_ready', { ready: true }));
+    await readyEcho;
+    await sleep(600);
+    assert.equal(initCount, 0, '真实 socket：2 ready bots + unready ordinary player cannot start');
+    if (leaveWaiting) {
+      const removed = waitSocket(
+        bots[0],
+        'room_update',
+        (data) => !data.players.some((player) => player.sid === id),
+      );
+      ordinary.disconnect();
+      await removed;
+      // 超过断线宽限期，排除等待房离开被延后结算为挂机/投降。
+      await sleep(11000);
+      const after = (await api(baseUrl, token, '/api/auth/me')).data.rating;
+      assert.deepEqual(after, before, '离开等待房不改变 rating 或 ratingGames');
+      log(
+        `场景 7a 通过：真实 socket 离开等待房 rating 前后 ${JSON.stringify(before)} -> ${JSON.stringify(after)}`,
+      );
+    } else {
+      const started = waitSocket(ordinary, 'init_map');
+      ordinary.emit('change_ready', { ready: true });
+      await started;
+      assert.equal(initCount, 1, '普通玩家准备后真实开局');
+      ordinary.disconnect();
+      log('场景 7b 通过：真实 socket 普通玩家准备后开局');
+    }
+    bots.forEach((socket) => socket.disconnect());
+  }
+}
+
 async function main() {
   try {
     ensureBuild();
@@ -193,15 +366,19 @@ async function main() {
 
     // 直接用编译产物造用户并签发会话 JWT，绕过注册验证码。
     const { UserStore } = await import(pathToFileURL(path.join(rootDir, 'dist', 'auth-store.js')).href);
-    const { ensureRuntimeEnv } = await import(pathToFileURL(path.join(rootDir, 'dist', 'runtime-env.js')).href);
+    const { ensureRuntimeEnv } = await import(
+      pathToFileURL(path.join(rootDir, 'dist', 'runtime-env.js')).href
+    );
     const store = new UserStore(dataDir);
     await store.ensureReady();
     await store.register(USER_VERIFY, 'verify-pass-1');
     await store.register(USER_PLAIN, 'verify-pass-2');
     await store.register(USER_HEARTBEAT, 'verify-pass-3');
+    await store.register('verify_guard', 'verify-pass-guard');
+    await testReadyPolicy(store);
     const env = ensureRuntimeEnv();
     const tokens = {};
-    for (const username of [USER_VERIFY, USER_PLAIN, USER_HEARTBEAT]) {
+    for (const username of [USER_VERIFY, USER_PLAIN, USER_HEARTBEAT, 'verify_guard']) {
       const sid = await store.rotateSession(username);
       tokens[username] = jwt.sign({ sub: username, sid }, env.jwtSecret, { expiresIn: '1h' });
     }
@@ -211,7 +388,11 @@ async function main() {
     const baseUrl = `http://127.0.0.1:${port}`;
     server = spawn(process.execPath, [serverEntry, '--port', String(port)], {
       cwd: rootDir,
-      env: { ...process.env, ROKA_DATA_DIR: dataDir },
+      env: {
+        ...process.env,
+        ROKA_DATA_DIR: dataDir,
+        ROKA_BOT_TOKENS: 'verify-bot-token:verify_bot,verify-bot-token-2:verify_bot2',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     server.stdout.on('data', () => undefined);
@@ -224,22 +405,7 @@ async function main() {
     assert.equal(me.status, 200, '/api/auth/me 对已登录会话返回 200');
     assert.equal(typeof me.data?.stamp, 'string', '/api/auth/me 下发 stamp');
 
-    // 场景 1：client_verify 新路径——连接后拿到 set_id 立即发 sig，再进房。
-    const { socket: socketVerify, setIdPromise: verifySetIdPromise } = await connectSocket(
-      baseUrl,
-      tokens[USER_VERIFY],
-      'Verify',
-    );
-    const verifySetId = await verifySetIdPromise;
-    socketVerify.emit('client_verify', { sig: computeSig(me.data.stamp, verifySetId) });
-    await sleep(300);
-    const verifyEntryPromise = waitRoomUpdateFor(socketVerify, verifySetId);
-    socketVerify.emit('join_game_room', { room: 'verifyroom' });
-    const verifyEntry = await verifyEntryPromise;
-    assert.equal(verifyEntry.ai, undefined, 'client_verify 验证后进房不带 ai 标记');
-    log('场景 1 通过：client_verify 新路径验证后房间列表不带 ai 标记');
-
-    // 场景 2：对照连接不发任何 sig——同房间成员带 ai 标记。
+    // 场景 2：普通连接不发任何 sig，不能据此推断为 AI。
     const { socket: socketPlain, setIdPromise: plainSetIdPromise } = await connectSocket(
       baseUrl,
       tokens[USER_PLAIN],
@@ -249,8 +415,27 @@ async function main() {
     const plainEntryPromise = waitRoomUpdateFor(socketPlain, plainSetId);
     socketPlain.emit('join_game_room', { room: 'verifyroom' });
     const plainEntry = await plainEntryPromise;
-    assert.equal(plainEntry.ai, true, '未验证连接在房间列表中带 ai 标记');
-    log('场景 2 通过：未验证对照连接带 ai 标记');
+    assert.equal(plainEntry.ai, undefined, '未验证普通连接不带 ai 标记');
+    assert.ok(plainEntry.team > 0, '未验证普通连接仍是参战成员');
+    log('场景 2 通过：未验证普通连接不带 ai 标记，仍正常参战');
+
+    // 场景 1：client_verify 新路径——连接后拿到 set_id 立即发 sig，再进房。
+    const { socket: socketVerify, setIdPromise: verifySetIdPromise } = await connectSocket(
+      baseUrl,
+      tokens[USER_VERIFY],
+      'Verify',
+    );
+    const verifySetId = await verifySetIdPromise;
+    socketVerify.emit('client_verify', { sig: computeSig(me.data.stamp, verifySetId) });
+    await sleep(300);
+    socketVerify.on('room_update', (data) => {
+      assert.equal(data.players[0].sid, verifySetId, 'client_verify 仍让已验证成员优先成为房主');
+    });
+    const verifyEntryPromise = waitRoomUpdateFor(socketVerify, verifySetId);
+    socketVerify.emit('join_game_room', { room: 'verifyroom' });
+    const verifyEntry = await verifyEntryPromise;
+    assert.equal(verifyEntry.ai, undefined, 'client_verify 验证后进房不带 ai 标记');
+    log('场景 1 通过：client_verify 新路径验证后房间列表不带 ai 标记');
 
     // 场景 3（回归）：room_heartbeat 携带 sig 的老路径仍生效。
     const meHb = await api(baseUrl, tokens[USER_HEARTBEAT], '/api/auth/me');
@@ -262,12 +447,30 @@ async function main() {
     const hbSetId = await hbSetIdPromise;
     socketHb.emit('room_heartbeat', { sig: computeSig(meHb.data.stamp, hbSetId) });
     await sleep(300);
+    socketHb.on('room_update', (data) => {
+      assert.equal(data.players[1].sid, hbSetId, 'room_heartbeat 验证仍让成员排在未验证成员前');
+    });
     const hbEntryPromise = waitRoomUpdateFor(socketHb, hbSetId);
     socketHb.emit('join_game_room', { room: 'verifyroom' });
     const hbEntry = await hbEntryPromise;
     assert.equal(hbEntry.ai, undefined, 'room_heartbeat 携带 sig 验证后进房不带 ai 标记');
     log('场景 3 通过：room_heartbeat 老路径回归仍生效');
 
+    const { socket: socketBot, setIdPromise: botSetIdPromise } = await connectSocket(
+      baseUrl,
+      'verify-bot-token',
+      'Bot',
+    );
+    const botSetId = await botSetIdPromise;
+    const botEntryPromise = waitRoomUpdateFor(socketBot, botSetId);
+    socketBot.emit('join_game_room', { room: 'verifyroom' });
+    const botEntry = await botEntryPromise;
+    assert.equal(botEntry.bot, true, '令牌认证连接被服务端确认为 bot');
+    assert.equal(botEntry.ai, true, '已确认 bot 带 ai 标记');
+    log('场景 4 通过：bot 令牌认证连接带 ai 标记');
+
+    await testGameAIClassification(store);
+    await testMixedReadySockets(baseUrl, tokens.verify_guard);
     finish(0, 'client_verify 测试通过');
   } catch (error) {
     finish(1, `测试失败：${error?.stack ?? error}`);
