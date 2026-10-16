@@ -28,6 +28,11 @@ import {
 type EditableLobbyKey =
   'speed' | 'allow_team' | 'fog' | 'multi_line' | 'map_mode' | 'map_region' | 'map_token' | 'map_size';
 
+/** 只有服务端鉴权确认的 bot 才算 AI；缺少真人验证不代表 AI。 */
+function isConfirmedAI(player: LobbyPlayer | undefined): boolean {
+  return player?.bot === true;
+}
+
 const FIXED_WIDTH_RATIO = 0.5;
 const FIXED_HEIGHT_RATIO = 0.5;
 const FIXED_CITY_RATIO = 0.5;
@@ -101,7 +106,7 @@ class LobbyService {
   readonly heartbeatExempt = new Set<string>();
   /**
    * 已通过真人客户端认证的连接 sid 集合（由 server.ts 在常规事件校验后写入）。
-   * 仅用于对局内的 [AI] 身份标识展示，不落库、不影响账号数据。
+   * 用于进房时的房主排序与客户端验证兼容，不作为 AI 判定依据。
    */
   readonly humanVerified = new Set<string>();
   private heartbeatSweepTimer?: NodeJS.Timeout;
@@ -544,8 +549,8 @@ class LobbyService {
         ? { server_bot_allow_multi_line: player.serverBotAllowMultiLine === true }
         : {}),
       ...(player.bot === true ? { bot: true } : {}),
-      // 未经真人客户端认证的连接在房间列表中带 ai 标记（前端显示「[AI] 」前缀）。
-      ...(this.humanVerified.has(player.sid) ? {} : { ai: true }),
+      // 仅已确认 bot 在房间列表中带 ai 标记（前端显示「[AI] 」前缀）。
+      ...(isConfirmedAI(player) ? { ai: true } : {}),
     }));
 
     const ready = players.filter((player) => player.ready && player.team !== 0).length;
@@ -738,12 +743,11 @@ class LobbyService {
       return teamId;
     });
 
-    // 全 AI 房（所有参战席位均未通过 humanVerified 真人校验——含官方 bot、
-    // 令牌 bot 与第三方用户 bot，观战者不计入）强制 4 倍速，不受房间速度设置
-    // 影响；任一参战席位通过真人校验即不强制。判定只看开局那一刻的连接名单。
+    // 只有所有参战席位都是已确认 bot 时才强制 4x；观战者不计入。
     const participants = players.filter((player) => player.team !== 0);
-    const allAI =
-      participants.length > 0 && participants.every((player) => !this.humanVerified.has(player.sid));
+    const allAI = participants.length > 0 && participants.every(isConfirmedAI);
+    // 按引擎玩家编号保存身份，避免断线换绑或房间成员移除影响排行榜标记。
+    const confirmedAIPlayers = players.map(isConfirmedAI);
 
     const gameConf: GameConfig = {
       ...conf,
@@ -760,7 +764,6 @@ class LobbyService {
     }
     this.emitRoomUpdate(io, lobbyId);
 
-    let gameRef: GameEngine | null = null;
     const game = await GameEngine.create(gameConf, playerSids, playerIds, gameId, {
       update: (sid, data) => {
         io.to(`sid_${sid}`).emit('update', data);
@@ -768,12 +771,11 @@ class LobbyService {
       emitInitMap: (sid, data) => {
         io.to(`sid_${sid}`).emit('init_map', data);
       },
-      // 实时帧排行榜装饰：未经真人客户端认证的连接标记 ai（前端显示「[AI] 」前缀）。
+      // 实时帧排行榜装饰：仅已确认 bot 标记 ai（前端显示「[AI] 」前缀）。
       // 仅当前对局生效——回放重建不经过此回调，账号数据不受影响。
       annotateLeaderboard: (entries) => {
         for (const entry of entries) {
-          const sid = gameRef?.playerSidAt(entry.id - 1);
-          entry.ai = !sid || !this.humanVerified.has(sid);
+          entry.ai = confirmedAIPlayers[entry.id - 1] === true;
         }
       },
       disciplineEvent: (event) => {
@@ -845,7 +847,6 @@ class LobbyService {
       md5: (input: string): string => this.md5(input),
       replayStore: this.replayStore,
     });
-    gameRef = game;
 
     game.startGame();
     this.gameInstances.set(gameId, game);
@@ -871,6 +872,9 @@ class LobbyService {
     }
 
     const ready = players.filter((player) => player.ready && player.team !== 0).length;
+    const participants = players.filter((player) => player.team !== 0);
+    const hasConfirmedBot = participants.some((player) => player.bot === true);
+    const nonBots = participants.filter((player) => player.bot !== true);
     const required = this.getReq(players);
     if (required <= 1) {
       for (const player of players) {
@@ -880,7 +884,10 @@ class LobbyService {
       return;
     }
 
-    if (required > 0 && ready >= required) {
+    // 混合 Bot/真人房间中，Bot 的多数票不能替未准备的普通玩家开局。
+    // 未确认身份的连接按普通玩家处理；观战席不参与此门槛。
+    const mixedBotReady = !hasConfirmedBot || nonBots.length === 0 || nonBots.every((player) => player.ready);
+    if (required > 0 && ready >= required && mixedBotReady) {
       // 组队模式下所有参赛者处于同一队伍时开局即终局（首 Tick 存活队伍数即为 1），
       // 拒绝开局并提示调整队伍，避免空转对局。
       const conf = this.lobbyConfig.get(gid);

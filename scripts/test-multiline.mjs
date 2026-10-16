@@ -8,11 +8,11 @@
 //    c. 全新出发点排一条无效操作自成新战线，lst_move 的 skip>=1 且归属该新战线；
 // 3) 对照房间：默认配置开局，init_map 不带 multi_line，lst_move 不带 line 字段。
 // 4) Bot 房间：第三方 bot 进房后多线被强制关闭，房主再次开启请求被拒绝。
-// 5) [AI] 标识：未随心跳上报会话派生值的连接在 leaderboard/room_update 中带 ai 标记，
-//    上报正确派生值后标记消除；bot 连接恒带 ai 标记。
-// 6) 全 AI 房强制 4x 统一判定（humanVerified 口径）：
+// 5) [AI] 标识：普通未验证连接在 leaderboard/room_update 中不带 ai 标记，
+//    上报正确派生值不改变标记；bot 连接恒带 ai 标记。
+// 6) 全 AI 房强制 4x 统一判定（已确认 bot 口径）：
 //    a. 两个令牌 bot 开局强制 4x（帧率判定；中途进房的人类为观战者不受影响）；
-//    b. 未验证的第三方连接（模拟 JWT 接入的用户 bot）+ 令牌 bot 的全 AI 房同样强制 4x；
+//    b. 未验证的普通 JWT 连接 + 令牌 bot 的混合房不强制 4x；
 //    c. 验证真人 + bot 的混编房不强制（按房间速度 1x 走帧）；
 //    d. 房主三档优先：bot 独居当房主，验证真人进房后接任房主（players[0] 换人）。
 // 7) v3 静态断言：对局页不存在战线区分 UI（battle-line/multi-line-hud 元素、
@@ -248,9 +248,7 @@ async function main() {
   log(`临时数据目录：${dataDir}，端口：${port}`);
 
   const { UserStore } = await import(pathToFileURL(path.join(rootDir, 'dist', 'auth-store.js')).href);
-  const { ensureRuntimeEnv } = await import(
-    pathToFileURL(path.join(rootDir, 'dist', 'runtime-env.js')).href
-  );
+  const { ensureRuntimeEnv } = await import(pathToFileURL(path.join(rootDir, 'dist', 'runtime-env.js')).href);
   const store = new UserStore(dataDir);
   await store.ensureReady();
   const env = ensureRuntimeEnv();
@@ -290,10 +288,12 @@ async function main() {
 
   await waitFor(() => a.initMap && b.initMap, 15_000, '多线对局开局');
   if (a.initMap.multi_line !== true || a.initMap.line_count !== 1) {
-    throw new Error(`多线对局 init_map 缺少 multi_line/line_count：${JSON.stringify({
-      multi_line: a.initMap.multi_line,
-      line_count: a.initMap.line_count,
-    })}`);
+    throw new Error(
+      `多线对局 init_map 缺少 multi_line/line_count：${JSON.stringify({
+        multi_line: a.initMap.multi_line,
+        line_count: a.initMap.line_count,
+      })}`,
+    );
   }
   log('init_map 携带 multi_line=true、line_count=1（v2 动态战线从 1 条起）');
 
@@ -332,22 +332,22 @@ async function main() {
   );
   log('skip 丢弃数归属正确的新战线（line=2）');
 
-  // 场景 1b：[AI] 标识——双方都未上报会话派生值，leaderboard 应带 ai 标记；
-  // A 上报正确派生值后标记消除，B 保持。
+  // 场景 1b：[AI] 标识——双方都未上报会话派生值，leaderboard 不应带 ai 标记；
+  // A 上报正确派生值后双方仍不带标记。
   log('场景 1b：对局内 [AI] 身份标识');
   // leaderboard 的 uid 是用户名。
   const lbEntry = (client, username) => client.leaderboard.find((entry) => entry?.uid === username);
   await waitFor(() => lbEntry(a, 'ml_a') && lbEntry(a, 'ml_b'), 5000, 'leaderboard 下发');
-  if (lbEntry(a, 'ml_a').ai !== true || lbEntry(a, 'ml_b').ai !== true) {
-    throw new Error('未认证的连接应带 ai 标记');
+  if (lbEntry(a, 'ml_a').ai === true || lbEntry(a, 'ml_b').ai === true) {
+    throw new Error('未验证普通连接不应带 ai 标记');
   }
-  log('未认证连接的排行榜条目带 ai 标记');
+  log('未验证普通连接的排行榜条目不带 ai 标记');
   a.socket.emit('room_heartbeat', { sig: clientSig(env.jwtSecret, userA.sid, a.clientId) });
-  await waitFor(() => lbEntry(a, 'ml_a') && lbEntry(a, 'ml_a').ai !== true, 10_000, 'A 的 ai 标记消除');
-  if (lbEntry(a, 'ml_b').ai !== true) {
-    throw new Error('B 未上报派生值，不应消除 ai 标记');
+  await waitFor(() => lbEntry(a, 'ml_a') && lbEntry(a, 'ml_a').ai !== true, 10_000, 'A 验证后仍无 ai 标记');
+  if (lbEntry(a, 'ml_b').ai === true) {
+    throw new Error('B 未上报派生值，也不应带 ai 标记');
   }
-  log('上报正确派生值后 ai 标记消除，未上报者保持');
+  log('上报正确派生值后，双方仍不带 ai 标记');
   a.socket.disconnect();
   b.socket.disconnect();
 
@@ -390,20 +390,24 @@ async function main() {
   if (e.roomMultiLine !== false) {
     throw new Error('房间内有 bot 时房主仍能开启多线');
   }
-  // room_update players 的 ai 标记：E 未上报派生值、bot 无会话，均应带 ai。
+  // room_update players 的 ai 标记：E 未上报派生值不带 ai，已确认 bot 带 ai。
   const eEntry = e.roomPlayers.find((player) => player?.uid === 'ml_e');
   const botEntry = e.roomPlayers.find((player) => player?.uid === 'bot_ml');
-  if (!eEntry || eEntry.ai !== true || !botEntry || botEntry.ai !== true) {
+  if (!eEntry || eEntry.ai === true || !botEntry || botEntry.ai !== true) {
     throw new Error(`房间成员列表 ai 标记异常：${JSON.stringify(e.roomPlayers)}`);
   }
-  // E 上报正确派生值并触发一次房间状态广播（切换 ready）后，E 的 ai 标记应消除。
+  // E 上报正确派生值并触发一次房间状态广播（切换 ready）后，E 仍不应带 ai 标记。
   e.socket.emit('room_heartbeat', { sig: clientSig(env.jwtSecret, userE.sid, e.clientId) });
   await sleep(300);
   e.socket.emit('change_ready', { ready: true });
-  await waitFor(() => {
-    const entry = e.roomPlayers.find((player) => player?.uid === 'ml_e');
-    return entry && entry.ai !== true;
-  }, 5000, 'E 的 room_update ai 标记消除');
+  await waitFor(
+    () => {
+      const entry = e.roomPlayers.find((player) => player?.uid === 'ml_e');
+      return entry && entry.ai !== true;
+    },
+    5000,
+    'E 的 room_update 仍无 ai 标记',
+  );
   e.socket.emit('change_ready', { ready: false });
   log('场景 3 通过：bot 房无法开启多线；房间成员 ai 标记符合预期');
 
@@ -435,7 +439,7 @@ async function main() {
   }
   log(`场景 4 通过：全官方 bot 对局强制 4x（2 秒 ${spec.frames} 帧）`);
 
-  // 场景 5：统一 AI 判定（humanVerified 口径）与房主三档优先。
+  // 场景 5：统一 AI 判定（已确认 bot 口径）与房主三档优先。
   log('场景 5：统一 AI 判定与房主优先级');
 
   // 5a：令牌 bot 独居时为房主；验证真人进房后接任房主（players[0] 换人）。
@@ -455,25 +459,21 @@ async function main() {
     human: { secret: env.jwtSecret, sid: userE.sid },
   });
   await waitFor(() => hostHuman.clientId !== '', 5000, '验证真人进房');
-  await waitFor(
-    () => hostBot.roomPlayers[0]?.uid === 'ml_e',
-    5000,
-    '真人进房后接任房主（players[0]=ml_e）',
-  );
+  await waitFor(() => hostBot.roomPlayers[0]?.uid === 'ml_e', 5000, '真人进房后接任房主（players[0]=ml_e）');
   log('场景 5a 通过：bot 独居当房主，验证真人进房后接任');
 
-  // 5b：未验证第三方连接（模拟 JWT 用户 bot）+ 令牌 bot 的全 AI 房强制 4x。
+  // 5b：未验证普通 JWT 连接 + 令牌 bot 的混合房不强制 4x。
   const aiUser = createGameClient(baseUrl, { cookie: userB.token, room: ROOM_ALLAI, name: 'AIUSER' });
-  await waitFor(() => aiUser.clientId !== '', 5000, '未验证第三方连接进房');
+  await waitFor(() => aiUser.clientId !== '', 5000, '未验证普通连接进房');
   const aiBot = createGameClient(baseUrl, { botToken: 'test-token-ml-6', room: ROOM_ALLAI, name: 'AIBOT' });
-  await waitFor(() => aiUser.initMap && aiBot.initMap, 30_000, '全 AI 房开局');
-  await waitFor(() => aiUser.frames >= 3, 15_000, '全 AI 房帧流出');
+  await waitFor(() => aiUser.initMap && aiBot.initMap, 30_000, '未验证普通连接混合房开局');
+  await waitFor(() => aiUser.frames >= 3, 15_000, '未验证普通连接混合房帧流出');
   aiUser.frames = 0;
   await sleep(2000);
-  if (aiUser.frames < 10) {
-    throw new Error(`全 AI 房（含未验证第三方连接）未以 4x 运行：2 秒仅 ${aiUser.frames} 帧`);
+  if (aiUser.frames > 9) {
+    throw new Error(`普通未验证连接的混合房不应强制 4x：2 秒 ${aiUser.frames} 帧`);
   }
-  log(`场景 5b 通过：全 AI 房（含第三方连接）强制 4x（2 秒 ${aiUser.frames} 帧）`);
+  log(`场景 5b 通过：普通未验证连接的混合房不强制 4x（2 秒 ${aiUser.frames} 帧）`);
   aiUser.socket.disconnect();
   aiBot.socket.disconnect();
 
