@@ -355,10 +355,22 @@ class LobbyService {
       players.push(player);
       return {};
     }
-    // 普通成员插入到首个服务端托管 bot 之前（无 bot 时等价于末尾追加，保持 FIFO）。
+    // 房主优先级三档（进房那一刻的身份快照，事后补验真人不重排队列）：
+    // 1) 人类（humanVerified 已命中）：插在最后一个既有普通人类之后——
+    //    任何人类进房后，房主自动归「第一个人类」；
+    // 2) 非官方 AI（令牌 bot、第三方 bot、未通过真人校验的普通连接）：
+    //    无人类在座时排在首位接任房主，有人类则排在人类之后、托管 bot 之前；
+    // 3) 服务端托管 bot：永远排尾（上面已处理）。
+    const isHuman = this.humanVerified.has(sid);
     let insertIndex = 0;
-    while (insertIndex < players.length && players[insertIndex].serverBot !== true) {
-      insertIndex += 1;
+    if (isHuman) {
+      while (insertIndex < players.length && this.humanVerified.has(players[insertIndex].sid)) {
+        insertIndex += 1;
+      }
+    } else {
+      while (insertIndex < players.length && players[insertIndex].serverBot !== true) {
+        insertIndex += 1;
+      }
     }
     players.splice(insertIndex, 0, player);
     if (isUserBot && isServerBotRoom) {
@@ -726,15 +738,16 @@ class LobbyService {
       return teamId;
     });
 
-    // 全官方 Bot 房（所有对战席位均为官方 bot——服务端托管或 ROKA_BOT_TOKENS 令牌接入，
-    // 观战者不计入）强制 4 倍速，不受房间速度设置影响；一旦有真人参赛席位即不强制。
-    // 托管 bot 同房间限一个，故多 bot 房通常由令牌 bot 组成。
+    // 全 AI 房（所有参战席位均未通过 humanVerified 真人校验——含官方 bot、
+    // 令牌 bot 与第三方用户 bot，观战者不计入）强制 4 倍速，不受房间速度设置
+    // 影响；任一参战席位通过真人校验即不强制。判定只看开局那一刻的连接名单。
     const participants = players.filter((player) => player.team !== 0);
-    const allBots = participants.length > 0 && participants.every((player) => player.bot === true);
+    const allAI =
+      participants.length > 0 && participants.every((player) => !this.humanVerified.has(player.sid));
 
     const gameConf: GameConfig = {
       ...conf,
-      speed: allBots ? 4 : conf.speed,
+      speed: allAI ? 4 : conf.speed,
       map_mode: conf.map_mode === 'huaxia' && !isHuaxiaSeasonActive(new Date()) ? 'random' : conf.map_mode,
       ...this.getMapSizeConfigByPlayers(players, conf),
       player_names: playerNames,
@@ -742,8 +755,8 @@ class LobbyService {
     };
 
     io.to(`game_${gameId}`).emit('starting', {});
-    if (allBots) {
-      this.sendLobbySystemMessage(io, gameId, '房间内全部为官方策略 Bot，本局强制以 4x 速度进行。');
+    if (allAI) {
+      this.sendLobbySystemMessage(io, gameId, '房间内全部为 AI 玩家，本局强制以 4x 速度进行。');
     }
     this.emitRoomUpdate(io, lobbyId);
 
