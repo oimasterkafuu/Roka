@@ -225,7 +225,7 @@ _一句话：共享类型/协议定义汇总。_
 
 无构建的原生 JS + jQuery。页面分两类：
 
-- **内容/文档页**（about、develop、develop-bot、tutorial-text）：各自内联样式与极简脚本，仅需 `loadUser()` 鉴权。
+- **内容/文档页**（about、develop、develop-bot、tutorial-text）：共享 `styles/docs.css` 统一样式与 `docs.js`（登录态展示、`data-goto` 导航、KaTeX 公式渲染，含数学内容的页面引入 `vendor/katex/` 的 katex.min.js + auto-render.min.js）；页面特有样式保留内联。
 - **功能页**：index.html / profile.js（REST 交互，socket `home_*` 失效通知驱动刷新）；game.html + main.js + main/\*（对局与回放共用一套骨架，**脚本全局化、加载顺序敏感**）。
 
 ### 功能页
@@ -325,6 +325,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **rating.css** — `.rt-*` 八档 rating 用户名颜色（后端 `rating-color.ts` 注入类名）+ `.rt-admin` 管理员黑色加粗与 `.rt-banned` 有效封禁棕色正常字重（issue #97）；`game-ui.css` 局内排行榜仍压为白字保证底色可读。_Rating 与身份姓名样式。_
 - **tables-and-inputs.css** — 通用表格、`.mobile` 移动端紧凑模式、跨浏览器 range 滑条。_通用表格/移动端/滑条样式。_
 - **tutorial.css** — 教程步骤横幅、地图平移缩放、目标高亮。_教程页样式。_
+- **docs.css** — 文档页共享样式（about/develop/develop-bot/tutorial-text）：`.doc-panel`/`.doc-table`/`.formula`/`.tips`/`.kbd`/`.cta-row` 等；各页仅保留特有内联样式（教程的地形列表与地图示例棋盘）。公式由 `docs.js` + `vendor/katex/`（katex.min.js + auto-render.min.js，css/fonts 原有）在客户端渲染，定界符 `$$…$$` / `\[…\]` / `\(…\)`，作用域 `#app`。_文档页共享样式与公式渲染。_
 
 ### 资源
 
@@ -394,7 +395,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 | 加/改 REST API                   | `src/server.ts`（路由集中在此；注意限流与认证钩子）                                                                                                                                                                                                      |
 | 改房间/断线/重连逻辑             | `src/server/lobby-service.ts` + `src/game-engine.ts`（宽限三件套）                                                                                                                                                                                       |
 | 改公告/动态渲染                  | `src/text-render.ts`（同一管线；加 KaTeX 标签需同步白名单）                                                                                                                                                                                              |
-| 改 @提及（解析/补全/渲染）       | `src/mentions.ts`（解析+HTML 渲染）、`src/feed-store.ts`（落库）、`src/server.ts`（装饰 + `/api/users/search`）、`static/mention-autocomplete.js` + `static/styles/base.css` + `static/index.html`/`profile.js`（补全接入）                                    |
+| 改 @提及（解析/补全/渲染）       | `src/mentions.ts`（解析+HTML 渲染）、`src/feed-store.ts`（落库）、`src/server.ts`（装饰 + `/api/users/search`）、`static/mention-autocomplete.js` + `static/styles/base.css` + `static/index.html`/`profile.js`（补全接入）                              |
 | 改 Rating/段位                   | `src/auth-store.ts`（分数）、`src/rating-color.ts` + `static/styles/rating.css`（颜色）                                                                                                                                                                  |
 | 改地图生成                       | `src/map/`（公共件在 map-core.ts；尺寸比例在 map-size.ts）                                                                                                                                                                                               |
 | 改对局页渲染                     | `static/main/render-update.js`（帧合并）、`static/styles/map.css`（视觉）                                                                                                                                                                                |

@@ -1,0 +1,165 @@
+/* 文档页共享样式（about / tutorial-text / develop / develop-bot）。
+   各页只保留页面特有样式（如教程的地形列表、地图示例棋盘）。 */
+
+#app {
+  max-width: 960px;
+  margin: 84px auto 36px;
+  padding: 0 12px;
+  text-align: left;
+}
+.doc-title {
+  margin: 0 0 10px 0;
+  font-size: 34px;
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+}
+.doc-subtitle {
+  margin: 0 0 16px 0;
+  line-height: 1.7;
+  opacity: 0.9;
+}
+.doc-panel {
+  margin: 0 0 14px 0;
+  padding: 16px 18px;
+  border: 1px solid #e3e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 3px rgba(37, 48, 66, 0.08),
+    0 6px 18px rgba(37, 48, 66, 0.05);
+}
+.doc-panel h2,
+.doc-panel h3,
+.doc-panel h4 {
+  margin: 0 0 10px 0;
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+}
+.doc-panel h2 {
+  font-size: 20px;
+  color: teal;
+}
+.doc-panel h3 {
+  margin-top: 14px;
+  font-size: 16px;
+}
+.doc-panel h4 {
+  margin: 12px 0 6px 0;
+  font-size: 15px;
+}
+.doc-panel > h3:first-child,
+.doc-panel > h2:first-child {
+  margin-top: 0;
+}
+.doc-panel p {
+  margin: 0;
+  line-height: 1.7;
+}
+.doc-panel p + p {
+  margin-top: 8px;
+}
+.doc-panel ul,
+.doc-panel ol {
+  margin: 8px 0 0 20px;
+  line-height: 1.7;
+}
+.doc-panel li {
+  margin: 0 0 4px 0;
+}
+.doc-link {
+  color: teal;
+  word-break: break-all;
+}
+.doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin-top: 8px;
+}
+.doc-table th,
+.doc-table td {
+  border-top: 1px solid #eceff4;
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.doc-table tr:first-child th,
+.doc-table tr:first-child td {
+  border-top: none;
+}
+.doc-table th {
+  width: 220px;
+  color: teal;
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+}
+.doc-table.doc-table-narrow th {
+  width: 130px;
+}
+.code-snippet {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e3e8f0;
+  border-radius: 8px;
+  background: #f7f9fb;
+  overflow-x: auto;
+  font-family: Consolas, 'Courier New', monospace;
+  line-height: 1.5;
+  font-size: 13px;
+  white-space: pre;
+}
+.formula {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid teal;
+  background: #f7f9fb;
+  font-size: 14px;
+  line-height: 1.8;
+  overflow-x: auto;
+}
+.tips {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 128, 128, 0.35);
+  border-radius: 8px;
+  background: #e6f3f3;
+  line-height: 1.7;
+}
+.kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 6px;
+  border: 1px solid #d5dce6;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: #f3f5f9;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+  color: #253042;
+  white-space: nowrap;
+}
+.cta-row,
+.nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cta-row button {
+  min-width: 160px;
+}
+
+@media (max-width: 640px) {
+  .doc-title {
+    font-size: 26px;
+  }
+  .doc-table th {
+    width: 132px;
+  }
+  .doc-table th,
+  .doc-table td {
+    padding: 8px 6px;
+    font-size: 13px;
+  }
+}
