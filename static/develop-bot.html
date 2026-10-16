@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -6,143 +7,14 @@
       content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
     />
     <link rel="stylesheet" href="/main.css" />
+    <link rel="stylesheet" href="/styles/docs.css" />
+    <link rel="stylesheet" href="/vendor/katex/katex.min.css" />
     <title>Roka - 机器人开发协议</title>
-    <style>
-      #app {
-        max-width: 1040px;
-        margin: 84px auto 36px;
-        padding: 0 12px;
-        text-align: left;
-      }
-      .dev-title {
-        margin: 0 0 10px 0;
-        font-size: 34px;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .dev-subtitle {
-        margin: 0 0 16px 0;
-        line-height: 1.7;
-        opacity: 0.9;
-      }
-      .dev-panel {
-        margin: 0 0 14px 0;
-        padding: 16px 18px;
-        border: 1px solid #e3e8f0;
-        border-radius: 10px;
-        background: #ffffff;
-        box-shadow:
-          0 1px 3px rgba(37, 48, 66, 0.08),
-          0 6px 18px rgba(37, 48, 66, 0.05);
-      }
-      .dev-panel h2,
-      .dev-panel h3 {
-        margin: 0 0 10px 0;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .dev-panel h2 {
-        font-size: 20px;
-        color: teal;
-      }
-      .dev-panel h3 {
-        margin-top: 14px;
-        font-size: 16px;
-      }
-      .dev-panel p {
-        margin: 0;
-        line-height: 1.7;
-      }
-      .dev-panel p + p {
-        margin-top: 8px;
-      }
-      .dev-panel ul,
-      .dev-panel ol {
-        margin: 8px 0 0 20px;
-        line-height: 1.7;
-      }
-      .dev-link {
-        color: teal;
-        word-break: break-all;
-      }
-      .protocol-table {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-        margin-top: 8px;
-      }
-      .protocol-table th,
-      .protocol-table td {
-        border-top: 1px solid #eceff4;
-        text-align: left;
-        vertical-align: top;
-        padding: 10px 8px;
-        font-size: 14px;
-        line-height: 1.6;
-        word-break: break-word;
-      }
-      .protocol-table tr:first-child th,
-      .protocol-table tr:first-child td {
-        border-top: none;
-      }
-      .protocol-table th {
-        width: 220px;
-        color: teal;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .code-snippet {
-        margin-top: 10px;
-        padding: 10px 12px;
-        border: 1px solid #e3e8f0;
-        border-radius: 8px;
-        background: #f7f9fb;
-        overflow-x: auto;
-        font-family: Consolas, 'Courier New', monospace;
-        line-height: 1.5;
-        font-size: 13px;
-        white-space: pre;
-      }
-      .formula {
-        margin-top: 8px;
-        padding: 8px 12px;
-        border-left: 3px solid teal;
-        background: #f7f9fb;
-        font-family: Consolas, 'Courier New', monospace;
-        font-size: 13px;
-        line-height: 1.6;
-        overflow-x: auto;
-        white-space: pre;
-      }
-      .tips {
-        margin-top: 10px;
-        padding: 10px 12px;
-        border: 1px solid rgba(0, 128, 128, 0.35);
-        border-radius: 8px;
-        background: #e6f3f3;
-      }
-      .nav-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 12px;
-      }
-      @media (max-width: 640px) {
-        .dev-title {
-          font-size: 26px;
-        }
-        .protocol-table th {
-          width: 132px;
-        }
-        .protocol-table th,
-        .protocol-table td {
-          padding: 8px 6px;
-          font-size: 13px;
-        }
-      }
-    </style>
   </head>
 
   <body style="overflow: auto; height: auto">
     <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
-      <button id="back-develop-btn" class="small">返回网站开发页</button>
+      <button data-goto="/develop" class="small">返回网站开发页</button>
     </div>
     <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
       <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span
@@ -150,14 +22,14 @@
     </div>
 
     <div id="app">
-      <h1 class="dev-title">Roka 机器人开发协议</h1>
-      <p class="dev-subtitle">
+      <h1 class="doc-title">Roka 机器人开发协议</h1>
+      <p class="doc-subtitle">
         本文档是 Roka 对局协议的权威说明，每个事件名、字段与数值都与服务端实现（<code>src/server.ts</code>、
         <code>src/server/lobby-service.ts</code
         >、<code>src/game-engine/</code>、<code>src/types.ts</code>）逐条核对。 人类和 AI
         都可以直接照着写出一个可用的 bot。仓库：
         <a
-          class="dev-link"
+          class="doc-link"
           href="https://github.com/oimasterkafuu/Roka"
           target="_blank"
           rel="noopener noreferrer"
@@ -165,13 +37,13 @@
         >
       </p>
 
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>1. 快速开始</h2>
         <p>
           仓库 <code>bot-template/</code> 下内置四个参考实现（均为独立 pnpm 包，仅依赖
           <code>socket.io-client</code>）：
         </p>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th><code>random-patch-bot</code></th>
             <td>
@@ -212,7 +84,7 @@
         </p>
 
         <h3>1.2 环境变量（random-patch-bot / simple-strategy-bot）</h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th><code>BOT_SERVER</code></th>
             <td>服务端地址，默认 <code>http://127.0.0.1:23333</code>。</td>
@@ -261,9 +133,9 @@ BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=your-room BOT_TOKEN=your-auth-token p
         </p>
       </section>
 
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>2. 连接与鉴权</h2>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th>Socket 地址</th>
             <td>与站点同源，Socket.IO 默认路径 <code>/socket.io/</code>。</td>
@@ -330,6 +202,18 @@ BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=your-room BOT_TOKEN=your-auth-token p
               的席位，而是作为新成员进房观战。
             </td>
           </tr>
+          <tr>
+            <th>真人校验 <code>client_verify</code></th>
+            <td>
+              网页客户端在拿到 <code>set_id</code> 后、进房之前发送 <code>client_verify</code>（<code
+                >{ sig }</code
+              >，sig 为会话戳与连接 id 的派生签名）；<code>room_heartbeat</code>
+              携带同签名为补充路径。校验通过的连接被服务端记为真人； 未通过的连接（bot 一律不通过）在
+              <code>room_update.players[]</code> 与对局排行榜中带
+              <code>ai: true</code> 标记（前端显示「[AI]」前缀），并影响房主归属与全 AI 房强制 4x 判定（见 3.1
+              与 7.2）。bot 不需要、也无法发送该事件。
+            </td>
+          </tr>
         </table>
         <pre class="code-snippet"><code>// JS 连接示例（socket.io-client）
 const { io } = require('socket.io-client');
@@ -340,19 +224,21 @@ const socket = io(BOT_SERVER, {
 socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre>
       </section>
 
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>3. 房间阶段协议（开局前）</h2>
 
         <h3>3.1 Client → Server</h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th><code>join_game_room</code></th>
             <td>
               <code>{ room: string }</code>。房间号仅限制长度
               <code>1..15</code>，无字符集限制；不合法时静默忽略。先尝试断线换绑（见第 2
-              节），否则正常进房；本连接已在其他房间时重复发送会被忽略。房主为房间成员列表首位：服务端托管 bot
-              进房时固定排在普通成员之后，房主位置保留给第一个人类用户或第三方
-              bot。对局进行中进房自动成为观战者，补发 <code>init_map</code>（<code>general: [-1, -1]</code
+              节），否则正常进房；本连接已在其他房间时重复发送会被忽略。房主为房间成员列表首位，按三档确定：
+              真人（进房时已通过 <code>client_verify</code> 校验）插在既有真人之后——任何真人进房即接任房主；
+              非官方 AI（令牌 bot、第三方 bot、未通过校验的连接）在房内无真人时居首位当房主； 服务端托管 bot
+              永远排尾、不当房主。判定以进房那一刻为准，进房后补验真人不重排队列。
+              对局进行中进房自动成为观战者，补发 <code>init_map</code>（<code>general: [-1, -1]</code
               >）与一帧全量 <code>update</code>。
             </td>
           </tr>
@@ -410,7 +296,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
         </table>
 
         <h3>3.2 Server → Client</h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th><code>room_update</code></th>
             <td>
@@ -434,14 +320,15 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               每项为
               <code
                 >{ sid, uid, team, ready, server_bot?, server_bot_allow_team?, server_bot_allow_fog?,
-                server_bot_allow_multi_line?, bot? }</code
+                server_bot_allow_multi_line?, bot?, ai? }</code
               >： <code>sid</code> 为该玩家 socket id 的 MD5；<code>uid</code> 为用户名；<code>team</code> 为
               0（观战）或队伍号；<code>ready</code> 为准备状态（观战席恒为 <code>false</code>）；
               <code>server_bot</code> 仅在服务端托管策略 Bot 成员上为 <code>true</code>；
               <code>server_bot_allow_team</code> / <code>server_bot_allow_fog</code> /
               <code>server_bot_allow_multi_line</code> 仅在 <code>server_bot</code> 为
               <code>true</code> 时下发，表示该 Bot 是否允许组队/迷雾/多线； <code>bot</code> 在任意 Bot
-              成员（含第三方 Bot）上为 <code>true</code>。
+              成员（含第三方 Bot）上为 <code>true</code>；<code>ai</code> 在未通过真人校验的连接上为
+              <code>true</code>（见第 2 节 <code>client_verify</code>）。
             </td>
           </tr>
           <tr>
@@ -497,11 +384,11 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
         </div>
       </section>
 
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>4. 对局阶段协议（开局后）</h2>
 
         <h3>4.1 开局事件 <code>init_map</code></h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th><code>n</code> / <code>m</code></th>
             <td>地图行数 / 列数。格子下标 <code>idx = x * m + y</code>（行优先）。</td>
@@ -528,7 +415,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
         </table>
 
         <h3>4.2 回合事件 <code>update</code></h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th>整体结构</th>
             <td>
@@ -602,10 +489,11 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           <tr>
             <th><code>leaderboard[]</code></th>
             <td>
-              每项结构：<code>{ team, uid, army, land, class_, dead, id }</code>。<code>army</code>
+              每项结构：<code>{ team, uid, army, land, class_, dead, id, ai? }</code>。<code>army</code>
               为全图兵力合计，<code>land</code> 为格数，<code>id</code> 为座位号（1 起），<code>dead</code>
-              为出局次序（0 = 存活）。<code>class_</code> 可为 <code>''</code> 或 <code>'dead'</code>（
-              <code>'afk'</code> 是历史遗留取值，当前版本不会出现）。仅参赛者入榜。
+              为出局次序（0 = 存活）。<code>class_</code>：<code>''</code> 正常；<code>'dead'</code>
+              已离场/出局；<code>'afk'</code> 断线宽限计数中（连接中断但尚未判负，宽限期内会出现）。
+              <code>ai</code> 在未通过真人校验的连接上为 <code>true</code>。仅参赛者入榜。
             </td>
           </tr>
           <tr>
@@ -627,7 +515,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
         </table>
 
         <h3>4.3 格子编码（<code>grid_type</code> 线上编码）</h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th><code>0..49</code></th>
             <td>
@@ -665,10 +553,6 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             </td>
           </tr>
           <tr>
-            <th><code>202 / 203 / 205</code></th>
-            <td>（已废弃）旧版迷雾编码。现已无此类状态，服务器不会下发。</td>
-          </tr>
-          <tr>
             <th><code>204</code></th>
             <td>可见中立沼泽。迷雾对局中视野外沼泽（含敌方沼泽）统一抹成 <code>204</code>（隐藏归属）。</td>
           </tr>
@@ -698,11 +582,11 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
 { "turn": 43, "is_diff": true, "grid_type": [17, 2, 58, 1], "army_cnt": [17, 6, 58, 0], "isolated": [] }</code></pre>
       </section>
 
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>5. 规则要点</h2>
 
         <h3>5.1 增兵规则</h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th>主城</th>
             <td>每 Tick +1 兵（无主城即出局，故恒为正常领土）。</td>
@@ -738,8 +622,9 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           </li>
           <li>
             攻下敌方最后一座主城 →
-            该玩家出局，残余领土<b>不再转移</b>给攻击方：锚点全部拆除为普通地块、兵力按断链规则减半（⌊n/2⌋，1
-            兵保持为 1，减半后归零直接变中立），随后全部沦为孤军并按孤军规则逐渐衰减至中立。
+            该玩家出局，残余领土<b>不再转移</b>给攻击方：锚点全部拆除为普通地块、兵力按断链规则减半（
+            \(\lfloor n/2 \rfloor\)，1 兵保持为
+            1，减半后归零直接变中立），随后全部沦为孤军并按孤军规则逐渐衰减至中立。
           </li>
         </ul>
 
@@ -749,9 +634,10 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           <code>update.isolated</code>）：
         </p>
         <div class="formula">
-          断链瞬间：兵力减半 n' = floor(n / 2) （n = 1 时保持 1；减半后 ≤ 0 直接变中立） 宽限期： 断链后前 10
-          Tick 只闪烁（isolated = 1），不衰减 衰减期： 第 11 Tick 起每 2 Tick 衰减 max(1, ceil(n × 5%))
-          （isolated = 2，归零变中立、建筑拆除） 重连： 恢复正常且兵力 ×2
+          断链瞬间兵力减半：\[ n' = \lfloor n / 2 \rfloor \quad (n = 1 \text{ 时保持 } 1\text{；减半后} \le 0
+          \text{ 直接变中立}) \] 断链后前 10 Tick 只闪烁（isolated = 1），不衰减；第 11 Tick
+          起进入衰减期（isolated = 2），每 2 Tick：\[ n \leftarrow n - \max\left(1, \lceil 0.05\, n
+          \rceil\right) \] 归零变中立、建筑拆除；重新连通立即恢复正常且兵力翻倍（\(n \leftarrow 2n\)）。
         </div>
         <p style="margin-top: 8px">
           孤军格子不可推兵、不可建造（校验直接失败）。被切断的领土会持续衰减，扩张时务必保持连通。
@@ -762,8 +648,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           房间可开关（默认关闭）。开启后，存活参赛者只收到己方队伍视野内的真实状态；观战者、已出局者与回放始终全视野。
         </p>
         <div class="formula">
-          视野范围：己方（含队友）任意格子为中心、切比雪夫距离 ≤ 1 的全部格子 即 visible(idx) = ∃ 己方格 (x,
-          y): max(|x' - x|, |y' - y|) ≤ 1
+          视野范围为己方（含队友）任意格子切比雪夫距离不超过 1 的全部格子：\[ \mathrm{visible}(i) = \exists\,
+          (x, y) \in \text{己方格}:\ \max(|x_i - x|,\ |y_i - y|) \le 1 \]
         </div>
         <ul>
           <li>
@@ -841,11 +727,11 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           </li>
         </ul>
       </section>
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>6. 对局内可发送操作</h2>
 
         <h3>6.1 <code>attack</code>（推兵）</h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th>payload</th>
             <td>
@@ -872,7 +758,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           <tr>
             <th><code>mode = 0</code> 智能分兵</th>
             <td>
-              为其他三个方向的「非山脉且非本队」相邻格保留驻军后推出余量。对应 Shift。公式（A = 起点兵力）：
+              为其他三个方向的「非山脉且非本队」相邻格保留驻军后推出余量。对应 Shift。公式见下方（A =
+              起点兵力）。
             </td>
           </tr>
           <tr>
@@ -887,13 +774,15 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           <tr>
             <th>队友主城累兵与转属</th>
             <td>
-              有效推兵进入存活队友主城时会累兵；若该队友执行当刻拥有至少两座主城，目标主城还会自动转属出兵玩家（保持建筑及后续产兵），最后一座只累兵不转属。空推兵或点击不能转属，无需额外事件（旧版显式转让入口已移除，仅存回放兼容）。
+              有效推兵进入存活队友主城时会累兵；若该队友执行当刻拥有至少两座主城，目标主城还会自动转属出兵玩家（保持建筑及后续产兵），最后一座只累兵不转属。空推兵或点击不能转属，无需额外事件。
             </td>
           </tr>
         </table>
         <div class="formula">
-          mode 0 / 1 推兵量： B = Σ 其余三方向相邻格中「非山脉且非本队」格子的 (兵力 - 1) push = max(0, A - B
-          - 1) mode = 1 时 push = floor(push / 2) 最终推出 min(push, A - 1)；推出 0 兵为无效操作
+          设 \(A\) 为起点兵力，保留量 \(B\) 为其余三方向相邻格中「非山脉且非本队」格子的驻军之和： \[ B =
+          \sum_{\text{威胁方向}} (\text{兵力} - 1), \qquad push = \max(0,\ A - B - 1) \]
+          <code>mode = 1</code> 时再减半：\(push = \lfloor push / 2 \rfloor\)。 最终推出 \(\min(push,\ A -
+          1)\)；推出 0 兵为无效操作。
         </div>
         <pre class="code-snippet"><code>// 从 (3,4) 向 (3,5) 全冲
 socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
@@ -913,7 +802,7 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
         </p>
 
         <h3>6.3 队列管理</h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th><code>clear_queue</code></th>
             <td>
@@ -926,7 +815,8 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
             <th><code>pop_queue</code></th>
             <td>
               删除队尾一条待执行操作（E 键）。多线争锋 v2 对局：按入队的全局时间序撤回
-              <b>全局最后一条</b>指令（可位于任意战线队尾），不区分战线，携带的 <code>line</code> 字段被忽略。
+              <b>全局最后一条</b>指令（可位于任意战线队尾），不区分战线，携带的 <code>line</code>
+              字段被忽略。
             </td>
           </tr>
         </table>
@@ -954,7 +844,7 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
         </p>
       </section>
 
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>7. 服务端托管 Bot 与运行限制</h2>
 
         <h3>7.1 托管机制</h3>
@@ -992,8 +882,9 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
         <ul>
           <li>不参与单会话顶号互斥；豁免房间心跳与 12 小时停留踢出。</li>
           <li>
-            进房时固定排在普通成员之后，永远不会成为房主（房主保留给人类用户或第三方 bot）；bot
-            单独在房时暂居首位，任何普通成员进房即接任房主。
+            进房时固定排在所有普通成员之后，永远不会成为房主；bot 单独在房时暂居首位。房主按三档归属：
+            房内真人（进房时已通过 <code>client_verify</code>）中的最先进房者 &gt; 无真人时最先进房的非官方
+            AI（令牌/第三方 bot）&gt; 托管 bot（不当房主）。真人进房即从 AI 手中接任房主。
           </li>
           <li>
             <code>allowTeam=false</code> 的托管 bot 进房会强制关闭组队模式，房主开启组队的请求也会被拒绝；
@@ -1005,9 +896,9 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
             0（行为等价单线），不需要实现多战线调度也能正常对局。
           </li>
           <li>
-            开局时若房间内所有对战席位均为官方
-            Bot（服务端托管或官方令牌接入，无任何真人玩家，观战者不计），该局强制以 4x
-            速度进行，不受房间速度设置影响；有真人玩家参赛则不强制。
+            开局时若所有参赛席位（<code>team !== 0</code>，观战不计）均未通过真人校验——即全 AI 房，含官方托管
+            bot、令牌 bot 与第三方用户 bot——该局强制以 4x
+            速度进行，不受房间速度设置影响，房间内会收到系统提示；任一参赛席位是真人则不强制。
           </li>
           <li>
             对局结束后的自动重新准备是策略自己的行为（由后续
@@ -1016,7 +907,7 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
         </ul>
 
         <h3>7.3 自动封禁策略（对 bot 账号同样适用）</h3>
-        <table class="protocol-table">
+        <table class="doc-table">
           <tr>
             <th>快速投降</th>
             <td>20 回合内手动投降计一次 <code>rapid_surrender</code>；24 小时内满 3 次触发自动封禁。</td>
@@ -1031,13 +922,14 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
           <tr>
             <th>封禁时长</th>
             <td>
-              基础 1 小时，按历史自动封禁次数翻倍（60 分钟 × 2^n），封顶 7 天；连续 14 天无违规则计数重置。
+              基础 1 小时，按历史自动封禁次数翻倍（\(60 \times 2^n\) 分钟，\(n\) 为历史自动封禁次数），封顶 7
+              天；连续 14 天无违规则计数重置。
             </td>
           </tr>
         </table>
       </section>
 
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>8. 增量帧合并示例</h2>
         <pre class="code-snippet"><code>// 已知 n, m 和本地 fullGrid/fullArmy/fullIsolated（长度 n*m）
 function applyDiff(pairs, target) {
@@ -1073,7 +965,7 @@ function applyUpdate(frame) {
         </div>
       </section>
 
-      <section class="dev-panel">
+      <section class="doc-panel">
         <h2>9. 常见坑</h2>
         <ul>
           <li>
@@ -1107,38 +999,14 @@ function applyUpdate(frame) {
           </li>
         </ul>
         <div class="nav-row">
-          <button id="goto-home" class="small">返回首页</button>
-          <button id="goto-web-dev" class="small inverted">返回网站开发页</button>
+          <button data-goto="/" class="small">返回首页</button>
+          <button data-goto="/develop" class="small inverted">返回网站开发页</button>
         </div>
       </section>
     </div>
 
-    <script>
-      async function loadUser() {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) {
-          document.getElementById('account-name').style.display = 'none';
-          return false;
-        }
-        const data = await res.json();
-        document.getElementById('account-name').textContent = data.username;
-        document.getElementById('login-btn').style.display = 'none';
-        return true;
-      }
-
-      document.getElementById('back-develop-btn').addEventListener('click', function () {
-        location.href = '/develop';
-      });
-
-      document.getElementById('goto-home').addEventListener('click', function () {
-        location.href = '/';
-      });
-
-      document.getElementById('goto-web-dev').addEventListener('click', function () {
-        location.href = '/develop';
-      });
-
-      loadUser();
-    </script>
+    <script src="/vendor/katex/katex.min.js"></script>
+    <script src="/vendor/katex/auto-render.min.js"></script>
+    <script src="/docs.js"></script>
   </body>
 </html>

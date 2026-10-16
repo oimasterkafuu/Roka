@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -6,89 +7,11 @@
       content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
     />
     <link rel="stylesheet" href="/main.css" />
+    <link rel="stylesheet" href="/styles/docs.css" />
+    <link rel="stylesheet" href="/vendor/katex/katex.min.css" />
     <title>Roka - 文字版教程</title>
     <style>
-      #app {
-        max-width: 920px;
-        margin: 84px auto 36px;
-        padding: 0 12px;
-        text-align: left;
-      }
-      .tutorial-title {
-        margin: 0 0 10px 0;
-        font-size: 34px;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .tutorial-subtitle {
-        margin: 0 0 16px 0;
-        line-height: 1.7;
-        opacity: 0.9;
-      }
-      .tutorial-panel {
-        margin: 0 0 14px 0;
-        padding: 16px 18px;
-        border: 1px solid #e3e8f0;
-        border-radius: 10px;
-        background: #ffffff;
-        box-shadow:
-          0 1px 3px rgba(37, 48, 66, 0.08),
-          0 6px 18px rgba(37, 48, 66, 0.05);
-      }
-      .tutorial-panel h3 {
-        margin: 0 0 10px 0;
-        font-size: 18px;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .tutorial-panel h4 {
-        margin: 12px 0 6px 0;
-        font-size: 15px;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .tutorial-panel p {
-        margin: 0;
-        line-height: 1.7;
-      }
-      .tutorial-panel p + p {
-        margin-top: 8px;
-      }
-      .tutorial-panel ul,
-      .tutorial-panel ol {
-        margin: 8px 0 0 20px;
-        line-height: 1.7;
-      }
-      .tutorial-panel li {
-        margin: 0 0 4px 0;
-      }
-      .kbd {
-        display: inline-block;
-        min-width: 18px;
-        padding: 0 6px;
-        border: 1px solid #d5dce6;
-        border-bottom-width: 2px;
-        border-radius: 4px;
-        background: #f3f5f9;
-        font-size: 12px;
-        line-height: 20px;
-        text-align: center;
-        color: #253042;
-        white-space: nowrap;
-      }
-      .cta-row {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 8px;
-        margin: 14px 0;
-      }
-      .tutorial-note {
-        margin-top: 10px;
-        padding: 10px 12px;
-        border: 1px solid rgba(0, 128, 128, 0.35);
-        border-radius: 8px;
-        background: #e6f3f3;
-        line-height: 1.7;
-      }
-      .tutorial-panel ul.terrain-list {
+      .doc-panel ul.terrain-list {
         margin: 8px 0 0 0;
         padding: 0;
         list-style: none;
@@ -221,7 +144,7 @@
 
   <body style="overflow: auto; height: auto">
     <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
-      <button id="back-home-btn" class="small">返回首页</button>
+      <button data-goto="/" class="small">返回首页</button>
     </div>
     <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
       <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span
@@ -229,15 +152,15 @@
     </div>
 
     <div id="app">
-      <h1 class="tutorial-title">Roka 文字版教程</h1>
-      <p class="tutorial-subtitle">本页完整介绍 Roka 的全部规则。建议先通读本页，再进入互动教程上手实操。</p>
+      <h1 class="doc-title">Roka 文字版教程</h1>
+      <p class="doc-subtitle">本页完整介绍 Roka 的全部规则。建议先通读本页，再进入互动教程上手实操。</p>
 
       <div class="cta-row">
-        <button id="goto-interactive-top" class="inverted">进入互动教程 →</button>
+        <button data-goto="/tutorial/interactive" class="inverted">进入互动教程 →</button>
       </div>
 
-      <section class="tutorial-panel">
-        <h3>目标与胜负</h3>
+      <section class="doc-panel">
+        <h2>目标与胜负</h2>
         <ul>
           <li>每位玩家拥有 1 座主城（皇冠），目标是成为最后存活的玩家/队伍。</li>
           <li>失去所有主城即出局；攻下敌方最后一座主城即可将其淘汰。</li>
@@ -248,8 +171,8 @@
         </ul>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>地图与地形</h3>
+      <section class="doc-panel">
+        <h2>地图与地形</h2>
         <ul class="terrain-list">
           <li class="terrain-item">
             <span class="terrain-icon-cell plain" aria-hidden="true"></span>
@@ -280,11 +203,11 @@
             </p>
           </li>
         </ul>
-        <div class="tutorial-note">默认不开启迷雾远征，开启前全图对所有玩家开放可见。</div>
+        <div class="tips">默认不开启迷雾远征，开启前全图对所有玩家开放可见。</div>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>地图示例</h3>
+      <section class="doc-panel">
+        <h2>地图示例</h2>
         <p>如果觉得地图的名字晦涩难懂，可以生成一张示例地图参考。</p>
         <p>
           房间地图尺寸有<b>标准</b>与<b>大地图</b>；房主可设置种子以复现地图。华夏系列仅在中国时区每年 10 月 1
@@ -331,8 +254,8 @@
         </article>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>回合与兵力生产</h3>
+      <section class="doc-panel">
+        <h2>回合与兵力生产</h2>
         <ul>
           <li>
             1 Tick = 0.5 秒（1x 速度）。顶部回合以“半回合”显示：<span class="kbd">回合 1</span> →
@@ -350,21 +273,21 @@
         </ul>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>迷雾远征（可选）</h3>
+      <section class="doc-panel">
+        <h2>迷雾远征（可选）</h2>
         <ul>
           <li>
-            房主可在房间设置的「迷雾远征」开关中开启（默认关闭；房间内有 Bot 参战时不可用）。开启后，
-            你只能看到己方（含队友）任意格子<b>周围一圈</b>内的归属与兵力。
+            房主可在房间设置的「迷雾远征」开关中开启（默认关闭；房间内有不支持迷雾的 Bot——第三方 Bot
+            或未允许迷雾的托管
+            Bot——时不可用）。开启后，你只能看到己方（含队友）任意格子<b>周围一圈</b>内的格子。
           </li>
           <li>
             <b>视野外</b
-            >的格子保留山脉与沼泽；其他地形显示为空地并盖上<b>暗色遮罩</b>，不揭示真实归属与兵力。它不是统一的“山
-            + 问号”占位；沼泽即使在视野外也照常显示。
+            >：山脉与沼泽保持原样显示（沼泽不暴露归属），其余一切格子一律显示为空地并盖上<b>暗色遮罩</b>——视野外的真实地形、归属与兵力都不会揭示。
           </li>
           <li>
-            <b>视野内</b>的地形、归属、兵力以及敌方建筑身份正常显示，包括敌方指挥所与主城；
-            中立城市也照常显示。观战始终全图可见。
+            <b>视野内</b
+            >的地形、归属、兵力以及敌方建筑身份正常显示，包括敌方指挥所与主城；中立城市也照常显示。观战始终全图可见。
           </li>
           <li>
             迷雾对局的<b>回放</b>默认为全知视角（全图可见）；回放控制条上提供「视角」选择器，可切换为任一
@@ -373,8 +296,8 @@
         </ul>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>多线争锋（可选）</h3>
+      <section class="doc-panel">
+        <h2>多线争锋（可选）</h2>
         <ul>
           <li>
             房主可在房间设置的「多线争锋」开关中开启（默认关闭；房间内有不支持多线的 Bot
@@ -392,21 +315,17 @@
             存在多组待发箭头，一次结算的移动数也可能更多。<span class="kbd">Q</span> /
             <span class="kbd">E</span> 撤回<b>全局最后一条</b>指令（按入队时间序，不区分战线）。
           </li>
-          <li>
-            非官方机器人（接入 API 的第三方 Bot）每日在官方 Bot 房间内累计停留不得超过 3
-            小时，超出后当日无法再进入官方 Bot 房间。
-          </li>
         </ul>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>推兵与队列</h3>
-        <h4>选中与视角</h4>
+      <section class="doc-panel">
+        <h2>推兵与队列</h2>
+        <h3>选中与视角</h3>
         <ul>
           <li>鼠标左键点击己方格：选中；点击空白背景：取消选中；拖动地图平移，滚轮缩放。</li>
           <li><span class="kbd">空格</span>：跳转选中到曼哈顿距离最近的己方主城。</li>
         </ul>
-        <h4>推兵（移动/进攻）</h4>
+        <h3>推兵（移动/进攻）</h3>
         <ul>
           <li>
             <span class="kbd">W/A/S/D</span> 或方向键：从选中格向对应方向推兵。默认<b>全兵</b>推出（只留 1
@@ -414,12 +333,13 @@
           </li>
           <li><span class="kbd">Z</span> + 方向：下一步<b>半兵</b>（50%，一次性，执行后失效）。</li>
           <li>
-            <span class="kbd">Shift</span> + 方向：<b>智能分兵</b>——为其他方向的威胁保留兵力（保留量 =
-            其他三方向非己方相邻格（山脉除外）的「兵力-1」之和 + 1），不消耗 Z。
+            <span class="kbd">Shift</span> + 方向：<b>智能分兵</b>——为其他方向的威胁保留兵力。设起点兵力为
+            \(A\)，其余三个方向相邻格中「非山脉且非己方」格子的驻军之和为 \(B\)： \[ B =
+            \sum_{\text{威胁方向}} (\text{兵力} - 1), \qquad push = \max(0,\ A - B - 1) \] 不消耗 Z。
           </li>
           <li>推兵进入操作队列，每 Tick 每名玩家最多执行一条队列操作。</li>
         </ul>
-        <h4>建造</h4>
+        <h3>建造</h3>
         <ul>
           <li><span class="kbd">X</span>：在选中的己方正常普通地块上排队建造指挥所，消耗 50 兵力。</li>
           <li>
@@ -428,7 +348,7 @@
           </li>
           <li>建造与推兵共用同一队列；执行时条件不满足会自动跳过，不产生消耗。沼泽/山脉上禁止建造。</li>
         </ul>
-        <h4>其他</h4>
+        <h3>其他</h3>
         <ul>
           <li>
             <span class="kbd">Q</span> / <span class="kbd">E</span>：撤回最后一步（单线对局中 Q
@@ -441,8 +361,8 @@
         </ul>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>攻击与占领</h3>
+      <section class="doc-panel">
+        <h2>攻击与占领</h2>
         <ul>
           <li>攻击兵力必须<b>严格大于</b>防守兵力才能占领目标格。</li>
           <li>
@@ -457,29 +377,35 @@
         </ul>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>连通与孤军</h3>
+      <section class="doc-panel">
+        <h2>连通与孤军</h2>
         <ul>
           <li>
             己方格经由连续己方格（普通地块或己方沼泽）四方向连通到己方任意主城/指挥所，即为正常领土；组队时只把队内<b>存活成员</b>的格子和锚点纳入连通计算。只要队伍仍有存活成员拥有锚点，全队连通领土都可操控；否则成为<b>孤军</b>（闪烁提示）。
           </li>
-          <li>断链瞬间兵力立即减半（⌊n/2⌋，1 兵保持为 1）。</li>
+          <li>断链瞬间兵力立即减半：\(n' = \lfloor n / 2 \rfloor\)（1 兵保持为 1）。</li>
           <li>断链后前 <b>10 Tick</b>为宽限期：孤军快速闪烁，兵力暂不衰减。</li>
-          <li>第 11 Tick 起进入衰减期：每 2 Tick 衰减 max(1, ⌈当前兵力 × 5%⌉)，兵力归零后变为中立格。</li>
+          <li>
+            第 11 Tick 起进入衰减期，每 2 Tick： \[ n \leftarrow n - \max\left(1, \lceil 0.05\, n
+            \rceil\right) \] 兵力归零后变为中立格。
+          </li>
           <li>孤军不可选中、不可推兵、不可建造、不产兵、无爆发加成。</li>
-          <li>孤军重新连通回己方（或同队存活成员）主城/指挥所时立即恢复正常，且每格兵力 ×2。</li>
+          <li>
+            孤军重新连通回己方（或同队存活成员）主城/指挥所时立即恢复正常，且每格兵力翻倍（\(n \leftarrow
+            2n\)）。
+          </li>
         </ul>
-        <div class="tutorial-note">
+        <div class="tips">
           攻下敌方最后一座主城后，其所有残余领土不转移归属：锚点全部拆除、兵力按断链规则减半后沦为孤军，随后逐渐衰减至中立。扩张时务必保持连通。
         </div>
-        <div class="tutorial-note">
+        <div class="tips">
           投降（Esc）=
           立即放弃所有控制权：若队内仍有其他存活成员，全部领土（含兵力）转移给编号最小的存活队友，主城降级为指挥所；否则主城与所有指挥所被拆除为普通空地，领土兵力减半后沦为孤军，进入自然衰减。
         </div>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>快捷键</h3>
+      <section class="doc-panel">
+        <h2>快捷键</h2>
         <ul>
           <li>
             <span class="kbd">W/A/S/D</span> 或方向键推兵；<span class="kbd">Z</span> 半兵；<span class="kbd"
@@ -504,8 +430,8 @@
         </ul>
       </section>
 
-      <section class="tutorial-panel">
-        <h3>实战建议与状态</h3>
+      <section class="doc-panel">
+        <h2>实战建议与状态</h2>
         <ul>
           <li>先扩张并保持主城/指挥所连通，再把兵力集中到突破口；不要把前线变成孤军。</li>
           <li>
@@ -516,14 +442,21 @@
             标准与大地图使用不同尺寸；需要复盘或测试时设置种子。华夏地图只在中国时区 10 月 1 日至 7
             日活动期开放。
           </li>
+          <li>
+            非官方机器人（接入 API 的第三方 Bot）每日在官方 Bot 房间内累计停留不得超过 3
+            小时，超出后当日无法再进入官方 Bot 房间。
+          </li>
         </ul>
       </section>
 
       <div class="cta-row">
-        <button id="goto-interactive-bottom" class="inverted">进入互动教程 →</button>
+        <button data-goto="/tutorial/interactive" class="inverted">进入互动教程 →</button>
       </div>
     </div>
 
+    <script src="/vendor/katex/katex.min.js"></script>
+    <script src="/vendor/katex/auto-render.min.js"></script>
+    <script src="/docs.js"></script>
     <script>
       let lastMapExampleData = null;
       let resizeTimer = 0;
@@ -568,14 +501,8 @@
           cls += ' empty';
         } else if (code === 201) {
           cls += ' mountain empty';
-        } else if (code === 202) {
-          cls += ' fog';
-        } else if (code === 203) {
-          cls += ' obstacle fog';
         } else if (code === 204) {
           cls += ' swamp';
-        } else if (code === 205) {
-          cls += ' swamp fog';
         }
         if (txt.length > 0 && scaleClass === 1) {
           txt = `<div class="txt">${txt}</div>`;
@@ -617,8 +544,10 @@
         lastMapExampleData = data;
         const example = data.example;
         document.getElementById('map-example-title').textContent = mapModeLabel(example.map_mode);
+        const regionText = example.region_name ? ` · ${example.region_name}` : '';
+        const seedText = data.seed ? ` · 种子 ${data.seed}` : '';
         document.getElementById('map-example-meta').textContent =
-          `${example.n} x ${example.m} · ${data.players} 人`;
+          `${example.n} x ${example.m} · ${data.players} 人` + regionText + seedText;
         document.getElementById('map-example-mode').value = String(example.map_mode || 'random');
         document.getElementById('map-example-region').value = String(example.map_region || 'china');
         syncMapExampleRegionControl();
@@ -702,30 +631,6 @@
         setMapExampleStatus('');
       }
 
-      async function loadUser() {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) {
-          document.getElementById('account-name').style.display = 'none';
-          return false;
-        }
-        const data = await res.json();
-        document.getElementById('account-name').textContent = data.username;
-        document.getElementById('login-btn').style.display = 'none';
-        return true;
-      }
-
-      document.getElementById('back-home-btn').addEventListener('click', function () {
-        location.href = '/';
-      });
-
-      document.getElementById('goto-interactive-top').addEventListener('click', function () {
-        location.href = '/tutorial/interactive';
-      });
-
-      document.getElementById('goto-interactive-bottom').addEventListener('click', function () {
-        location.href = '/tutorial/interactive';
-      });
-
       document.getElementById('map-example-mode').addEventListener('change', syncMapExampleRegionControl);
 
       document.getElementById('generate-map-example-btn').addEventListener('click', async function () {
@@ -742,7 +647,6 @@
       });
 
       async function main() {
-        await loadUser();
         initMapPlayerOptions();
         refreshHuaxiaOption();
         window.setInterval(refreshHuaxiaOption, 60 * 1000);

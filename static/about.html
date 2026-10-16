@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -6,77 +7,13 @@
       content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
     />
     <link rel="stylesheet" href="/main.css" />
+    <link rel="stylesheet" href="/styles/docs.css" />
     <title>Roka - 关于</title>
-    <style>
-      #app {
-        max-width: 1200px;
-        margin: 84px auto 36px;
-        padding: 0 12px;
-        text-align: left;
-      }
-      .about-title {
-        margin: 0 0 10px 0;
-        font-size: 34px;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .about-subtitle {
-        margin: 0 0 16px 0;
-        line-height: 1.7;
-        opacity: 0.9;
-      }
-      .about-panel {
-        margin: 0 0 14px 0;
-        padding: 16px 18px;
-        border: 1px solid #e3e8f0;
-        border-radius: 10px;
-        background: #ffffff;
-        box-shadow:
-          0 1px 3px rgba(37, 48, 66, 0.08),
-          0 6px 18px rgba(37, 48, 66, 0.05);
-      }
-      .about-panel h3 {
-        margin: 0 0 10px 0;
-        font-size: 18px;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .about-panel p {
-        margin: 0;
-        line-height: 1.7;
-        opacity: 0.95;
-      }
-      .source-table {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-      }
-      .source-table th,
-      .source-table td {
-        padding: 10px 8px;
-        border-top: 1px solid #eceff4;
-        vertical-align: top;
-        text-align: left;
-        font-size: 14px;
-        line-height: 1.6;
-      }
-      .source-table tr:first-child th,
-      .source-table tr:first-child td {
-        border-top: none;
-      }
-      .source-table th {
-        width: 130px;
-        color: teal;
-        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
-      }
-      .about-link {
-        color: teal;
-        word-break: break-all;
-      }
-    </style>
   </head>
 
   <body style="overflow: auto; height: auto">
     <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
-      <button id="back-home-btn" class="small">返回首页</button>
+      <button data-goto="/" class="small">返回首页</button>
     </div>
     <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
       <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span
@@ -84,34 +21,32 @@
     </div>
 
     <div id="app">
-      <h1 class="about-title">关于 Roka</h1>
-      <p class="about-subtitle">
-        Roka 是一个多人策略对战项目。当前版本聚焦于自定义房间、实时对局、回放和账号系统，
-        并在原有玩法基础上做了适配与扩展。
+      <h1 class="doc-title">关于 Roka</h1>
+      <p class="doc-subtitle">
+        Roka 是一个多人策略对战项目：自定义房间、实时对局、回放与账号系统，在 generals.io
+        玩法基础上做了适配与扩展。本项目不是官方 generals.io 服务。
       </p>
 
-      <section class="about-panel">
-        <h3>项目说明</h3>
-        <p>
-          本项目不是官方 generals.io 服务。页面中的来源信息用于致谢与许可证合规说明，
-          便于追溯核心玩法、实现参考和协议来源。
-        </p>
-        <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px">
-          <button id="goto-tutorial-btn" class="small inverted">查看完整规则与教程 →</button>
-          <button id="goto-develop-btn" class="small">参与网站开发 →</button>
+      <section class="doc-panel">
+        <h2>了解更多</h2>
+        <div class="cta-row">
+          <button data-goto="/tutorial" class="small inverted">完整规则与教程 →</button>
+          <button data-goto="/develop" class="small">参与网站开发 →</button>
+          <button data-goto="/develop/bot" class="small">机器人开发协议 →</button>
         </div>
       </section>
 
-      <section class="about-panel">
-        <h3>来源与参考</h3>
-        <table class="source-table">
+      <section class="doc-panel">
+        <h2>来源与参考</h2>
+        <p>以下信息用于致谢与许可证合规说明，便于追溯核心玩法、实现参考和协议来源。</p>
+        <table class="doc-table doc-table-narrow">
           <tr>
             <th>项目源码</th>
             <td>
               oimasterkafuu / Roka
               <br />
               <a
-                class="about-link"
+                class="doc-link"
                 href="https://github.com/oimasterkafuu/Roka"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -125,7 +60,7 @@
             <td>
               generals.io
               <br />
-              <a class="about-link" href="https://generals.io/" target="_blank" rel="noopener noreferrer"
+              <a class="doc-link" href="https://generals.io/" target="_blank" rel="noopener noreferrer"
                 >https://generals.io/</a
               >
             </td>
@@ -136,7 +71,7 @@
             <td>
               Konkr.io
               <br />
-              <a class="about-link" href="https://konkr.io/" target="_blank" rel="noopener noreferrer"
+              <a class="doc-link" href="https://konkr.io/" target="_blank" rel="noopener noreferrer"
                 >https://konkr.io/</a
               >
             </td>
@@ -148,7 +83,7 @@
               mcfx0 / generals.io_copy
               <br />
               <a
-                class="about-link"
+                class="doc-link"
                 href="https://github.com/mcfx/generals.io_copy"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -163,7 +98,7 @@
               By-Ha / Checkmate
               <br />
               <a
-                class="about-link"
+                class="doc-link"
                 href="https://github.com/By-Ha/Checkmate"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -178,7 +113,7 @@
               oimasterkafuu / checkmate
               <br />
               <a
-                class="about-link"
+                class="doc-link"
                 href="https://github.com/oimasterkafuu/checkmate"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -191,32 +126,6 @@
       </section>
     </div>
 
-    <script>
-      async function loadUser() {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) {
-          document.getElementById('account-name').style.display = 'none';
-          return false;
-        }
-        const data = await res.json();
-        document.getElementById('account-name').textContent = data.username;
-        document.getElementById('login-btn').style.display = 'none';
-        return true;
-      }
-
-      document.getElementById('back-home-btn').addEventListener('click', function () {
-        location.href = '/';
-      });
-
-      document.getElementById('goto-tutorial-btn').addEventListener('click', function () {
-        location.href = '/tutorial';
-      });
-
-      document.getElementById('goto-develop-btn').addEventListener('click', function () {
-        location.href = '/develop';
-      });
-
-      loadUser();
-    </script>
+    <script src="/docs.js"></script>
   </body>
 </html>
