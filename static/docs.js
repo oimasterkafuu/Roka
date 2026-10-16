@@ -20,9 +20,18 @@ async function docsLoadUser() {
 }
 
 function docsWireNav() {
+  // 固定白名单：仅允许以下路径，未命中一律拒绝（不跳转）
+  const allowedPaths = ['/', '/tutorial', '/develop', '/develop/bot', '/tutorial/interactive'];
   document.querySelectorAll('[data-goto]').forEach((el) => {
     el.addEventListener('click', () => {
-      location.href = el.getAttribute('data-goto');
+      const target = el.getAttribute('data-goto');
+      for (const path of allowedPaths) {
+        if (target === path) {
+          // 必须赋白名单成员本身，而不是不可信的 target
+          location.href = path;
+          return;
+        }
+      }
     });
   });
 }
