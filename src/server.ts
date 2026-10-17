@@ -709,7 +709,9 @@ const boot = async (): Promise<void> => {
       rating: userStore.getDisplayRating(authUser.username),
       isAdmin: userStore.isAdminUser(authUser.username),
       isSuperAdmin: userStore.isSuperAdminUser(authUser.username),
-      stamp: authUser.sid ? authService.sessionStamp(authUser.sid) : undefined,
+      // 会话戳不下发到 JSON 接口：任何 JWT 持有者（含第三方 bot）都能调本接口
+      // 自取戳并伪造 client_verify 洗掉 [AI] 标记。戳只随游戏页 HTML 注入
+      // （见 serveGameHtml），socket 直连的 bot 拿不到。
     });
   });
 
@@ -1248,13 +1250,27 @@ const boot = async (): Promise<void> => {
     return reply.send({ items, next_offset, has_more });
   });
 
+  // 游戏页 HTML 启动时读一次缓存；会话戳（真人验证凭据）按请求注入 meta。
+  // 戳不再经任何 JSON 接口下发——socket 直连的第三方 bot 无法自取戳伪造
+  // client_verify，浏览器渲染页面时无感。no-store 防止共享缓存串号。
+  const gameHtmlTemplate = readFileSync(path.join(process.cwd(), 'static', 'game.html'), 'utf8');
+  const serveGameHtml = (request: FastifyRequest, reply: FastifyReply): FastifyReply => {
+    const authUser = (request as AuthRequest).authUser;
+    const stamp = authUser?.sid ? authService.sessionStamp(authUser.sid) : '';
+    const html = gameHtmlTemplate.replace(
+      '<meta name="roka-session-stamp" content="" />',
+      `<meta name="roka-session-stamp" content="${stamp}" />`,
+    );
+    return reply.header('Cache-Control', 'no-store').type('text/html').send(html);
+  };
+
   app.get('/games/:game_id', async (request, reply) => {
     const params = request.params as { game_id: string };
     const gameId = params.game_id;
     if (gameId.length === 0 || gameId.length > 15) {
       return reply.redirect(`/games/${lobbyService.randomRoomId()}`);
     }
-    return reply.sendFile('game.html');
+    return serveGameHtml(request, reply);
   });
 
   app.get('/', async (_request, reply) => reply.sendFile('index.html'));
@@ -1293,7 +1309,7 @@ const boot = async (): Promise<void> => {
     if (!isReplayIdValid(id)) {
       return reply.type('text/plain').send('');
     }
-    return reply.sendFile('game.html');
+    return serveGameHtml(request, reply);
   });
 
   app.get('/api/getreplay/:id', async (request, reply) => {
@@ -1553,6 +1569,13 @@ const boot = async (): Promise<void> => {
         authService.verifyClientSig(sessionSid, lobbyService.md5(socket.id), data.sig)
       ) {
         lobbyService.humanVerified.add(socket.id);
+        // WebCrypto 摘要是异步的：client_verify 可能晚于进房到达，此时首帧
+        // room_update 已按未验证渲染（[AI] 误标的存量显示）。验证一旦落地
+        // 立即向所在房间重发 room_update，不等下一次房间状态变化。
+        const lobbyId = lobbyService.lobbyOfSid.get(socket.id);
+        if (lobbyId) {
+          lobbyService.emitRoomUpdate(io, lobbyId);
+        }
       }
     };
 

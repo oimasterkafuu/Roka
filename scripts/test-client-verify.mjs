@@ -184,6 +184,18 @@ function computeSig(stamp, clientId) {
   return createHash('sha256').update(`${stamp}:${clientId}`).digest('hex');
 }
 
+// 会话戳只随游戏页 HTML 注入（roka-session-stamp meta），不再出现在 JSON 接口；
+// 测试模拟浏览器：带 cookie 取游戏页并解析 meta。
+async function fetchStamp(baseUrl, cookie) {
+  const res = await fetch(`${baseUrl}/games/stamppage`, {
+    headers: { cookie: `auth_token=${encodeURIComponent(cookie)}` },
+  });
+  const html = await res.text();
+  const match = html.match(/<meta name="roka-session-stamp" content="([^"]*)" \/>/);
+  assert.ok(match, '游戏页 HTML 注入 roka-session-stamp meta');
+  return match[1];
+}
+
 const USER_VERIFY = 'verify_alice'; // 首个注册 = 超管（走 client_verify 新路径）
 const USER_PLAIN = 'verify_bob'; // 对照连接（不发 sig）
 const USER_HEARTBEAT = 'verify_carol'; // 回归连接（走 room_heartbeat 老路径）
@@ -345,8 +357,8 @@ async function testMixedReadySockets(baseUrl, token) {
       initCount++;
     });
     const joined = waitRoomUpdateFor(ordinary, id);
-    const me = await api(baseUrl, token, '/api/auth/me');
-    ordinary.emit('client_verify', { sig: computeSig(me.data.stamp, id) });
+    const guardStamp = await fetchStamp(baseUrl, token);
+    ordinary.emit('client_verify', { sig: computeSig(guardStamp, id) });
     ordinary.emit('join_game_room', { room });
     await joined;
     const bots = [];
@@ -435,10 +447,12 @@ async function main() {
     await waitTcpReady(port, SERVER_READY_TIMEOUT_MS);
     log(`测试服务器已启动：${baseUrl}`);
 
-    // 取真人会话的 stamp（/api/auth/me）。
+    // 取真人会话的 stamp（游戏页 meta 注入）；同时断言 JSON 接口不再泄露 stamp。
     const me = await api(baseUrl, tokens[USER_VERIFY], '/api/auth/me');
     assert.equal(me.status, 200, '/api/auth/me 对已登录会话返回 200');
-    assert.equal(typeof me.data?.stamp, 'string', '/api/auth/me 下发 stamp');
+    assert.equal(me.data?.stamp, undefined, '/api/auth/me 不再下发 stamp');
+    const stampVerify = await fetchStamp(baseUrl, tokens[USER_VERIFY]);
+    assert.ok(stampVerify.length > 0, '游戏页注入非空 stamp');
 
     // 场景 2：普通 JWT 连接不发任何 sig，自动识别为 AI。
     const { socket: socketPlain, setIdPromise: plainSetIdPromise } = await connectSocket(
@@ -466,21 +480,21 @@ async function main() {
       assert.equal(data.players[0].sid, verifySetId, 'client_verify 仍让已验证成员优先成为房主');
     });
     const verifyEntryPromise = waitRoomUpdateFor(socketVerify, verifySetId);
-    socketVerify.emit('client_verify', { sig: computeSig(me.data.stamp, verifySetId) });
+    socketVerify.emit('client_verify', { sig: computeSig(stampVerify, verifySetId) });
     socketVerify.emit('join_game_room', { room: 'verifyroom' });
     const verifyEntry = await verifyEntryPromise;
     assert.equal(verifyEntry.ai, undefined, 'client_verify 验证后进房不带 ai 标记');
     log('场景 1 通过：client_verify 新路径验证后房间列表不带 ai 标记');
 
     // 场景 3（回归）：room_heartbeat 携带 sig 的老路径仍生效。
-    const meHb = await api(baseUrl, tokens[USER_HEARTBEAT], '/api/auth/me');
+    const stampHb = await fetchStamp(baseUrl, tokens[USER_HEARTBEAT]);
     const { socket: socketHb, setIdPromise: hbSetIdPromise } = await connectSocket(
       baseUrl,
       tokens[USER_HEARTBEAT],
       'Heartbeat',
     );
     const hbSetId = await hbSetIdPromise;
-    socketHb.emit('room_heartbeat', { sig: computeSig(meHb.data.stamp, hbSetId) });
+    socketHb.emit('room_heartbeat', { sig: computeSig(stampHb, hbSetId) });
     await sleep(300);
     socketHb.on('room_update', (data) => {
       assert.equal(data.players[1].sid, hbSetId, 'room_heartbeat 验证仍让成员排在未验证成员前');
