@@ -355,7 +355,7 @@ class LobbyService {
       players.push(player);
       return {};
     }
-    // 房主优先级三档（进房那一刻的身份快照，事后补验真人不重排队列）：
+    // 房主优先级三档（首次补验真人时也由 reorderLobbyForVerification 稳定重排）：
     // 1) 人类（humanVerified 已命中）：插在最后一个既有普通人类之后——
     //    任何人类进房后，房主自动归「第一个人类」；
     // 2) 非官方 AI（令牌 bot、第三方 bot、未通过真人校验的普通连接）：
@@ -526,7 +526,7 @@ class LobbyService {
     }
 
     const need = this.getReq(players);
-    if (need <= 1) {
+    if (this.getPlayingCount(players) < 2) {
       for (const player of players) {
         player.ready = false;
       }
@@ -549,6 +549,7 @@ class LobbyService {
     }));
 
     const ready = players.filter((player) => player.ready && player.team !== 0).length;
+    const readyCounts = this.getReadyCounts(players);
 
     return {
       speed: conf.speed,
@@ -565,7 +566,32 @@ class LobbyService {
       players: roomPlayers,
       ready,
       need,
+      ready_counts: readyCounts,
     };
+  }
+
+  getReadyCounts(players: LobbyPlayer[]): RoomUpdatePayload['ready_counts'] {
+    const participants = players.filter((player) => player.team !== 0);
+    const human = participants.filter((player) => this.humanVerified.has(player.sid));
+    const ai = participants.filter((player) => !this.humanVerified.has(player.sid));
+    const count = (group: LobbyPlayer[]) => ({
+      ready: group.filter((player) => player.ready).length,
+      need: Math.ceil(group.length / 2),
+      total: group.length,
+    });
+    return { human: count(human), ai: count(ai) };
+  }
+
+  reorderLobbyForVerification(gid: string): void {
+    const players = this.lobbyPlayers.get(gid);
+    if (!players) return;
+    const sorted = [...players].sort((a, b) => {
+      const tier = (p: LobbyPlayer) => (p.serverBot ? 2 : this.humanVerified.has(p.sid) ? 0 : 1);
+      return tier(a) - tier(b);
+    });
+    if (sorted.some((player, index) => player.sid !== players[index]?.sid)) {
+      players.splice(0, players.length, ...sorted);
+    }
   }
 
   listLobbyRooms(): RoomListItem[] {
@@ -587,6 +613,7 @@ class LobbyService {
         spectators: players.length - playing,
         ready,
         need: this.getReq(players),
+        ready_counts: this.getReadyCounts(players),
         running: this.isLobbyGameRunning(room),
         ...(this.lobbyConfig.get(room)?.multi_line === true ? { multi_line: true } : {}),
       });
@@ -867,12 +894,8 @@ class LobbyService {
       return;
     }
 
-    const ready = players.filter((player) => player.ready && player.team !== 0).length;
-    const participants = players.filter((player) => player.team !== 0);
-    const hasAI = participants.some((player) => !this.humanVerified.has(player.sid));
-    const humans = participants.filter((player) => this.humanVerified.has(player.sid));
-    const required = this.getReq(players);
-    if (required <= 1) {
+    const readyCounts = this.getReadyCounts(players);
+    if (this.getPlayingCount(players) < 2) {
       for (const player of players) {
         player.ready = false;
       }
@@ -880,10 +903,10 @@ class LobbyService {
       return;
     }
 
-    // 混合 AI/真人房间中，AI 的多数票不能替未准备的已验证真人开局。
-    // 纯 AI、纯真人沿用多数规则；观战席不参与此门槛。
-    const mixedBotReady = !hasAI || humans.every((player) => player.ready);
-    if (required > 0 && ready >= required && mixedBotReady) {
+    const groupsReady = [readyCounts.human, readyCounts.ai].every(
+      (group) => group.total === 0 || group.ready >= group.need,
+    );
+    if (groupsReady) {
       // 组队模式下所有参赛者处于同一队伍时开局即终局（首 Tick 存活队伍数即为 1），
       // 拒绝开局并提示调整队伍，避免空转对局。
       const conf = this.lobbyConfig.get(gid);
@@ -1182,11 +1205,6 @@ class LobbyService {
     return bestTeam === 0 ? 1 : bestTeam;
   }
 
-  private getReqReady(x: number): number {
-    // 非观战用户中「我准备好了」超过向下取整的 1/2 即自动开始。
-    return Math.floor(x / 2) + 1;
-  }
-
   private getPlayingCount(players: LobbyPlayer[]): number {
     return players.filter((player) => player.team !== 0).length;
   }
@@ -1296,7 +1314,9 @@ class LobbyService {
     if (playingCount < 2) {
       return 0;
     }
-    return this.getReqReady(playingCount);
+    // Legacy clients use need > 1 to decide whether to ready up.
+    // Actual start eligibility is exclusively determined by getReadyCounts.
+    return Math.floor(playingCount / 2) + 1;
   }
 }
 

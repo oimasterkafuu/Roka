@@ -198,8 +198,8 @@ function createRoomClient(baseUrl, { cookie, token, room, autoReady = true, name
       return;
     }
     const self = data.players.find((player) => String(player?.sid || '') === client.clientId);
-    const need = Number.parseInt(String(data?.need ?? '0'), 10) || 0;
-    if (self && !self.ready && Number(self.team) !== 0 && need > 1) {
+    const playing = data.players.filter((player) => Number(player.team) !== 0).length;
+    if (self && !self.ready && Number(self.team) !== 0 && playing >= 2) {
       socket.emit('change_ready', { ready: true });
     }
   });
@@ -473,7 +473,7 @@ async function scenarioNoResetDuringGame(baseUrl, tokenA) {
     name: 'rstg-A',
   });
   await waitFor(() => a.clientId !== '', 5000, 'A 进房');
-  const bot = createRoomClient(baseUrl, { token: BOT_TOKEN, room: ROOM_RESET_GAME, name: 'rstg-bot' });
+  const bot = createRoomClient(baseUrl, { token: BOT_TOKEN, room: ROOM_RESET_GAME, autoReady: false, name: 'rstg-bot' });
   await waitFor(() => bot.clientId !== '', 5000, 'bot 进房');
 
   a.socket.emit('change_game_conf', { speed: 2, map_mode: 'maze' });
