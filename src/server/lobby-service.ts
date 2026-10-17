@@ -28,11 +28,6 @@ import {
 type EditableLobbyKey =
   'speed' | 'allow_team' | 'fog' | 'multi_line' | 'map_mode' | 'map_region' | 'map_token' | 'map_size';
 
-/** 只有服务端鉴权确认的 bot 才算 AI；缺少真人验证不代表 AI。 */
-function isConfirmedAI(player: LobbyPlayer | undefined): boolean {
-  return player?.bot === true;
-}
-
 const FIXED_WIDTH_RATIO = 0.5;
 const FIXED_HEIGHT_RATIO = 0.5;
 const FIXED_CITY_RATIO = 0.5;
@@ -549,8 +544,8 @@ class LobbyService {
         ? { server_bot_allow_multi_line: player.serverBotAllowMultiLine === true }
         : {}),
       ...(player.bot === true ? { bot: true } : {}),
-      // 仅已确认 bot 在房间列表中带 ai 标记（前端显示「[AI] 」前缀）。
-      ...(isConfirmedAI(player) ? { ai: true } : {}),
+      // 未通过真人客户端校验即 AI；网页在进房前发送 client_verify，避免首帧竞态。
+      ...(!this.humanVerified.has(player.sid) ? { ai: true } : {}),
     }));
 
     const ready = players.filter((player) => player.ready && player.team !== 0).length;
@@ -743,11 +738,12 @@ class LobbyService {
       return teamId;
     });
 
-    // 只有所有参战席位都是已确认 bot 时才强制 4x；观战者不计入。
+    // 所有参战席位均未通过真人校验时强制 4x；观战者不计入。
     const participants = players.filter((player) => player.team !== 0);
-    const allAI = participants.length > 0 && participants.every(isConfirmedAI);
+    const allAI =
+      participants.length > 0 && participants.every((player) => !this.humanVerified.has(player.sid));
     // 按引擎玩家编号保存身份，避免断线换绑或房间成员移除影响排行榜标记。
-    const confirmedAIPlayers = players.map(isConfirmedAI);
+    const aiFlags = players.map((player) => !this.humanVerified.has(player.sid));
 
     const gameConf: GameConfig = {
       ...conf,
@@ -771,11 +767,11 @@ class LobbyService {
       emitInitMap: (sid, data) => {
         io.to(`sid_${sid}`).emit('init_map', data);
       },
-      // 实时帧排行榜装饰：仅已确认 bot 标记 ai（前端显示「[AI] 」前缀）。
+      // 实时帧排行榜装饰：按开局真人校验快照标记 ai（前端显示「[AI] 」前缀）。
       // 仅当前对局生效——回放重建不经过此回调，账号数据不受影响。
       annotateLeaderboard: (entries) => {
         for (const entry of entries) {
-          entry.ai = confirmedAIPlayers[entry.id - 1] === true;
+          entry.ai = aiFlags[entry.id - 1] === true;
         }
       },
       disciplineEvent: (event) => {
@@ -873,8 +869,8 @@ class LobbyService {
 
     const ready = players.filter((player) => player.ready && player.team !== 0).length;
     const participants = players.filter((player) => player.team !== 0);
-    const hasConfirmedBot = participants.some((player) => player.bot === true);
-    const nonBots = participants.filter((player) => player.bot !== true);
+    const hasAI = participants.some((player) => !this.humanVerified.has(player.sid));
+    const humans = participants.filter((player) => this.humanVerified.has(player.sid));
     const required = this.getReq(players);
     if (required <= 1) {
       for (const player of players) {
@@ -884,9 +880,9 @@ class LobbyService {
       return;
     }
 
-    // 混合 Bot/真人房间中，Bot 的多数票不能替未准备的普通玩家开局。
-    // 未确认身份的连接按普通玩家处理；观战席不参与此门槛。
-    const mixedBotReady = !hasConfirmedBot || nonBots.length === 0 || nonBots.every((player) => player.ready);
+    // 混合 AI/真人房间中，AI 的多数票不能替未准备的已验证真人开局。
+    // 纯 AI、纯真人沿用多数规则；观战席不参与此门槛。
+    const mixedBotReady = !hasAI || humans.every((player) => player.ready);
     if (required > 0 && ready >= required && mixedBotReady) {
       // 组队模式下所有参赛者处于同一队伍时开局即终局（首 Tick 存活队伍数即为 1），
       // 拒绝开局并提示调整队伍，避免空转对局。

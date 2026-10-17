@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -211,7 +211,8 @@ BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=your-room BOT_TOKEN=your-auth-token p
               携带同签名为补充路径。校验通过的连接被服务端记为真人； 未通过的连接（bot 一律不通过）在
               <code>room_update.players[]</code> 与对局排行榜中带
               <code>ai: true</code> 标记（前端显示「[AI]」前缀），并影响房主归属与全 AI 房强制 4x 判定（见 3.1
-              与 7.2）。bot 不需要、也无法发送该事件。
+              与 7.2）。网页先发送验证再进房，同一连接事件按序处理，首次房间更新即正确识别真人。 普通账号 JWT
+              登录的第三方 bot 未通过验证时自动显示「[AI]」，无需管理员配置名单。
             </td>
           </tr>
         </table>
@@ -493,7 +494,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               为全图兵力合计，<code>land</code> 为格数，<code>id</code> 为座位号（1 起），<code>dead</code>
               为出局次序（0 = 存活）。<code>class_</code>：<code>''</code> 正常；<code>'dead'</code>
               已离场/出局；<code>'afk'</code> 断线宽限计数中（连接中断但尚未判负，宽限期内会出现）。
-              <code>ai</code> 在未通过真人校验的连接上为 <code>true</code>。仅参赛者入榜。
+              <code>ai</code> 按开局时真人校验结果保存快照：未验证为 <code>true</code>，
+              后续补验、断线换绑或成员移除不改变本局标记。仅参赛者入榜。
             </td>
           </tr>
           <tr>
@@ -898,7 +900,9 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
           <li>
             开局时若所有参赛席位（<code>team !== 0</code>，观战不计）均未通过真人校验——即全 AI 房，含官方托管
             bot、令牌 bot 与第三方用户 bot——该局强制以 4x
-            速度进行，不受房间速度设置影响，房间内会收到系统提示；任一参赛席位是真人则不强制。
+            速度进行，不受房间速度设置影响，房间内会收到系统提示；任一参赛席位是真人则不强制。 AI
+            与已验证真人混合参赛时，须所有已验证真人准备好且满足原有多数门槛，AI 多数票不能替真人开局； 纯
+            AI、纯真人沿用多数规则，观战席不计。
           </li>
           <li>
             对局结束后的自动重新准备是策略自己的行为（由后续

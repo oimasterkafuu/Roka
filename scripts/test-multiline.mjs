@@ -85,6 +85,7 @@ function finish(code, message) {
     return;
   }
   finished = true;
+  process.exitCode = code;
   cleanup();
   log(message);
   setTimeout(() => process.exit(code), 300).unref();
@@ -332,22 +333,23 @@ async function main() {
   );
   log('skip 丢弃数归属正确的新战线（line=2）');
 
-  // 场景 1b：[AI] 标识——双方都未上报会话派生值，leaderboard 不应带 ai 标记；
-  // A 上报正确派生值后双方仍不带标记。
+  // 场景 1b：[AI] 标识——双方开局均未验证，排行榜快照均为 AI；
+  // A 在对局中补验只改变房间标记，不改变本局排行榜身份。
   log('场景 1b：对局内 [AI] 身份标识');
   // leaderboard 的 uid 是用户名。
   const lbEntry = (client, username) => client.leaderboard.find((entry) => entry?.uid === username);
   await waitFor(() => lbEntry(a, 'ml_a') && lbEntry(a, 'ml_b'), 5000, 'leaderboard 下发');
-  if (lbEntry(a, 'ml_a').ai === true || lbEntry(a, 'ml_b').ai === true) {
-    throw new Error('未验证普通连接不应带 ai 标记');
+  if (lbEntry(a, 'ml_a').ai !== true || lbEntry(a, 'ml_b').ai !== true) {
+    throw new Error('未验证 JWT 连接应带 ai 标记');
   }
-  log('未验证普通连接的排行榜条目不带 ai 标记');
+  log('未验证 JWT 连接的排行榜条目带 ai 标记');
   a.socket.emit('room_heartbeat', { sig: clientSig(env.jwtSecret, userA.sid, a.clientId) });
-  await waitFor(() => lbEntry(a, 'ml_a') && lbEntry(a, 'ml_a').ai !== true, 10_000, 'A 验证后仍无 ai 标记');
-  if (lbEntry(a, 'ml_b').ai === true) {
-    throw new Error('B 未上报派生值，也不应带 ai 标记');
+  const framesBeforeVerify = a.frames;
+  await waitFor(() => a.frames > framesBeforeVerify + 2, 10_000, '补验后收到新的排行榜帧');
+  if (lbEntry(a, 'ml_a').ai !== true || lbEntry(a, 'ml_b').ai !== true) {
+    throw new Error('补验不应改变本局开局身份快照');
   }
-  log('上报正确派生值后，双方仍不带 ai 标记');
+  log('上报正确派生值后，排行榜仍保留双方开局时的 AI 标记');
   a.socket.disconnect();
   b.socket.disconnect();
 
@@ -390,13 +392,13 @@ async function main() {
   if (e.roomMultiLine !== false) {
     throw new Error('房间内有 bot 时房主仍能开启多线');
   }
-  // room_update players 的 ai 标记：E 未上报派生值不带 ai，已确认 bot 带 ai。
+  // room_update players 的 ai 标记：E 未验证与令牌 bot 均带 ai。
   const eEntry = e.roomPlayers.find((player) => player?.uid === 'ml_e');
   const botEntry = e.roomPlayers.find((player) => player?.uid === 'bot_ml');
-  if (!eEntry || eEntry.ai === true || !botEntry || botEntry.ai !== true) {
+  if (!eEntry || eEntry.ai !== true || !botEntry || botEntry.ai !== true) {
     throw new Error(`房间成员列表 ai 标记异常：${JSON.stringify(e.roomPlayers)}`);
   }
-  // E 上报正确派生值并触发一次房间状态广播（切换 ready）后，E 仍不应带 ai 标记。
+  // E 上报正确派生值并触发一次房间状态广播（切换 ready）后，E 不再带 ai 标记。
   e.socket.emit('room_heartbeat', { sig: clientSig(env.jwtSecret, userE.sid, e.clientId) });
   await sleep(300);
   e.socket.emit('change_ready', { ready: true });
@@ -406,7 +408,7 @@ async function main() {
       return entry && entry.ai !== true;
     },
     5000,
-    'E 的 room_update 仍无 ai 标记',
+    'E 补验后的 room_update 不再带 ai 标记',
   );
   e.socket.emit('change_ready', { ready: false });
   log('场景 3 通过：bot 房无法开启多线；房间成员 ai 标记符合预期');
@@ -439,7 +441,7 @@ async function main() {
   }
   log(`场景 4 通过：全官方 bot 对局强制 4x（2 秒 ${spec.frames} 帧）`);
 
-  // 场景 5：统一 AI 判定（已确认 bot 口径）与房主三档优先。
+  // 场景 5：统一 AI 判定（真人校验口径）与房主三档优先。
   log('场景 5：统一 AI 判定与房主优先级');
 
   // 5a：令牌 bot 独居时为房主；验证真人进房后接任房主（players[0] 换人）。
@@ -462,7 +464,7 @@ async function main() {
   await waitFor(() => hostBot.roomPlayers[0]?.uid === 'ml_e', 5000, '真人进房后接任房主（players[0]=ml_e）');
   log('场景 5a 通过：bot 独居当房主，验证真人进房后接任');
 
-  // 5b：未验证普通 JWT 连接 + 令牌 bot 的混合房不强制 4x。
+  // 5b：未验证普通 JWT 连接 + 令牌 bot 均为 AI，强制 4x。
   const aiUser = createGameClient(baseUrl, { cookie: userB.token, room: ROOM_ALLAI, name: 'AIUSER' });
   await waitFor(() => aiUser.clientId !== '', 5000, '未验证普通连接进房');
   const aiBot = createGameClient(baseUrl, { botToken: 'test-token-ml-6', room: ROOM_ALLAI, name: 'AIBOT' });
@@ -470,10 +472,10 @@ async function main() {
   await waitFor(() => aiUser.frames >= 3, 15_000, '未验证普通连接混合房帧流出');
   aiUser.frames = 0;
   await sleep(2000);
-  if (aiUser.frames > 9) {
-    throw new Error(`普通未验证连接的混合房不应强制 4x：2 秒 ${aiUser.frames} 帧`);
+  if (aiUser.frames < 10) {
+    throw new Error(`未验证 JWT 与令牌 bot 的全 AI 房应强制 4x：2 秒 ${aiUser.frames} 帧`);
   }
-  log(`场景 5b 通过：普通未验证连接的混合房不强制 4x（2 秒 ${aiUser.frames} 帧）`);
+  log(`场景 5b 通过：未验证 JWT 与令牌 bot 的全 AI 房强制 4x（2 秒 ${aiUser.frames} 帧）`);
   aiUser.socket.disconnect();
   aiBot.socket.disconnect();
 
