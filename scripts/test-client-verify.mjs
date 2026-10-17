@@ -518,6 +518,24 @@ async function main() {
     assert.equal(botEntry.ai, true, '已确认 bot 带 ai 标记');
     log('场景 4 通过：bot 令牌认证连接带 ai 标记');
 
+    // 场景 2b：进房后首次验证只刷新一次；重复验证与已签名心跳均不再刷新。
+    const stampPlain = await fetchStamp(baseUrl, tokens[USER_PLAIN]);
+    let plainRefreshes = 0;
+    let refreshedPlainEntry;
+    socketPlain.on('room_update', (data) => {
+      plainRefreshes += 1;
+      refreshedPlainEntry = (data?.players ?? []).find((item) => item.sid === plainSetId);
+    });
+    socketPlain.emit('client_verify', { sig: computeSig(stampPlain, plainSetId) });
+    await sleep(500);
+    assert.equal(plainRefreshes, 1, '首次 client_verify 应只触发一次 room_update');
+    assert.equal(refreshedPlainEntry?.ai, undefined, '首次 client_verify 刷新后应清除 AI 标记');
+    socketPlain.emit('client_verify', { sig: computeSig(stampPlain, plainSetId) });
+    socketPlain.emit('room_heartbeat', { sig: computeSig(stampPlain, plainSetId) });
+    await sleep(500);
+    assert.equal(plainRefreshes, 1, '重复 client_verify 与签名 room_heartbeat 不应再次刷新');
+    log('场景 2b 通过：首次验证单次刷新并清除 AI 标记');
+
     await testGameAIClassification(store);
     await testMixedReadySockets(baseUrl, tokens.verify_guard);
     finish(0, 'client_verify 测试通过');
