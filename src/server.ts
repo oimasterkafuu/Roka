@@ -1570,10 +1570,13 @@ const boot = async (): Promise<void> => {
         authService.verifyClientSig(sessionSid, lobbyService.md5(socket.id), data.sig)
       ) {
         lobbyService.humanVerified.add(socket.id);
+        const lobbyId = lobbyService.lobbyOfSid.get(socket.id);
+        if (lobbyId) {
+          lobbyService.reorderLobbyForVerification(lobbyId);
+        }
         // WebCrypto 摘要是异步的：client_verify 可能晚于进房到达，此时首帧
         // room_update 已按未验证渲染（[AI] 误标的存量显示）。验证一旦落地
         // 立即向所在房间重发 room_update，不等下一次房间状态变化。
-        const lobbyId = lobbyService.lobbyOfSid.get(socket.id);
         if (lobbyId) {
           lobbyService.emitRoomUpdate(io, lobbyId);
         }

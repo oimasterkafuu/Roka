@@ -209,8 +209,8 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
     client.inGame = Boolean(data?.in_game);
     if (!autoReady || !client.clientId || !Array.isArray(data?.players) || data?.in_game) return;
     const self = data.players.find((player) => String(player?.sid || '') === client.clientId);
-    const need = Number.parseInt(String(data?.need ?? '0'), 10) || 0;
-    if (self && !self.ready && Number(self.team) !== 0 && need > 1) {
+    const playing = data.players.filter((player) => Number(player.team) !== 0).length;
+    if (self && !self.ready && Number(self.team) !== 0 && playing >= 2) {
       socket.emit('change_ready', { ready: true });
     }
   });
