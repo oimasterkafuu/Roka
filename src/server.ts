@@ -1562,6 +1562,7 @@ const boot = async (): Promise<void> => {
     // client_verify 在进房之前完成验证（消除「进房瞬间开局」首帧误标与
     // set_id 晚到的时序竞态），room_heartbeat 保留为常规周期路径。
     const markHumanVerified = (data?: { sig?: unknown }): void => {
+      if (lobbyService.humanVerified.has(socket.id)) return;
       const sessionSid = socket.data.sessionSid;
       if (
         typeof sessionSid === 'string' &&
