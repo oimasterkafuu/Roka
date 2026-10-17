@@ -154,6 +154,7 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
     general: [-1, -1],
     board: null, // { grid_type, army_cnt, fog, fogFieldSeen, fogFieldAbsent }
     frames: 0,
+    updates: [],
   };
 
   socket.on('set_id', (id) => {
@@ -175,6 +176,7 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
   socket.on('update', (data) => {
     if (!client.board) return;
     client.frames += 1;
+    client.updates.push(data);
     if (typeof data.fog === 'undefined') client.board.fogFieldAbsent = true;
     else client.board.fogFieldSeen = true;
     const merge = (key, flat) => {
@@ -264,9 +266,7 @@ async function main() {
   log(`临时数据目录：${dataDir}，端口：${port}`);
 
   const { UserStore } = await import(pathToFileURL(path.join(rootDir, 'dist', 'auth-store.js')).href);
-  const { ensureRuntimeEnv } = await import(
-    pathToFileURL(path.join(rootDir, 'dist', 'runtime-env.js')).href
-  );
+  const { ensureRuntimeEnv } = await import(pathToFileURL(path.join(rootDir, 'dist', 'runtime-env.js')).href);
   const store = new UserStore(dataDir);
   await store.ensureReady();
   const env = ensureRuntimeEnv();
@@ -276,6 +276,7 @@ async function main() {
   const tokenD = await signUser(store, env.jwtSecret, 'fog_d', 'fog-pass-4');
   const tokenE = await signUser(store, env.jwtSecret, 'fog_e', 'fog-pass-5');
   const tokenS = await signUser(store, env.jwtSecret, 'fog_s', 'fog-pass-6');
+  const tokenT = await signUser(store, env.jwtSecret, 'fog_t', 'fog-pass-7');
 
   const server = spawn('node', [serverEntry, '--port', String(port)], {
     cwd: rootDir,
@@ -315,24 +316,74 @@ async function main() {
   log('场景 1b：观战者选择玩家视角');
   const s = createGameClient(baseUrl, { cookie: tokenS, room: ROOM_FOG, name: 'S', autoReady: false });
   await waitFor(() => s.frames >= 2, 10_000, '观战者收到初始全图帧');
-  const countGenerals = (client) =>
-    client.board.grid_type.filter((code) => code >= 100 && code < 150).length;
+  await waitFor(() => s.updates.some((frame) => frame.is_diff === true), 10_000, '观战者收到差分帧');
+  const firstSpectatorFull = s.updates[0];
+  const firstSpectatorDiff = s.updates[1];
+  if (!firstSpectatorFull || firstSpectatorFull.is_diff !== false) {
+    throw new Error('观战者首帧必须是全量帧');
+  }
+  if (firstSpectatorDiff?.is_diff !== true || !Array.isArray(firstSpectatorDiff.grid_type)) {
+    throw new Error('同一外部 sid 的连续观战帧应使用可解析的差分数组');
+  }
+  const serializedLength = (frame) =>
+    ['grid_type', 'army_cnt', 'isolated', 'fog'].reduce(
+      (total, key) => total + JSON.stringify(frame[key] ?? []).length,
+      0,
+    );
+  if (serializedLength(firstSpectatorDiff) >= serializedLength(firstSpectatorFull)) {
+    throw new Error('观战者第二帧差分数组应小于首个全量数组');
+  }
+  const countGenerals = (client) => client.board.grid_type.filter((code) => code >= 100 && code < 150).length;
   const countFogged = (client) => client.board.fog.filter((v) => v).length;
   if (!s.board.fogFieldSeen || countFogged(s) !== 0 || countGenerals(s) !== 2) {
     throw new Error('观战者默认应为全图视野（fog 全 0、双方主城可见）');
   }
+  const switchStart = s.updates.length;
   s.socket.emit('spectate_view', { team: 1 });
-  await waitFor(() => countFogged(s) > 0, 10_000, '观战者切换到队伍 1 视角');
+  await waitFor(
+    () => s.updates.length > switchStart && countFogged(s) > 0,
+    10_000,
+    '观战者切换到队伍 1 视角',
+  );
+  const switchFrame = s.updates[switchStart];
+  if (!switchFrame || switchFrame.is_diff !== false) {
+    throw new Error('观战视角切换后应立即发送全量帧并重置差分基线');
+  }
+  await waitFor(
+    () => s.updates.slice(switchStart + 1).some((frame) => frame.is_diff === true),
+    10_000,
+    '观战者视角切换后收到差分帧',
+  );
   assertFogInvariants(s);
   log('观战者队伍视角满足迷雾不变量');
   a.socket.emit('spectate_view', { team: 2 });
   await sleep(1200);
   assertFogInvariants(a);
   log('存活参赛者的视角切换请求已被忽略');
+  const fullStart = s.updates.length;
   s.socket.emit('spectate_view', { team: 0 });
-  await waitFor(() => s.frames >= 2 && countFogged(s) === 0 && countGenerals(s) === 2, 10_000, '观战者切回全图');
+  await waitFor(
+    () => s.frames >= 2 && countFogged(s) === 0 && countGenerals(s) === 2,
+    10_000,
+    '观战者切回全图',
+  );
+  if (s.updates[fullStart]?.is_diff !== false) {
+    throw new Error('切回全图后应立即发送全量帧并重置差分基线');
+  }
   log('场景 1b 通过：观战视角可切换且不泄漏、可恢复全图');
   s.socket.disconnect();
+  const rejoined = createGameClient(baseUrl, { cookie: tokenS, room: ROOM_FOG, name: 'S', autoReady: false });
+  await waitFor(() => rejoined.frames >= 1, 10_000, '移除后重新加入的观战者收到首帧');
+  if (rejoined.updates[0]?.is_diff !== false) {
+    throw new Error('移除后重新加入的观战者必须收到新的全量帧');
+  }
+  rejoined.socket.disconnect();
+  const s2 = createGameClient(baseUrl, { cookie: tokenT, room: ROOM_FOG, name: 'S2', autoReady: false });
+  await waitFor(() => s2.frames >= 1, 10_000, '独立 sid 观战者收到首帧');
+  if (s2.updates[0]?.is_diff !== false) {
+    throw new Error('独立 sid 观战者必须从自己的全量基线开始');
+  }
+  s2.socket.disconnect();
   a.socket.disconnect();
   b.socket.disconnect();
 
