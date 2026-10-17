@@ -304,7 +304,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               房间状态快照：
               <code
                 >{ speed, allow_team, fog, multi_line, map_size, map_token, map_token_custom, map_mode,
-                map_region, in_game, update_queued, players, ready, need }</code
+                map_region, in_game, update_queued, players, ready, need, ready_counts }</code
               >。<code>fog=true</code> 表示本房间开启了迷雾远征；<code>multi_line=true</code>
               表示本房间开启了多线争锋（对局协议变化见 5.6）；<code>map_token_custom=true</code>
               表示当前种子为房主自定义（对局结束后沿用不重随机）；<code>map_mode</code>/<code
@@ -333,13 +333,14 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             </td>
           </tr>
           <tr>
-            <th><code>ready</code> / <code>need</code></th>
+            <th><code>ready</code> / <code>need</code> / <code>ready_counts</code></th>
             <td>
-              当前已准备人数 / 开局所需人数。<code>need = floor(参赛人数 / 2) + 1</code>（参赛者少于 2 人时为
-              0）。<code>ready &gt;= need</code> 且 <code>need &gt; 0</code> 即自动开局（简单多数）；<code
-                >need &lt;= 1</code
-              >
-              时不会开局。组队模式下若所有参赛者处于同一队伍，服务端拒绝开局并提示调整队伍。
+              <code>ready</code>/<code>need</code> 分别为全体参赛者准备数和旧版多数门槛（floor(参赛人数 / 2) +
+              1；不足 2 人时为 0），不再作为开局判据；标量达标不代表两组均达标，客户端应用参赛人数而非 need >
+              1 判断能否准备；<code>ready_counts</code>
+              的 human/ai 分别给出 ready、need、total。观战席不计，每个非空组按 ceil(total / 2)
+              计算，所有非空组达标且总参赛人数至少 2
+              人才自动开局。组队模式下若所有参赛者处于同一队伍，服务端拒绝开局并提示调整队伍。
             </td>
           </tr>
           <tr>
@@ -900,9 +901,9 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
           <li>
             开局时若所有参赛席位（<code>team !== 0</code>，观战不计）均未通过真人校验——即全 AI 房，含官方托管
             bot、令牌 bot 与第三方用户 bot——该局强制以 4x
-            速度进行，不受房间速度设置影响，房间内会收到系统提示；任一参赛席位是真人则不强制。 AI
-            与已验证真人混合参赛时，须所有已验证真人准备好且满足原有多数门槛，AI 多数票不能替真人开局； 纯
-            AI、纯真人沿用多数规则，观战席不计。
+            速度进行，不受房间速度设置影响，房间内会收到系统提示；任一参赛席位是真人则不强制。
+            非观战成员按已验证真人与 AI（未通过真人校验的连接）分别统计，每个非空组准备人数须达到
+            ceil(该组人数 / 2)，空组自动满足；两组均达标且总参赛人数至少 2 人才自动开局。
           </li>
           <li>
             对局结束后的自动重新准备是策略自己的行为（由后续

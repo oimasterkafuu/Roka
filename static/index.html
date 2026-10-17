@@ -502,9 +502,22 @@
               .text(
                 item.running
                   ? '游戏中'
-                  : item.need < 2
+                  : item.playing < 2
                     ? '人数不足'
-                    : (item.ready || 0) + '/' + item.need + ' 准备',
+                    : Object.keys(item.ready_counts || {})
+                        .filter(function (kind) {
+                          return item.ready_counts[kind].total > 0;
+                        })
+                        .map(function (kind) {
+                          return (
+                            (kind === 'human' ? '真人' : 'AI') +
+                            ' ' +
+                            item.ready_counts[kind].ready +
+                            '/' +
+                            item.ready_counts[kind].need
+                          );
+                        })
+                        .join('，'),
               )
               .appendTo($tr);
             $body.append($tr);

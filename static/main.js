@@ -1235,16 +1235,40 @@ socket.on('room_update', function (data) {
     $('#force-start').prop('disabled', true);
     $('#force-start').attr('class', '');
     $('#force-start').html('系统即将排队更新，请稍等');
-  } else if (!roomRunning && data.need > 1) {
+  } else if (
+    !roomRunning &&
+    data.players.filter(function (player) {
+      return player.team !== 0;
+    }).length >= 2
+  ) {
     $('#force-start').css('display', 'block');
     $('#force-start').prop('disabled', false);
-    $('#force-start').html('强制开局 ' + data.ready + ' / ' + data.need);
+    var counts = data.ready_counts || {};
+    var countText = ['human', 'ai']
+      .filter(function (kind) {
+        return counts[kind] && counts[kind].total > 0;
+      })
+      .map(function (kind) {
+        return (kind === 'human' ? '真人' : 'AI') + ' ' + counts[kind].ready + '/' + counts[kind].need;
+      })
+      .join('，');
+    $('#force-start').html('我准备好了');
+    $('#force-start').attr('title', countText);
+    $('#ready-counts').text(countText).show();
   } else {
     ready_state = 0;
     $('#force-start').css('display', 'none');
+    $('#ready-counts').hide();
     $('#force-start').prop('disabled', false);
   }
-  if (!roomRunning && !deploy_queued && data.need > 1 && ready_state) {
+  if (
+    !roomRunning &&
+    !deploy_queued &&
+    data.players.filter(function (player) {
+      return player.team !== 0;
+    }).length >= 2 &&
+    ready_state
+  ) {
     $('#force-start').attr('class', 'inverted');
   } else {
     $('#force-start').attr('class', '');

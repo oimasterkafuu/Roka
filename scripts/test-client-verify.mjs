@@ -327,7 +327,7 @@ async function testReadyPolicy(store) {
       assert.equal(starts, 1, '普通玩家准备后允许开局');
     }
   }
-  log('场景 6 通过：混合房普通玩家全员准备 + 原有多数门槛，纯 bot/观战/纯人类规则保持');
+  log('场景 6 通过：真人与 AI 分组向上取半，观战忽略');
 }
 
 function waitSocket(socket, event, predicate = () => true) {
@@ -453,6 +453,36 @@ async function main() {
     assert.equal(me.data?.stamp, undefined, '/api/auth/me 不再下发 stamp');
     const stampVerify = await fetchStamp(baseUrl, tokens[USER_VERIFY]);
     assert.ok(stampVerify.length > 0, '游戏页注入非空 stamp');
+
+    // Late verification through either event must transfer host once, without repeat churn.
+    for (const event of ['client_verify', 'room_heartbeat']) {
+      const room = event === 'client_verify' ? 'late-verify' : 'late-heartbeat';
+      const first = await connectSocket(baseUrl, 'verify-bot-token-2', 'Late AI');
+      const firstId = await first.setIdPromise;
+      const firstJoined = waitRoomUpdateFor(first.socket, firstId);
+      first.socket.emit('join_game_room', { room });
+      await firstJoined;
+      const late = await connectSocket(baseUrl, tokens[USER_VERIFY], 'Late human');
+      const lateId = await late.setIdPromise;
+      const joined = waitSocket(late.socket, 'room_update', (data) => data.players.some((p) => p.sid === lateId));
+      late.socket.emit('join_game_room', { room });
+      assert.equal((await joined).players[0].sid, firstId, 'unverified member does not displace AI host');
+      let updates = 0;
+      late.socket.on('room_update', () => { updates++; });
+      const reordered = waitSocket(late.socket, 'room_update', (data) => data.players[0].sid === lateId);
+      const sig = computeSig(stampVerify, lateId);
+      late.socket.emit(event, { sig });
+      const update = await reordered;
+      assert.equal(update.players[0].ai, undefined);
+      assert.equal(updates, 1, `${event}: first verification emits once`);
+      late.socket.emit('client_verify', { sig });
+      late.socket.emit('room_heartbeat', { sig });
+      await sleep(300);
+      assert.equal(updates, 1, `${event}: repeated verification causes no churn`);
+      late.socket.disconnect();
+      first.socket.disconnect();
+    }
+    log('late verification: client_verify and room_heartbeat host transfer and dedup passed');
 
     // 场景 2：普通 JWT 连接不发任何 sig，自动识别为 AI。
     const { socket: socketPlain, setIdPromise: plainSetIdPromise } = await connectSocket(
