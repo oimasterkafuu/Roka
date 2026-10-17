@@ -737,7 +737,9 @@ async function loadAccountProfile() {
     if (!res.ok) throw '';
     const data = await res.json();
     account_name = data.username;
-    session_stamp = typeof data.stamp == 'string' ? data.stamp : '';
+    // 会话戳只随游戏页 HTML 注入（不再经 JSON 接口下发），socket 直连的 bot 取不到。
+    const stampMeta = document.querySelector('meta[name="roka-session-stamp"]');
+    session_stamp = stampMeta && typeof stampMeta.content == 'string' ? stampMeta.content : '';
     // 拿到 stamp 立即验证一次（早于 joinGameRoom），消除进房瞬间开局的误标竞态。
     sendClientVerify();
   } catch {

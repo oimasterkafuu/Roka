@@ -167,13 +167,7 @@ function render() {
       for (var d = 0; d < 4; d++)
         if (have_route[d][i][j]) {
           if (scale > 1) txt += '<div class="' + dire_class[d] + '">' + dire_char[d] + '</div>';
-          else
-            txt +=
-              '<div class="' +
-              dire_class[d] +
-              '"><div class="txt">' +
-              dire_char[d] +
-              '</div></div>';
+          else txt += '<div class="' + dire_class[d] + '"><div class="txt">' + dire_char[d] + '</div></div>';
         }
       if (have_build[i][j]) {
         var hasB = have_build[i][j].indexOf('b') >= 0;
