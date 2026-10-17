@@ -2,9 +2,9 @@
 // 临时数据目录起 dist 服务 + socket.io-client 真实连接，覆盖
 //   1) 真人 JWT 连接按公式算 sig 后发 client_verify（不进房、不等心跳）→
 //      进房后房间列表（room_update）该成员不带 ai 标记；
-//   2) 不发 sig 的普通连接不带 ai 标记，仍正常参战；
+//   2) 不发 sig 的 JWT 连接带 ai 标记，仍正常参战；
 //   3) 回归：room_heartbeat 携带 sig 的老路径仍生效；
-//   4) bot 令牌连接带 ai；聚焦测试覆盖全 bot 加速与排行榜身份；
+//   4) bot 令牌连接带 ai；聚焦测试覆盖全 AI 加速与排行榜身份；
 //   5) 混合房准备门槛、真实 socket 开局与离开等待房不影响 rating。
 // 运行：pnpm run test:client-verify（需 dist 产物，缺失时自动 pnpm run build）。
 
@@ -196,8 +196,10 @@ async function testGameAIClassification(store) {
   const { GameEngine } = await import(pathToFileURL(path.join(rootDir, 'dist/game-engine.js')).href);
   const originalCreate = GameEngine.create;
   let captured;
+  let duringCreate;
   GameEngine.create = async (conf, _sids, _ids, _gid, callbacks) => {
     captured = { conf, callbacks };
+    duringCreate?.(callbacks);
     return { startGame() {} };
   };
   const io = {
@@ -207,32 +209,45 @@ async function testGameAIClassification(store) {
     },
   };
   try {
-    for (const browserParticipant of [true, false]) {
+    for (const kind of ['unverified', 'human', 'spectator']) {
       const lobby = new LobbyService({}, store);
-      lobby.joinLobby('bot-a', 'bot_a', 'ai-test', { bot: true });
-      lobby.joinLobby('bot-b', 'bot_b', 'ai-test', { bot: true });
+      // 两个普通 JWT 型成员均无 bot 标志，也必须识别为 AI。
+      lobby.joinLobby('ai-a', 'bot_a', 'ai-test');
+      lobby.joinLobby('ai-b', 'bot_b', 'ai-test');
       lobby.joinLobby('browser', USER_PLAIN, 'ai-test');
       const players = lobby.lobbyPlayers.get('ai-test');
-      players.find((player) => player.sid === 'browser').team = browserParticipant ? 1 : 0;
+      if (kind !== 'unverified') lobby.humanVerified.add('browser');
+      players[2].team = kind === 'spectator' ? 0 : 1;
       lobby.lobbyConfig.get('ai-test').speed = 2;
-      // 真人验证集合不能覆盖已确认的 bot 身份。
-      lobby.humanVerified.add('bot-a');
+      const expected = [true, true, kind === 'unverified', false, false];
+      const checkSnapshot = (callbacks) => {
+        const entries = [1, 2, 3, 999, 0].map((id) => ({ id, ai: true }));
+        callbacks.annotateLeaderboard(entries);
+        assert.deepEqual(
+          entries.map((entry) => entry.ai),
+          expected,
+          `${kind}: 开局身份快照与未知席位`,
+        );
+      };
+      duringCreate = (callbacks) => {
+        // 引擎工厂尚未返回时即可能发帧，不能依赖稍后赋值的 gameRef。
+        checkSnapshot(callbacks);
+        lobby.humanVerified.clear();
+        lobby.humanVerified.add('ai-a');
+        players[0].sid = 'rebound-ai-a';
+        players.reverse();
+        players.pop();
+        checkSnapshot(callbacks);
+      };
       await lobby.startGame(io, 'ai-test');
       assert.equal(
         captured.conf.speed,
-        browserParticipant ? 2 : 4,
-        '普通未验证参战者阻止强制加速，纯 bot 参战时才强制 4x（观战者不计）',
+        kind === 'human' ? 2 : 4,
+        '未验证参战者均为 AI；已验证观战者不阻止 4x，真人参战保留配置速度',
       );
-      const entries = players.map((_, index) => ({ id: index + 1 }));
-      entries.push({ id: 999 });
-      captured.callbacks.annotateLeaderboard(entries);
-      assert.deepEqual(
-        entries.map((entry) => entry.ai),
-        [true, true, false, false],
-        '排行榜只标记已确认 bot，普通玩家与未知席位均不标记',
-      );
+      checkSnapshot(captured.callbacks);
     }
-    log('场景 5 通过：混合对局保持 2x，纯 bot 参战强制 4x，排行榜仅标记 bot');
+    log('场景 5 通过：JWT 全 AI 4x、真人参战 2x、真人观战忽略、开局及换绑/移除后的身份快照稳定');
   } finally {
     GameEngine.create = originalCreate;
   }
@@ -249,13 +264,31 @@ async function testReadyPolicy(store) {
       return this;
     },
   };
-  for (const kind of ['mixed', 'pure-bot', 'spectator', 'pure-human', 'majority', 'mixed-majority']) {
+  for (const kind of [
+    'mixed',
+    'pure-bot',
+    'spectator',
+    'pure-human',
+    'majority',
+    'mixed-majority',
+    'unverified',
+  ]) {
     const lobby = new LobbyService({}, store);
     const bot = kind === 'mixed' || kind === 'pure-bot' || kind === 'spectator' || kind === 'mixed-majority';
     lobby.joinLobby('a', 'bot_a', kind, { bot });
     lobby.joinLobby('b', 'bot_b', kind, { bot });
     if (kind !== 'pure-bot') lobby.joinLobby('ordinary', USER_PLAIN, kind);
+    if (kind !== 'pure-bot' && kind !== 'unverified') lobby.humanVerified.add('ordinary');
+    if (kind === 'pure-human' || kind === 'majority') {
+      lobby.humanVerified.add('a');
+      lobby.humanVerified.add('b');
+    }
+    // mixed 中两个 AI 无 bot 标志，验证门槛不能依赖令牌鉴权。
     const players = lobby.lobbyPlayers.get(kind);
+    if (kind === 'mixed')
+      players.forEach((player) => {
+        delete player.bot;
+      });
     players.forEach((player) => {
       player.ready = player.sid !== 'ordinary';
     });
@@ -312,6 +345,8 @@ async function testMixedReadySockets(baseUrl, token) {
       initCount++;
     });
     const joined = waitRoomUpdateFor(ordinary, id);
+    const me = await api(baseUrl, token, '/api/auth/me');
+    ordinary.emit('client_verify', { sig: computeSig(me.data.stamp, id) });
     ordinary.emit('join_game_room', { room });
     await joined;
     const bots = [];
@@ -405,7 +440,7 @@ async function main() {
     assert.equal(me.status, 200, '/api/auth/me 对已登录会话返回 200');
     assert.equal(typeof me.data?.stamp, 'string', '/api/auth/me 下发 stamp');
 
-    // 场景 2：普通连接不发任何 sig，不能据此推断为 AI。
+    // 场景 2：普通 JWT 连接不发任何 sig，自动识别为 AI。
     const { socket: socketPlain, setIdPromise: plainSetIdPromise } = await connectSocket(
       baseUrl,
       tokens[USER_PLAIN],
@@ -415,9 +450,9 @@ async function main() {
     const plainEntryPromise = waitRoomUpdateFor(socketPlain, plainSetId);
     socketPlain.emit('join_game_room', { room: 'verifyroom' });
     const plainEntry = await plainEntryPromise;
-    assert.equal(plainEntry.ai, undefined, '未验证普通连接不带 ai 标记');
+    assert.equal(plainEntry.ai, true, '未验证 JWT 连接自动带 ai 标记');
     assert.ok(plainEntry.team > 0, '未验证普通连接仍是参战成员');
-    log('场景 2 通过：未验证普通连接不带 ai 标记，仍正常参战');
+    log('场景 2 通过：未验证 JWT 连接带 ai 标记，仍正常参战');
 
     // 场景 1：client_verify 新路径——连接后拿到 set_id 立即发 sig，再进房。
     const { socket: socketVerify, setIdPromise: verifySetIdPromise } = await connectSocket(
@@ -426,12 +461,12 @@ async function main() {
       'Verify',
     );
     const verifySetId = await verifySetIdPromise;
-    socketVerify.emit('client_verify', { sig: computeSig(me.data.stamp, verifySetId) });
-    await sleep(300);
+    // 不等待 ack、心跳或延时：同一连接紧接着发送 join，断言首次含自己的 room_update。
     socketVerify.on('room_update', (data) => {
       assert.equal(data.players[0].sid, verifySetId, 'client_verify 仍让已验证成员优先成为房主');
     });
     const verifyEntryPromise = waitRoomUpdateFor(socketVerify, verifySetId);
+    socketVerify.emit('client_verify', { sig: computeSig(me.data.stamp, verifySetId) });
     socketVerify.emit('join_game_room', { room: 'verifyroom' });
     const verifyEntry = await verifyEntryPromise;
     assert.equal(verifyEntry.ai, undefined, 'client_verify 验证后进房不带 ai 标记');
