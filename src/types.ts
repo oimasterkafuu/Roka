@@ -92,7 +92,13 @@ export interface RoomUpdatePayload {
   update_queued: boolean;
   players: RoomPlayerView[];
   ready: number;
+  /** Legacy majority threshold; 0 when fewer than two participants. Not a start gate. */
   need: number;
+  /** Readiness split by verified humans and AI; spectators are excluded. */
+  ready_counts: {
+    human: { ready: number; need: number; total: number };
+    ai: { ready: number; need: number; total: number };
+  };
 }
 
 export interface MovePayload {
@@ -279,6 +285,7 @@ export interface RoomListItem {
   spectators: number;
   ready: number;
   need: number;
+  ready_counts: RoomUpdatePayload['ready_counts'];
   running: boolean;
   /** 多线争锋房间标记（仅在为 true 时下发）：首页房间列表据此显示模式标识。 */
   multi_line?: boolean;

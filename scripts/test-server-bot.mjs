@@ -17,7 +17,9 @@
 // 10) 调 POST /api/admin/bots/stop 停止并确认列表清空、状态文件已清除。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 180 秒。
 
+import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -87,6 +89,7 @@ function finish(code, message) {
     return;
   }
   finished = true;
+  process.exitCode = code;
   cleanup();
   log(message);
   setTimeout(() => process.exit(code), 300).unref();
@@ -405,17 +408,29 @@ async function main() {
   }
   log('anti-human 校验通过：不可托管模板 random-patch-bot 被 400 拒绝');
 
+  // 模拟真实浏览器完成验证，避免未验证 JWT 被计入 AI 组并提前开局。
+  const gamePage = await fetch(`${baseUrl}/games/${ANTI_ROOM}`, {
+    headers: { cookie: `auth_token=${encodeURIComponent(userToken)}` },
+  });
+  const stamp = (await gamePage.text()).match(/<meta name="roka-session-stamp" content="([^"]*)" \/>/)?.[1];
+  assert.ok(stamp, '游戏页必须提供真人验证戳');
   const antiSocket = ioClient(baseUrl, {
     auth: { token: userToken },
     transports: ['websocket'],
   });
+  const antiClientId = new Promise((resolve) => antiSocket.once('set_id', resolve));
+  let antiRoom;
+  antiSocket.on('room_update', (data) => { antiRoom = data; });
   await new Promise((resolve, reject) => {
     antiSocket.once('connect', resolve);
     antiSocket.once('connect_error', reject);
   });
   try {
-    antiSocket.emit('join_game_room', { room: ANTI_ROOM });
-    await waitRoomUpdate(
+    const clientId = await antiClientId;
+    antiSocket.emit('client_verify', {
+      sig: createHash('sha256').update(`${stamp}:${clientId}`).digest('hex'),
+    });
+    const joined = waitRoomUpdate(
       antiSocket,
       (d) =>
         d.allow_team === false &&
@@ -424,15 +439,19 @@ async function main() {
       15_000,
       'anti-human bot 独占房间时组队默认关闭',
     );
+    antiSocket.emit('join_game_room', { room: ANTI_ROOM });
+    const joinedRoom = await joined;
+    assert.equal(joinedRoom.players.find((p) => p.uid === NORMAL_USER)?.ai, undefined, '房主必须通过真人验证');
     log('anti-human 校验通过：allowTeam=true 的 bot 独占房间时组队默认关闭，由房主决定');
 
-    await waitRoomUpdate(
+    if (!antiRoom.players.find((p) => p.uid === ANTI_USER)?.ready) await waitRoomUpdate(
       antiSocket,
       (d) => d.players.find((p) => p.uid === ANTI_USER)?.ready === true,
       20_000,
       'anti-human bot 自动准备',
     );
-    log('anti-human 校验通过：bot 无需聊天命令即自动准备');
+    assert.equal(antiRoom.in_game, false, '真人尚未准备时，Bot 自动准备不得提前开局');
+    log('anti-human 校验通过：bot 无需聊天命令即自动准备，真人未准备时仍在等待区');
 
     const fogOn = waitRoomUpdate(antiSocket, (d) => d.fog === true, 10_000, 'allowFog 开启');
     antiSocket.emit('change_game_conf', { fog: true });
@@ -504,6 +523,7 @@ async function main() {
     }
     log('anti-human 校验通过：人类换队不被服务端修正，bot 检测后主动避让');
 
+    // 开局帧会覆盖 room_update 中的 ready 状态；以服务端真实的对局初始化事件确认开局。
     antiSocket.emit('change_ready', { ready: true });
     const antiInitDeadline = Date.now() + 20_000;
     while (Date.now() < antiInitDeadline && !sawAntiInitMap) {

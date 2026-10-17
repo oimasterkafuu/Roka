@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.67.2",
+  "version": "1.67.3",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -22,7 +22,8 @@
     "test:fog": "node scripts/test-fog.mjs",
     "test:multiline": "node scripts/test-multiline.mjs",
     "test:multiline-v2": "node scripts/test-multiline-v2.mjs",
-    "test": "pnpm run test:multiline-v2 && pnpm run test:multiline && pnpm run test:strategy && pnpm run test:fog && pnpm run test:bot && pnpm run test:server-bot && pnpm run test:lobby-guards && pnpm run test:lobby-dwell && pnpm run test:guest-access && pnpm run test:points && pnpm run test:deploy-update && pnpm run test:presence && pnpm run test:map-generation && pnpm run test:huaxia-season && pnpm run test:leaderboard && pnpm run test:storage && pnpm run test:auto-ban-policy && pnpm run test:replay-stats && pnpm run test:replay-cache && pnpm run test:profile-stat-label && pnpm run test:mentions && pnpm run test:crown-transfer && pnpm run test:admin-badge && pnpm run test:client-verify && pnpm run test:bot-dwell-cap",
+    "test:ready-counts": "node scripts/test-ready-counts.mjs",
+    "test": "pnpm run test:ready-counts && pnpm run test:multiline-v2 && pnpm run test:multiline && pnpm run test:strategy && pnpm run test:fog && pnpm run test:bot && pnpm run test:server-bot && pnpm run test:lobby-guards && pnpm run test:lobby-dwell && pnpm run test:guest-access && pnpm run test:points && pnpm run test:deploy-update && pnpm run test:presence && pnpm run test:map-generation && pnpm run test:huaxia-season && pnpm run test:leaderboard && pnpm run test:storage && pnpm run test:auto-ban-policy && pnpm run test:replay-stats && pnpm run test:replay-cache && pnpm run test:profile-stat-label && pnpm run test:mentions && pnpm run test:crown-transfer && pnpm run test:admin-badge && pnpm run test:client-verify && pnpm run test:bot-dwell-cap",
     "test:presence": "node scripts/test-presence.mjs",
     "test:map-generation": "pnpm exec tsx scripts/test-map-generation.mjs",
     "test:huaxia-season": "pnpm exec tsx scripts/test-huaxia-season.mjs",

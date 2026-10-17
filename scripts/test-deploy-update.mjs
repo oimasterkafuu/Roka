@@ -74,6 +74,7 @@ function finish(code, message) {
     return;
   }
   finished = true;
+  process.exitCode = code;
   cleanup();
   log(message);
   setTimeout(() => process.exit(code), 300).unref();
@@ -197,8 +198,8 @@ function createRoomClient(baseUrl, { cookie, room, autoReady = true, name }) {
       return;
     }
     const self = data.players.find((player) => String(player?.sid || '') === client.clientId);
-    const need = Number.parseInt(String(data?.need ?? '0'), 10) || 0;
-    if (self && !self.ready && Number(self.team) !== 0 && need > 1) {
+    const playing = data.players.filter((player) => Number(player.team) !== 0).length;
+    if (self && !self.ready && Number(self.team) !== 0 && playing >= 2) {
       socket.emit('change_ready', { ready: true });
     }
   });
@@ -336,8 +337,8 @@ async function main() {
   if (typeof endFrame.replay !== 'string' || endFrame.replay.length === 0) {
     throw new Error('清算终局帧缺少回放 id（回放未正常存档）');
   }
-  if (!a.chats.some((text) => text.includes('按当前名次提前结算'))) {
-    throw new Error('未收到清算提示消息');
+  if (!a.chats.some((text) => text.includes('系统即将更新') && text.includes('按当前名次结算'))) {
+    throw new Error('未收到部署排队时的清算提示消息');
   }
   log(`场景 3a 通过：宽限 ${settleElapsed}ms 后按当前名次清算，回放 ${endFrame.replay}`);
 
