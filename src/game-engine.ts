@@ -48,6 +48,13 @@ import {
 
 type Move = [number, number, number, number, MoveMode];
 
+type SpectatorSnapshot = {
+  grid_type: number[];
+  army_cnt: number[];
+  isolated: number[];
+  fog: number[] | null;
+};
+
 /**
  * 玩家队列操作：'m' 推兵 / 'b' 建造指挥所（X）/ 'c' 升级主城（C）。
  */
@@ -255,6 +262,9 @@ export class GameEngine {
    */
   private readonly spectatorViewTeams: Map<string, number>;
 
+  /** 外部观战者按 sid 维护的最后实际下发快照，用于差分广播。 */
+  private readonly spectatorSnapshotLast: Map<string, SpectatorSnapshot>;
+
   private readonly afkLastMoveTurn: number[];
 
   private readonly afkLastMoveAt: number[];
@@ -388,6 +398,7 @@ export class GameEngine {
     this.replayTurnSurrenders = Array.from({ length: pcnt }, () => new Set<number>());
     this.externalSpectatorSids = new Set<string>();
     this.spectatorViewTeams = new Map<string, number>();
+    this.spectatorSnapshotLast = new Map<string, SpectatorSnapshot>();
     this.afkLastMoveTurn = Array.from({ length: pcnt }, () => 0);
     this.afkLastMoveAt = Array.from({ length: pcnt }, () => this.startAt);
     this.disconnectedAt = Array.from({ length: pcnt }, () => null);
@@ -968,25 +979,53 @@ export class GameEngine {
           historyHash = await this.saveHistory();
           payload.replay = historyHash;
         }
-        // 外部观战者默认共享全图帧；选了玩家视角的单独按该队伍视野出全量帧
-        // （观战者基数小，且复用本 tick 的 visionCache，不影响正常广播）。
+        // 外部观战者按 sid 独立维护基线；视角切换/新连接后的首帧为全量，
+        // 后续与玩家一样只发送数组差分。
         for (const spectatorSid of this.externalSpectatorSids) {
           const povTeam = this.fogEnabled ? (this.spectatorViewTeams.get(spectatorSid) ?? 0) : 0;
-          if (povTeam > 0) {
-            const povPayload = this.fullFrameFromSnapshot(
-              this.buildTeamFoggedSnapshot(povTeam, visionCache),
-              stat,
-            );
-            if (historyHash) {
-              povPayload.replay = historyHash;
-            }
-            this.update(spectatorSid, povPayload);
-          } else {
-            this.update(spectatorSid, payload);
+          const spectatorSnapshot =
+            povTeam > 0
+              ? this.buildTeamFoggedSnapshot(povTeam, visionCache)
+              : this.buildSnapshotFor(-1, visionCache);
+          const previous = this.spectatorSnapshotLast.get(spectatorSid);
+          const full = stat || !previous;
+          const spectatorPayload: UpdatePayload = {
+            grid_type: full
+              ? spectatorSnapshot.grid_type
+              : getDiff(spectatorSnapshot.grid_type, previous.grid_type),
+            army_cnt: full
+              ? spectatorSnapshot.army_cnt
+              : getDiff(spectatorSnapshot.army_cnt, previous.army_cnt),
+            isolated: full
+              ? spectatorSnapshot.isolated
+              : getDiff(spectatorSnapshot.isolated, previous.isolated),
+            lst_move: { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm' },
+            leaderboard,
+            turn: this.turn,
+            kills,
+            game_end: stat,
+            is_diff: !full,
+          };
+          if (spectatorSnapshot.fog) {
+            spectatorPayload.fog = full
+              ? spectatorSnapshot.fog
+              : getDiff(spectatorSnapshot.fog, previous.fog ?? []);
           }
+          if (historyHash) spectatorPayload.replay = historyHash;
+          this.spectatorSnapshotLast.set(spectatorSid, this.cloneSpectatorSnapshot(spectatorSnapshot));
+          this.update(spectatorSid, spectatorPayload);
         }
       }
     }
+  }
+
+  private cloneSpectatorSnapshot(snapshot: SpectatorSnapshot): SpectatorSnapshot {
+    return {
+      grid_type: [...snapshot.grid_type],
+      army_cnt: [...snapshot.army_cnt],
+      isolated: [...snapshot.isolated],
+      fog: snapshot.fog ? [...snapshot.fog] : null,
+    };
   }
 
   private buildFullVisionPayload(gameEnd: boolean): UpdatePayload {
@@ -1276,12 +1315,15 @@ export class GameEngine {
         ? { multi_line: true, line_count: Math.max(1, ...this.pmove.map((lines) => lines.length)) }
         : {}),
     });
-    this.update(sid, this.buildFullVisionPayload(false));
+    const snapshot = this.buildSnapshotFor(-1, new Map<number, number[]>());
+    this.spectatorSnapshotLast.set(sid, this.cloneSpectatorSnapshot(snapshot));
+    this.update(sid, this.fullFrameFromSnapshot(snapshot, false));
   }
 
   removeSpectator(sid: string): void {
     this.externalSpectatorSids.delete(sid);
     this.spectatorViewTeams.delete(sid);
+    this.spectatorSnapshotLast.delete(sid);
   }
 
   /**
@@ -1305,8 +1347,7 @@ export class GameEngine {
       povTeam > 0
         ? this.buildTeamFoggedSnapshot(povTeam, visionCache)
         : this.buildSnapshotFor(-1, visionCache);
-    // 基线 = 最后实际下发的快照：座位上（观战席/已战败）的接收者后续 diff 帧
-    // 以此为基准，外部观战者本就只收全量帧、无基线。
+    // 基线 = 最后实际下发的快照；视角切换后下一帧从新视野全量开始。
     const idx = this.playerSidToIndex.get(sid);
     if (idx !== undefined) {
       this.gridTypeLast[idx] = snapshot.grid_type;
@@ -1315,6 +1356,9 @@ export class GameEngine {
       if (snapshot.fog) {
         this.fogLast[idx] = snapshot.fog;
       }
+    }
+    if (this.externalSpectatorSids.has(sid)) {
+      this.spectatorSnapshotLast.set(sid, this.cloneSpectatorSnapshot(snapshot));
     }
     this.update(sid, this.fullFrameFromSnapshot(snapshot, false));
   }
@@ -1380,6 +1424,8 @@ export class GameEngine {
     if (typeof id === 'undefined') {
       return false;
     }
+    this.spectatorSnapshotLast.delete(oldSid);
+    this.spectatorSnapshotLast.delete(newSid);
     this.playerSidToIndex.delete(oldSid);
     this.playerSidToIndex.set(newSid, id);
     this.playerSids[id] = newSid;
