@@ -574,9 +574,12 @@ class LobbyService {
     const participants = players.filter((player) => player.team !== 0);
     const human = participants.filter((player) => this.humanVerified.has(player.sid));
     const ai = participants.filter((player) => !this.humanVerified.has(player.sid));
+    // 两人房（参战席位 ≤2）不设多数决：所有参战者都必须准备才开局；
+    // 三人及以上按组内过半（ceil(n/2)）放行。
+    const everyoneMustReady = participants.length <= 2;
     const count = (group: LobbyPlayer[]) => ({
       ready: group.filter((player) => player.ready).length,
-      need: Math.ceil(group.length / 2),
+      need: everyoneMustReady ? group.length : Math.ceil(group.length / 2),
       total: group.length,
     });
     return { human: count(human), ai: count(ai) };
