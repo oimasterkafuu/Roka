@@ -407,6 +407,26 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td><code>[x, y]</code>，你自己的主城坐标；观战者为 <code>[-1, -1]</code>。</td>
           </tr>
           <tr>
+            <th><code>next_seq</code></th>
+            <td>
+              可选，仅参赛席下发（观战席无自身队列不下发）：服务端为你分配的下一个操作序号。本地每入队一条
+              <code>attack</code>/<code>build</code> 指令即分配一个单调递增的 seq，必须从该值继续计数，与
+              <code>update.lst_moves</code> 下发的 seq 对齐摘除本地镜像队列。<strong
+                >断线重连换绑时也会随补发的 <code>init_map</code> 重新下发</strong
+              >（服务端序号已递增），收到后必须用它覆盖本地计数器，否则两端 seq 永久错位、lst_moves
+              永远摘不到队列项（移动箭头/建造标志永不消失）。
+            </td>
+          </tr>
+          <tr>
+            <th><code>queue_ops</code></th>
+            <td>
+              可选，仅参赛席下发：服务端当前为你保留的操作队列拷贝（元素形如
+              <code>{ kind: 'm', x, y, dx, dy, mode, seq }</code> 或
+              <code>{ kind: 'b' | 'c', x, y, seq }</code>），用于重建本地镜像队列；断线重连换绑时同样随
+              <code>init_map</code> 补发（换绑会清空服务端队列，此时为空数组）。
+            </td>
+          </tr>
+          <tr>
             <th><code>multi_line</code> / <code>队列项数量</code></th>
             <td>
               可选，仅房间开启「全局队列」时下发：<code>单一全局队列</code>，<code>队列项数量</code>
