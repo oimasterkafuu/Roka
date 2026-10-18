@@ -33,11 +33,21 @@ body.home .home-topbar {
   gap: 10px;
   margin-bottom: 18px;
 }
+body.home .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+body.home .brand-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: block;
+}
 body.home .brand-name {
   font-family: Quicksand-Bold, HYMaQiDuo-Bold;
   font-size: 30px;
   color: teal;
-  margin-right: 10px;
 }
 body.home .brand-sub {
   font-size: 13px;
