@@ -1796,7 +1796,10 @@ const boot = async (): Promise<void> => {
         }
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
-        lobbyService.sendLobbySystemMessage(io, roomVal, `${username} 加入了自定义房间。`);
+        lobbyService.sendLobbySystemMessage(io, roomVal, `${username} 加入了自定义房间。`, {
+          name: username,
+          verb: '加入了自定义房间。',
+        });
         // 不允许组队的托管策略 Bot 进房会强制关闭组队（见 lobby-service.joinLobby），补充提示。
         if (
           socket.data.isServerBot === true &&
@@ -1895,6 +1898,7 @@ const boot = async (): Promise<void> => {
         io,
         lobbyService.getLobbyVal(gid),
         `${nickname} 加入了${teamName}。`,
+        { name: nickname, verb: `加入了${teamName}。` },
       );
       lobbyService.emitHomeRooms(io);
     });
