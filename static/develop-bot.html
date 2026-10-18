@@ -688,12 +688,31 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           </li>
         </ul>
 
-        <h3>5.6 全局队列（multi-line）</h3>
+        <h3>5.6 队列模式：单线串行 / 全局队列（multi-line）</h3>
         <p>
-          房间可开关（默认关闭）。开启后每名玩家的全局队列<b>按需动态增长、条数不设上限</b>，每条队列
-          是一条独立的操作队列。<b>操作指令集完全不变</b>：<code>attack</code>/<code>build</code>/<code>clear_queue</code>/<code>pop_queue</code>。v2
-          起指令不再由客户端指定队列：<code>attack</code>/<code>build</code> 携带的可选
-          <code>line</code> 字段<b>被忽略</b>，服务端按下列起始点规则自动路由。
+          房间可开关（<code>multi_line</code>，默认关闭）。两种模式下指令都会进入每名玩家<b>唯一</b>的全局大队列（按到达顺序入队，入队分配单调递增
+          <code>seq</code>），区别只在每 Tick 的调度语义：
+        </p>
+        <ul>
+          <li>
+            <b>单线串行（默认，<code>multi_line=false</code>）</b>：每 Tick
+            每玩家只从大队列<b>头部</b>依次弹出指令，丢弃失效指令（校验失败或执行无效），直到成功执行<b>第一条有效指令</b>为止——每
+            Tick 每玩家最多执行一条操作，后续指令原地等待下一 Tick。被摘除的指令（执行 + 丢弃）的
+            <code>seq</code> 全部进入当 Tick 的 <code>lst_moves</code> 下发。
+          </li>
+          <li>
+            <b>全局队列并行（<code>multi_line=true</code>）</b>：把队列中的移动指令看作有向边，每 Tick 所有<b
+              >入度为 0</b
+            >
+            的头部指令各执行一步（真并行，issue
+            #107）；建造指令在其格子不再是任何待发移动指令的出发格时尝试执行。空队列不占
+            Tick，只有一条指令链时节奏与单线完全一致。
+          </li>
+        </ul>
+        <p>
+          全局队列模式开启后，指令不再由客户端指定队列：<code>attack</code>/<code>build</code> 携带的可选
+          <code>line</code> 字段<b>被忽略</b>，服务端按下列起始点规则自动路由（单线模式同样忽略
+          <code>line</code>，所有指令按全局时间序串行）。
         </p>
         <ul>
           <li>
