@@ -264,7 +264,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td>
               可选字段 patch，仅房主可改，对局进行中不生效。合法字段：
               <code>speed</code>（0.5~4
-              浮点）、<code>allow_team</code>（bool）、<code>fog</code>（bool，迷雾远征）、<code>multi_line</code>（bool，多线争锋）、<code>map_size</code>（<code>normal|large</code>，其余值归一为
+              浮点）、<code>allow_team</code>（bool）、<code>fog</code>（bool，迷雾远征）、<code>multi_line</code>（bool，全局队列）、<code>map_size</code>（<code>normal|large</code>，其余值归一为
               <code>normal</code
               >）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>，未知值归一为
               <code>random</code
@@ -279,8 +279,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               房间内存在不允许组队的服务端托管策略 Bot 时不允许组队：<code>allow_team</code>
               开启请求会被拒绝（房间消息提示），且托管 Bot 进房时会强制关闭已开启的组队模式；允许组队的托管
               Bot 则由房主自由开关组队。同理，房间内存在第三方 Bot 或未允许迷雾的托管 Bot 时不允许开启
-              <code>fog</code>；存在第三方 Bot 或未允许多线的托管 Bot 时不允许开启
-              <code>multi_line</code>，这类 Bot 进房时会强制关闭已开启的迷雾/多线。
+              <code>fog</code>；存在第三方 Bot 或未允许全局队列的托管 Bot 时不允许开启
+              <code>multi_line</code>，这类 Bot 进房时会强制关闭已开启的迷雾/全局队列。
             </td>
           </tr>
           <tr>
@@ -305,8 +305,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               <code
                 >{ speed, allow_team, fog, multi_line, map_size, map_token, map_token_custom, map_mode,
                 map_region, in_game, update_queued, players, ready, need, ready_counts }</code
-              >。<code>fog=true</code> 表示本房间开启了迷雾远征；<code>multi_line=true</code>
-              表示本房间开启了多线争锋（对局协议变化见 5.6）；<code>map_token_custom=true</code>
+              >。<code>fog=true</code> 表示本房间开启了迷雾远征；<code>单一全局队列</code>
+              表示本房间开启了全局队列（对局协议变化见 5.6）；<code>map_token_custom=true</code>
               表示当前种子为房主自定义（对局结束后沿用不重随机）；<code>map_mode</code>/<code
                 >map_region</code
               >
@@ -327,7 +327,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               <code>server_bot</code> 仅在服务端托管策略 Bot 成员上为 <code>true</code>；
               <code>server_bot_allow_team</code> / <code>server_bot_allow_fog</code> /
               <code>server_bot_allow_multi_line</code> 仅在 <code>server_bot</code> 为
-              <code>true</code> 时下发，表示该 Bot 是否允许组队/迷雾/多线； <code>bot</code> 在任意 Bot
+              <code>true</code> 时下发，表示该 Bot 是否允许组队/迷雾/全局队列； <code>bot</code> 在任意 Bot
               成员（含第三方 Bot）上为 <code>true</code>；<code>ai</code> 在未通过真人校验的连接上为
               <code>true</code>（见第 2 节 <code>client_verify</code>）。
             </td>
@@ -382,7 +382,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
         <div class="tips">
           <b>提示：</b>房间内只剩 bot（所有剩余成员
           <code>bot=true</code>，观战的人类除外）时，服务端会在准备阶段把房间设置整体重置为默认值（speed
-          1、不组队、无迷雾、无多线、随机新种子、<code>map_mode=random</code>、<code>map_size=normal</code>）并提示；对局进行中不触发，等本局结束后才重置。
+          1、不组队、无迷雾、无全局队列、随机新种子、<code>map_mode=random</code>、<code>map_size=normal</code>）并提示；对局进行中不触发，等本局结束后才重置。
         </div>
       </section>
 
@@ -407,10 +407,10 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td><code>[x, y]</code>，你自己的主城坐标；观战者为 <code>[-1, -1]</code>。</td>
           </tr>
           <tr>
-            <th><code>multi_line</code> / <code>line_count</code></th>
+            <th><code>multi_line</code> / <code>队列项数量</code></th>
             <td>
-              可选，仅房间开启「多线争锋」时下发：<code>multi_line=true</code>，<code>line_count</code>
-              为当前战线数（v2 起战线条数按需动态增长、不设上限，开局为
+              可选，仅房间开启「全局队列」时下发：<code>单一全局队列</code>，<code>队列项数量</code>
+              为当前队列数（v2 起队列条数按需动态增长、不设上限，开局为
               1）。缺省即为单线对局。调度与路由规则见 5.6。
             </td>
           </tr>
@@ -484,8 +484,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               Tick 被执行操作之前因条件不满足被自动丢弃的队首操作数（无执行时为本 Tick
               全部丢弃数）；失效操作会被服务器直接移出队列，后续操作在同一 Tick
               继续尝试执行。观战者收到的是占位值（全 -1，<code>skip=0</code>）。
-              <code>line</code> 仅多线争锋对局下发：本 Tick 调度的是第几条战线（0 起，skip
-              丢弃也发生在该战线）。
+              <code>line</code> 仅全局队列对局下发：本 Tick 调度的是第几条队列（0 起，skip
+              丢弃也发生在该队列）。
             </td>
           </tr>
           <tr>
@@ -688,45 +688,45 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           </li>
         </ul>
 
-        <h3>5.6 多线争锋（multi-line）</h3>
+        <h3>5.6 全局队列（multi-line）</h3>
         <p>
-          房间可开关（默认关闭）。开启后每名玩家的战线队列<b>按需动态增长、条数不设上限</b>，每条战线
+          房间可开关（默认关闭）。开启后每名玩家的全局队列<b>按需动态增长、条数不设上限</b>，每条队列
           是一条独立的操作队列。<b>操作指令集完全不变</b>：<code>attack</code>/<code>build</code>/<code>clear_queue</code>/<code>pop_queue</code>。v2
-          起指令不再由客户端指定战线：<code>attack</code>/<code>build</code> 携带的可选
+          起指令不再由客户端指定队列：<code>attack</code>/<code>build</code> 携带的可选
           <code>line</code> 字段<b>被忽略</b>，服务端按下列起始点规则自动路由。
         </p>
         <ul>
           <li>
-            路由（起始点规则）：每条战线跟踪自己的<b>起始点</b>（队列第一条待发指令的出发格），并随执行
-            沿已执行指令链逐格推进。新移动指令的出发格是某条战线的起始点时：该起始点上待发方向一致则
-            并入该战线，方向不同则<b>分兵</b>另立战线（同一出发点的多个方向各自成线）；出发格不是任何
-            战线的起始点、但已是某条战线待发指令的到达格时，<b>挂到第一条匹配战线的队尾</b>等待接续
+            路由（起始点规则）：每条队列跟踪自己的<b>起始点</b>（队列第一条待发指令的出发格），并随执行
+            沿已执行指令链逐格推进。新移动指令的出发格是某条队列的起始点时：该起始点上待发方向一致则
+            并入该队列，方向不同则<b>分兵</b>另立队列（同一出发点的多个方向各自成线）；出发格不是任何
+            队列的起始点、但已是某条队列待发指令的到达格时，<b>挂到第一条匹配队列的队尾</b>等待接续
             （链式挂尾，issue #107——例：先发「从 A 移到 B」再发「从 B 移到 C」，B 是 A→B 的到达格
-            而非起始点，B→C 依次入队同一战线，A→B 执行后 B→C 自动接续执行，与单线手动排队
-            语义一致）。其余情况开辟新战线。建造指令无方向：建造格是某条战线起始点则并入该战线，
-            否则另立战线，不参与链式挂尾判定。
+            而非起始点，B→C 依次入队同一队列，A→B 执行后 B→C 自动接续执行，与单线手动排队
+            语义一致）。其余情况开辟新队列。建造指令无方向：建造格是某条队列起始点则并入该队列，
+            否则另立队列，不参与链式挂尾判定。
           </li>
           <li>
             撤回（Q/E 全局化）：<code>clear_queue</code> 与
             <code>pop_queue</code>
-            在多线对局中语义相同——按指令入队的全局时间序撤回<b>最后一条</b>指令（可能位于任意一条
-            战线的队尾），不再区分战线，携带的 <code>line</code> 字段被忽略。单线对局语义不变（Q 清空队列、E
+            在全局队列对局中语义相同——按指令入队的全局时间序撤回<b>最后一条</b>指令（可能位于任意一条
+            队列的队尾），不再区分队列，携带的 <code>line</code> 字段被忽略。单线对局语义不变（Q 清空队列、E
             撤销队尾）。
           </li>
           <li>
-            调度：<b>真并行</b>（issue #107）——每 Tick 遍历该玩家全部战线，每条<b>非空</b>战线
-            各自丢弃失效队首并执行首条有效操作（不再轮转游标 1/N）。空战线不占
-            Tick，只维护一条战线时节奏与单线完全一致；回放协议（ops-v1）无需改动。
+            调度：<b>真并行</b>（issue #107）——每 Tick 遍历该玩家全部队列，每条<b>非空</b>队列
+            各自丢弃失效队首并执行首条有效操作（不再轮转游标 1/N）。空队列不占
+            Tick，只维护一条队列时节奏与单线完全一致；回放协议（ops-v1）无需改动。
           </li>
           <li>
-            <code>lst_move.line</code> 标明本 Tick 汇报的战线（含 skip 丢弃）：同一 Tick
-            多条战线都有活动时只汇报<b>最后一条活动战线</b>，bot 据此逐战线同步本地队列镜像，
-            未被汇报的战线按本地镜像自行推进即可。
+            <code>旧版 lst_move.line</code> 标明本 Tick 汇报的队列（含 skip 丢弃）：同一 Tick
+            多条队列都有活动时只汇报<b>最后一条活动队列</b>，bot 据此逐队列同步本地队列镜像，
+            未被汇报的队列按本地镜像自行推进即可。
           </li>
           <li>
-            不消费多线字段的旧客户端/bot 照常对局：其指令由服务端按起始点规则自动归入战线（首个指令落 在战线
-            0），行为与单线局等价。房间内存在第三方 Bot 或未允许多线的托管 Bot 时无法开启该模式（见 3 与
-            7.2）。
+            不消费全局队列字段的旧客户端/bot 照常对局：其指令由服务端按起始点规则自动归入队列（首个指令落
+            在队列 0），行为与单线局等价。房间内存在第三方 Bot 或未允许全局队列的托管 Bot 时无法开启该模式（见
+            3 与 7.2）。
           </li>
         </ul>
       </section>
@@ -745,7 +745,7 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               >）。入队时只解析字段不校验局面；执行时校验：起点归己方、非孤军、兵力 &gt; 0、目标不是山。<code
                 >line</code
               >
-              可选但<b>已被忽略</b>（多线争锋 v2 起战线由服务端按起始点规则自动路由，见 5.6）。
+              可选但<b>已被忽略</b>（v3 全局队列 起队列由服务端按起始点规则自动路由，见 5.6）。
             </td>
           </tr>
           <tr>
@@ -794,13 +794,13 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
         <p>
           <code>{ x, y, op, line? }</code>。<code>op='b'</code> 建造指挥所（相当于 X 键），<code>op='c'</code>
           升级主城（相当于 C 键），均消耗 50 兵；其他 <code>op</code> 值直接被忽略。与
-          <code>attack</code> 共用同一队列（多线争锋 v2 对局中按起始点规则自动归入战线：建造格是
-          某条战线的起始点则并入该战线，否则另立战线；可选 <code>line</code> 字段已被忽略），每 Tick
+          <code>attack</code> 共用同一队列（v3 全局队列 对局中按起始点规则自动归入队列：建造格是
+          某条队列的起始点则并入该队列，否则另立队列；可选 <code>line</code> 字段已被忽略），每 Tick
           每玩家最多执行一条队列操作，队列长度无上限。服务端入队只记录合法的
           <code>op</code>
           与坐标，不校验地形、归属、兵力或连通，可排在队列很靠后的未来位置；执行时才校验（指挥所须建在己方普通地块、主城须由己方指挥所升级、兵力
           ≥ 50、非孤军），条件不满足会自动跳过（通过
-          <code>lst_move.skip</code> 告知丢弃数量），不会产生消耗。在普通地块上连发 <code>b</code> +
+          <code>旧版 lst_move.skip</code> 告知丢弃数量），不会产生消耗。在普通地块上连发 <code>b</code> +
           <code>c</code> 两条即可两 Tick 后建成主城（相当于在普通地块按 C 键）。
         </p>
 
@@ -809,7 +809,7 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
           <tr>
             <th><code>clear_queue</code></th>
             <td>
-              单线对局：清空当前玩家待执行操作队列（Q 键）。多线争锋 v2 对局：与
+              单线对局：清空当前玩家待执行操作队列（Q 键）。v3 全局队列 对局：与
               <code>pop_queue</code> 语义相同——按入队的全局时间序撤回最后一条指令， 携带的
               <code>line</code> 字段被忽略。
             </td>
@@ -817,8 +817,8 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
           <tr>
             <th><code>pop_queue</code></th>
             <td>
-              删除队尾一条待执行操作（E 键）。多线争锋 v2 对局：按入队的全局时间序撤回
-              <b>全局最后一条</b>指令（可位于任意战线队尾），不区分战线，携带的 <code>line</code>
+              删除队尾一条待执行操作（E 键）。v3 全局队列 对局：按入队的全局时间序撤回
+              <b>全局最后一条</b>指令（可位于任意队列队尾），不区分队列，携带的 <code>line</code>
               字段被忽略。
             </td>
           </tr>
@@ -891,12 +891,12 @@ socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
           </li>
           <li>
             <code>allowTeam=false</code> 的托管 bot 进房会强制关闭组队模式，房主开启组队的请求也会被拒绝；
-            未允许迷雾的 bot（含第三方 bot）同理强制关闭迷雾；未允许多线的 bot（含第三方
-            bot）同理强制关闭多线争锋。
+            未允许迷雾的 bot（含第三方 bot）同理强制关闭迷雾；未允许全局队列的 bot（含第三方
+            bot）同理强制关闭全局队列。
           </li>
           <li>
-            <code>allowMultiLine=true</code> 仅表示该 bot 被允许进入多线局；bot 自身的最简策略可以只使用战线
-            0（行为等价单线），不需要实现多战线调度也能正常对局。
+            <code>allowMultiLine=true</code> 仅表示该 bot 被允许进入全局队列局；bot
+            自身的最简策略可以只使用队列 0（行为等价单线），不需要实现多队列调度也能正常对局。
           </li>
           <li>
             开局时若所有参赛席位（<code>team !== 0</code>，观战不计）均未通过真人校验——即全 AI 房，含官方托管
@@ -979,7 +979,7 @@ function applyUpdate(frame) {
             <code>ROKA_BOT_TOKENS</code> 合成账号）。
           </li>
           <li>
-            <b>队列节流</b>：每 Tick 每条战线最多执行一条队列操作（多线对局为全部非空战线真并行， 见
+            <b>队列节流</b>：每 Tick 每条队列最多执行一条队列操作（全局队列对局为全部非空队列真并行， 见
             5.6）。一帧内连发多条 <code>attack</code>/<code>build</code>
             只是入队，不会立刻全部生效；规划节奏时按 Tick 计算。
           </li>
@@ -992,8 +992,8 @@ function applyUpdate(frame) {
           </li>
           <li>
             <b>操作确认</b>：服务端不回 ACK，用 <code>update.lst_move</code> 对照本地队列：<code>skip</code>
-            条队首操作被丢弃后，本 Tick 执行的那一条与 <code>lst_move</code> 匹配。多线对局按
-            <code>lst_move.line</code> 对照对应战线。
+            条队首操作被丢弃后，本 Tick 执行的那一条与 <code>lst_move</code> 匹配。全局队列对局按
+            <code>旧版 lst_move.line</code> 对照对应队列。
           </li>
           <li>
             <b>孤军不可操作</b>：<code>isolated != 0</code> 的格子不可推兵、不可建造，推兵校验会直接失败。
@@ -1013,5 +1013,10 @@ function applyUpdate(frame) {
     <script src="/vendor/katex/katex.min.js"></script>
     <script src="/vendor/katex/auto-render.min.js"></script>
     <script src="/docs.js"></script>
+    <p>
+      <strong>v3 队列协议：</strong>实时 update 使用 <code>lst_moves</code> 序号数组，数组包含本 Tick
+      执行和丢弃的全部操作 seq；空数组表示无出队。<code>init_map.next_seq</code> 与
+      <code>queue_ops</code> 用于重连对齐。旧回放仍兼容标量 <code>lst_move</code> 与 <code>line</code>。
+    </p>
   </body>
 </html>

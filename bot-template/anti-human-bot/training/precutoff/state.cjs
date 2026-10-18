@@ -35,7 +35,7 @@ class BoardState {
     Object.assign(this, updates);
     if (!payload.is_diff && payload.fog === undefined) this.fog.fill(0);
     this.turn = payload.turn;
-    this.lastMove = payload.lst_move ? { ...payload.lst_move, turn: payload.turn } : null;
+    this.lastMove = Array.isArray(payload.lst_moves) ? { seqs: payload.lst_moves, turn: payload.turn } : (payload.lst_move ? { ...payload.lst_move, turn: payload.turn } : null);
     this.ended = Boolean(payload.game_end);
     if (Array.isArray(payload.leaderboard)) {
       this.leaderboard = payload.leaderboard.map((p) => ({ ...p }));

@@ -84,18 +84,15 @@ function render() {
       have_build[i][j] = '';
     }
   }
-  // 多线争锋：逐条队列绘制待发箭头，着色与普通对局完全一致（不区分战线）；
-  // 单线对局 routes 只有一条，等价于原单队列渲染。
-  for (var l = 0; l < routes.length; l++) {
-    for (var i = 0; i < routes[l].length; i++) {
-      var queued = routes[l][i];
-      if (queued.build) {
-        // 同一格可能同时排有“建指挥所 + 升级主城”两步，角标需要累积
-        var prevBuild = have_build[queued.x][queued.y];
-        if (prevBuild.indexOf(queued.build) < 0) have_build[queued.x][queued.y] = prevBuild + queued.build;
-      } else {
-        have_route[queued.d][queued.x][queued.y] = true;
-      }
+  // 遍历唯一大队列绘制待发箭头。
+  for (var i = 0; i < route.length; i++) {
+    var queued = route[i];
+    if (queued.build) {
+      // 同一格可能同时排有“建指挥所 + 升级主城”两步，角标需要累积
+      var prevBuild = have_build[queued.x][queued.y];
+      if (prevBuild.indexOf(queued.build) < 0) have_build[queued.x][queued.y] = prevBuild + queued.build;
+    } else {
+      have_route[queued.d][queued.x][queued.y] = true;
     }
   }
   var displayGrid = grid_type;
@@ -271,69 +268,13 @@ function update(data, options) {
     }
     general_order = general_kept.concat(general_new);
   }
-  // 服务器每 Tick 会丢弃所调度队列队首的失效操作（skip 个），本地队列严格按 skip
-  // 同步，然后再匹配本 Tick 实际执行的那一条操作。多线争锋对局按 lst_move.line
-  // 定位本 Tick 被调度的战线队列；单线对局沿用唯一队列。v2：同步的同时维护
-  // route_order 全局入队序镜像，并在确认执行的移动指令上推进 line_heads 起始点镜像。
-  var syncLine = multi_line_mode && typeof data.lst_move.line == 'number' ? data.lst_move.line : 0;
-  if (syncLine < 0 || syncLine >= routes.length) syncLine = 0;
-  var syncQueue = routes[syncLine];
-  if (syncQueue.length) {
-    var removedOps = 0;
-    var skipOps = data.lst_move.skip | 0;
-    if (skipOps > syncQueue.length) skipOps = syncQueue.length;
-    if (skipOps > 0) {
-      syncQueue = syncQueue.slice(skipOps);
-      removedOps += skipOps;
-    }
-    if (data.lst_move.x != -1 && syncQueue.length) {
-      if (data.lst_move.op == 'b' || data.lst_move.op == 'c') {
-        for (var i = 0; i < syncQueue.length; i++) {
-          if (
-            syncQueue[i].build == data.lst_move.op &&
-            syncQueue[i].x == data.lst_move.x &&
-            syncQueue[i].y == data.lst_move.y
-          ) {
-            syncQueue.splice(i, 1);
-            removedOps += 1;
-            break;
-          }
-        }
-      } else {
-        while (syncQueue.length) {
-          if (syncQueue[0].build) {
-            syncQueue = syncQueue.slice(1);
-            removedOps += 1;
-            continue;
-          }
-          var t1 = data.lst_move,
-            t2 = {
-              x: syncQueue[0].x,
-              y: syncQueue[0].y,
-              dx: syncQueue[0].x + dire[syncQueue[0].d].x,
-              dy: syncQueue[0].y + dire[syncQueue[0].d].y,
-              half: syncQueue[0].mode == 1,
-            };
-          syncQueue = syncQueue.slice(1);
-          removedOps += 1;
-          if (t1.x == t2.x && t1.y == t2.y && t1.dx == t2.dx && t1.dy == t2.dy && t1.half == t2.half) {
-            // R3 起始点镜像推进：确认执行的移动指令从当前起始点出发时，起始点前进一格。
-            var head = line_heads[syncLine];
-            if (head && head[0] == t1.x && head[1] == t1.y) line_heads[syncLine] = [t1.dx, t1.dy];
-            break;
-          }
-        }
-      }
-    }
-    // route_order 与队列内容一一对应：按队首移除数同步摘除该战线最早的登记。
-    for (var k = 0; k < removedOps; k++) {
-      var orderIdx = route_order.indexOf(syncLine);
-      if (orderIdx < 0) break;
-      route_order.splice(orderIdx, 1);
-    }
-    routes[syncLine] = syncQueue;
-    if (syncLine == 0) route = syncQueue;
-  }
+  // 新协议按 seq 摘除本地大队列；旧回放按 lst_move 首项兼容。
+  var seqs = Array.isArray(data.lst_moves) ? data.lst_moves : [];
+  if (seqs.length)
+    route = route.filter(function (op) {
+      return seqs.indexOf(op.seq) < 0;
+    });
+  else if (data.lst_move && data.lst_move.x != -1) route.shift();
   render();
   lb = data.leaderboard.sort(function (a, b) {
     if (a.army != b.army) return a.army > b.army ? -1 : 1;

@@ -4,9 +4,9 @@ import { toMoveDirection } from './replay-helpers';
 
 const cloneQueuedOp = (op: QueuedOp): QueuedOp => {
   if (op.kind === 'm') {
-    return { kind: 'm', x: op.x, y: op.y, dx: op.dx, dy: op.dy, mode: op.mode };
+    return { kind: 'm', x: op.x, y: op.y, dx: op.dx, dy: op.dy, mode: op.mode, seq: 0 };
   }
-  return { kind: op.kind, x: op.x, y: op.y };
+  return { kind: op.kind, x: op.x, y: op.y, seq: 0 };
 };
 
 const buildTurnMoves = (lastMoves: Array<QueuedOp | null>): Array<QueuedOp | null> => {

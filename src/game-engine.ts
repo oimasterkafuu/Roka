@@ -59,8 +59,8 @@ type SpectatorSnapshot = {
  * 玩家队列操作：'m' 推兵 / 'b' 建造指挥所（X）/ 'c' 升级主城（C）。
  */
 type QueuedOp =
-  | { kind: 'm'; x: number; y: number; dx: number; dy: number; mode: MoveMode }
-  | { kind: 'b' | 'c'; x: number; y: number };
+  | { kind: 'm'; x: number; y: number; dx: number; dy: number; mode: MoveMode; seq: number }
+  | { kind: 'b' | 'c'; x: number; y: number; seq: number };
 
 /**
  * 建造指挥所 / 升级主城的兵力消耗。
@@ -89,7 +89,9 @@ interface GameCallbacks {
       m: number;
       player_ids: string[];
       general: GeneralPos;
-      /** 多线争锋对局标记与战线数（仅多线对局下发；缺省为单线）。 */
+      next_seq?: number;
+      queue_ops?: QueuedOp[];
+      /** 全局队列模式对局标记与队列数（仅全局队列模式下发；缺省为单线）。 */
       multi_line?: boolean;
       line_count?: number;
     },
@@ -186,11 +188,10 @@ export class GameEngine {
   private readonly fogEnabled: boolean;
 
   /**
-   * 多线争锋开关（房间设置）。v2 语义：开启后每名玩家的战线队列按需动态增长
-   * （条数不设上限），新指令按起始点/链式挂尾规则自动路由到战线（R1/R3/R4），
-   * Q/E 撤回全局最后一条指令（R2）；关闭时恒为单条战线，行为与单线完全一致。
+   * 全局队列模式开关（房间设置）。v2 语义：开启后每名玩家的队列队列按需动态增长
+   * （条数不设上限），新指令按起始点/链式挂尾规则自动路由到队列（R1/R3/R4），
+   * Q/E 撤回全局最后一条指令（R2）；关闭时恒为单条队列，行为与单线完全一致。
    */
-  private readonly multiLine: boolean;
 
   private readonly rng: SeededRandom;
 
@@ -201,36 +202,34 @@ export class GameEngine {
   private readonly pstat: number[];
 
   /**
-   * 操作队列：玩家 → 战线 → 操作序列。初始每玩家一条战线；多线对局随指令
-   * 路由动态开辟新战线（不设上限），单线对局恒为一条。
+   * 操作队列：玩家 → 队列 → 操作序列。初始每玩家一条队列；全局队列模式随指令
+   * 路由动态开辟新队列（不设上限），单线对局恒为一条。
    */
-  private readonly pmove: QueuedOp[][][];
+  private readonly pmove: QueuedOp[][];
 
   /**
-   * 每条战线的起始点（队列第一条待发指令的出发格，随已执行指令链逐格推进）。
-   * 与 pmove[player] 平行；多线路由（链式挂尾/分兵）只发生在多线对局。
+   * 每条队列的起始点（队列第一条待发指令的出发格，随已执行指令链逐格推进）。
+   * 与 pmove[player] 平行；全局队列路由（链式挂尾/分兵）只发生在全局队列模式。
    */
-  private readonly pqueueHead: Array<Array<{ x: number; y: number } | null>>;
+  private readonly nextSeq: number[];
 
   /**
-   * 全局入队时间序登记（元素 = 战线编号，与队列内容一一对应）：
-   * 多线对局的 Q/E 全局撤回（R2）据此定位最后一条指令所在战线。
+   * 全局入队时间序登记（元素 = 队列编号，与队列内容一一对应）：
+   * 全局队列模式的 Q/E 全局撤回（R2）据此定位最后一条指令所在队列。
    */
-  private readonly pmoveOrder: number[][];
 
   private readonly lstMove: Array<QueuedOp | null>;
 
   /**
-   * 本 Tick 汇报的战线编号（多线对局随 lst_move 下发，供客户端按战线同步队列）：
-   * 并行调度下每 Tick 可能多条战线各执行一条，协议只汇报最后一条有活动
-   * （执行或丢弃）的战线，lst_move/lst_skip/line 三者始终归属同一战线。
+   * 本 Tick 汇报的队列编号（全局队列模式随 lst_move 下发，供客户端按队列同步队列）：
+   * 并行调度下每 Tick 可能多条队列各执行一条，协议只汇报最后一条有活动
+   * （执行或丢弃）的队列，lst_move/lst_skip/line 三者始终归属同一队列。
    */
-  private readonly lstMoveLine: number[];
+  private readonly lstMoves: number[][];
 
   /**
    * 本 Tick 每名玩家被执行操作前丢弃的失效队首操作数（用于客户端精确同步队列显示）。
    */
-  private readonly lstSkip: number[];
 
   private readonly watching: boolean[];
 
@@ -342,7 +341,6 @@ export class GameEngine {
     this.mapMode = gameConf.map_mode;
     this.mapRegion = normalizeMapRegion(gameConf.map_region ?? DEFAULT_MAP_REGION);
     this.fogEnabled = gameConf.fog === true;
-    this.multiLine = gameConf.multi_line === true;
     this.mapSeed = resolveMapSeed(
       this.mapMode,
       this.mapMode === 'huaxia' ? `${this.mapRegion}:${this.mapToken}` : this.mapToken,
@@ -368,7 +366,7 @@ export class GameEngine {
       speed: gameConf.speed,
       allow_team: gameConf.allow_team,
       fog: gameConf.fog === true,
-      multi_line: this.multiLine,
+      multi_line: gameConf.multi_line === true,
       map_token: this.mapToken,
       map_mode: gameConf.map_mode,
       map_region: this.mapRegion,
@@ -380,13 +378,11 @@ export class GameEngine {
 
     const pcnt = playerSids.length;
     this.pstat = Array.from({ length: pcnt }, () => 0);
-    // 初始战线：单线对局恒为一条；多线对局从 0 条起步，随指令路由动态开辟（条数不设上限）。
-    this.pmove = Array.from({ length: pcnt }, () => (this.multiLine ? [] : [[] as QueuedOp[]]));
-    this.pqueueHead = Array.from({ length: pcnt }, () => (this.multiLine ? [] : [null]));
-    this.pmoveOrder = Array.from({ length: pcnt }, () => [] as number[]);
+    // 初始队列：单线对局恒为一条；全局队列模式从 0 条起步，随指令路由动态开辟（条数不设上限）。
+    this.pmove = Array.from({ length: pcnt }, () => [] as QueuedOp[]);
+    this.nextSeq = Array.from({ length: pcnt }, () => 1);
     this.lstMove = Array.from({ length: pcnt }, () => null);
-    this.lstMoveLine = Array.from({ length: pcnt }, () => 0);
-    this.lstSkip = Array.from({ length: pcnt }, () => 0);
+    this.lstMoves = Array.from({ length: pcnt }, () => [] as number[]);
     this.watching = Array.from({ length: pcnt }, () => true);
     this.spec = Array.from({ length: pcnt }, () => false);
     this.gridTypeLast = Array.from({ length: pcnt }, () => []);
@@ -424,10 +420,8 @@ export class GameEngine {
         m: engine.m,
         player_ids: [...playerIds],
         general: engine.generals[i],
-        // 多线争锋 v2：战线条数动态增长，开局时玩家尚无战线（协议下限报 1）。
-        ...(engine.multiLine
-          ? { multi_line: true, line_count: Math.max(1, engine.pmove[i]?.length ?? 0) }
-          : {}),
+        next_seq: engine.nextSeq[i],
+        queue_ops: engine.pmove[i].map((op) => ({ ...op })),
       });
     }
 
@@ -778,6 +772,7 @@ export class GameEngine {
       army_cnt: snapshot.army_cnt,
       isolated: snapshot.isolated,
       lst_move: { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm' },
+      lst_moves: [],
       leaderboard: this.buildLeaderboard(),
       turn: this.turn,
       kills: {},
@@ -817,26 +812,11 @@ export class GameEngine {
     return result;
   }
 
-  private toMovePayload(op: QueuedOp | null, skip = 0, line = 0): UpdatePayload['lst_move'] {
-    // 多线对局附带所调度战线编号，客户端据此按战线同步本地队列显示。
-    const lineField = this.multiLine ? { line } : {};
-    if (!op) {
-      return { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm', skip, ...lineField };
-    }
-    if (op.kind === 'm') {
-      return {
-        x: op.x,
-        y: op.y,
-        dx: op.dx,
-        dy: op.dy,
-        half: op.mode === 1,
-        mode: op.mode,
-        op: 'm',
-        skip,
-        ...lineField,
-      };
-    }
-    return { x: op.x, y: op.y, dx: -1, dy: -1, half: false, mode: 0, op: op.kind, skip, ...lineField };
+  private toMovePayload(op: QueuedOp | null): UpdatePayload['lst_move'] {
+    if (!op) return { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm' };
+    return op.kind === 'm'
+      ? { x: op.x, y: op.y, dx: op.dx, dy: op.dy, half: op.mode === 1, mode: op.mode, op: 'm', seq: op.seq }
+      : { x: op.x, y: op.y, dx: -1, dy: -1, half: false, mode: 0, op: op.kind, seq: op.seq };
   }
 
   /**
@@ -924,11 +904,7 @@ export class GameEngine {
           ? this.buildTeamFoggedSnapshot(povTeam, visionCache)
           : this.buildSnapshotFor(p, visionCache);
 
-      const lstMovePayload = this.toMovePayload(
-        p === -1 ? null : this.lstMove[p],
-        p === -1 ? 0 : this.lstSkip[p],
-        p === -1 ? 0 : this.lstMoveLine[p],
-      );
+      const lstMovePayload = this.toMovePayload(p === -1 ? null : this.lstMove[p]);
       const fullSnapshot = stat || p === -1 || this.turn % 50 === 0 || randomInt(51) === 0;
 
       const payload: UpdatePayload = fullSnapshot
@@ -937,6 +913,7 @@ export class GameEngine {
             army_cnt: snapshot.army_cnt,
             isolated: snapshot.isolated,
             lst_move: lstMovePayload,
+            lst_moves: p === -1 ? [] : [...this.lstMoves[p]],
             leaderboard,
             turn: this.turn,
             kills,
@@ -948,6 +925,7 @@ export class GameEngine {
             army_cnt: getDiff(snapshot.army_cnt, this.armyCntLast[p]),
             isolated: getDiff(snapshot.isolated, this.isolatedLast[p]),
             lst_move: lstMovePayload,
+            lst_moves: p === -1 ? [] : [...this.lstMoves[p]],
             leaderboard,
             turn: this.turn,
             kills,
@@ -971,8 +949,7 @@ export class GameEngine {
           this.fogLast[p] = snapshot.fog;
         }
         this.lstMove[p] = null;
-        this.lstMoveLine[p] = 0;
-        this.lstSkip[p] = 0;
+        this.lstMoves[p] = [];
         this.update(this.playerSids[p], payload);
       } else {
         if (stat) {
@@ -1000,6 +977,7 @@ export class GameEngine {
               ? spectatorSnapshot.isolated
               : getDiff(spectatorSnapshot.isolated, previous.isolated),
             lst_move: { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm' },
+            lst_moves: [],
             leaderboard,
             turn: this.turn,
             kills,
@@ -1044,6 +1022,7 @@ export class GameEngine {
       army_cnt: snapshot.army_cnt,
       isolated: snapshot.isolated,
       lst_move: { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm' },
+      lst_moves: [],
       leaderboard,
       turn: this.turn,
       kills: {},
@@ -1064,119 +1043,14 @@ export class GameEngine {
     return this.fullFrameFromSnapshot(this.buildSnapshotFor(p, new Map<number, number[]>()), gameEnd);
   }
 
-  /** 多线争锋是否开启（server.ts 的 Q/E 处理按此分派全局撤回或单线语义）。 */
-  get multiLineMode(): boolean {
-    return this.multiLine;
+  private enqueue(
+    player: number,
+    op:
+      | { kind: 'm'; x: number; y: number; dx: number; dy: number; mode: MoveMode }
+      | { kind: 'b' | 'c'; x: number; y: number },
+  ): void {
+    this.pmove[player].push({ ...op, seq: this.nextSeq[player]++ } as QueuedOp);
   }
-
-  /**
-   * 解析操作目标战线（兼容路径）：仅多线对局接受 line 参数（0 起，越界回退 0）；
-   * 单线对局恒为战线 0（旧客户端不带 line，行为不变）。
-   * 注意：多线争锋 v2 的 addMove/addBuild 不再使用 line 参数（见 routeMoveLine）。
-   */
-  private resolveLine(line?: number): number {
-    if (!this.multiLine || typeof line !== 'number' || !Number.isInteger(line)) {
-      return 0;
-    }
-    return line >= 0 ? line : 0;
-  }
-
-  /** 入队登记：维护全局入队时间序（R2 全局撤回据此定位最后一条指令）。 */
-  private markEnqueue(player: number, line: number): void {
-    this.pmoveOrder[player].push(line);
-  }
-
-  /** 出队登记：战线队列从队首移出一条操作时，移除该战线最早的一条入队登记。 */
-  private markDequeue(player: number, line: number): void {
-    const order = this.pmoveOrder[player];
-    const idx = order.indexOf(line);
-    if (idx >= 0) {
-      order.splice(idx, 1);
-    }
-  }
-
-  /** 开辟新战线（R1：条数按需动态增长，不设上限），返回新战线编号。 */
-  private openLine(player: number, head: { x: number; y: number } | null): number {
-    this.pmove[player].push([]);
-    this.pqueueHead[player].push(head);
-    return this.pmove[player].length - 1;
-  }
-
-  /** 清空某玩家全部战线：多线收敛为 0 条（随指令路由再开辟），单线恒为 1 条空战线。 */
-  private resetLines(player: number): void {
-    if (this.multiLine) {
-      this.pmove[player] = [];
-      this.pqueueHead[player] = [];
-    } else {
-      this.pmove[player] = [[] as QueuedOp[]];
-      this.pqueueHead[player] = [null];
-    }
-    this.pmoveOrder[player] = [];
-  }
-
-  /**
-   * 多线争锋 v2 的移动指令路由（R3/R4）：
-   * - 出发格是某条战线的起始点：该起始点上待发指令方向一致则并入该战线；
-   *   方向不同则分兵、另立战线（R4）。起始点上的指令永远不被覆盖。
-   * - 出发格不是任何战线的起始点、但已是某条战线待发指令的到达格：
-   *   挂到第一条匹配战线的队尾等待接续（R3 链式挂尾，issue #107——不再覆盖
-   *   丢弃；连点画链 A→B、B→C 依次入队同一条战线，与单线手动排队语义一致）。
-   *   到达格同时匹配多条战线时挂第一条匹配的战线。
-   * - 其余情况开辟新战线。
-   * 返回目标战线编号（可能等于当前条数 = 待开辟的新战线）。
-   */
-  private routeMoveLine(player: number, x: number, y: number, dx: number, dy: number): number {
-    const lines = this.pmove[player];
-    const heads = this.pqueueHead[player];
-    const dirx = dx - x;
-    const diry = dy - y;
-    let headMatched = false;
-    for (let l = 0; l < lines.length; l += 1) {
-      const head = heads[l];
-      if (!head || head.x !== x || head.y !== y) {
-        continue;
-      }
-      headMatched = true;
-      // 同一起始点可能挂多条战线（分兵）：方向相容（该起始点上待发方向一致
-      // 或没有从该点出发的待发指令）的第一条战线即归属；都不相容才另立战线。
-      const compatible = lines[l].every(
-        (op) =>
-          op.kind !== 'm' || op.x !== x || op.y !== y || (op.dx - op.x === dirx && op.dy - op.y === diry),
-      );
-      if (compatible) {
-        return l;
-      }
-    }
-    if (headMatched) {
-      return lines.length; // R4：起始点上的新方向，分兵另立战线（起始点指令不被覆盖）。
-    }
-    // R3 链式挂尾：出发格是某条战线待发指令的到达格时，挂到第一条匹配的战线队尾。
-    for (let l = 0; l < lines.length; l += 1) {
-      for (const op of lines[l]) {
-        if (op.kind === 'm' && op.dx === x && op.dy === y) {
-          return l;
-        }
-      }
-    }
-    return lines.length;
-  }
-
-  /**
-   * 多线争锋 v2 的建造指令路由：建造格是某条战线起始点则并入该战线，否则另立
-   * 战线（建造无方向，不参与 R3 链式挂尾判定）。
-   */
-  private routeBuildLine(player: number, x: number, y: number): number {
-    const lines = this.pmove[player];
-    const heads = this.pqueueHead[player];
-    for (let l = 0; l < lines.length; l += 1) {
-      const head = heads[l];
-      if (head && head.x === x && head.y === y) {
-        return l;
-      }
-    }
-    return lines.length;
-  }
-
   addMove(
     playerSid: string,
     x: number,
@@ -1184,120 +1058,31 @@ export class GameEngine {
     dx: number,
     dy: number,
     mode: MoveMode = 0,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     line?: number,
   ): void {
+    void line;
     const player = this.playerSidToIndex.get(playerSid);
-    if (typeof player === 'undefined') {
-      return;
-    }
-    if (this.pstat[player] === LEFT_GAME) {
-      return;
-    }
-    const op: QueuedOp = { kind: 'm', x, y, dx, dy, mode };
-    if (!this.multiLine) {
-      // 单线对局：唯一战线，行为与旧版完全一致（line 参数忽略）。
-      this.pmove[player][0].push(op);
-      this.markEnqueue(player, 0);
-      return;
-    }
-    // 多线争锋 v2：忽略客户端携带的 line，按起始点/链式挂尾规则自动路由（R1/R3/R4）。
-    const routed = this.routeMoveLine(player, x, y, dx, dy);
-    const target = routed < this.pmove[player].length ? routed : this.openLine(player, { x, y });
-    this.pmove[player][target].push(op);
-    if (!this.pqueueHead[player][target]) {
-      this.pqueueHead[player][target] = { x, y };
-    }
-    this.markEnqueue(player, target);
+    if (player === undefined || this.pstat[player] === LEFT_GAME) return;
+    this.enqueue(player, { kind: 'm', x, y, dx, dy, mode });
   }
-
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   addBuild(playerSid: string, x: number, y: number, kind: 'b' | 'c', line?: number): void {
     const player = this.playerSidToIndex.get(playerSid);
-    if (typeof player === 'undefined') {
-      return;
-    }
-    if (this.pstat[player] === LEFT_GAME) {
-      return;
-    }
-    const op: QueuedOp = { kind, x, y };
-    if (!this.multiLine) {
-      this.pmove[player][0].push(op);
-      this.markEnqueue(player, 0);
-      return;
-    }
-    // 多线争锋 v2：忽略 line，按起始点归属自动路由（建造不参与链式挂尾判定）。
-    const routed = this.routeBuildLine(player, x, y);
-    const target = routed < this.pmove[player].length ? routed : this.openLine(player, { x, y });
-    this.pmove[player][target].push(op);
-    if (!this.pqueueHead[player][target]) {
-      this.pqueueHead[player][target] = { x, y };
-    }
-    this.markEnqueue(player, target);
+    if (player === undefined || this.pstat[player] === LEFT_GAME) return;
+    this.enqueue(player, { kind, x, y });
   }
-
-  /** 清空操作队列：携带 line 时只清对应战线，缺省清空全部战线并收敛回单条空战线。 */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   clearQueue(playerSid: string, line?: number): void {
-    const player = this.playerSidToIndex.get(playerSid);
-    if (typeof player === 'undefined') {
-      return;
-    }
-    if (this.multiLine && typeof line === 'number' && Number.isInteger(line)) {
-      const target = this.resolveLine(line);
-      if (target >= this.pmove[player].length) {
-        return;
-      }
-      this.pmove[player][target] = [];
-      this.pmoveOrder[player] = this.pmoveOrder[player].filter((entry) => entry !== target);
-      return;
-    }
-    this.resetLines(player);
+    const p = this.playerSidToIndex.get(playerSid);
+    if (p !== undefined) this.pmove[p].length = 0;
   }
-
-  /** 撤销队尾：携带 line 时撤销对应战线队尾，缺省撤销战线 0（单线/兼容路径）。 */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   popQueue(playerSid: string, line?: number): void {
-    const player = this.playerSidToIndex.get(playerSid);
-    if (typeof player === 'undefined') {
-      return;
-    }
-    const target = this.resolveLine(line);
-    const queue = this.pmove[player][target];
-    if (queue && queue.length > 0) {
-      queue.pop();
-      const order = this.pmoveOrder[player];
-      const idx = order.lastIndexOf(target);
-      if (idx >= 0) {
-        order.splice(idx, 1);
-      }
-    }
+    const p = this.playerSidToIndex.get(playerSid);
+    if (p !== undefined) this.pmove[p].pop();
   }
-
-  /**
-   * 多线争锋 v2 的 Q/E 撤回（R2）：不区分战线，按指令入队的全局时间顺序
-   * 撤回最后一条指令（可能位于任意一条战线的队尾）。
-   */
   retractLast(playerSid: string): void {
-    const player = this.playerSidToIndex.get(playerSid);
-    if (typeof player === 'undefined') {
-      return;
-    }
-    const order = this.pmoveOrder[player];
-    while (order.length > 0) {
-      const line = order.pop() as number;
-      const queue = this.pmove[player][line];
-      if (queue && queue.length > 0) {
-        queue.pop();
-        return;
-      }
-    }
-    // 兜底：登记与队列失同步（不应发生）时从最后一条战线向前扫描。
-    for (let l = this.pmove[player].length - 1; l >= 0; l -= 1) {
-      const queue = this.pmove[player][l];
-      if (queue.length > 0) {
-        queue.pop();
-        return;
-      }
-    }
+    this.popQueue(playerSid);
   }
 
   addSpectator(sid: string): void {
@@ -1310,10 +1095,7 @@ export class GameEngine {
       m: this.m,
       player_ids: [...this.playerIds],
       general: [-1, -1],
-      // 多线争锋 v2：战线条数动态增长，对观战者下发当前各玩家最大战线数。
-      ...(this.multiLine
-        ? { multi_line: true, line_count: Math.max(1, ...this.pmove.map((lines) => lines.length)) }
-        : {}),
+      // 全局队列模式 v2：队列条数动态增长，对观战者下发当前各玩家最大队列数。
     });
     const snapshot = this.buildSnapshotFor(-1, new Map<number, number[]>());
     this.spectatorSnapshotLast.set(sid, this.cloneSpectatorSnapshot(snapshot));
@@ -1440,14 +1222,13 @@ export class GameEngine {
     this.watching[id] = true;
     this.afkLastMoveTurn[id] = this.turn;
     this.afkLastMoveAt[id] = Date.now();
-    this.resetLines(id);
+    this.pmove[id].length = 0;
     this.emitInitMap(newSid, {
       n: this.n,
       m: this.m,
       player_ids: [...this.playerIds],
       general: this.generals[id],
-      // 多线争锋 v2：战线条数按需动态增长，下发当前实际战线数（换绑清队后回初始态）。
-      ...(this.multiLine ? { multi_line: true, line_count: Math.max(1, this.pmove[id].length) } : {}),
+      // 全局队列模式 v2：队列条数按需动态增长，下发当前实际队列数（换绑清队后回初始态）。
     });
     // 换绑后补发全量帧：保留观战席/已战败玩家已选的观战视角；同时把 diff 基线
     // 对齐到本次补发的快照（客户端 init_map 已重置棋盘，后续 diff 以此为准）。
@@ -1872,76 +1653,33 @@ export class GameEngine {
       if (this.pstat[p] === LEFT_GAME) {
         continue;
       }
-      // 多线争锋真并行（issue #107）：每 Tick 遍历该玩家全部战线，每条非空战线
-      // 各自弹出失效队首并执行首条有效操作（不再从轮转游标起只调度一条战线）。
-      // 空战线不消耗 Tick——只有一条战线有操作时节奏与单线完全一致。
-      // lst_move/lst_skip/lst_move.line 每 Tick 只能汇报一条：记录最后一条有活动
-      // （执行或丢弃）的战线，三者始终归属同一战线；单线对局恒为战线 0，行为不变。
-      let lastActiveLine = -1;
-      let lastActiveSkipped = 0;
-      let lastActiveOp: QueuedOp | null = null;
-      for (let line = 0; line < this.pmove[p].length; line += 1) {
-        const queue = this.pmove[p][line];
-        if (queue.length === 0) {
-          continue;
-        }
-        let skipped = 0;
-        let executed: QueuedOp | null = null;
-        while (queue.length > 0) {
-          const op = queue.shift();
-          this.markDequeue(p, line);
-          if (!op) {
-            skipped += 1;
-            continue;
-          }
-          if (op.kind === 'm') {
-            if (!this.chkMove(op.x, op.y, op.dx, op.dy, p)) {
-              skipped += 1;
-              continue;
-            }
-            if (!this.attack(op.x, op.y, op.dx, op.dy, op.mode)) {
-              skipped += 1;
-              continue;
-            }
-          } else if (op.kind === 'b') {
-            // 建造条件不满足时自动跳过，队列继续向后执行。
-            if (!this.chkBuildCity(op.x, op.y, p)) {
-              skipped += 1;
-              continue;
-            }
-            this.armyCnt[op.x][op.y] -= BUILD_COST;
-            this.gridType[op.x][op.y] = -1;
-          } else {
-            if (!this.chkUpgradeCrown(op.x, op.y, p)) {
-              skipped += 1;
-              continue;
-            }
-            this.armyCnt[op.x][op.y] -= BUILD_COST;
-            this.gridType[op.x][op.y] = -2;
-          }
-          // R3 起始点推进：执行的移动指令从当前起始点出发时，
-          // 起始点沿已执行指令链向到达格前进一格。
-          const head = this.pqueueHead[p][line];
-          if (op.kind === 'm' && head && head.x === op.x && head.y === op.y) {
-            this.pqueueHead[p][line] = { x: op.dx, y: op.dy };
-          }
-          executed = op;
+      // 全局队列模式真并行（issue #107）：每 Tick 遍历该玩家全部队列，每条非空队列
+      // 各自弹出失效队首并执行首条有效操作（不再从轮转游标起只调度一条队列）。
+      // 空队列不消耗 Tick——只有一条队列有操作时节奏与单线完全一致。
+      const queue = this.pmove[p];
+      const moveTargets = new Set(queue.filter((op) => op.kind === 'm').map((op) => `${op.dx},${op.dy}`));
+      const blockedStarts = new Set(queue.filter((op) => op.kind === 'm').map((op) => `${op.x},${op.y}`));
+      const removed: number[] = [];
+      for (const op of [...queue]) {
+        const key = `${op.x},${op.y}`;
+        const eligible = op.kind === 'm' ? !moveTargets.has(key) : !blockedStarts.has(key);
+        if (!eligible) continue;
+        const ok =
+          op.kind === 'm'
+            ? this.chkMove(op.x, op.y, op.dx, op.dy, p) && this.attack(op.x, op.y, op.dx, op.dy, op.mode)
+            : op.kind === 'b'
+              ? this.chkBuildCity(op.x, op.y, p) &&
+                ((this.armyCnt[op.x][op.y] -= BUILD_COST), (this.gridType[op.x][op.y] = -1), true)
+              : this.chkUpgradeCrown(op.x, op.y, p) &&
+                ((this.armyCnt[op.x][op.y] -= BUILD_COST), (this.gridType[op.x][op.y] = -2), true);
+        removed.push(op.seq);
+        if (ok) {
+          this.lstMove[p] = op;
           movedThisTurn[p] = true;
-          break;
-        }
-        if (executed || skipped > 0) {
-          lastActiveLine = line;
-          lastActiveSkipped = skipped;
-          lastActiveOp = executed;
         }
       }
-      if (lastActiveLine >= 0) {
-        this.lstMoveLine[p] = lastActiveLine;
-        if (lastActiveOp) {
-          this.lstMove[p] = lastActiveOp;
-        }
-      }
-      this.lstSkip[p] = lastActiveSkipped;
+      this.pmove[p] = queue.filter((op) => !removed.includes(op.seq));
+      this.lstMoves[p] = removed;
     }
 
     this.applyConnectivity();
@@ -1974,7 +1712,7 @@ export class GameEngine {
       return;
     }
     this.applySurrenderByIndex(id, 'leave');
-    this.resetLines(id);
+    this.pmove[id].length = 0;
     this.watching[id] = false;
     this.sendSystemMessage(`${this.names[id]} 离开了游戏。`);
     this.scheduleImmediateTick();
@@ -2059,7 +1797,7 @@ export class GameEngine {
     this.markEliminated(playerIndex);
     this.recentKills[this.md5(this.playerSids[playerIndex])] =
       cause === 'afk' || cause === 'disconnect_timeout' ? '挂机' : '投降';
-    this.resetLines(playerIndex);
+    this.pmove[playerIndex].length = 0;
     this.disciplineEvent({
       gameId: this.gid,
       username: this.names[playerIndex],

@@ -453,7 +453,8 @@ function createArena({
       const payload = engine.buildFullFramePayload(p, gameEnd);
       payload.leaderboard = leaderboard;
       payload.kills = kills;
-      payload.lst_move = engine.toMovePayload(engine.lstMove[p], engine.lstSkip[p]);
+      payload.lst_move = engine.toMovePayload(engine.lstMove[p]);
+      payload.lst_moves = engine.lstMoves[p] || [];
       updateSeat(p, payload);
       if (engine.lstMove[p]) {
         const op = engine.lstMove[p];
@@ -461,9 +462,9 @@ function createArena({
         else if (op.kind === 'b') stats[p].builds += 1;
         else stats[p].upgrades += 1;
       }
-      stats[p].rejected += engine.lstSkip[p];
+      stats[p].rejected += (engine.lstMoves[p] || []).length;
       engine.lstMove[p] = null;
-      engine.lstSkip[p] = 0;
+      engine.lstMoves[p] = [];
     }
     ended = Boolean(gameEnd);
   };
