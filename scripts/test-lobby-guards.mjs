@@ -486,6 +486,7 @@ async function scenarioNoResetDuringGame(baseUrl, tokenA) {
     '自定义设置生效',
   );
   a.socket.emit('change_ready', { ready: true });
+  bot.socket.emit('change_ready', { ready: true });
   await waitFor(() => bot.inits.length > 0 && a.inits.length > 0, 10_000, '双人对局开局');
 
   // 对局进行中人类断开：走 10 秒宽限期，期间不触发重置（对局中本来就不会有
