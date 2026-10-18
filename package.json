@@ -24,7 +24,7 @@
     "test:multiline-v2": "node scripts/test-multiline-v2.mjs",
     "test:rebind-sync": "node scripts/test-rebind-init-sync.mjs",
     "test:ready-counts": "node scripts/test-ready-counts.mjs",
-    "test": "pnpm run test:ready-counts && pnpm run test:multiline-v2 && pnpm run test:rebind-sync && pnpm run test:multiline && pnpm run test:strategy && pnpm run test:fog && pnpm run test:bot && pnpm run test:server-bot && pnpm run test:lobby-guards && pnpm run test:lobby-dwell && pnpm run test:guest-access && pnpm run test:points && pnpm run test:deploy-update && pnpm run test:presence && pnpm run test:map-generation && pnpm run test:huaxia-season && pnpm run test:leaderboard && pnpm run test:storage && pnpm run test:auto-ban-policy && pnpm run test:replay-stats && pnpm run test:replay-cache && pnpm run test:profile-stat-label && pnpm run test:mentions && pnpm run test:crown-transfer && pnpm run test:admin-badge && pnpm run test:client-verify && pnpm run test:bot-dwell-cap",
+    "test": "pnpm run test:ready-counts && pnpm run test:multiline-v2 && pnpm run test:rebind-sync && pnpm run test:multiline && pnpm run test:strategy && pnpm run test:fog && pnpm run test:bot && pnpm run test:server-bot && pnpm run test:lobby-guards && pnpm run test:lobby-dwell && pnpm run test:guest-access && pnpm run test:points && pnpm run test:deploy-update && pnpm run test:presence && pnpm run test:map-generation && pnpm run test:huaxia-season && pnpm run test:leaderboard && pnpm run test:storage && pnpm run test:auto-ban-policy && pnpm run test:replay-stats && pnpm run test:replay-cache && pnpm run test:profile-stat-label && pnpm run test:mentions && pnpm run test:crown-transfer && pnpm run test:admin-badge && pnpm run test:client-verify && pnpm run test:bot-dwell-cap && pnpm run test:asset-versioning",
     "test:presence": "node scripts/test-presence.mjs",
     "test:map-generation": "pnpm exec tsx scripts/test-map-generation.mjs",
     "test:huaxia-season": "pnpm exec tsx scripts/test-huaxia-season.mjs",
@@ -38,6 +38,7 @@
     "test:mentions": "node scripts/test-mentions.mjs",
     "test:crown-transfer": "node scripts/test-crown-transfer.mjs",
     "test:admin-badge": "node scripts/test-admin-badge.mjs",
+    "test:asset-versioning": "node scripts/test-asset-versioning.mjs",
     "observe:bot": "node scripts/observe-bot-match.mjs"
   },
   "repository": {
