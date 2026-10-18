@@ -45,4 +45,4 @@ node training/long-eval.cjs --help
 
 服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机。
 Bot 加入房间后默认自动切换到配置队伍并发送准备；只有设置 `BOT_AUTO_READY=0` 或传入 `autoReady: false` 才会关闭自动准备。
-服务端运行时会按对手用户名累计胜负、平局和连续失败次数；同一对手连续失败达到 3 局后默认暂停自动准备 180 秒，再允许继续匹配。可用 `APEX_LOSS_STREAK_LIMIT` 与 `APEX_LOSS_COOLDOWN_MS` 调整阈值和冷却时长。
+服务端运行时会按对手用户名累计胜负、平局和连续失败次数（仅作日志记录，不影响自动准备——无论连败多少局都会照常准备开局）。
