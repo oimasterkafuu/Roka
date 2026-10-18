@@ -84,7 +84,7 @@ export const readFileWithBackup = async <T>(
     try {
       const backup = await readFile(backupPathOf(filePath));
       const value = await decode(backup);
-      console.warn(`[storage] ${filePath} 解析失败，已从 .bak 备份恢复。`);
+      console.warn(`[storage] ${filePath} 解析异常，已从 .bak 备份恢复。`);
       return value;
     } catch {
       throw error;

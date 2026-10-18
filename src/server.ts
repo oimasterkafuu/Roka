@@ -1664,7 +1664,7 @@ const boot = async (): Promise<void> => {
         );
     });
 
-    socket.on('clear_queue', (data?: { line?: unknown }) => {
+    socket.on('clear_queue', () => {
       const gid = lobbyService.gameUid.get(socket.id);
       if (!gid) {
         return;
@@ -1673,15 +1673,10 @@ const boot = async (): Promise<void> => {
       if (!game) {
         return;
       }
-      // 多线争锋 v2（R2）：Q 不再按战线清空，与 E 同为全局撤回最后一条指令。
-      if (game.multiLineMode) {
-        game.retractLast(socket.id);
-        return;
-      }
-      game.clearQueue(socket.id, parseLine(data?.line));
+      game.retractLast(socket.id);
     });
 
-    socket.on('pop_queue', (data?: { line?: unknown }) => {
+    socket.on('pop_queue', () => {
       const gid = lobbyService.gameUid.get(socket.id);
       if (!gid) {
         return;
@@ -1690,12 +1685,7 @@ const boot = async (): Promise<void> => {
       if (!game) {
         return;
       }
-      // 多线争锋 v2（R2）：E 按指令入队的全局时间序撤回最后一条，不区分战线。
-      if (game.multiLineMode) {
-        game.retractLast(socket.id);
-        return;
-      }
-      game.popQueue(socket.id, parseLine(data?.line));
+      game.retractLast(socket.id);
     });
 
     // 观战视角切换（迷雾对局）：观战者请求按某队伍的迷雾视野观战，team<=0 恢复全图。

@@ -87,3 +87,5 @@ node training/long-eval.cjs --help
 ## 许可
 
 本项目以 AGPL-3.0-only 许可开源。
+
+协议说明：实时 `update` 使用 `lst_moves: number[]` 汇报本 Tick 当前玩家所有出队操作的 `seq`，执行成功和丢弃均包含；无出队时为空数组。`init_map` 提供 `next_seq` 与 `queue_ops` 用于断线重连对齐。旧回放仍可读取标量 `lst_move` 及其 `line` 字段。

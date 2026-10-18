@@ -227,7 +227,7 @@ function attachStrategy(socket, options = {}) {
     state.isolated.splice(0, state.size, ...next.isolated);
     state.fog.splice(0, state.size, ...next.fog);
     updatePlayers(payload);
-    const move = payload.lst_move;
+    const move = payload.lst_moves || payload.lst_move;
     if (state.actionPending && move) {
       const hasMove = Number(move.x) >= 0 && Number(move.y) >= 0;
       const pending = state.pendingAction;

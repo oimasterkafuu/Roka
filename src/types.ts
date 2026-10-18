@@ -119,6 +119,7 @@ export interface MovePayload {
    * 仅多线对局下发，单线对局无此字段。
    */
   line?: number;
+  seq?: number;
 }
 
 export interface LeaderboardEntry {
@@ -142,7 +143,9 @@ export interface UpdatePayload {
    * diff 帧中与 grid_type 一样以 [index, value] 对编码。回放不含此字段。
    */
   fog?: number[];
-  lst_move: MovePayload;
+  lst_moves?: number[];
+  /** 旧回放兼容字段。实时新协议使用 lst_moves。 */
+  lst_move?: MovePayload;
   leaderboard: LeaderboardEntry[];
   turn: number;
   kills: Record<string, string>;
@@ -155,7 +158,8 @@ export interface ReplayPatchPayload {
   grid_type: number[];
   army_cnt: number[];
   isolated: number[];
-  lst_move: MovePayload;
+  lst_move?: MovePayload;
+  lst_moves?: number[];
   leaderboard: LeaderboardEntry[];
   turn: number;
   kills: Record<string, string>;
