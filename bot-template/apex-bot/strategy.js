@@ -3,25 +3,20 @@
 const { makeBoard } = require('./bot/board.cjs');
 const { createController } = require('./bot/controller.cjs');
 
-const configuredLossLimit = Number(process.env.APEX_LOSS_STREAK_LIMIT);
-const configuredCooldown = Number(process.env.APEX_LOSS_COOLDOWN_MS);
-const LOSS_STREAK_LIMIT = Number.isFinite(configuredLossLimit) ? Math.max(2, configuredLossLimit) : 3;
-const LOSS_COOLDOWN_MS = Number.isFinite(configuredCooldown) ? Math.max(10_000, configuredCooldown) : 180_000;
-
-function createOpponentStats(now = () => Date.now()) {
+function createOpponentStats() {
   const records = new Map();
   const get = (uid) => {
     const key = String(uid || '').trim();
     if (!key) return null;
     let record = records.get(key);
     if (!record) {
-      record = { games: 0, wins: 0, losses: 0, draws: 0, consecutiveLosses: 0, cooldownUntil: 0 };
+      record = { games: 0, wins: 0, losses: 0, draws: 0, consecutiveLosses: 0 };
       records.set(key, record);
     }
     return record;
   };
   return {
-    record(leaderboard, playerId, timestamp = now()) {
+    record(leaderboard, playerId) {
       if (!Array.isArray(leaderboard)) return [];
       const me = leaderboard.find((entry) => Number(entry.id) === Number(playerId));
       if (!me) return [];
@@ -41,22 +36,9 @@ function createOpponentStats(now = () => Date.now()) {
         record[result === 'win' ? 'wins' : result === 'loss' ? 'losses' : 'draws'] += 1;
         if (result === 'loss' || result === 'draw') record.consecutiveLosses += 1;
         else record.consecutiveLosses = 0;
-        if (record.consecutiveLosses >= LOSS_STREAK_LIMIT) {
-          record.cooldownUntil = Math.max(record.cooldownUntil, timestamp + LOSS_COOLDOWN_MS);
-        }
         changes.push({ uid: String(opponent.uid || ''), result, ...record });
       }
       return changes;
-    },
-    blocked(players, timestamp = now()) {
-      if (!Array.isArray(players)) return null;
-      for (const player of players) {
-        const record = records.get(String(player?.uid || ''));
-        if (record && record.cooldownUntil > timestamp) {
-          return { uid: String(player.uid), until: record.cooldownUntil, ...record };
-        }
-      }
-      return null;
     },
     snapshot() {
       return Object.fromEntries([...records.entries()].map(([uid, record]) => [uid, { ...record }]));
@@ -284,15 +266,6 @@ function attachStrategy(socket, options = {}) {
     const players = Array.isArray(payload.players) ? payload.players : [];
     const me = players.find((entry) => String(entry.sid || entry.client_id || '') === state.clientId);
     if (!me) return;
-    const blocked = opponentStats.blocked(players, now());
-    if (blocked) {
-      const command = `cooldown:${blocked.uid}:${blocked.until}`;
-      if (lastRoomCommand !== command) {
-        lastRoomCommand = command;
-        log(`cooldown vs ${blocked.uid}: ${Math.ceil((blocked.until - now()) / 1000)}s remaining`);
-      }
-      return;
-    }
     const desiredTeam = Number(options.team);
     if (Number.isInteger(desiredTeam) && desiredTeam >= 0 && Number(me.team) !== desiredTeam) {
       const key = `team:${desiredTeam}`;

@@ -65,9 +65,8 @@ test('controller returns one legal action and keeps a target across turns', () =
   assert.equal(stats.rejected, 0);
 });
 
-test('tracks opponent loss streaks and opens a cooldown after repeated losses', () => {
-  let now = 1_000;
-  const stats = createOpponentStats(() => now);
+test('tracks opponent loss streaks without pausing auto-ready', () => {
+  const stats = createOpponentStats();
   const defeated = [
     { id: 1, team: 1, uid: 'Apex', class_: 'dead', dead: 1 },
     { id: 2, team: 2, uid: 'human', class_: '', dead: 0 },
@@ -75,16 +74,13 @@ test('tracks opponent loss streaks and opens a cooldown after repeated losses', 
   stats.record(defeated, 1);
   stats.record(defeated, 1);
   stats.record(defeated, 1);
-  const blocked = stats.blocked([{ uid: 'human' }]);
-  assert.ok(blocked);
-  assert.equal(blocked.losses, 3);
-  assert.equal(blocked.consecutiveLosses, 3);
-  now += 181_000;
-  assert.equal(stats.blocked([{ uid: 'human' }]), null);
+  const snapshot = stats.snapshot().human;
+  assert.equal(snapshot.losses, 3);
+  assert.equal(snapshot.consecutiveLosses, 3);
 });
 
 test('a win resets only that opponent\'s consecutive loss streak', () => {
-  const stats = createOpponentStats(() => 1_000);
+  const stats = createOpponentStats();
   const loss = [
     { id: 1, team: 1, uid: 'Apex', class_: 'dead', dead: 1 },
     { id: 2, team: 2, uid: 'human', class_: '', dead: 0 },
