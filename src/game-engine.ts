@@ -1228,7 +1228,11 @@ export class GameEngine {
       m: this.m,
       player_ids: [...this.playerIds],
       general: this.generals[id],
-      // 全局队列模式 v2：队列条数按需动态增长，下发当前实际队列数（换绑清队后回初始态）。
+      // 换绑重连必须补发 seq 同步字段：服务端 nextSeq 已递增，客户端 init_map
+      // 默认从 1 重新计数，缺这两个字段会导致两端 seq 永久错位（lst_moves 摘不到队列项）。
+      // 换绑已清空队列，queue_ops 恒为空拷贝，与开局路径字段对齐。
+      next_seq: this.nextSeq[id],
+      queue_ops: this.pmove[id].map((op) => ({ ...op })),
     });
     // 换绑后补发全量帧：保留观战席/已战败玩家已选的观战视角；同时把 diff 基线
     // 对齐到本次补发的快照（客户端 init_map 已重置棋盘，后续 diff 以此为准）。

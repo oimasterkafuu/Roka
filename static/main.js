@@ -782,12 +782,17 @@ function anyRouteQueued() {
 }
 
 function addroute(x, y, d, mode) {
+  // 服务端静默丢弃场景（未在对局/已结束/已出局）下不入队不发送：
+  // 否则本地自增 seq 而服务端未入队，两端 next_seq 永久错位（lst_moves 摘不到队列项）。
+  if (lost === true || game_ended === true || in_game !== true) return;
   var seq = next_seq++;
   route.push({ x: x, y: y, d: d, mode: mode, seq: seq });
   socket.emit('attack', { x: x, y: y, dx: x + dire[d].x, dy: y + dire[d].y, mode: mode, half: mode == 1 });
   render();
 }
 function addbuild(x, y, op) {
+  // 与 addroute 同一防线：服务端必然丢弃时不入队不发送，保持两端 seq 一致。
+  if (lost === true || game_ended === true || in_game !== true) return;
   var seq = next_seq++;
   route.push({ x: x, y: y, build: op, seq: seq });
   socket.emit('build', { x: x, y: y, op: op });
