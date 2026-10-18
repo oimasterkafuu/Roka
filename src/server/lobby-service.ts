@@ -23,6 +23,7 @@ import {
   MAX_TEAMS,
   RoomListItem,
   RoomUpdatePayload,
+  ChatFoldPayload,
 } from '../types';
 
 type EditableLobbyKey =
@@ -503,7 +504,10 @@ class LobbyService {
     io.to(`sid_${sid}`).emit('room_kick', {});
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
-      this.sendLobbySystemMessage(io, roomVal, `${uid} 因长时间未活跃被移出了自定义房间。`);
+      this.sendLobbySystemMessage(io, roomVal, `${uid} 因长时间未活跃被移出了自定义房间。`, {
+        name: uid,
+        verb: '因长时间未活跃被移出了自定义房间。',
+      });
     }
     this.emitHomeRooms(io);
     this.checkReady(io, lobbyId);
@@ -639,9 +643,10 @@ class LobbyService {
     color: number,
     text: string,
     team = false,
+    fold?: ChatFoldPayload,
   ): void {
     const target = scope === 'room' ? `game_${id}` : `sid_${id}`;
-    io.to(target).emit('chat_message', { sender, color, text, team });
+    io.to(target).emit('chat_message', { sender, color, text, team, fold });
   }
 
   /**
@@ -665,8 +670,8 @@ class LobbyService {
     });
   }
 
-  sendLobbySystemMessage(io: SocketIOServer, gid: string, text: string): void {
-    this.sendSystemMessage(io, gid, 'room', '', 0, text);
+  sendLobbySystemMessage(io: SocketIOServer, gid: string, text: string, fold?: ChatFoldPayload): void {
+    this.sendSystemMessage(io, gid, 'room', '', 0, text, false, fold);
   }
 
   parseFloatRange(value: unknown, min: number, max: number): number {
@@ -843,7 +848,10 @@ class LobbyService {
           this.pendingRejoins.delete(key);
           const uid = this.leaveLobby(pending.oldSid, pending.lobbyId);
           if (uid) {
-            this.sendLobbySystemMessage(io, gid, `${uid} 离开了自定义房间。`);
+            this.sendLobbySystemMessage(io, gid, `${uid} 离开了自定义房间。`, {
+              name: uid,
+              verb: '离开了自定义房间。',
+            });
           }
         }
 
@@ -987,7 +995,10 @@ class LobbyService {
     this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
-      this.sendLobbySystemMessage(io, roomVal, `${uid} 离开了自定义房间。`);
+      this.sendLobbySystemMessage(io, roomVal, `${uid} 离开了自定义房间。`, {
+        name: uid,
+        verb: '离开了自定义房间。',
+      });
     }
     this.emitHomeRooms(io);
     this.checkReady(io, lobbyId);
@@ -1066,7 +1077,10 @@ class LobbyService {
     if (!game.rebindPlayer(oldSid, sid)) {
       return false;
     }
-    this.sendLobbySystemMessage(io, gameId, `${username} 重新连接。`);
+    this.sendLobbySystemMessage(io, gameId, `${username} 重新连接。`, {
+      name: username,
+      verb: '重新连接。',
+    });
     return true;
   }
 
@@ -1090,7 +1104,10 @@ class LobbyService {
     this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
-      this.sendLobbySystemMessage(io, gameId, `${uid} 离开了自定义房间。`);
+      this.sendLobbySystemMessage(io, gameId, `${uid} 离开了自定义房间。`, {
+        name: uid,
+        verb: '离开了自定义房间。',
+      });
     }
     this.emitHomeRooms(io);
     this.checkReady(io, lobbyId);

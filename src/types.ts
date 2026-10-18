@@ -5,6 +5,16 @@ export type MapRegion = 'qin' | 'han' | 'tang' | 'song' | 'yuan' | 'ming' | 'lia
 export type ChatScope = 'room' | 'sid';
 
 /**
+ * chat_message 可选折叠负载（issue #113）：进出类系统消息（加入/离开/重连/被移出）由
+ * 客户端把连续到达的消息合并显示。verb 为该消息的谓语部分（如「加入了自定义房间。」），
+ * 仅用于客户端重组文案；不含此字段的系统消息不参与折叠并断开折叠链。
+ */
+export interface ChatFoldPayload {
+  name: string;
+  verb: string;
+}
+
+/**
  * 推兵模式：0 = 智能分兵（普通 WASD），1 = 半兵（Z，一次性），2 = 全冲（Shift+WASD）。
  */
 export type MoveMode = 0 | 1 | 2;

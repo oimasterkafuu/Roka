@@ -359,6 +359,8 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <td>
               聊天消息：<code>{ sender, color, text, team }</code>。系统消息 <code>sender</code> 为空、
               <code>color=0</code>；跨房间转发的非队伍消息额外带 <code>room</code>（来源房间号）。
+              进出类系统消息（加入/离开/重连/被移出）额外带可选 <code>fold: { name, verb }</code>
+              供客户端合并连续消息显示，纯展示字段，bot 可忽略。
             </td>
           </tr>
           <tr>

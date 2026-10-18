@@ -1285,6 +1285,10 @@ $(document).ready(function () {
     $('#chat-messages-container').attr('class', collapsed ? 'minimized' : '');
     $('#chatroom-input').attr('class', collapsed ? 'minimized' : '');
   });
+  // 连续进出类系统消息折叠状态（issue #113）：仅当新消息直接接在折叠元素之后时合并，
+  // 中间插入任何其他消息（普通聊天、开局/设置提示等）即断开，各自正常显示。
+  var chatFoldEl = null;
+  var chatFoldState = null;
   socket.on('chat_message', function (data) {
     // 用户名色块三门闸：「在房间且参战」才给色——
     // 1) 跨房转发的消息（带 room 字段）是房外的人，不显示色块；
@@ -1317,8 +1321,25 @@ $(document).ready(function () {
       // 用户名：统一用户名组件（rating 颜色 + 点击跳主页），接口不带颜色时先 rt-unrated 渲染。
       $p.append(usernameLink(data.sender, null, 'username'), $('<span></span>').text(': ' + data.text));
       usernameEnsureColors([data.sender]);
+      chatFoldEl = null;
+      chatFoldState = null;
     } else {
-      $p.addClass('server-chat-message').text(data.text);
+      var $container = $('#chat-messages-container');
+      if (data.fold) {
+        if (chatFoldEl && $container.children().last().is(chatFoldEl)) {
+          // 上一条仍是未被打断的折叠元素：就地合并更新文案，不新增消息行。
+          chatFoldState = chatFoldAppend(chatFoldState, data.fold);
+          chatFoldEl.text(chatFoldState.text);
+          $container.scrollTop(233333);
+          return;
+        }
+        chatFoldState = chatFoldAppend(null, data.fold);
+        chatFoldEl = $p;
+      } else {
+        chatFoldEl = null;
+        chatFoldState = null;
+      }
+      $p.addClass('server-chat-message').text(chatFoldState ? chatFoldState.text : data.text);
     }
     $('#chat-messages-container').append($p);
     $('#chat-messages-container').scrollTop(233333);

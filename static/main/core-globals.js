@@ -124,3 +124,22 @@ function fogObserverView() {
   }
   return fog_mode && player == 0;
 }
+
+// 连续进出类系统消息折叠（issue #113）：纯函数，供 main.js 聊天渲染与 node 自测共用。
+// state 为 null（折叠链已断/首条）或 { names: [], verb: string|null }；verb 为 null 表示
+// 已混入多种谓语。fold = { name, verb } 来自 chat_message 的可选 fold 负载。
+function chatFoldAppend(state, fold) {
+  var names = state ? state.names.concat([fold.name]) : [fold.name];
+  // 只有与原链谓语完全一致才继续同文案合并，否则降级为「进出」汇总。
+  var verb = !state ? fold.verb : state.verb === fold.verb ? fold.verb : null;
+  return { names: names, verb: verb, text: chatFoldText(names, verb) };
+}
+
+// 由人名列表与谓语生成折叠文案：≤3 人全列出，更多只列前 3 人 + 等 N 人。
+function chatFoldText(names, verb) {
+  var head = names.join('、');
+  if (names.length > 3) {
+    head = names.slice(0, 3).join('、') + ' 等 ' + names.length + ' 人';
+  }
+  return head + (verb ? ' ' + verb : ' 进出了房间。');
+}
