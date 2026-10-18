@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.69.0",
+  "version": "1.69.1",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -14,6 +14,7 @@
     "test:server-bot": "node scripts/test-server-bot.mjs",
     "test:lobby-guards": "node scripts/test-lobby-guards.mjs",
     "test:lobby-dwell": "pnpm exec tsx scripts/test-lobby-dwell.mjs",
+    "test:chat-fold": "pnpm exec tsx scripts/test-chat-fold.mjs",
     "test:client-verify": "node scripts/test-client-verify.mjs",
     "test:bot-dwell-cap": "pnpm exec tsx scripts/test-bot-dwell-cap.mjs",
     "test:guest-access": "node scripts/test-guest-access.mjs",
