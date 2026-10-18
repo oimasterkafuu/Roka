@@ -62,6 +62,9 @@ interface StoredUser {
   // 最后在线时间：用户最近一次有效请求/动作的时间，由 presence-service 统一维护
   // （本字段只是它的持久化落盘）。旧数据无此字段，读取时按 undefined 处理（向后兼容）。
   lastSeenAt?: number;
+  // 最后比赛时间：最近一次对局结算（applyRatingUpdates）的时间。排行榜活跃口径只认
+  // 本字段——登录/上线不再续命。旧数据无此字段，读取时按 undefined 处理（向后兼容）。
+  lastGameAt?: number;
 }
 
 export interface PublicProfile {
@@ -276,16 +279,16 @@ export const isProvisionalRating = (rating: number, ratingGames: number): boolea
 const RATING_HISTORY_MAX = 1000;
 
 /**
- * 排行榜不活跃下榜阈值：≥7 天没有任何活动即从榜单隐藏（rating 数据保留，
- * 重新活跃后立即回榜）。活动 = socket 上线/下线（lastSeenAt）或账号字段变更
- * （updatedAt，对局结算、登录轮换会话等都会刷新）。
+ * 排行榜不活跃下榜阈值：≥7 天没有比赛即从榜单隐藏（rating 数据保留，
+ * 重新结算一局后立即回榜）。活跃只认比赛（lastGameAt，对局结算刷新）；
+ * 登录、上线不再算活跃。
  */
 export const LEADERBOARD_INACTIVITY_MS = 7 * 24 * 3600 * 1000;
 
 /**
- * 用户最后活动时间：取 lastSeenAt（socket 上线/下线）与 updatedAt（对局结算、
- * 登录等账号变更）的较大者。bot 账号同样适用——天天对局的 bot 经结算刷新
- * updatedAt 保持活跃；停用超过阈值的 bot 也会下榜（与人类账号同一语义）。
+ * 用户最后活动时间（旧口径）：取 lastSeenAt（socket 上线/下线）与 updatedAt
+ * （对局结算、登录等账号变更）的较大者。现仅用作旧数据的一次性过渡 fallback——
+ * 用户缺 lastGameAt 字段时以此作为初始比赛活跃时间，此后活跃只认比赛。
  */
 export const getLastActiveAt = (user: { lastSeenAt?: number; updatedAt: number }): number =>
   Math.max(user.updatedAt, user.lastSeenAt ?? 0);
@@ -407,6 +410,10 @@ const toStoredUser = (value: unknown): StoredUser | null => {
         : undefined,
     ratingHistory,
     lastSeenAt: typeof lastSeenAt === 'number' && Number.isFinite(lastSeenAt) ? lastSeenAt : undefined,
+    lastGameAt:
+      typeof value.lastGameAt === 'number' && Number.isFinite(value.lastGameAt)
+        ? value.lastGameAt
+        : undefined,
   };
 };
 
@@ -685,12 +692,15 @@ export class UserStore {
       if (!Array.isArray(user.ratingHistory)) {
         user.ratingHistory = [];
       }
+      const now = Date.now();
       // 历史曲线记录对外显示分，保持与个人主页展示一致。
-      user.ratingHistory.push({ t: Date.now(), r: toDisplayRating(user.rating, user.ratingGames) });
+      user.ratingHistory.push({ t: now, r: toDisplayRating(user.rating, user.ratingGames) });
       if (user.ratingHistory.length > RATING_HISTORY_MAX) {
         user.ratingHistory = user.ratingHistory.slice(-RATING_HISTORY_MAX);
       }
-      user.updatedAt = Date.now();
+      user.updatedAt = now;
+      // 比赛活跃时间：排行榜活跃口径只认本字段。
+      user.lastGameAt = now;
       changed = true;
     }
     if (changed) {
@@ -921,8 +931,15 @@ export class UserStore {
       if (ratingGames <= 0) {
         continue;
       }
-      // 不活跃下榜：≥7 天无任何活动（对局/上线等）即隐藏，重新活跃后回榜。
-      if (now - getLastActiveAt(user) >= LEADERBOARD_INACTIVITY_MS) {
+      // 有效封禁不上榜：封禁过期经 getBanStatus 惰性解除后自动回榜。
+      if (this.getBanStatus(user.username).banned) {
+        continue;
+      }
+      // 不活跃下榜：≥7 天无比赛（lastGameAt，对局结算刷新）即隐藏，重新结算一局后回榜。
+      // lastGameAt 缺失的旧数据用旧的 getLastActiveAt 作一次性过渡初始值，
+      // 此后登录/上线不再续命，活跃只认比赛。
+      const lastGameAt = user.lastGameAt ?? getLastActiveAt(user);
+      if (now - lastGameAt >= LEADERBOARD_INACTIVITY_MS) {
         continue;
       }
       entries.push({
