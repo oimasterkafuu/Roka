@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -604,7 +604,7 @@ const boot = async (): Promise<void> => {
     if (authUser) {
       return reply.redirect('/');
     }
-    return reply.sendFile('login.html');
+    return serveAssetTemplate(request, reply, 'login.html', 'text/html');
   });
 
   app.get('/api/auth/captcha', { preHandler: authActionRateLimitPreHandler }, async (_request, reply) => {
@@ -734,7 +734,7 @@ const boot = async (): Promise<void> => {
     if (!authUser || !userStore.isAdminUser(authUser.username)) {
       return reply.redirect('/');
     }
-    return reply.sendFile('admin.html');
+    return serveAssetTemplate(request, reply, 'admin.html', 'text/html');
   });
 
   app.get('/api/admin/users', async (request, reply) => {
@@ -1250,10 +1250,58 @@ const boot = async (): Promise<void> => {
     return reply.send({ items, next_offset, has_more });
   });
 
+  // 静态资源版本号注入（防浏览器缓存旧版 JS/CSS）：HTML 与少量拼静态 URL 的
+  // JS/CSS 中以 {{V}} 占位，启动时统一替换为 package.json version（每次发布必
+  // bump）并缓存。缓存头语义保持与原 @fastify/static sendFile 一致
+  // （Cache-Control: public, max-age=0 + ETag，If-None-Match 命中回 304）。
+  // 兜底：某路径若绕过模板由 @fastify/static 直发，残留的 {{V}} 只出现在
+  // URL query 里，服务端忽略未知 query，不影响资源加载。
+  const assetTemplateCache = new Map<string, { body: string; etag: string }>();
+  const renderAssetTemplate = (filename: string): { body: string; etag: string } => {
+    let cached = assetTemplateCache.get(filename);
+    if (!cached) {
+      const body = readFileSync(path.join(process.cwd(), 'static', filename), 'utf8').replaceAll(
+        '{{V}}',
+        packageVersion,
+      );
+      cached = { body, etag: `"${createHash('sha1').update(body).digest('hex')}"` };
+      assetTemplateCache.set(filename, cached);
+    }
+    return cached;
+  };
+  const serveAssetTemplate = (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    filename: string,
+    contentType: string,
+  ): FastifyReply => {
+    const { body, etag } = renderAssetTemplate(filename);
+    if (request.headers['if-none-match'] === etag) {
+      return reply.code(304).header('ETag', etag).send();
+    }
+    return reply
+      .header('Cache-Control', 'public, max-age=0')
+      .header('ETag', etag)
+      .type(contentType)
+      .send(body);
+  };
+  // 引用链入口统一走模板替换：main.css 的 @import 链与 JS 内拼接的静态 URL
+  // （sw.js 注册 /sw.js、sw.js 预缓存 /updating.html、main.js 加载 /gong.mp3）。
+  app.get('/main.css', async (request, reply) => serveAssetTemplate(request, reply, 'main.css', 'text/css'));
+  app.get('/main.js', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'main.js', 'application/javascript'),
+  );
+  app.get('/sw.js', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'sw.js', 'application/javascript'),
+  );
+  app.get('/sw-register.js', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'sw-register.js', 'application/javascript'),
+  );
+
   // 游戏页 HTML 启动时读一次缓存；会话戳（真人验证凭据）按请求注入 meta。
   // 戳不再经任何 JSON 接口下发——socket 直连的第三方 bot 无法自取戳伪造
   // client_verify，浏览器渲染页面时无感。no-store 防止共享缓存串号。
-  const gameHtmlTemplate = readFileSync(path.join(process.cwd(), 'static', 'game.html'), 'utf8');
+  const gameHtmlTemplate = renderAssetTemplate('game.html').body;
   const serveGameHtml = (request: FastifyRequest, reply: FastifyReply): FastifyReply => {
     const authUser = (request as AuthRequest).authUser;
     const stamp = authUser?.sid ? authService.sessionStamp(authUser.sid) : '';
@@ -1273,7 +1321,7 @@ const boot = async (): Promise<void> => {
     return serveGameHtml(request, reply);
   });
 
-  app.get('/', async (_request, reply) => reply.sendFile('index.html'));
+  app.get('/', async (request, reply) => serveAssetTemplate(request, reply, 'index.html', 'text/html'));
 
   app.get('/rooms', async (_request, reply) => reply.redirect('/'));
 
@@ -1284,15 +1332,23 @@ const boot = async (): Promise<void> => {
     if (!USERNAME_REGEX.test(username)) {
       return reply.redirect('/');
     }
-    return reply.sendFile('profile.html');
+    return serveAssetTemplate(request, reply, 'profile.html', 'text/html');
   });
 
-  app.get('/develop', async (_request, reply) => reply.sendFile('develop.html'));
-  app.get('/develop/bot', async (_request, reply) => reply.sendFile('develop-bot.html'));
+  app.get('/develop', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'develop.html', 'text/html'),
+  );
+  app.get('/develop/bot', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'develop-bot.html', 'text/html'),
+  );
 
-  app.get('/about', async (_request, reply) => reply.sendFile('about.html'));
-  app.get('/tutorial', async (_request, reply) => reply.sendFile('tutorial-text.html'));
-  app.get('/tutorial/interactive', async (_request, reply) => reply.sendFile('tutorial.html'));
+  app.get('/about', async (request, reply) => serveAssetTemplate(request, reply, 'about.html', 'text/html'));
+  app.get('/tutorial', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'tutorial-text.html', 'text/html'),
+  );
+  app.get('/tutorial/interactive', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'tutorial.html', 'text/html'),
+  );
 
   app.get('/games', async (_request, reply) => {
     let html = '';
