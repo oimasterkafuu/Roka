@@ -187,11 +187,8 @@ export class GameEngine {
    */
   private readonly fogEnabled: boolean;
 
-  /**
-   * 全局队列模式开关（房间设置）。v2 语义：开启后每名玩家的队列队列按需动态增长
-   * （条数不设上限），新指令按起始点/链式挂尾规则自动路由到队列（R1/R3/R4），
-   * Q/E 撤回全局最后一条指令（R2）；关闭时恒为单条队列，行为与单线完全一致。
-   */
+  /** 多线争锋开关：false 时单线串行（每 Tick 每玩家只执行队首第一条有效指令）。 */
+  private readonly multiLine: boolean;
 
   private readonly rng: SeededRandom;
 
@@ -202,8 +199,8 @@ export class GameEngine {
   private readonly pstat: number[];
 
   /**
-   * 操作队列：玩家 → 队列 → 操作序列。初始每玩家一条队列；全局队列模式随指令
-   * 路由动态开辟新队列（不设上限），单线对局恒为一条。
+   * 操作大队列：玩家 → 按到达顺序排列的待执行指令。两种模式共用单一队列，
+   * 区别只在 Tick 调度（单线串行 / 全局队列并行，见 gameTick）。
    */
   private readonly pmove: QueuedOp[][];
 
@@ -341,6 +338,7 @@ export class GameEngine {
     this.mapMode = gameConf.map_mode;
     this.mapRegion = normalizeMapRegion(gameConf.map_region ?? DEFAULT_MAP_REGION);
     this.fogEnabled = gameConf.fog === true;
+    this.multiLine = gameConf.multi_line === true;
     this.mapSeed = resolveMapSeed(
       this.mapMode,
       this.mapMode === 'huaxia' ? `${this.mapRegion}:${this.mapToken}` : this.mapToken,
@@ -366,7 +364,7 @@ export class GameEngine {
       speed: gameConf.speed,
       allow_team: gameConf.allow_team,
       fog: gameConf.fog === true,
-      multi_line: gameConf.multi_line === true,
+      multi_line: this.multiLine,
       map_token: this.mapToken,
       map_mode: gameConf.map_mode,
       map_region: this.mapRegion,
@@ -422,6 +420,8 @@ export class GameEngine {
         general: engine.generals[i],
         next_seq: engine.nextSeq[i],
         queue_ops: engine.pmove[i].map((op) => ({ ...op })),
+        // 仅多线争锋对局下发模式标记；单线对局缺省即旧协议单线语义。
+        ...(engine.multiLine ? { multi_line: true as const } : {}),
       });
     }
 
@@ -1653,33 +1653,66 @@ export class GameEngine {
       if (this.pstat[p] === LEFT_GAME) {
         continue;
       }
-      // 全局队列模式真并行（issue #107）：每 Tick 遍历该玩家全部队列，每条非空队列
-      // 各自弹出失效队首并执行首条有效操作（不再从轮转游标起只调度一条队列）。
-      // 空队列不消耗 Tick——只有一条队列有操作时节奏与单线完全一致。
-      const queue = this.pmove[p];
-      const moveTargets = new Set(queue.filter((op) => op.kind === 'm').map((op) => `${op.dx},${op.dy}`));
-      const blockedStarts = new Set(queue.filter((op) => op.kind === 'm').map((op) => `${op.x},${op.y}`));
-      const removed: number[] = [];
-      for (const op of [...queue]) {
-        const key = `${op.x},${op.y}`;
-        const eligible = op.kind === 'm' ? !moveTargets.has(key) : !blockedStarts.has(key);
-        if (!eligible) continue;
-        const ok =
-          op.kind === 'm'
-            ? this.chkMove(op.x, op.y, op.dx, op.dy, p) && this.attack(op.x, op.y, op.dx, op.dy, op.mode)
-            : op.kind === 'b'
-              ? this.chkBuildCity(op.x, op.y, p) &&
-                ((this.armyCnt[op.x][op.y] -= BUILD_COST), (this.gridType[op.x][op.y] = -1), true)
-              : this.chkUpgradeCrown(op.x, op.y, p) &&
-                ((this.armyCnt[op.x][op.y] -= BUILD_COST), (this.gridType[op.x][op.y] = -2), true);
-        removed.push(op.seq);
-        if (ok) {
-          this.lstMove[p] = op;
-          movedThisTurn[p] = true;
+      if (this.multiLine) {
+        // 全局队列并行（issue #107）：把大队列中的移动指令看作有向边，
+        // 每 Tick 所有入度为 0 的头部指令各执行一步（失效即丢弃）；
+        // 建造指令在其格子不再是任何待发移动指令的出发格时尝试执行。
+        // 空队列不消耗 Tick——只有一条指令链时节奏与单线完全一致。
+        const queue = this.pmove[p];
+        const moveTargets = new Set(queue.filter((op) => op.kind === 'm').map((op) => `${op.dx},${op.dy}`));
+        const blockedStarts = new Set(queue.filter((op) => op.kind === 'm').map((op) => `${op.x},${op.y}`));
+        const removed: number[] = [];
+        for (const op of [...queue]) {
+          const key = `${op.x},${op.y}`;
+          const eligible = op.kind === 'm' ? !moveTargets.has(key) : !blockedStarts.has(key);
+          if (!eligible) continue;
+          const ok =
+            op.kind === 'm'
+              ? this.chkMove(op.x, op.y, op.dx, op.dy, p) && this.attack(op.x, op.y, op.dx, op.dy, op.mode)
+              : op.kind === 'b'
+                ? this.chkBuildCity(op.x, op.y, p) &&
+                  ((this.armyCnt[op.x][op.y] -= BUILD_COST), (this.gridType[op.x][op.y] = -1), true)
+                : this.chkUpgradeCrown(op.x, op.y, p) &&
+                  ((this.armyCnt[op.x][op.y] -= BUILD_COST), (this.gridType[op.x][op.y] = -2), true);
+          removed.push(op.seq);
+          if (ok) {
+            this.lstMove[p] = op;
+            movedThisTurn[p] = true;
+          }
         }
+        this.pmove[p] = queue.filter((op) => !removed.includes(op.seq));
+        this.lstMoves[p] = removed;
+      } else {
+        // 单线串行（旧协议语义）：每 Tick 每玩家只从大队列头部依次弹出指令，
+        // 丢弃失效指令，直到成功执行第一条有效指令为止；本 Tick 不再执行后续
+        // 指令。所有被摘除指令（执行 + 丢弃）的 seq 全部进 lstMoves[p] 下发，
+        // 保证客户端按 seq 摘除本地镜像后箭头/建造标志同步不错乱。
+        const queue = this.pmove[p];
+        const removed: number[] = [];
+        while (queue.length > 0) {
+          const op = queue[0];
+          let ok = false;
+          if (op.kind === 'm') {
+            ok = this.chkMove(op.x, op.y, op.dx, op.dy, p) && this.attack(op.x, op.y, op.dx, op.dy, op.mode);
+          } else if (op.kind === 'b') {
+            ok =
+              this.chkBuildCity(op.x, op.y, p) &&
+              ((this.armyCnt[op.x][op.y] -= BUILD_COST), (this.gridType[op.x][op.y] = -1), true);
+          } else {
+            ok =
+              this.chkUpgradeCrown(op.x, op.y, p) &&
+              ((this.armyCnt[op.x][op.y] -= BUILD_COST), (this.gridType[op.x][op.y] = -2), true);
+          }
+          removed.push(op.seq);
+          queue.shift();
+          if (ok) {
+            this.lstMove[p] = op;
+            movedThisTurn[p] = true;
+            break;
+          }
+        }
+        this.lstMoves[p] = removed;
       }
-      this.pmove[p] = queue.filter((op) => !removed.includes(op.seq));
-      this.lstMoves[p] = removed;
     }
 
     this.applyConnectivity();
