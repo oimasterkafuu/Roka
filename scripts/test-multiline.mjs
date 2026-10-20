@@ -85,6 +85,16 @@ async function tick(ctx) { await ctx.e['gameTick'](); return ctx.frames.filter(x
 }
 
 {
+  // 单线对局 Q 清空整个操作队列（issue #119）。
+  const c = await make();
+  c.e.addMove('a', 0, 0, 0, 1); c.e.addMove('a', 2, 0, 2, 1); c.e.addBuild('a', 1, 1, 'b');
+  c.e.clearQueue('a');
+  check('Q 清空全部待发指令', c.e.pmove[0].length === 0);
+  const frame = await tick(c);
+  check('清空后本 Tick 无任何执行', c.e.__attacks.length === 0 && frame.lst_moves.length === 0);
+}
+
+{
   // 协议：单线对局 init_map 保持旧行为（无 multi_line 标记），next_seq/queue_ops 保留。
   const c = await make();
   const init = c.inits.find(x => x.sid === 'a')?.data;
