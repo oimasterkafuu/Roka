@@ -44,6 +44,18 @@ var lb = null;
 const LB_LOCK_DIGITS_MAX = 6;
 var lb_lock_digits = { army: 0, land: 0 };
 
+// 兵力数字位数 → 缩字档位类名（issue #116）：格子默认字号按 4 位数字能完整
+// 显示设计（#map td overflow:hidden，更多位会被截断），超过 4 位时套 em 相对
+// 缩字类（map.css 的 army-num-d5~d8，相对各尺寸档 .sN 的字号），只缩不放大；
+// ≤4 位返回空串保持默认字号。纯函数，供 render-update.js 与 node 自测共用。
+function armyCountShrinkClass(digits) {
+  if (digits <= 4) return '';
+  if (digits == 5) return 'army-num army-num-d5';
+  if (digits == 6) return 'army-num army-num-d6';
+  if (digits == 7) return 'army-num army-num-d7';
+  return 'army-num army-num-d8';
+}
+
 // 按座位号（格子归属码 %50）查当前对局排行榜条目；不在对局中或不存在返回 null。
 function findGameLeaderboardEntry(id) {
   if (!gameLeaderboard) return null;
