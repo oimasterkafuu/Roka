@@ -138,7 +138,13 @@ function render() {
           cls += ' isolated';
           if (isolated[i][j] === 1) cls += ' isolated-fresh';
         }
-        if (cellArmy || cellType == 50) txt = String(cellArmy);
+        if (cellArmy || cellType == 50) {
+          txt = String(cellArmy);
+          // 兵力数字超过 4 位时按位数档缩小字体（issue #116）：只缩不放大，
+          // ≤4 位维持默认字号。
+          var armyShrink = armyCountShrinkClass(txt.length);
+          if (armyShrink) txt = '<span class="' + armyShrink + '">' + txt + '</span>';
+        }
       } else if (cellType == 200) {
         cls += ' empty';
       } else if (cellType == 201) {
