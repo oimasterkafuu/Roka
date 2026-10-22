@@ -215,6 +215,26 @@ class LobbyService {
     return this.gameInstances.has(this.getLobbyVal(gid));
   }
 
+  /**
+   * 成员当前席位名称（进出广播文案用，issue #122）：观战席成员——team 0，
+   * 或对局进行中但并非该局存活参赛者（中途进房的观战者、已出局留观玩家）——
+   * 为「观战席」，其余参战成员为「自定义房间」。
+   */
+  lobbySeatName(lobbyId: string, sid: string): string {
+    const member = this.lobbyPlayers.get(lobbyId)?.find((player) => player.sid === sid);
+    if (!member) {
+      return '自定义房间';
+    }
+    if (member.team === 0) {
+      return '观战席';
+    }
+    const game = this.gameInstances.get(this.getLobbyVal(lobbyId));
+    if (game && !game.isActiveParticipant(sid)) {
+      return '观战席';
+    }
+    return '自定义房间';
+  }
+
   hasActiveGames(): boolean {
     return this.gameInstances.size > 0;
   }
@@ -499,14 +519,16 @@ class LobbyService {
     this.lobbyOfSid.delete(sid);
     const roomVal = this.getLobbyVal(lobbyId);
     io.sockets.sockets.get(sid)?.leave(`game_${roomVal}`);
+    const kickSeat = this.lobbySeatName(lobbyId, sid);
     const uid = this.leaveLobby(sid, lobbyId);
     this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     io.to(`sid_${sid}`).emit('room_kick', {});
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
-      this.sendLobbySystemMessage(io, roomVal, `${uid} 因长时间未活跃被移出了自定义房间。`, {
+      const kickVerb = `因长时间未活跃被移出了${kickSeat}。`;
+      this.sendLobbySystemMessage(io, roomVal, `${uid} ${kickVerb}`, {
         name: uid,
-        verb: '因长时间未活跃被移出了自定义房间。',
+        verb: kickVerb,
       });
     }
     this.emitHomeRooms(io);
@@ -846,11 +868,13 @@ class LobbyService {
           }
           clearTimeout(pending.timer);
           this.pendingRejoins.delete(key);
+          const leaveSeat = this.lobbySeatName(pending.lobbyId, pending.oldSid);
           const uid = this.leaveLobby(pending.oldSid, pending.lobbyId);
           if (uid) {
-            this.sendLobbySystemMessage(io, gid, `${uid} 离开了自定义房间。`, {
+            const leaveVerb = `离开了${leaveSeat}。`;
+            this.sendLobbySystemMessage(io, gid, `${uid} ${leaveVerb}`, {
               name: uid,
-              verb: '离开了自定义房间。',
+              verb: leaveVerb,
             });
           }
         }
@@ -991,13 +1015,15 @@ class LobbyService {
     const roomVal = this.getLobbyVal(lobbyId);
     leaveRoom(`game_${roomVal}`);
 
+    const leaveSeat = this.lobbySeatName(lobbyId, sid);
     const uid = this.leaveLobby(sid, lobbyId);
     this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
-      this.sendLobbySystemMessage(io, roomVal, `${uid} 离开了自定义房间。`, {
+      const leaveVerb = `离开了${leaveSeat}。`;
+      this.sendLobbySystemMessage(io, roomVal, `${uid} ${leaveVerb}`, {
         name: uid,
-        verb: '离开了自定义房间。',
+        verb: leaveVerb,
       });
     }
     this.emitHomeRooms(io);
@@ -1090,6 +1116,10 @@ class LobbyService {
    */
   private expireGracePeriod(io: SocketIOServer, gameId: string, sid: string): void {
     const game = this.gameInstances.get(gameId);
+    // 席位判定须在 expireDisconnect 之前：到期清算后该玩家不再算存活参赛者，
+    // 事后再查会被误判为观战席（issue #122）。
+    const lobbyIdForSeat = this.gameLobbyId.get(gameId);
+    const leaveSeat = lobbyIdForSeat ? this.lobbySeatName(lobbyIdForSeat, sid) : '自定义房间';
     if (!game || !game.expireDisconnect(sid)) {
       return;
     }
@@ -1104,9 +1134,10 @@ class LobbyService {
     this.resetLobbyConfigIfOnlyBots(io, lobbyId);
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
-      this.sendLobbySystemMessage(io, gameId, `${uid} 离开了自定义房间。`, {
+      const leaveVerb = `离开了${leaveSeat}。`;
+      this.sendLobbySystemMessage(io, gameId, `${uid} ${leaveVerb}`, {
         name: uid,
-        verb: '离开了自定义房间。',
+        verb: leaveVerb,
       });
     }
     this.emitHomeRooms(io);
