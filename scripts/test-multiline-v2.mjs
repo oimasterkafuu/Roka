@@ -61,5 +61,35 @@ async function tick(ctx) { await ctx.e['gameTick'](); return ctx.frames.filter(x
   check('入队操作 seq 单调递增', frame.lst_moves.join(',') === '1,2');
 }
 
+{
+  // issue #121：A→B、B→A 两条移动互为目标成环，不得死锁。
+  const c = await make();
+  c.e.addMove('a', 0, 0, 0, 1); c.e.addMove('a', 0, 1, 0, 0);
+  const f1 = await tick(c);
+  check('成环第 1 Tick 强制拆开一条', c.e.__attacks.length === 1 && c.e.pmove[0].length === 1);
+  check('成环强制执行的 seq 进 lst_moves', f1.lst_moves.includes(1));
+  const f2 = await tick(c);
+  check('成环第 2 Tick 剩余指令恢复执行', c.e.__attacks.length === 2 && c.e.pmove[0].length === 0 && f2.lst_moves.includes(2));
+}
+
+{
+  // issue #121：三环 A→B→C→A 逐 Tick 拆解，最终排空不死锁。
+  const c = await make();
+  c.e.addMove('a', 0, 0, 0, 1); c.e.addMove('a', 0, 1, 0, 2); c.e.addMove('a', 0, 2, 0, 0);
+  await tick(c); await tick(c); await tick(c);
+  check('三环 3 Tick 内全部排空', c.e.__attacks.length === 3 && c.e.pmove[0].length === 0);
+}
+
+{
+  // issue #121：成环节点失效时被丢弃而非卡死（chkMove 拒绝）。
+  const c = await make();
+  c.e.chkMove = (x, y) => !(x === 0 && y === 0);
+  c.e.addMove('a', 0, 0, 0, 1); c.e.addMove('a', 0, 1, 0, 0);
+  const f1 = await tick(c);
+  check('成环节点失效即被丢弃', c.e.__attacks.length === 0 && c.e.pmove[0].length === 1 && f1.lst_moves.includes(1));
+  await tick(c);
+  check('丢弃后剩余指令恢复执行', c.e.pmove[0].length === 0 && c.e.__attacks.length === 1);
+}
+
 if (failures) process.exit(1);
 console.log('test-multiline-v2: 全部 v3 全局队列场景通过');
