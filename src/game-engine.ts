@@ -1670,10 +1670,33 @@ export class GameEngine {
         const queue = this.pmove[p];
         const moveTargets = new Set(queue.filter((op) => op.kind === 'm').map((op) => `${op.dx},${op.dy}`));
         const blockedStarts = new Set(queue.filter((op) => op.kind === 'm').map((op) => `${op.x},${op.y}`));
+        // 环检测（issue #121）：拓扑剥离后仍有剩余的移动指令即成环（如 A→B、B→A
+        // 互为目标），其入度永不为 0 会死锁。每 Tick 按入队序（seq 最小）强制
+        // 尝试一条成环节点打破死锁——执行成功则环被拆开，失效则正常丢弃。
+        const peeled = new Set<number>();
+        let peeling = true;
+        while (peeling) {
+          peeling = false;
+          const liveTargets = new Set(
+            queue
+              .filter((op): op is Extract<QueuedOp, { kind: 'm' }> => op.kind === 'm' && !peeled.has(op.seq))
+              .map((op) => `${op.dx},${op.dy}`),
+          );
+          for (const op of queue) {
+            if (op.kind !== 'm' || peeled.has(op.seq)) continue;
+            if (!liveTargets.has(`${op.x},${op.y}`)) {
+              peeled.add(op.seq);
+              peeling = true;
+            }
+          }
+        }
+        const cycledOp = queue.find((op) => op.kind === 'm' && !peeled.has(op.seq));
+        const forcedSeq = cycledOp ? cycledOp.seq : -1;
         const removed: number[] = [];
         for (const op of [...queue]) {
           const key = `${op.x},${op.y}`;
-          const eligible = op.kind === 'm' ? !moveTargets.has(key) : !blockedStarts.has(key);
+          const eligible =
+            op.kind === 'm' ? !moveTargets.has(key) || op.seq === forcedSeq : !blockedStarts.has(key);
           if (!eligible) continue;
           const ok =
             op.kind === 'm'
