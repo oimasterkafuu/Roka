@@ -1797,9 +1797,12 @@ const boot = async (): Promise<void> => {
         }
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
-        lobbyService.sendLobbySystemMessage(io, roomVal, `${username} 加入了自定义房间。`, {
+        // 观战加入与参战加入文案区分（issue #122）：对局进行中进房或落在
+        // 观战席（team 0）的成员按「观战席」广播，避免被折叠成「进出了房间」。
+        const joinVerb = `加入了${lobbyService.lobbySeatName(room, socket.id)}。`;
+        lobbyService.sendLobbySystemMessage(io, roomVal, `${username} ${joinVerb}`, {
           name: username,
-          verb: '加入了自定义房间。',
+          verb: joinVerb,
         });
         // 不允许组队的托管策略 Bot 进房会强制关闭组队（见 lobby-service.joinLobby），补充提示。
         if (
