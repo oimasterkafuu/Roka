@@ -61,5 +61,21 @@ async function tick(ctx) { await ctx.e['gameTick'](); return ctx.frames.filter(x
   check('入队操作 seq 单调递增', frame.lst_moves.join(',') === '1,2');
 }
 
+{
+  const c = await make();
+  c.e.addMove('a', 0, 0, 0, 1); c.e.addMove('a', 2, 0, 2, 1); c.e.addBuild('a', 1, 1, 'b');
+  c.e.clearQueue('a');
+  check('全局队列对局 Q 同样清空全部待发指令（issue #120）', c.e.pmove[0].length === 0);
+  const frame = await tick(c);
+  check('清空后本 Tick 无任何执行', c.e.__attacks.length === 0 && frame.lst_moves.length === 0);
+}
+
+{
+  const c = await make();
+  c.e.addMove('a', 0, 0, 0, 1); c.e.addMove('a', 2, 0, 2, 1);
+  c.e.retractLast('a');
+  check('全局队列对局 E 撤回全局最后一条', c.e.pmove[0].length === 1 && c.e.pmove[0][0].seq === 1);
+}
+
 if (failures) process.exit(1);
 console.log('test-multiline-v2: 全部 v3 全局队列场景通过');
