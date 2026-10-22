@@ -1085,11 +1085,6 @@ export class GameEngine {
     this.popQueue(playerSid);
   }
 
-  /** 当前对局是否为全局队列（多线争锋）模式，供键位分派等按模式区分行为。 */
-  get isMultiLine(): boolean {
-    return this.multiLine;
-  }
-
   addSpectator(sid: string): void {
     if (this.externalSpectatorSids.has(sid)) {
       return;
