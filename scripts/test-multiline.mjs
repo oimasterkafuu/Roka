@@ -85,7 +85,7 @@ async function tick(ctx) { await ctx.e['gameTick'](); return ctx.frames.filter(x
 }
 
 {
-  // 单线对局 Q 清空整个操作队列（issue #119）。
+  // 单线对局 Q 清空整个操作队列（统一语义，issue #120）。
   const c = await make();
   c.e.addMove('a', 0, 0, 0, 1); c.e.addMove('a', 2, 0, 2, 1); c.e.addBuild('a', 1, 1, 'b');
   c.e.clearQueue('a');
