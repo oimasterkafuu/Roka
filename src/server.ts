@@ -1729,12 +1729,8 @@ const boot = async (): Promise<void> => {
       if (!game) {
         return;
       }
-      // 单线对局 Q 为清空操作队列；全局队列（多线争锋）对局 Q/E 均撤回最后一条指令。
-      if (game.isMultiLine) {
-        game.retractLast(socket.id);
-      } else {
-        game.clearQueue(socket.id);
-      }
+      // Q 统一为清空操作队列，不分模式（issue #120）。
+      game.clearQueue(socket.id);
     });
 
     socket.on('pop_queue', () => {

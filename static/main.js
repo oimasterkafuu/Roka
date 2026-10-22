@@ -162,8 +162,6 @@ var cell_elems, cell_html;
 // 本地唯一操作大队列；seq 与服务端 next_seq 保持单调一致。
 var route = [];
 var next_seq = 1;
-// 当前对局是否为全局队列（多线争锋）模式：决定 Q 键清空队列还是撤回队尾（issue #119）。
-var multi_line = false;
 var general_order = Array();
 
 var room_id = '',
@@ -809,12 +807,7 @@ function retract_last() {
   render();
 }
 function clear_queue() {
-  // 全局队列（多线争锋）对局 Q 与 E 同为撤回全局最后一条指令；
-  // 单线对局 Q 清空整个操作队列（issue #119）。
-  if (multi_line) {
-    retract_last();
-    return;
-  }
+  // Q 统一为清空整个操作队列，不分模式（issue #120）。
   if (lost === true || game_ended === true || in_game !== true) return;
   if (!route.length) return;
   route = [];
@@ -837,7 +830,6 @@ socket.on('set_id', function (data) {
 socket.on('init_map', function (data) {
   init_map(data.n, data.m, data.general);
   if (typeof data.next_seq == 'number') next_seq = data.next_seq;
-  multi_line = data.multi_line === true;
   in_game = true;
   game_ended = false;
   lost = false;
