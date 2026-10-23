@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createCanvas } from '@napi-rs/canvas';
 
-const root = path.resolve(import.meta.dirname, '..');
+const root = path.resolve(import.meta.dirname, '../..');
 const boardCode = await readFile(path.join(root, 'static/intro/replay-board.js'), 'utf8');
 const { createReplayBoard, CELL_W, CELL_H } = await import(
   `data:text/javascript;base64,${Buffer.from(boardCode).toString('base64')}`

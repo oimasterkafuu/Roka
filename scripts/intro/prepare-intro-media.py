@@ -1,6 +1,6 @@
 """One-time background/score preparation from the backed-up film (Pillow + FFmpeg).
 The normal website build never calls this tool. Input is not an MP4.
-Usage: python tools/prepare-intro-media.py /path/to/roka-trailer /path/to/early-background-sprite.png
+Usage: python scripts/intro/prepare-intro-media.py /path/to/roka-trailer /path/to/early-background-sprite.png
 """
 from pathlib import Path
 import hashlib

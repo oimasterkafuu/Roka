@@ -1,5 +1,5 @@
 /** Browser integration/performance probe; never exports video or frame sequences.
- * ROKA_PLAYWRIGHT_MODULE=/path/to/playwright ROKA_INTRO_BASE=http://localhost:23333 node tools/benchmark-intro.mjs
+ * ROKA_PLAYWRIGHT_MODULE=/path/to/playwright ROKA_INTRO_BASE=http://localhost:23333 node scripts/intro/benchmark-intro.mjs
  */
 import fs from 'node:fs/promises';
 const { chromium } = await import(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');

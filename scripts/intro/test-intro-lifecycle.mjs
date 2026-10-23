@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
-const source = await fs.readFile(new URL('../static/intro/player-source.js', import.meta.url), 'utf8');
+const source = await fs.readFile(new URL('../../static/intro/player-source.js', import.meta.url), 'utf8');
 const instantiate = new Function(
   'createScene',
   'createDirector',

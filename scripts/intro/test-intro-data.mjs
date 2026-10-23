@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-const root = path.resolve(import.meta.dirname, '..');
+const root = path.resolve(import.meta.dirname, '../..');
 const dataDir = process.argv[2] || path.join(root, 'static/intro/assets');
 const trailer = process.argv[3];
-const hashes = JSON.parse(await readFile(path.join(root, 'tools/fixtures/intro-replay-hashes.json')));
+const hashes = JSON.parse(
+  await readFile(path.join(import.meta.dirname, 'fixtures/intro-replay-hashes.json')),
+);
 const boardCode = await readFile(path.join(root, 'static/intro/replay-board.js'), 'utf8');
 const { ReplayState, isolatedOpacity, createReplayBoard } = await import(
   `data:text/javascript;base64,${Buffer.from(boardCode).toString('base64')}`

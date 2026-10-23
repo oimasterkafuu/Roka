@@ -49,26 +49,26 @@ pnpm run test:guest-access
 pnpm run test:asset-versioning
 ```
 
-正常构建完全使用仓库素材，`tools/build-intro.mjs` 以 esbuild 打包播放器并创建预压缩副本，不调用 Blender/FFmpeg，不访问旧制作工程或网络。`player.js` 为构建产物，修改源码后应重新构建。
+正常构建完全使用仓库素材，`scripts/intro/build-intro.mjs` 以 esbuild 打包播放器并创建预压缩副本，不调用 Blender/FFmpeg，不访问旧制作工程或网络。`player.js` 为构建产物，修改源码后应重新构建。
 
 额外浏览器测试：
 
 ```sh
 ROKA_PLAYWRIGHT_MODULE=/path/to/playwright node scripts/test-intro-entry.mjs
 # 本地服务启动后，实际入口/音频/渲染/流量性能探测，仅保存一张页面截图与 JSON：
-ROKA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs ROKA_INTRO_BASE=http://127.0.0.1:23333 node tools/benchmark-intro.mjs
+ROKA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs ROKA_INTRO_BASE=http://127.0.0.1:23333 node scripts/intro/benchmark-intro.mjs
 ```
 
-额外的 `tools/benchmark-intro-canvas.mjs` 可独立检查棋盘缓存绘制耗时。
+额外的 `scripts/intro/benchmark-intro-canvas.mjs` 可独立检查棋盘缓存绘制耗时。
 
 便携回放测试用原始快照的 SHA-256 摘要检查 1,402 次完整状态重建，含反向和大跨度跳转。若本机有备份制作工程，可再作原数据/无损模型交叉核对：
 
 ```sh
-node tools/test-intro-data.mjs static/intro/assets /path/to/roka-trailer
-node tools/test-intro-models.mjs /path/to/roka-trailer
+node scripts/intro/test-intro-data.mjs static/intro/assets /path/to/roka-trailer
+node scripts/intro/test-intro-models.mjs /path/to/roka-trailer
 ```
 
-`tools/import-intro-assets.mjs`、`prepare-intro-media.py`、`build-intro-data.mjs`、`build-intro-fonts.py` 是开发期素材准备工具。它们依赖备份制作工程，不属于正常站点构建。字体工具使用安装了 fonttools/Brotli 的 Python。修改回放源或时间轴后，应同步更新校验摘要；不要只改摘要绕过不一致。
+`scripts/intro/import-intro-assets.mjs`、`prepare-intro-media.py`、`build-intro-data.mjs`、`build-intro-fonts.py` 是开发期素材准备工具。它们依赖备份制作工程，不属于正常站点构建。字体工具使用安装了 fonttools/Brotli 的 Python。修改回放源或时间轴后，应同步更新校验摘要；不要只改摘要绕过不一致。
 
 ## 来源与许可
 

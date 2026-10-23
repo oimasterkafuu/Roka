@@ -1,5 +1,5 @@
 /** Isolate Canvas composition from WebGL and audio-clock scheduling.
- * ROKA_PLAYWRIGHT_MODULE=/path/to/playwright ROKA_INTRO_BASE=http://localhost:23333 node tools/benchmark-intro-canvas.mjs
+ * ROKA_PLAYWRIGHT_MODULE=/path/to/playwright ROKA_INTRO_BASE=http://localhost:23333 node scripts/intro/benchmark-intro-canvas.mjs
  * Uses a still Canvas as the scene source; creates no video or frame sequence.
  */
 import fs from 'node:fs/promises';

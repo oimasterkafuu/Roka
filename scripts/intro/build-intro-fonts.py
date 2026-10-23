@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Subset the original film fonts to the introduction's actual character set.
 
-Usage: python3 tools/build-intro-fonts.py [trailer-directory] [output-directory]
+Usage: python3 scripts/intro/build-intro-fonts.py [trailer-directory] [output-directory]
 Requires fonttools[woff] and brotli. Does not download fonts.
 """
 from pathlib import Path
@@ -9,7 +9,7 @@ import json
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 TRAILER = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/workspace/roka-trailer')
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / 'static/intro/assets'
 OUT.mkdir(parents=True, exist_ok=True)

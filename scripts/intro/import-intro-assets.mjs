@@ -7,7 +7,7 @@ import { EXTMeshoptCompression } from '@gltf-transform/extensions';
 import { reorder } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
 const source = process.argv[2];
-if (!source) throw new Error('Usage: node tools/import-intro-assets.mjs /path/to/roka-trailer');
+if (!source) throw new Error('Usage: node scripts/intro/import-intro-assets.mjs /path/to/roka-trailer');
 const out = path.resolve('static/intro/assets');
 await fs.mkdir(out, { recursive: true });
 const manifest = { version: 1, width: 1920, height: 1080, duration: 124, files: {}, images: {}, fonts: {} };

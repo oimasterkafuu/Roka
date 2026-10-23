@@ -1,5 +1,5 @@
 /** Reproduce only the public replay ticks used by the 124-second introduction.
- * Usage: node tools/build-intro-data.mjs [trailer-dir] [output-dir]
+ * Usage: node scripts/intro/build-intro-data.mjs [trailer-dir] [output-dir]
  * No user IDs, player names, or private metadata enter the browser bundle.
  */
 import { readFile, mkdir, writeFile } from 'node:fs/promises';

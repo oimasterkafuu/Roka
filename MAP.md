@@ -28,20 +28,20 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 关键事实：
 
 - 后端 TypeScript（`src/`）经 `pnpm run build` 编译到 `dist/` 运行；`dist/` 不手工编辑。
-- 前端主体无构建流程，`static/` 基本原样下发；介绍片由 `tools/build-intro.mjs` 单独打包至 `static/intro/player.js`；例外是含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
+- 前端主体无构建流程，`static/` 基本原样下发；介绍片由 `scripts/intro/build-intro.mjs` 单独打包至 `static/intro/player.js`；例外是含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
 - 静态资源发布：`src/server/static-assets.ts` 将 HTML 的资源地址固定到最近静态提交，注入 `static/asset-runtime.js` 处理有序脚本、完整性校验与 CDN 回退；CSS 内引用使用相对路径继承同一 commit。动态接口不经 CDN。详见 `docs/static-cdn.md`。
 - 玩家身份 = socket.id（sid）；对局协议与格子编码的权威文档是 `static/develop-bot.html`。
 
 ## 实时介绍片
 
 - `static/intro.js` / `static/styles/intro.css`：轻量入口、一次性同意弹窗、关于页重播、固定 16:9 舞台、播放控件与取消清理。首页认证/通知提示就绪后发送 `roka:home-ready`，防止弹窗堆叠。
-- `static/intro/player-source.js` → `player.js`：按需载入、Web Audio 时间轴、30 fps 调度、WebGL/Canvas 分层合成、暂停/跳转/退出生命周期；`tools/build-intro.mjs` 用 esbuild 构建并生成预压缩资源。
+- `static/intro/player-source.js` → `player.js`：按需载入、Web Audio 时间轴、30 fps 调度、WebGL/Canvas 分层合成、暂停/跳转/退出生命周期；`scripts/intro/build-intro.mjs` 用 esbuild 构建并生成预压缩资源。
 - `static/intro/asset-loading.js`：通过共享 CDN 传输加载模型、HDR 与纹理；重写 glTF 内部依赖为去重的 blob URL，退出时取消请求并释放。
 - `static/intro/scene.js` / `motion.js` / `landform.js` / `architecture.js`：原片三维镜头、接地 IK、连续山脊与沼泽、材质合批和分阶段施工。
 - `static/intro/director.js` / `replay-board.js`：1080p 合成、字幕/背景、原生棋盘与隔离闪烁；真实回放与 16 方模拟数据仅含显示所需字段。
 - `static/intro/assets/manifest.json`：哈希模型/共享贴图、音轨、回放、背景及字体地址；`licenses/` 保留第三方许可。`src/server/auth-service.ts` 只公开读取这些静态资源，`src/server.ts` 协商 gzip/Brotli 并给哈希素材不可变缓存。
-- `tools/build-intro-data.mjs` / `build-intro-fonts.py` / `import-intro-assets.mjs`：从备份制作工程重新准备素材的开发工具，正常站点构建不访问原工程。`tools/fixtures/intro-replay-hashes.json` 为原始回放状态校验摘要。
-- 验证：`tools/test-intro-{blink-white,data,models,lifecycle}.mjs`、`scripts/test-intro-{assets,entry,cdn}.mjs`、`scripts/test-{static-cdn,cdn-runtime}.mjs`；详见 `docs/realtime-intro.md`。
+- `scripts/intro/build-intro-data.mjs` / `build-intro-fonts.py` / `import-intro-assets.mjs`：从备份制作工程重新准备素材的开发工具，正常站点构建不访问原工程。`scripts/intro/fixtures/intro-replay-hashes.json` 为原始回放状态校验摘要。
+- 验证：`scripts/intro/test-intro-{blink-white,data,models,lifecycle}.mjs`、`scripts/test-intro-{assets,entry,cdn}.mjs`、`scripts/test-{static-cdn,cdn-runtime}.mjs`；详见 `docs/realtime-intro.md`。
 
 ## 目录结构树
 
