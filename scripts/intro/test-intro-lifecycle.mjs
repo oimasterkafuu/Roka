@@ -55,6 +55,9 @@ function harness(settings = {}) {
     },
   };
   const director = {
+    resize() {
+      return false;
+    },
     dispose() {
       stats.directorDisposed++;
     },
@@ -104,6 +107,9 @@ function harness(settings = {}) {
     createElement() {
       return {
         style: {},
+        getBoundingClientRect() {
+          return { width: 1920, height: 1080 };
+        },
         remove() {
           stats.canvasRemoved = true;
         },

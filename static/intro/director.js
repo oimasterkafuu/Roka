@@ -17,7 +17,7 @@ function surface(w = W, h = H) {
   c.height = h;
   return c;
 }
-/** Fixed 1920×1080 composition; CSS scales this single frame as a unit. */
+/** Fixed 1920×1080 logical composition with an independently sized output surface. */
 export function createDirector(canvas, { assets = {}, plan, replays, scene } = {}) {
   canvas.width = W;
   canvas.height = H;
@@ -363,6 +363,7 @@ export function createDirector(canvas, { assets = {}, plan, replays, scene } = {
   }
   function renderAt(time) {
     if (disposed) return;
+    ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
     const t = Math.max(0, Math.min(plan.duration - 1 / plan.fps, time));
     const fr = plan.frames[Math.min(plan.frames.length - 1, Math.floor(t * plan.fps + 1e-7))];
     const shot = plan.shots[fr.shot],
@@ -511,6 +512,12 @@ export function createDirector(canvas, { assets = {}, plan, replays, scene } = {
   }
   return {
     renderAt,
+    resize(width, height) {
+      if (canvas.width === width && canvas.height === height) return false;
+      canvas.width = width;
+      canvas.height = height;
+      return true;
+    },
     dispose() {
       disposed = true;
       for (const b of boards.values()) b.dispose();

@@ -1,4 +1,4 @@
-/* The stage is always 1920×1080; only its containing viewport scales. */
+/* The stage keeps 1920×1080 logical coordinates; canvases render at native display resolution. */
 html.intro-open {
   overflow: hidden;
 }
