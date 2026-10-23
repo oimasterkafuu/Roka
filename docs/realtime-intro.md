@@ -12,7 +12,7 @@
 
 ## 本轮视觉修改
 
-- 隔离区域采用原生快速/常速透明度闪烁：宽限期 0.4 秒周期，衰减期 1 秒周期，半周期透明度 0.45，由全片时钟驱动；去掉黄色隔离描边。
+- 隔离区域采用原生快速/常速透明度闪烁：宽限期 0.4 秒周期，衰减期 1 秒周期，半周期透明度 0.45，由全片时钟驱动；低亮度相位淡出到白色（先铺不透明白底再半透明绘制，与游戏本体在白底页面上的视觉效果一致）；去掉黄色隔离描边。
 - 冲刺后新增 4 秒铺满画面的左右对照，左半屏三维冲锋、右半屏放大真实回放，中间只有一条竖线，不使用黑底或卡片边框；放大的地图按显示尺寸绘制文字和图标，避免小位图放大的模糊。Y5bAFF7R2i8s 的 628–638 tick 中，蓝军在 632、634、636 tick 沿第 15 行向东推进并占领红格。视窗固定，不追随单位抖动，不显示玩家或算法名称。
 - 升空过程中保留山体和投影，直接交融原生棋盘，移除遮挡转场的云雾。施工阶段的敲击、火花与烟尘保留。三维为概念演绎，二维为游戏实际画面，没有把这种转场包装成游戏功能。
 - 142 个山格有不同的峰高、轮廓、走向和侵蚀细节，70 处相邻连接形成连续山脊；54 处湿地使用变化的盆地/岸线、泥土、暗色浅水、非规则微波、芦苇与睡莲。避免重复复制同一山/水塘。
@@ -49,26 +49,26 @@ pnpm run test:guest-access
 pnpm run test:asset-versioning
 ```
 
-正常构建完全使用仓库素材，`tools/build-intro.mjs` 以 esbuild 打包播放器并创建预压缩副本，不调用 Blender/FFmpeg，不访问旧制作工程或网络。`player.js` 为构建产物，修改源码后应重新构建。
+正常构建完全使用仓库素材，`scripts/intro/build-intro.mjs` 以 esbuild 打包播放器并创建预压缩副本，不调用 Blender/FFmpeg，不访问旧制作工程或网络。`player.js` 为构建产物，修改源码后应重新构建。
 
 额外浏览器测试：
 
 ```sh
 ROKA_PLAYWRIGHT_MODULE=/path/to/playwright node scripts/test-intro-entry.mjs
 # 本地服务启动后，实际入口/音频/渲染/流量性能探测，仅保存一张页面截图与 JSON：
-ROKA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs ROKA_INTRO_BASE=http://127.0.0.1:23333 node tools/benchmark-intro.mjs
+ROKA_PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs ROKA_INTRO_BASE=http://127.0.0.1:23333 node scripts/intro/benchmark-intro.mjs
 ```
 
-额外的 `tools/benchmark-intro-canvas.mjs` 可独立检查棋盘缓存绘制耗时。
+额外的 `scripts/intro/benchmark-intro-canvas.mjs` 可独立检查棋盘缓存绘制耗时。
 
 便携回放测试用原始快照的 SHA-256 摘要检查 1,402 次完整状态重建，含反向和大跨度跳转。若本机有备份制作工程，可再作原数据/无损模型交叉核对：
 
 ```sh
-node tools/test-intro-data.mjs static/intro/assets /path/to/roka-trailer
-node tools/test-intro-models.mjs /path/to/roka-trailer
+node scripts/intro/test-intro-data.mjs static/intro/assets /path/to/roka-trailer
+node scripts/intro/test-intro-models.mjs /path/to/roka-trailer
 ```
 
-`tools/import-intro-assets.mjs`、`prepare-intro-media.py`、`build-intro-data.mjs`、`build-intro-fonts.py` 是开发期素材准备工具。它们依赖备份制作工程，不属于正常站点构建。字体工具使用安装了 fonttools/Brotli 的 Python。修改回放源或时间轴后，应同步更新校验摘要；不要只改摘要绕过不一致。
+`scripts/intro/import-intro-assets.mjs`、`prepare-intro-media.py`、`build-intro-data.mjs`、`build-intro-fonts.py` 是开发期素材准备工具。它们依赖备份制作工程，不属于正常站点构建。字体工具使用安装了 fonttools/Brotli 的 Python。修改回放源或时间轴后，应同步更新校验摘要；不要只改摘要绕过不一致。
 
 ## 来源与许可
 
