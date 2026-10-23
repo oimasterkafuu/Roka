@@ -929,7 +929,7 @@ $(document).ready(function () {
   var tmp = location.pathname;
   room_id = tmp.substr(tmp.indexOf('games/') + 6);
   refreshRoomLinkDisplay();
-  starting_audio = new Audio('/gong.mp3?v={{V}}');
+  starting_audio = new Audio(window.ROKA_ASSETS ? window.ROKA_ASSETS.url('/gong.mp3') : '/gong.mp3');
   // 已登录才能进入本页（未登录会在 loadAccountProfile 跳走），此处引导通知权限。
   maybePromptNotificationPermission();
   loadAccountProfile().then(function () {

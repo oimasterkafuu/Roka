@@ -4,12 +4,13 @@ import * as T from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { Motion } from './motion.js';
+import { createIntroAssetLoader } from './asset-loading.js';
 import { createLandform } from './landform.js';
 import { materials, fortress } from './architecture.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 export async function createScene({ assets, signal, onStatus = () => {} }) {
   const manager = new T.LoadingManager();
-  manager.setURLModifier((url) => assets.files[url] || url);
+  const assetLoader = createIntroAssetLoader({ files: assets.files, signal });
   const resources = new Set(),
     roots = new Set();
   let disposed = false,
@@ -44,6 +45,7 @@ export async function createScene({ assets, signal, onStatus = () => {} }) {
     disposed = true;
     signal?.removeEventListener('abort', abort);
     manager.abort();
+    assetLoader.dispose();
     for (const root of roots) release(root);
     for (const r of resources) {
       r.dispose();
@@ -59,13 +61,7 @@ export async function createScene({ assets, signal, onStatus = () => {} }) {
   const check = () => {
     if (disposed || signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   };
-  const resolve = (name) => assets.files[name] || name;
-  async function json(name) {
-    const r = await fetch(resolve(name), { signal });
-    if (!r.ok) throw new Error(`Intro ${name}: ${r.status}`);
-    check();
-    return r.json();
-  }
+  const json = assetLoader.json;
   function tracked(loader) {
     const original = loader.loadAsync.bind(loader);
     loader.loadAsync = async (...args) => {
@@ -132,14 +128,14 @@ export async function createScene({ assets, signal, onStatus = () => {} }) {
     const fill = new T.DirectionalLight(0xa4c3df, 0.6);
     fill.position.set(60, 40, 80);
     scene.add(fill);
-    const sky = await tracked(new HDRLoader(manager)).loadAsync(BASE + 'sky.hdr');
+    const sky = await tracked(new HDRLoader(manager)).loadAsync(await assetLoader.blobURL(BASE + 'sky.hdr'));
     sky.mapping = T.EquirectangularReflectionMapping;
     scene.background = sky;
     scene.environment = sky;
     scene.environmentIntensity = 0.5;
     scene.backgroundIntensity = 0.48;
     scene.backgroundRotation.y = 2.8;
-    // Bitmap fetches honor the manager abort signal. Flip at decode time because
+    // Fetch through the commit-pinned runtime before decoding. Flip at decode time because
     // WebGL ignores UNPACK_FLIP_Y_WEBGL for ImageBitmap sources.
     const bitmapLoader = new T.ImageBitmapLoader(manager).setOptions({
       imageOrientation: 'flipY',
@@ -147,7 +143,7 @@ export async function createScene({ assets, signal, onStatus = () => {} }) {
     });
     const texLoader = {
       async loadAsync(name) {
-        const image = await bitmapLoader.loadAsync(name);
+        const image = await bitmapLoader.loadAsync(await assetLoader.blobURL(name));
         const texture = own(new T.Texture(image));
         texture.flipY = false;
         texture.needsUpdate = true;
@@ -526,8 +522,8 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
 
     const gltfLoader = tracked(new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder));
     const [heroGL, midGL, lowGL] = await Promise.all([
-      ...['knight-hero.glb', 'knight-lod.glb', 'knight-crowd.glb'].map((name) =>
-        gltfLoader.loadAsync(new URL(resolve(name), location.href).href),
+      ...['knight-hero.glb', 'knight-lod.glb', 'knight-crowd.glb'].map(async (name) =>
+        gltfLoader.loadAsync(await assetLoader.modelURL(name)),
       ),
     ]);
     function recolor(original, owner, stone = false) {

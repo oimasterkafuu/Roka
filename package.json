@@ -1,7 +1,7 @@
 {
   "name": "roka",
-  "version": "1.70.0",
-  "description": "Roka - \u5b9e\u65f6\u65b9\u683c\u9886\u571f\u6218\u4e89",
+  "version": "1.70.1",
+  "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx src/server.ts",
@@ -44,7 +44,9 @@
     "test:asset-versioning": "node scripts/test-asset-versioning.mjs",
     "observe:bot": "node scripts/observe-bot-match.mjs",
     "build:intro": "node tools/build-intro.mjs",
-    "test:intro": "node tools/test-intro-data.mjs && node tools/test-intro-models.mjs && node tools/test-intro-lifecycle.mjs && node scripts/test-intro-assets.mjs"
+    "test:intro": "node tools/test-intro-data.mjs && node tools/test-intro-models.mjs && node tools/test-intro-lifecycle.mjs && node scripts/test-intro-assets.mjs && node scripts/test-intro-cdn.mjs",
+    "test:static-cdn": "node scripts/test-static-cdn.mjs",
+    "test:cdn-runtime": "node scripts/test-cdn-runtime.mjs"
   },
   "repository": {
     "type": "git",

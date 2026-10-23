@@ -1,7 +1,9 @@
-// 注册部署更新兜底 Service Worker（见 sw.js）：注册失败静默忽略，
-// 不影响页面正常功能（老旧浏览器无 serviceWorker 时同样跳过）。
+// Registration stays same-origin; the generated worker imports its pinned CDN implementation.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function () {
-    navigator.serviceWorker.register('/sw.js?v={{V}}').catch(function () {});
-  });
+  var scriptVersion = new URL(document.currentScript.src).searchParams.get('v') || 'local';
+  function registerDeploymentWorker() {
+    navigator.serviceWorker.register('/sw.js?v=' + encodeURIComponent(scriptVersion)).catch(function () {});
+  }
+  if (document.readyState === 'complete') registerDeploymentWorker();
+  else window.addEventListener('load', registerDeploymentWorker, { once: true });
 }

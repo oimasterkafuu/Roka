@@ -21,6 +21,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 const keys = [
   'document',
   'fetch',
+  'ROKA_ASSETS',
   'FontFace',
   'createImageBitmap',
   'requestAnimationFrame',
@@ -31,6 +32,8 @@ const original = new Map(keys.map((key) => [key, globalThis[key]]));
 function harness(settings = {}) {
   const stats = {
     requests: 0,
+    paths: [],
+    requestSignals: [],
     sceneDisposed: 0,
     directorDisposed: 0,
     starts: [],
@@ -107,8 +110,10 @@ function harness(settings = {}) {
       };
     },
   };
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, options) => {
     stats.requests++;
+    stats.paths.push(url);
+    stats.requestSignals.push(options.signal);
     return {
       ok: true,
       async json() {
@@ -128,6 +133,16 @@ function harness(settings = {}) {
       },
     };
   };
+  if (settings.cdn) {
+    globalThis.ROKA_ASSETS = {
+      fetch(path, options) {
+        return globalThis.fetch(
+          'https://cdn.invalid/gh/oimasterkafuu/Roka@0123456789abcdef0123456789abcdef01234567/static' + path,
+          options,
+        );
+      },
+    };
+  } else delete globalThis.ROKA_ASSETS;
   globalThis.FontFace = class {
     load() {
       return settings.font ? settings.font.promise.then(() => this) : Promise.resolve(this);
@@ -189,6 +204,21 @@ function harness(settings = {}) {
 }
 
 try {
+  {
+    const h = harness({ cdn: true });
+    assert.equal(h.stats.requests, 0, 'preparing playback starts no requests before consent');
+    const player = await h.create();
+    assert.equal(h.stats.requests, 6, 'manifest, replay JSON, audio, image and font use the runtime');
+    assert(
+      h.stats.paths.every((url) =>
+        url.startsWith(
+          'https://cdn.invalid/gh/oimasterkafuu/Roka@0123456789abcdef0123456789abcdef01234567/static/',
+        ),
+      ),
+    );
+    assert(h.stats.requestSignals.every((signal) => signal === h.stats.sceneSignal));
+    player.destroy();
+  }
   {
     const h = harness();
     const player = await h.create();
