@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
@@ -13,6 +13,15 @@ const root = process.cwd();
 const commit = '0123456789abcdef0123456789abcdef01234567';
 const prefix = `/gh/oimasterkafuu/Roka@${commit}/static/`;
 const { version } = JSON.parse(await readFile('package.json', 'utf8'));
+const artifact = path.join(root, 'static', `.cdn-build-test-${process.pid}.gz`);
+try {
+  await writeFile(artifact, 'generated build artifact');
+  const production = new StaticAssetDelivery(version, root, {});
+  assert(production.enabled, 'generated/untracked build artifacts must not disable production CDN');
+  assert.match(production.commit, /^[a-f0-9]{40}$/);
+} finally {
+  await rm(artifact, { force: true });
+}
 const disabled = new StaticAssetDelivery(version, root, { ROKA_STATIC_CDN: '0' });
 assert.equal(disabled.html('<head></head>'), '<head></head>');
 assert.throws(() => new StaticAssetDelivery(version, root, { ROKA_STATIC_COMMIT: 'main' }));
@@ -42,6 +51,8 @@ const html = delivery.html(
   '<head></head><img src="/crown.png" srcset="/city.png 1x, /mountain.png 2x"><script src="/notify.js"></script><a href="/api/version">API</a>',
 );
 assert.match(html, /sha384-/);
+assert.match(html, /rel="preload" as="script"/);
+assert.match(html, /crossorigin="anonymous"/);
 assert(html.includes(`${delivery.bases[0]}mountain.png 2x`));
 assert(html.includes('href="/api/version"'));
 assert(!html.includes('<script src="/notify.js"'));
