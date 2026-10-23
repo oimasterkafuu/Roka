@@ -114,7 +114,7 @@ body {
 }
 
 .build-badge.build-b {
-  background-image: url('/city.png');
+  background-image: url('../city.png');
 }
 
 .build-badge.build-b.with-c {
@@ -122,7 +122,7 @@ body {
 }
 
 .build-badge.build-c {
-  background-image: url('/crown.png');
+  background-image: url('../crown.png');
 }
 
 @media (max-width: 1000px) {

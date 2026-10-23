@@ -68,8 +68,13 @@ export async function createIntroPlayer(stage, options = {}) {
   }
   signal?.addEventListener('abort', destroy, { once: true });
 
+  function fetchAsset(path, options) {
+    const runtime = globalThis.ROKA_ASSETS;
+    return runtime?.fetch ? runtime.fetch(path, options) : fetch(path, options);
+  }
+
   async function json(url) {
-    const response = await fetch(url, { signal: combined });
+    const response = await fetchAsset(url, { signal: combined });
     if (!response.ok) throw new Error(`Intro request failed: ${response.status}`);
     return response.json();
   }
@@ -86,7 +91,7 @@ export async function createIntroPlayer(stage, options = {}) {
       quicksand: 'Quicksand',
     };
     const loadImage = async ([name, url]) => {
-      const response = await fetch(url, { signal: combined });
+      const response = await fetchAsset(url, { signal: combined });
       if (!response.ok) throw new Error('Intro image unavailable');
       const blob = await response.blob();
       const image = await createImageBitmap(blob);
@@ -98,7 +103,7 @@ export async function createIntroPlayer(stage, options = {}) {
       images[name] = image;
     };
     const loadFont = async ([name, url]) => {
-      const response = await fetch(url, { signal: combined });
+      const response = await fetchAsset(url, { signal: combined });
       if (!response.ok) throw new Error('Intro font unavailable');
       const data = await response.arrayBuffer();
       const font = new FontFace(family[name], data, {
@@ -114,7 +119,7 @@ export async function createIntroPlayer(stage, options = {}) {
       json(manifest.files['plan.json']),
       json(manifest.files['replays.json']),
       audioContext
-        ? fetch(manifest.files['score.mp3'], { signal: combined }).then(async (response) => {
+        ? fetchAsset(manifest.files['score.mp3'], { signal: combined }).then(async (response) => {
             if (!response.ok) throw new Error('Intro soundtrack unavailable');
             return audioContext.decodeAudioData(await response.arrayBuffer());
           })

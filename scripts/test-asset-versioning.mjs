@@ -1,7 +1,7 @@
 // Roka 静态资源版本号注入测试：临时数据目录 + 随机端口启动 dist/server.js，断言
 //   1) 首页（/）与对局页（/games/:id，需登录）响应中所有本地 .js/.css 引用均携带
 //      ?v=<package.json version>（外部 CDN 引用不受影响）；
-//   2) /main.css 响应中的 @import 行均携带同一版本号；
+//   2) /main.css 的相对 @import 可在同一资源根下解析并正常加载；
 //   3) 带 ?v= 查询参数的静态资源请求返回 200 且内容正确（模板文件已替换占位符，
 //      @fastify/static 直发文件忽略未知 query）；
 //   4) 模板路由保持原缓存头语义（ETag + If-None-Match 304）。
@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -173,7 +174,7 @@ async function main() {
   const token = await prepareUserToken(dataDir);
   const server = spawn(process.execPath, [serverEntry, '--port', String(port)], {
     cwd: rootDir,
-    env: { ...process.env, ROKA_DATA_DIR: dataDir },
+    env: { ...process.env, ROKA_DATA_DIR: dataDir, ROKA_STATIC_CDN: '0' },
     stdio: ['ignore', 'ignore', 'inherit'],
   });
   children.add(server);
@@ -192,13 +193,21 @@ async function main() {
   assert(game.body.includes(`/main.css?v=${VERSION}`), '对局页 /main.css 引用携带版本号');
   assertVersionedReferences(game.body, '对局页');
 
-  // 2) /main.css 的 @import 行均携带同一版本号。
+  // 2) CSS uses relative imports so a commit-pinned CDN stylesheet keeps every
+  // dependency at the same provider/commit. Local-mode requests resolve identically.
   const mainCss = await getText(baseUrl, '/main.css');
   assert(mainCss.status === 200, '/main.css 返回 200');
-  const importLines = mainCss.body.split('\n').filter((line) => line.includes('@import'));
-  assert(importLines.length > 0, '/main.css 存在 @import 行');
-  for (const line of importLines) {
-    assert(line.includes(`?v=${VERSION}`), `/main.css @import 携带版本号：${line.trim()}`);
+  const imports = [...mainCss.body.matchAll(/@import\s+url\(['"]([^'"]+)['"]\)/g)];
+  assert(imports.length > 0, '/main.css 存在 @import 行');
+  for (const [, reference] of imports) {
+    assert(/^styles\/[^?#]+\.css$/.test(reference), `/main.css @import 使用相对路径：${reference}`);
+    const resolved = new URL(reference, `${baseUrl}/main.css?v=${VERSION}`);
+    const response = await getText(baseUrl, resolved.pathname);
+    assert(response.status === 200, `相对样式依赖可加载：${resolved.pathname}`);
+    assert(
+      response.body === fs.readFileSync(path.join(rootDir, 'static', reference), 'utf8'),
+      `相对样式依赖内容正确：${reference}`,
+    );
   }
   assert(!mainCss.body.includes('{{V}}'), '/main.css 无残留 {{V}} 占位符');
 
@@ -209,15 +218,40 @@ async function main() {
   const mainJs = await getText(baseUrl, `/main.js?v=${VERSION}`);
   assert(mainJs.status === 200, '/main.js?v= 返回 200');
   assert(mainJs.body === templatedMainJs, '/main.js?v= 内容正确（占位符已替换）');
-  assert(mainJs.body.includes(`/gong.mp3?v=${VERSION}`), '/main.js 内音效 URL 携带版本号');
+  assert(mainJs.body.includes("ROKA_ASSETS.url('/gong.mp3')"), '/main.js 音效使用固定提交传输');
+  assert(!mainJs.body.includes('{{V}}'), '/main.js 同源与 CDN 字节一致');
 
   const swJs = await getText(baseUrl, `/sw.js?v=${VERSION}`);
   assert(swJs.status === 200, '/sw.js?v= 返回 200');
-  assert(swJs.body.includes(`/updating.html?v=${VERSION}`), '/sw.js 预缓存 URL 携带版本号');
+  const workerContext = {
+    self: { location: { href: `${baseUrl}/sw.js?v=${VERSION}` }, addEventListener() {} },
+    URL,
+  };
+  vm.runInNewContext(swJs.body, workerContext);
+  assert(
+    workerContext.UPDATING_PAGE_URL === `/updating.html?v=${VERSION}`,
+    '/sw.js 从注册 URL 派生预缓存版本号',
+  );
 
   const swRegister = await getText(baseUrl, `/sw-register.js?v=${VERSION}`);
   assert(swRegister.status === 200, '/sw-register.js?v= 返回 200');
-  assert(swRegister.body.includes(`/sw.js?v=${VERSION}`), '/sw-register.js 注册 URL 携带版本号');
+  const registered = [];
+  vm.runInNewContext(swRegister.body, {
+    navigator: {
+      serviceWorker: {
+        register(url) {
+          registered.push(url);
+          return Promise.resolve();
+        },
+      },
+    },
+    document: { readyState: 'complete', currentScript: { src: `${baseUrl}/sw-register.js?v=${VERSION}` } },
+    URL,
+  });
+  assert(
+    registered.length === 1 && registered[0] === `/sw.js?v=${VERSION}`,
+    '/sw-register.js 从脚本 URL 派生注册版本号',
+  );
 
   // @fastify/static 直发资源忽略未知 query，内容原样。
   const baseCssRaw = fs.readFileSync(path.join(rootDir, 'static', 'styles', 'base.css'), 'utf8');

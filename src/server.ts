@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { isIP } from 'node:net';
 import fastifyRateLimit from '@fastify/rate-limit';
@@ -34,6 +34,7 @@ import { EditableLobbyKey, FIXED_SWAMP_RATIO, LobbyService } from './server/lobb
 import { PresenceService } from './server/presence-service';
 import { ServerBotManager } from './server/server-bot-manager';
 import { WebhookUpdater } from './server/webhook-updater';
+import { StaticAssetDelivery } from './server/static-assets';
 
 const runtimeEnv = ensureRuntimeEnv();
 const app = Fastify({ logger: true });
@@ -57,6 +58,8 @@ const gitCommit = (() => {
     return '';
   }
 })();
+
+const staticAssets = new StaticAssetDelivery(packageVersion);
 
 // 回放上传：接收原始 .rpl 文件（ops-v1 操作流，通常仅几百字节）。
 app.addContentTypeParser(
@@ -1266,10 +1269,12 @@ const boot = async (): Promise<void> => {
   const renderAssetTemplate = (filename: string): { body: string; etag: string } => {
     let cached = assetTemplateCache.get(filename);
     if (!cached) {
-      const body = readFileSync(path.join(process.cwd(), 'static', filename), 'utf8').replaceAll(
+      let body = readFileSync(path.join(process.cwd(), 'static', filename), 'utf8').replaceAll(
         '{{V}}',
         packageVersion,
       );
+      if (filename.endsWith('.html')) body = staticAssets.html(body);
+      else if (filename === 'sw.js') body = staticAssets.worker(body);
       cached = { body, etag: `"${createHash('sha1').update(body).digest('hex')}"` };
       assetTemplateCache.set(filename, cached);
     }
@@ -1297,9 +1302,14 @@ const boot = async (): Promise<void> => {
   app.get('/main.js', async (request, reply) =>
     serveAssetTemplate(request, reply, 'main.js', 'application/javascript'),
   );
-  app.get('/sw.js', async (request, reply) =>
-    serveAssetTemplate(request, reply, 'sw.js', 'application/javascript'),
-  );
+  app.get('/sw.js', async (request, reply) => {
+    if ((request.query as { source?: string }).source === '1')
+      return reply
+        .header('Cache-Control', 'public, max-age=0')
+        .type('application/javascript')
+        .send(readFileSync(path.join(process.cwd(), 'static/sw.js'), 'utf8'));
+    return serveAssetTemplate(request, reply, 'sw.js', 'application/javascript');
+  });
   app.get('/sw-register.js', async (request, reply) =>
     serveAssetTemplate(request, reply, 'sw-register.js', 'application/javascript'),
   );
@@ -1317,6 +1327,17 @@ const boot = async (): Promise<void> => {
     );
     return reply.header('Cache-Control', 'no-store').type('text/html').send(html);
   };
+
+  // Direct .html links use the same pinned assets and session handling as friendly routes.
+  for (const file of readdirSync(path.join(process.cwd(), 'static')).filter((name) =>
+    name.endsWith('.html'),
+  )) {
+    app.get('/' + file, async (request, reply) =>
+      file === 'game.html'
+        ? serveGameHtml(request, reply)
+        : serveAssetTemplate(request, reply, file, 'text/html'),
+    );
+  }
 
   app.get('/games/:game_id', async (request, reply) => {
     const params = request.params as { game_id: string };

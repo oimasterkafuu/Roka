@@ -359,7 +359,10 @@
     };
     document.addEventListener('visibilitychange', session.onVisibility);
 
-    import('/intro/player.js?v=' + encodeURIComponent(version))
+    (window.ROKA_ASSETS
+      ? window.ROKA_ASSETS.import('/intro/player.js?v=' + encodeURIComponent(version))
+      : import('/intro/player.js?v=' + encodeURIComponent(version))
+    )
       .then(function (module) {
         if (!isActive()) return null;
         return module.createIntroPlayer(stage, {

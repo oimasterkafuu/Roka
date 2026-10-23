@@ -40,7 +40,13 @@ node training/long-eval.cjs --help
 
 介绍片由 Three.js / WebGL2 和 Canvas 2D 在客户端绘制，没有整段 MP4 请求。构图固定为 1920×1080，按 16:9 完整缩放；三维源画布保持原片的 1600×900，字幕、棋盘与合成使用 1080p。音乐时钟驱动统一的 124 秒时间轴；慢设备丢帧而不拉长配乐或打乱镜头。需要支持 WebGL2 的现代浏览器。素材加载失败时可以关闭或重试。
 
-`pnpm run build` 会离线构建播放器与 gzip / Brotli 静态副本；无需 Blender、视频编码器或外部 CDN。哈希素材缓存一年，入口随站点版本更新。完整实现、素材许可、性能实测与已知设备限制见 [实时介绍片说明](docs/realtime-intro.md)。`pnpm run test:intro` 检查回放、模型解码、播放生命周期和静态访问规则；浏览器入口测试使用 `node scripts/test-intro-entry.mjs`（需 Playwright/Chromium，可通过 `ROKA_PLAYWRIGHT_MODULE` 指定依赖位置）。
+`pnpm run build` 会离线构建播放器与 gzip / Brotli 静态副本；无需 Blender、视频编码器或联网下载素材。线上静态资源默认走固定 commit 的 CDN，哈希素材缓存一年。完整实现、素材许可、性能实测与已知设备限制见 [实时介绍片说明](docs/realtime-intro.md)。`pnpm run test:intro` 检查回放、模型解码、播放生命周期和静态访问规则；浏览器入口测试使用 `node scripts/test-intro-entry.mjs`（需 Playwright/Chromium，可通过 `ROKA_PLAYWRIGHT_MODULE` 指定依赖位置）。
+
+## 静态资源 CDN
+
+线上 JS、CSS、字体、图标和介绍片的模型、贴图、HDR、回放与音轨，统一从 GitHub CDN 获取。默认首选 `cdn.jsdmirror.com`，失败依次尝试 `.cn`、`testingcf.jsdelivr.net`，最后回源；脚本与入口样式还校验 SHA-384。所有 CDN 地址固定完整 40 位 commit，部署自动选取最近一次修改 `static/` 的提交，避免 `main` 缓存导致旧文件混用。介绍片仍为客户端实时渲染，没有整段视频下载。
+
+本地修改静态文件后自动使用同源，便于开发；可用 `ROKA_STATIC_CDN=0` 显式关闭。归档部署可用 `ROKA_STATIC_COMMIT=<完整 SHA>` 指定版本；`ROKA_STATIC_CDN_ORIGINS` 可覆盖候选 HTTPS 域名（逗号分隔）。HTML、API、Socket.IO 与 Service Worker 注册入口保持本站来源。国内三运营商抽样可用，但免费 CDN 没有可靠 SLA，已保留故障回退。配置、发布预热与检测证据见 [CDN 说明](docs/static-cdn.md)。
 
 ## 游戏规则
 

@@ -200,21 +200,21 @@
   background-color: #dcdcdc;
 }
 .swamp {
-  background-image: url('/swamp.png');
+  background-image: url('../swamp.png');
   background-color: gray;
 }
 .obstacle {
-  background-image: url('/obstacle.png');
+  background-image: url('../obstacle.png');
 }
 .general {
-  background-image: url('/crown.png');
+  background-image: url('../crown.png');
 }
 .mountain {
-  background-image: url('/mountain.png');
+  background-image: url('../mountain.png');
 }
 .city {
   background-color: gray;
-  background-image: url('/city.png');
+  background-image: url('../city.png');
 }
 .fog {
   /* 迷雾远征：视野外格子叠轻微暗色遮罩，山脉与沼泽仍可见。 */
@@ -262,7 +262,7 @@
 }
 
 .build-badge.build-b {
-  background-image: url('/city.png');
+  background-image: url('../city.png');
 }
 
 .build-badge.build-b.with-c {
@@ -270,7 +270,7 @@
 }
 
 .build-badge.build-c {
-  background-image: url('/crown.png');
+  background-image: url('../crown.png');
 }
 
 #map.burst::after {
