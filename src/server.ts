@@ -544,6 +544,12 @@ const boot = async (): Promise<void> => {
   await app.register(fastifyStatic, {
     root: path.join(process.cwd(), 'static'),
     prefix: '/',
+    preCompressed: true,
+    setHeaders(response, filePath) {
+      if (/[/\\]intro[/\\]assets[/\\][^/\\]+\.[a-f0-9]{16}\./.test(filePath)) {
+        response.header('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    },
   });
 
   await app.register(async (webhookApp) => {

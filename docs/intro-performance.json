@@ -1,0 +1,677 @@
+{
+  "measuredAt": "2026-10-23",
+  "environment": {
+    "hardwareGPU": false,
+    "cpuQuota": 4,
+    "renderer": "Chromium / ANGLE SwiftShader"
+  },
+  "motionAndBatches": {
+    "motion": {
+      "walk": {
+        "maxError": 7.9273776452797e-7,
+        "maxDrift": 1.1244767226316705e-7,
+        "maxPenetration": 0
+      },
+      "run": {
+        "maxError": 1.3378081417792846e-6,
+        "maxDrift": 4.174543459644336e-7,
+        "maxPenetration": 0
+      },
+      "idle": {
+        "maxError": 8.838895453584342e-7,
+        "maxDrift": 0,
+        "maxPenetration": 0
+      }
+    },
+    "buildingBatches": [4, 4, 4, 4, 4, 4, 4],
+    "metrics": {
+      "renderer": {
+        "frame": 31,
+        "calls": 54,
+        "triangles": 725151,
+        "points": 0,
+        "lines": 0
+      },
+      "memory": {
+        "geometries": 71,
+        "textures": 76
+      },
+      "units": 157,
+      "terrainVertices": 90601,
+      "landforms": {
+        "mountainCells": 142,
+        "sharedRidgeLinks": 70,
+        "wetlandCells": 54
+      },
+      "waterTriangles": 39653,
+      "reedStems": 5293,
+      "internalWidth": 1600,
+      "internalHeight": 900
+    }
+  },
+  "textureLoaderPixels": {
+    "meanAbsoluteChannelError": 0,
+    "maximumChannelError": 0
+  },
+  "modelValidation": {
+    "method": "lossless Meshopt; original triangle attributes and animation channels compared",
+    "heroTriangles": 49624,
+    "midTriangles": 16055,
+    "crowdTriangles": 3378
+  },
+  "notes": [
+    "No exported video. Selected preview stills and runtime browser probes only.",
+    "Isolated Canvas timings include a forced flush. Full-player software-GPU timings include compositor/backpressure; they do not predict hardware GPU or mobile frame rates."
+  ],
+  "fullPlayerSoftwareGPU": {
+    "initialRequests": 0,
+    "loadMs": 6412.0999999940395,
+    "gpu": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+    "firstResources": [
+      {
+        "url": "player.js?v=1.70.0",
+        "encoded": 158082,
+        "decoded": 702146,
+        "transfer": 158382
+      },
+      {
+        "url": "manifest.json",
+        "encoded": 800,
+        "decoded": 2759,
+        "transfer": 1100
+      },
+      {
+        "url": "plan.638362863669ba56.json",
+        "encoded": 10463,
+        "decoded": 190683,
+        "transfer": 10763
+      },
+      {
+        "url": "replays.7441473e89e8f92e.json",
+        "encoded": 179149,
+        "decoded": 1466890,
+        "transfer": 179449
+      },
+      {
+        "url": "crown.ebb8133c5bb0e0f1.png",
+        "encoded": 2121,
+        "decoded": 2121,
+        "transfer": 2421
+      },
+      {
+        "url": "city.f7f5eccaeeb39a3c.png",
+        "encoded": 1813,
+        "decoded": 1813,
+        "transfer": 2113
+      },
+      {
+        "url": "score.526f2eefdc557d3b.mp3",
+        "encoded": 2977388,
+        "decoded": 2977388,
+        "transfer": 2977688
+      },
+      {
+        "url": "mountain.01b962885d7d31ab.png",
+        "encoded": 1789,
+        "decoded": 1789,
+        "transfer": 2089
+      },
+      {
+        "url": "swamp.dcfb5715f0ab50fd.png",
+        "encoded": 254,
+        "decoded": 254,
+        "transfer": 554
+      },
+      {
+        "url": "join-qr.d985cbdfbc44096b.png",
+        "encoded": 1214,
+        "decoded": 1214,
+        "transfer": 1514
+      },
+      {
+        "url": "background.88605652f0858920.webp",
+        "encoded": 417036,
+        "decoded": 417036,
+        "transfer": 417336
+      },
+      {
+        "url": "intro-serif.390b17cca0e65761.woff2",
+        "encoded": 137880,
+        "decoded": 137880,
+        "transfer": 138180
+      },
+      {
+        "url": "intro-cn.076b77a0aae176a9.woff2",
+        "encoded": 96972,
+        "decoded": 96972,
+        "transfer": 97272
+      },
+      {
+        "url": "intro-latin.890993bdd007af2b.woff2",
+        "encoded": 15092,
+        "decoded": 15092,
+        "transfer": 15392
+      },
+      {
+        "url": "intro-sans.f63bfe68f7ba5f2d.woff2",
+        "encoded": 14928,
+        "decoded": 14928,
+        "transfer": 15228
+      },
+      {
+        "url": "intro-quicksand.90f838cbb06c732b.woff2",
+        "encoded": 2336,
+        "decoded": 2336,
+        "transfer": 2636
+      },
+      {
+        "url": "motion-profile.de5369deadcfe944.json",
+        "encoded": 118766,
+        "decoded": 393924,
+        "transfer": 119066
+      },
+      {
+        "url": "world.3d6668085ef7e518.json",
+        "encoded": 844,
+        "decoded": 7389,
+        "transfer": 1144
+      },
+      {
+        "url": "sky.5477b7dbb2aea4a6.hdr",
+        "encoded": 1180478,
+        "decoded": 1637206,
+        "transfer": 1180778
+      },
+      {
+        "url": "ground.d570c10b1d5302f4.jpg",
+        "encoded": 843188,
+        "decoded": 843188,
+        "transfer": 843488
+      },
+      {
+        "url": "ground-normal.f4f9d9671c660f4e.jpg",
+        "encoded": 993692,
+        "decoded": 993692,
+        "transfer": 993992
+      },
+      {
+        "url": "rock_face_03-diff.ea48e0e47ad42c8b.jpg",
+        "encoded": 927082,
+        "decoded": 927082,
+        "transfer": 927382
+      },
+      {
+        "url": "rock_face_03-nor_gl.c6423169583f3171.jpg",
+        "encoded": 1146788,
+        "decoded": 1146788,
+        "transfer": 1147088
+      },
+      {
+        "url": "rock_face_03-rough.9e3d9a2fd7524489.jpg",
+        "encoded": 638904,
+        "decoded": 638904,
+        "transfer": 639204
+      },
+      {
+        "url": "brown_mud_02-diff.058b6f12493305ec.jpg",
+        "encoded": 527741,
+        "decoded": 527741,
+        "transfer": 528041
+      },
+      {
+        "url": "knight-hero.6bb51eb98f8c0d49.gltf",
+        "encoded": 3823,
+        "decoded": 38981,
+        "transfer": 4123
+      },
+      {
+        "url": "knight-lod.8acb191b9b1edeec.gltf",
+        "encoded": 3800,
+        "decoded": 38970,
+        "transfer": 4100
+      },
+      {
+        "url": "knight-crowd.2c66f1133401726f.gltf",
+        "encoded": 3743,
+        "decoded": 38948,
+        "transfer": 4043
+      },
+      {
+        "url": "knight-hero.d56dbd23ca822461.bin",
+        "encoded": 1456843,
+        "decoded": 1576656,
+        "transfer": 1457143
+      },
+      {
+        "url": "knight-texture.979b62eea7a8c998.jpg",
+        "encoded": 160639,
+        "decoded": 160639,
+        "transfer": 160939
+      },
+      {
+        "url": "knight-texture.2c7172aaf4ada5eb.jpg",
+        "encoded": 300942,
+        "decoded": 300942,
+        "transfer": 301242
+      },
+      {
+        "url": "knight-texture.19324a0364f2dc07.jpg",
+        "encoded": 164894,
+        "decoded": 164894,
+        "transfer": 165194
+      },
+      {
+        "url": "knight-lod.2f72d9b992b78695.bin",
+        "encoded": 613749,
+        "decoded": 662928,
+        "transfer": 614049
+      },
+      {
+        "url": "knight-texture.2c7172aaf4ada5eb.jpg",
+        "encoded": 300942,
+        "decoded": 300942,
+        "transfer": 0
+      },
+      {
+        "url": "knight-texture.979b62eea7a8c998.jpg",
+        "encoded": 160639,
+        "decoded": 160639,
+        "transfer": 0
+      },
+      {
+        "url": "knight-texture.19324a0364f2dc07.jpg",
+        "encoded": 164894,
+        "decoded": 164894,
+        "transfer": 0
+      },
+      {
+        "url": "knight-crowd.cdbe113801ff4940.bin",
+        "encoded": 212340,
+        "decoded": 228484,
+        "transfer": 212640
+      },
+      {
+        "url": "knight-texture.6cb8d3945f0d1859.jpg",
+        "encoded": 95632,
+        "decoded": 95632,
+        "transfer": 95932
+      },
+      {
+        "url": "knight-texture.8e03fc61b2251203.jpg",
+        "encoded": 58617,
+        "decoded": 58617,
+        "transfer": 58917
+      },
+      {
+        "url": "knight-texture.ca4ce076a00223a6.jpg",
+        "encoded": 47102,
+        "decoded": 47102,
+        "transfer": 47402
+      },
+      {
+        "url": "medieval_blocks_03-diff.3852b4a60e0f62d2.jpg",
+        "encoded": 954113,
+        "decoded": 954113,
+        "transfer": 954413
+      },
+      {
+        "url": "medieval_blocks_03-rough.9eba5fed68b8a705.jpg",
+        "encoded": 460951,
+        "decoded": 460951,
+        "transfer": 461251
+      },
+      {
+        "url": "medieval_blocks_03-nor_gl.52350ed4b577c9fd.jpg",
+        "encoded": 1352681,
+        "decoded": 1352681,
+        "transfer": 1352981
+      },
+      {
+        "url": "slate_floor_02-diff.c531c542b7c31205.jpg",
+        "encoded": 607643,
+        "decoded": 607643,
+        "transfer": 607943
+      },
+      {
+        "url": "slate_floor_02-nor_gl.8b04e186bd0e5bcf.jpg",
+        "encoded": 341130,
+        "decoded": 341130,
+        "transfer": 341430
+      },
+      {
+        "url": "slate_floor_02-rough.7d164d71d46643b5.jpg",
+        "encoded": 491749,
+        "decoded": 491749,
+        "transfer": 492049
+      },
+      {
+        "url": "wood_planks_grey-diff.d758be23e8fe7bfb.jpg",
+        "encoded": 228279,
+        "decoded": 228279,
+        "transfer": 228579
+      },
+      {
+        "url": "wood_planks_grey-nor_gl.5e570e57d688b016.jpg",
+        "encoded": 157419,
+        "decoded": 157419,
+        "transfer": 157719
+      },
+      {
+        "url": "wood_planks_grey-rough.ef640502cec94bd2.jpg",
+        "encoded": 186804,
+        "decoded": 186804,
+        "transfer": 187104
+      }
+    ],
+    "coldTransferred": 18311493,
+    "scenes": {
+      "march": {
+        "elapsedMs": 3505.300000011921,
+        "frames": 22,
+        "fps": 6.276210310080502,
+        "scene": {
+          "renderer": {
+            "frame": 75,
+            "calls": 123,
+            "triangles": 1529429,
+            "points": 0,
+            "lines": 0
+          },
+          "memory": {
+            "geometries": 66,
+            "textures": 76
+          },
+          "units": 157,
+          "terrainVertices": 90601,
+          "landforms": {
+            "mountainCells": 142,
+            "sharedRidgeLinks": 70,
+            "wetlandCells": 54
+          },
+          "waterTriangles": 39653,
+          "reedStems": 5293,
+          "internalWidth": 1600,
+          "internalHeight": 900
+        }
+      },
+      "construction": {
+        "elapsedMs": 3503.899999976158,
+        "frames": 2,
+        "fps": 0.5707925454532403,
+        "scene": {
+          "renderer": {
+            "frame": 81,
+            "calls": 113,
+            "triangles": 753821,
+            "points": 0,
+            "lines": 0
+          },
+          "memory": {
+            "geometries": 73,
+            "textures": 76
+          },
+          "units": 157,
+          "terrainVertices": 90601,
+          "landforms": {
+            "mountainCells": 142,
+            "sharedRidgeLinks": 70,
+            "wetlandCells": 54
+          },
+          "waterTriangles": 39653,
+          "reedStems": 5293,
+          "internalWidth": 1600,
+          "internalHeight": 900
+        }
+      },
+      "ascent": {
+        "elapsedMs": 3527.9000000059605,
+        "frames": 1,
+        "fps": 0.2834547464492504,
+        "scene": {
+          "renderer": {
+            "frame": 85,
+            "calls": 137,
+            "triangles": 1610637,
+            "points": 0,
+            "lines": 0
+          },
+          "memory": {
+            "geometries": 77,
+            "textures": 95
+          },
+          "units": 157,
+          "terrainVertices": 90601,
+          "landforms": {
+            "mountainCells": 142,
+            "sharedRidgeLinks": 70,
+            "wetlandCells": 54
+          },
+          "waterTriangles": 39653,
+          "reedStems": 5293,
+          "internalWidth": 1600,
+          "internalHeight": 900
+        }
+      },
+      "native": {
+        "elapsedMs": 74142.89999997616,
+        "frames": 2,
+        "fps": 0.026974936238003143,
+        "scene": {
+          "renderer": {
+            "frame": 87,
+            "calls": 65,
+            "triangles": 753225,
+            "points": 0,
+            "lines": 0
+          },
+          "memory": {
+            "geometries": 77,
+            "textures": 95
+          },
+          "units": 157,
+          "terrainVertices": 90601,
+          "landforms": {
+            "mountainCells": 142,
+            "sharedRidgeLinks": 70,
+            "wetlandCells": 54
+          },
+          "waterTriangles": 39653,
+          "reedStems": 5293,
+          "internalWidth": 1600,
+          "internalHeight": 900
+        }
+      },
+      "sixteen": {
+        "elapsedMs": 3500.5999999940395,
+        "frames": 9,
+        "fps": 2.5709878306619793,
+        "scene": {
+          "renderer": {
+            "frame": 87,
+            "calls": 65,
+            "triangles": 753225,
+            "points": 0,
+            "lines": 0
+          },
+          "memory": {
+            "geometries": 77,
+            "textures": 95
+          },
+          "units": 157,
+          "terrainVertices": 90601,
+          "landforms": {
+            "mountainCells": 142,
+            "sharedRidgeLinks": 70,
+            "wetlandCells": 54
+          },
+          "waterTriangles": 39653,
+          "reedStems": 5293,
+          "internalWidth": 1600,
+          "internalHeight": 900
+        }
+      },
+      "comparison": {
+        "elapsedMs": 3504.9000000059605,
+        "frames": 27,
+        "fps": 7.703500813134208,
+        "scene": {
+          "renderer": {
+            "frame": 143,
+            "calls": 124,
+            "triangles": 1543481,
+            "points": 0,
+            "lines": 0
+          },
+          "memory": {
+            "geometries": 77,
+            "textures": 95
+          },
+          "units": 157,
+          "terrainVertices": 90601,
+          "landforms": {
+            "mountainCells": 142,
+            "sharedRidgeLinks": 70,
+            "wetlandCells": 54
+          },
+          "waterTriangles": 39653,
+          "reedStems": 5293,
+          "internalWidth": 1600,
+          "internalHeight": 900
+        }
+      }
+    },
+    "metrics": {
+      "frames": 70,
+      "totalRenderMs": 3593.7999999523163,
+      "maxRenderMs": 3144.7000000178814,
+      "renderSamples": [
+        8.599999994039536, 26.5, 5, 9.900000005960464, 4.300000011920929, 4.200000017881393,
+        4.0999999940395355, 3.0999999940395355, 3.2000000178813934, 3.199999988079071, 3.5999999940395355,
+        3.0999999940395355, 3, 3.699999988079071, 3.199999988079071, 3.800000011920929, 4, 4.9000000059604645,
+        9.199999988079071, 4.899999976158142, 21.19999998807907, 4.300000011920929, 4.4000000059604645,
+        3.899999976158142, 3144.7000000178814, 3.7999999821186066, 4.200000017881393, 24.099999994039536,
+        24.5, 20.5, 0.19999998807907104, 9.899999976158142, 31.5, 0.09999999403953552, 4.699999988079071,
+        2.300000011920929, 1.800000011920929, 2.4000000059604645, 2.300000011920929, 2.5999999940395355, 2,
+        1.899999976158142, 19.69999998807907, 4.700000017881393, 19, 3.899999976158142, 6.5999999940395355,
+        3.5, 9.100000023841858, 3, 4.9000000059604645, 2.5999999940395355, 3, 3.5, 2.800000011920929, 4.5,
+        4.299999982118607, 3.800000011920929, 5.699999988079071, 3.5, 7.5, 3.300000011920929,
+        3.7000000178813934, 7.9000000059604645, 4.300000011920929, 3.5999999940395355, 4, 6.300000011920929,
+        7.299999982118607, 5
+      ],
+      "duration": 124,
+      "meanRenderMs": 51.339999999318806,
+      "scene": {
+        "renderer": {
+          "frame": 143,
+          "calls": 124,
+          "triangles": 1543481,
+          "points": 0,
+          "lines": 0
+        },
+        "memory": {
+          "geometries": 0,
+          "textures": 95
+        },
+        "units": 157,
+        "terrainVertices": 90601,
+        "landforms": {
+          "mountainCells": 142,
+          "sharedRidgeLinks": 70,
+          "wetlandCells": 54
+        },
+        "waterTriangles": 39653,
+        "reedStems": 5293,
+        "internalWidth": 1600,
+        "internalHeight": 900
+      }
+    },
+    "canvasAfterClose": 0,
+    "errors": [],
+    "composition": "layered WebGL and Canvas",
+    "probeScope": "Before the final full-bleed split-screen/fullscreen UI steering; not a hardware performance claim"
+  },
+  "visualLayering": {
+    "meanAbsoluteChannelError": {
+      "march": 0.0687,
+      "construction": 0.0779,
+      "commander": 0.0698
+    },
+    "scope": "Selected same-time 1920x1080 screenshots; values are channel units out of255"
+  },
+  "canvasIsolatedBeforeLayoutRevision": {
+    "initMs": 48.5,
+    "clock": "performance.now; no AudioContext or WebGL",
+    "sections": {
+      "native": {
+        "cold": {
+          "submitMs": 36.19999998807907,
+          "flushedMs": 410.7999999821186
+        },
+        "hotMeanMs": 3.819999998807907,
+        "hotP95Ms": 4.300000011920929,
+        "maxMs": 410.7999999821186
+      },
+      "sixteen": {
+        "cold": {
+          "submitMs": 23,
+          "flushedMs": 26.5
+        },
+        "hotMeanMs": 4.636666666467985,
+        "hotP95Ms": 6.199999988079071,
+        "maxMs": 26.5
+      },
+      "comparison": {
+        "cold": {
+          "submitMs": 14.099999994039536,
+          "flushedMs": 17.900000005960464
+        },
+        "hotMeanMs": 3,
+        "hotP95Ms": 5.5,
+        "maxMs": 17.900000005960464
+      }
+    }
+  },
+  "canvasIsolatedFinalSplitLayout": {
+    "initMs": 51.29999998211861,
+    "clock": "performance.now; no AudioContext or WebGL",
+    "sections": {
+      "native": {
+        "cold": {
+          "submitMs": 36.70000001788139,
+          "flushedMs": 393.2000000178814
+        },
+        "hotMeanMs": 3.5433333327372867,
+        "hotP95Ms": 4.299999982118607,
+        "maxMs": 393.2000000178814
+      },
+      "sixteen": {
+        "cold": {
+          "submitMs": 27,
+          "flushedMs": 30.5
+        },
+        "hotMeanMs": 4.493333333730698,
+        "hotP95Ms": 6.200000017881393,
+        "maxMs": 30.5
+      },
+      "comparison": {
+        "cold": {
+          "submitMs": 11.400000005960464,
+          "flushedMs": 16.599999994039536
+        },
+        "hotMeanMs": 4.453333333134651,
+        "hotP95Ms": 7.800000011920929,
+        "maxMs": 16.599999994039536
+      }
+    }
+  },
+  "fullscreenIntegration": {
+    "realPlayerAndAudio": true,
+    "element": "intro-screen DIV",
+    "outerBorder": "0px",
+    "headerElements": 0,
+    "logicalStage": [1920, 1080],
+    "layerCanvases": 2,
+    "closedWithoutLeftoverCanvas": true,
+    "javascriptErrors": []
+  }
+}

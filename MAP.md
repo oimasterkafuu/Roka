@@ -28,8 +28,18 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 关键事实：
 
 - 后端 TypeScript（`src/`）经 `pnpm run build` 编译到 `dist/` 运行；`dist/` 不手工编辑。
-- 前端无构建流程，`static/` 基本原样下发；例外是含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
+- 前端主体无构建流程，`static/` 基本原样下发；介绍片由 `tools/build-intro.mjs` 单独打包至 `static/intro/player.js`；例外是含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
 - 玩家身份 = socket.id（sid）；对局协议与格子编码的权威文档是 `static/develop-bot.html`。
+
+## 实时介绍片
+
+- `static/intro.js` / `static/styles/intro.css`：轻量入口、一次性同意弹窗、关于页重播、固定 16:9 舞台、播放控件与取消清理。首页认证/通知提示就绪后发送 `roka:home-ready`，防止弹窗堆叠。
+- `static/intro/player-source.js` → `player.js`：按需载入、Web Audio 时间轴、30 fps 调度、WebGL/Canvas 分层合成、暂停/跳转/退出生命周期；`tools/build-intro.mjs` 用 esbuild 构建并生成预压缩资源。
+- `static/intro/scene.js` / `motion.js` / `landform.js` / `architecture.js`：原片三维镜头、接地 IK、连续山脊与沼泽、材质合批和分阶段施工。
+- `static/intro/director.js` / `replay-board.js`：1080p 合成、字幕/背景、原生棋盘与隔离闪烁；真实回放与 16 方模拟数据仅含显示所需字段。
+- `static/intro/assets/manifest.json`：哈希模型/共享贴图、音轨、回放、背景及字体地址；`licenses/` 保留第三方许可。`src/server/auth-service.ts` 只公开读取这些静态资源，`src/server.ts` 协商 gzip/Brotli 并给哈希素材不可变缓存。
+- `tools/build-intro-data.mjs` / `build-intro-fonts.py` / `import-intro-assets.mjs`：从备份制作工程重新准备素材的开发工具，正常站点构建不访问原工程。`tools/fixtures/intro-replay-hashes.json` 为原始回放状态校验摘要。
+- 验证：`tools/test-intro-{data,models,lifecycle}.mjs`、`scripts/test-intro-{assets,entry}.mjs`；详见 `docs/realtime-intro.md`。
 
 ## 目录结构树
 
@@ -47,7 +57,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── text-render.ts      # Markdown+LaTeX → 消毒 HTML（公告/动态共用）
 │   ├── rating-color.ts     # Codeforces 风格段位配色
 │   └── runtime-env.ts      # .env 引导与密钥自动生成
-├── static/                 # 前端（原生 JS，无构建，原样下发）
+├── static/                 # 前端（主体原生 JS；介绍片独立打包）
 │   ├── index.html          # 首页/大厅（脚本基本内联，另加载 /notify.js）
 │   ├── game.html           # 对局/回放共用骨架
 │   ├── main.js + main/     # 对局/回放主控与模块（加载顺序敏感）

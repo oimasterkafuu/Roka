@@ -22,6 +22,7 @@
       referrerpolicy="no-referrer"
     ></script>
     <script src="/notify.js?v={{V}}"></script>
+    <script defer src="/intro.js?v={{V}}" data-version="{{V}}"></script>
     <script src="/sw-register.js?v={{V}}"></script>
     <script src="/username.js?v={{V}}"></script>
     <script src="/mention-autocomplete.js?v={{V}}"></script>
@@ -29,6 +30,7 @@
     <link rel="stylesheet" href="/styles/rating.css?v={{V}}" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css?v={{V}}" />
     <link rel="stylesheet" href="/styles/home.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/intro.css?v={{V}}" />
     <title>Roka</title>
   </head>
 
@@ -1351,6 +1353,9 @@
             maybePromptNotificationPermission();
             loadMyProfile();
           }
+          // Intro waits until auth has had a chance to show the notification explanation.
+          document.documentElement.dataset.introHomeReady = 'true';
+          document.dispatchEvent(new Event('roka:home-ready'));
           loadRooms();
           loadReplays(0);
           loadAnnouncement();
