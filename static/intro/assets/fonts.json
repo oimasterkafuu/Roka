@@ -1,0 +1,32 @@
+[
+  {
+    "key": "serif",
+    "family": "RokaIntroSerif",
+    "weight": 700,
+    "file": "intro-serif.woff2"
+  },
+  {
+    "key": "cn",
+    "family": "RokaIntroCN",
+    "weight": 700,
+    "file": "intro-cn.woff2"
+  },
+  {
+    "key": "latin",
+    "family": "RokaIntroLatin",
+    "weight": 400,
+    "file": "intro-latin.woff2"
+  },
+  {
+    "key": "sans",
+    "family": "RokaIntroSans",
+    "weight": 400,
+    "file": "intro-sans.woff2"
+  },
+  {
+    "key": "quicksand",
+    "family": "Quicksand",
+    "weight": 700,
+    "file": "intro-quicksand.woff2"
+  }
+]

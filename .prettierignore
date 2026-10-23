@@ -1,3 +1,6 @@
 dist
 node_modules
 static/vendor
+
+static/intro/player.js
+static/intro/assets

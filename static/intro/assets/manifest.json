@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "width": 1920,
+  "height": 1080,
+  "duration": 124,
+  "files": {
+    "knight-hero.glb": "/intro/assets/knight-hero.6bb51eb98f8c0d49.gltf",
+    "knight-lod.glb": "/intro/assets/knight-lod.8acb191b9b1edeec.gltf",
+    "knight-crowd.glb": "/intro/assets/knight-crowd.2c66f1133401726f.gltf",
+    "world.json": "/intro/assets/world.3d6668085ef7e518.json",
+    "motion-profile.json": "/intro/assets/motion-profile.de5369deadcfe944.json",
+    "rock_face_03-diff.jpg": "/intro/assets/rock_face_03-diff.ea48e0e47ad42c8b.jpg",
+    "rock_face_03-nor_gl.jpg": "/intro/assets/rock_face_03-nor_gl.c6423169583f3171.jpg",
+    "rock_face_03-rough.jpg": "/intro/assets/rock_face_03-rough.9e3d9a2fd7524489.jpg",
+    "brown_mud_02-diff.jpg": "/intro/assets/brown_mud_02-diff.058b6f12493305ec.jpg",
+    "medieval_blocks_03-diff.jpg": "/intro/assets/medieval_blocks_03-diff.3852b4a60e0f62d2.jpg",
+    "medieval_blocks_03-nor_gl.jpg": "/intro/assets/medieval_blocks_03-nor_gl.52350ed4b577c9fd.jpg",
+    "medieval_blocks_03-rough.jpg": "/intro/assets/medieval_blocks_03-rough.9eba5fed68b8a705.jpg",
+    "slate_floor_02-diff.jpg": "/intro/assets/slate_floor_02-diff.c531c542b7c31205.jpg",
+    "slate_floor_02-nor_gl.jpg": "/intro/assets/slate_floor_02-nor_gl.8b04e186bd0e5bcf.jpg",
+    "slate_floor_02-rough.jpg": "/intro/assets/slate_floor_02-rough.7d164d71d46643b5.jpg",
+    "wood_planks_grey-diff.jpg": "/intro/assets/wood_planks_grey-diff.d758be23e8fe7bfb.jpg",
+    "wood_planks_grey-nor_gl.jpg": "/intro/assets/wood_planks_grey-nor_gl.5e570e57d688b016.jpg",
+    "wood_planks_grey-rough.jpg": "/intro/assets/wood_planks_grey-rough.ef640502cec94bd2.jpg",
+    "ground.jpg": "/intro/assets/ground.d570c10b1d5302f4.jpg",
+    "ground-normal.jpg": "/intro/assets/ground-normal.f4f9d9671c660f4e.jpg",
+    "sky.hdr": "/intro/assets/sky.5477b7dbb2aea4a6.hdr",
+    "plan.json": "/intro/assets/plan.dbf7d79932b977b7.json",
+    "replays.json": "/intro/assets/replays.7441473e89e8f92e.json",
+    "score.mp3": "/intro/assets/score.526f2eefdc557d3b.mp3"
+  },
+  "images": {
+    "crown": "/intro/assets/crown.ebb8133c5bb0e0f1.png",
+    "city": "/intro/assets/city.f7f5eccaeeb39a3c.png",
+    "mountain": "/intro/assets/mountain.01b962885d7d31ab.png",
+    "swamp": "/intro/assets/swamp.dcfb5715f0ab50fd.png",
+    "qr": "/intro/assets/join-qr.d985cbdfbc44096b.png",
+    "background": "/intro/assets/background.88605652f0858920.webp"
+  },
+  "fonts": {
+    "serif": "/intro/assets/intro-serif.390b17cca0e65761.woff2",
+    "cn": "/intro/assets/intro-cn.076b77a0aae176a9.woff2",
+    "latin": "/intro/assets/intro-latin.890993bdd007af2b.woff2",
+    "sans": "/intro/assets/intro-sans.f63bfe68f7ba5f2d.woff2",
+    "quicksand": "/intro/assets/intro-quicksand.90f838cbb06c732b.woff2"
+  }
+}

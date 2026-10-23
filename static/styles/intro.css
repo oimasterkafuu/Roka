@@ -1,0 +1,234 @@
+/* The stage is always 1920×1080; only its containing viewport scales. */
+html.intro-open {
+  overflow: hidden;
+}
+dialog.intro-dialog {
+  box-sizing: border-box;
+  width: min(1160px, calc(100vw - 24px));
+  max-width: none;
+  max-height: calc(100dvh - 24px);
+  margin: auto;
+  padding: 20px;
+  overflow: auto;
+  border: 1px solid #364b63;
+  border-radius: 18px;
+  background: #0b1523;
+  color: #edf4ff;
+  box-shadow: 0 24px 100px #0009;
+  text-align: left;
+  font:
+    16px/1.5 system-ui,
+    sans-serif;
+}
+.intro-dialog::backdrop {
+  background: #020813d9;
+}
+.intro-dialog.intro-offer {
+  width: min(520px, calc(100vw - 24px));
+  padding: 26px;
+}
+.intro-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.intro-dialog .intro-header h2 {
+  margin: 0;
+  color: #f3f7ff;
+  font:
+    700 22px/1.4 system-ui,
+    sans-serif;
+}
+.intro-dialog .intro-description {
+  margin: 10px 0 18px;
+  color: #c0cede;
+  font-size: 14px;
+}
+.intro-dialog .intro-button {
+  box-sizing: border-box;
+  min-height: 42px;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid #526780;
+  border-width: 1px !important;
+  border-radius: 8px;
+  background: #192b40;
+  color: #f3f7ff;
+  font:
+    600 14px/1.4 system-ui,
+    sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.intro-dialog .intro-button:hover {
+  background: #29415d;
+}
+.intro-dialog .intro-primary {
+  border-color: #92f0db;
+  background: #98f2de;
+  color: #08221f;
+}
+.intro-dialog .intro-primary:hover {
+  background: #c6fff2;
+}
+.intro-dialog .intro-button:focus-visible,
+.intro-dialog .intro-progress:focus-visible {
+  outline: 3px solid #b5f8ed !important;
+  outline-offset: 3px;
+}
+.intro-dialog .intro-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.intro-dialog [hidden] {
+  display: none !important;
+}
+.intro-offer-actions,
+.intro-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.intro-viewport {
+  position: relative;
+  width: min(100vw, calc(100dvh * 16 / 9));
+  aspect-ratio: 16 / 9;
+  margin: 0 auto;
+  overflow: hidden;
+  background: #050b14;
+  contain: layout paint;
+}
+.intro-stage {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: top left;
+  overflow: hidden;
+}
+.intro-stage canvas {
+  display: block;
+}
+.intro-dialog .intro-status {
+  min-height: 21px;
+  margin: 10px 0;
+  color: #c0cede;
+  font-size: 13px;
+}
+.intro-progress {
+  flex: 1 1 100px;
+  min-width: 70px;
+  width: auto;
+  accent-color: #98f2de;
+  cursor: pointer;
+}
+.intro-dialog .intro-time {
+  color: #c0cede;
+  font:
+    12px/1.5 ui-monospace,
+    monospace;
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .intro-dialog {
+    padding: 12px;
+    border-radius: 12px;
+  }
+  .intro-dialog .intro-header h2 {
+    font-size: 18px;
+  }
+  .intro-dialog .intro-description {
+    font-size: 12px;
+  }
+  .intro-controls {
+    gap: 8px;
+  }
+  .intro-dialog .intro-button {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+  .intro-controls .intro-progress {
+    order: 1;
+    flex-basis: calc(100% - 120px);
+  }
+  .intro-dialog .intro-time {
+    order: 2;
+  }
+}
+
+/* Playback has no card/header: the entire browser or fallback viewport is the screen. */
+dialog.intro-player {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+  box-shadow: none;
+}
+.intro-player::backdrop,
+.intro-screen::backdrop {
+  background: #000;
+}
+.intro-screen {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  outline: none;
+}
+.intro-chrome {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+.intro-screen .intro-close {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  pointer-events: auto;
+  background: #09121dcc;
+}
+.intro-bottom {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 42px max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+  background: linear-gradient(transparent, #020711e8);
+}
+.intro-bottom .intro-controls {
+  pointer-events: auto;
+}
+.intro-screen.intro-controls-hidden {
+  cursor: none;
+}
+.intro-controls-hidden .intro-chrome {
+  opacity: 0;
+}
+.intro-controls-hidden .intro-chrome * {
+  pointer-events: none;
+}
+@media (max-width: 600px) {
+  .intro-bottom {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-chrome {
+    transition: none;
+  }
+}

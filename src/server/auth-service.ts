@@ -58,6 +58,14 @@ class AuthService {
     if (normalizedPathname === '/socket.io' || normalizedPathname.startsWith('/socket.io/')) {
       return true;
     }
+    // Public, read-only introduction resources; never broaden API/write access.
+    if (
+      /^\/intro\/(?:player\.js|assets\/(?:manifest\.json|[A-Za-z0-9_-]+\.[a-f0-9]{16}\.(?:json|gltf|bin|hdr|jpg|png|webp|woff2|mp3)))$/.test(
+        normalizedPathname,
+      )
+    ) {
+      return normalizedMethod === 'GET' || normalizedMethod === 'HEAD';
+    }
     if (/\.(css|js|png|jpg|jpeg|gif|svg|ico|otf|woff2|mp3)$/i.test(normalizedPathname)) {
       return normalizedMethod === 'GET';
     }
