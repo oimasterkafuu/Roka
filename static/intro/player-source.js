@@ -18,6 +18,8 @@ export async function createIntroPlayer(stage, options = {}) {
     if (combined.aborted) throw new DOMException('Aborted', 'AbortError');
   };
   let scene, director, source, gain, audioBuffer;
+  let resizeObserver, dprQuery;
+  const view = stage.ownerDocument?.defaultView || globalThis;
   let raf = 0;
   let destroyed = false;
   let playing = false;
@@ -51,6 +53,10 @@ export async function createIntroPlayer(stage, options = {}) {
     playRequest++;
     cancelAnimationFrame(raf);
     local.abort();
+    resizeObserver?.disconnect();
+    view.removeEventListener?.('resize', handleResize);
+    dprQuery?.removeEventListener?.('change', handleDprChange);
+    dprQuery?.removeListener?.(handleDprChange);
     stopAudio();
     gain?.disconnect();
     director?.dispose();
@@ -126,7 +132,7 @@ export async function createIntroPlayer(stage, options = {}) {
         : null,
       Promise.all(Object.entries(manifest.images).map(loadImage)),
       Promise.all(Object.entries(manifest.fonts).map(loadFont)),
-      createScene({ assets: manifest, signal: combined, onStatus }).then((result) => {
+      createScene({ assets: manifest, signal: combined, onStatus, nativeResolution: true }).then((result) => {
         if (destroyed) result.dispose();
         else scene = result;
       }),
@@ -145,7 +151,33 @@ export async function createIntroPlayer(stage, options = {}) {
     const clock = () => (audioClock ? audioContext.currentTime : performance.now() / 1000);
     const current = () => Math.min(124, Math.max(0, offset + (playing ? clock() - clockStart : 0)));
 
+    function syncResolution() {
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return false;
+      const dpr = view.devicePixelRatio || 1;
+      const changed = director.resize(
+        Math.max(1, Math.round(rect.width * dpr)),
+        Math.max(1, Math.round(rect.height * dpr)),
+      );
+      return scene.resize?.() || changed;
+    }
+    function watchDpr() {
+      dprQuery?.removeEventListener?.('change', handleDprChange);
+      dprQuery?.removeListener?.(handleDprChange);
+      dprQuery = view.matchMedia?.(`(resolution: ${view.devicePixelRatio || 1}dppx)`);
+      if (dprQuery?.addEventListener) dprQuery.addEventListener('change', handleDprChange);
+      else dprQuery?.addListener?.(handleDprChange);
+    }
+    function handleResize() {
+      if (destroyed) return;
+      watchDpr();
+      if (syncResolution()) draw(current());
+    }
+    function handleDprChange() {
+      handleResize();
+    }
     function draw(time) {
+      syncResolution();
       const start = performance.now();
       director.renderAt(time);
       const cost = performance.now() - start;
@@ -239,6 +271,14 @@ export async function createIntroPlayer(stage, options = {}) {
       onStateChange(offset >= 124 ? 'ended' : 'paused');
     }
 
+    view.addEventListener?.('resize', handleResize);
+    watchDpr();
+    if (view.ResizeObserver) {
+      resizeObserver = new view.ResizeObserver(handleResize);
+      resizeObserver.observe(stage.parentElement || stage);
+      resizeObserver.observe(canvas);
+      if (scene.canvas) resizeObserver.observe(scene.canvas);
+    }
     draw(0);
     abortCheck();
     onStatus(audioContext ? '画面与音乐已就绪' : '当前浏览器将静音播放');

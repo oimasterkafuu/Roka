@@ -8,7 +8,7 @@ import { createIntroAssetLoader } from './asset-loading.js';
 import { createLandform } from './landform.js';
 import { materials, fortress } from './architecture.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-export async function createScene({ assets, signal, onStatus = () => {} }) {
+export async function createScene({ assets, signal, onStatus = () => {}, nativeResolution = false }) {
   const manager = new T.LoadingManager();
   const assetLoader = createIntroAssetLoader({ files: assets.files, signal });
   const resources = new Set(),
@@ -765,6 +765,20 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
  gl_FragColor=vec4(c,1.);}`,
     });
     postScene.add(new T.Mesh(new T.PlaneGeometry(2, 2), postMat));
+    function resize(width, height) {
+      if (renderer.domElement.width === width && renderer.domElement.height === height) return false;
+      renderer.setSize(width, height, false);
+      rt.setSize(width, height);
+      postMat.uniforms.resolution.value.set(width, height);
+      return true;
+    }
+    function resizeToDisplay() {
+      if (!nativeResolution) return false;
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (!rect.width || !rect.height) return false;
+      const dpr = globalThis.devicePixelRatio || 1;
+      return resize(Math.max(1, Math.round(rect.width * dpr)), Math.max(1, Math.round(rect.height * dpr)));
+    }
     let flatState = -1;
     function flatten(amount) {
       if (Math.abs(amount - flatState) < 0.00001) return;
@@ -1048,6 +1062,7 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
       renderAt: (...args) => {
         if (disposed) return null;
         if (contextLost) throw new Error('WebGL context lost');
+        resizeToDisplay();
         return renderAt(...args);
       },
       canvas: renderer.domElement,
@@ -1059,8 +1074,10 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
         if (contextLost) throw new Error('WebGL context lost');
         const [x, y, w, h] = rect;
         renderer.domElement.style.cssText = `display:block;position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;z-index:0;pointer-events:none`;
+        resizeToDisplay();
         return renderAt(name, time, duration);
       },
+      resize: resizeToDisplay,
       dispose,
       getMetrics: () => ({
         renderer: renderer.info.render,
@@ -1070,8 +1087,8 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
         landforms: landform.stats,
         waterTriangles: wp.length / 9,
         reedStems: stems.length,
-        internalWidth: W,
-        internalHeight: H,
+        internalWidth: renderer.domElement.width,
+        internalHeight: renderer.domElement.height,
       }),
       getDebug: () => ({ scene, soldiers, buildings }),
     };
