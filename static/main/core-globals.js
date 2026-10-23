@@ -141,7 +141,9 @@ function fogObserverView() {
 // state 为 null（折叠链已断/首条）或 { names: [], verb: string|null }；verb 为 null 表示
 // 已混入多种谓语。fold = { name, verb } 来自 chat_message 的可选 fold 负载。
 function chatFoldAppend(state, fold) {
-  var names = state ? state.names.concat([fold.name]) : [fold.name];
+  var names = state ? state.names.slice() : [];
+  // 同一用户名只保留一次（issue #124），按首次出现顺序排列。
+  if (names.indexOf(fold.name) === -1) names.push(fold.name);
   // 只有与原链谓语完全一致才继续同文案合并，否则降级为「进出」汇总。
   var verb = !state ? fold.verb : state.verb === fold.verb ? fold.verb : null;
   return { names: names, verb: verb, text: chatFoldText(names, verb) };
