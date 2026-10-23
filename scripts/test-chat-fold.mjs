@@ -1,7 +1,7 @@
 // 房间进出消息折叠（issue #113）自测：
 // 1) 客户端折叠纯函数（static/main/core-globals.js 的 chatFoldAppend/chatFoldText，node vm 加载）；
 // 2) 服务端 sendLobbySystemMessage 的 chat_message 负载携带可选 fold 字段（tsx 直跑 src）。
-// 覆盖：同类连续合并、加入/离开交错汇总、超过 3 人截断为「等 N 人」、
+// 覆盖：同类连续合并、同名去重（issue #124）、加入/离开交错汇总、超过 3 人截断为「等 N 人」、
 // 折叠链断开（非折叠系统消息/普通聊天）后重新起链、服务端 fold 负载形状。
 // 运行：pnpm run test:chat-fold（无需构建）。
 
@@ -67,6 +67,19 @@ const JOIN = (name) => ({ name, verb: '加入了自定义房间。' });
   console.log('场景 5 通过：折叠链断开重起（' + s.text + ' → ' + fresh.text + '）');
 }
 
+// 场景 5.5：同一用户名重复进出只保留一次（issue #124），按首次出现顺序。
+{
+  let s = chatFoldAppend(null, LEAVE('Alice'));
+  s = chatFoldAppend(s, LEAVE('Bob'));
+  s = chatFoldAppend(s, LEAVE('Alice'));
+  assert.equal(s.text, 'Alice、Bob 离开了自定义房间。');
+  let m = chatFoldAppend(null, JOIN('Alice'));
+  m = chatFoldAppend(m, JOIN('Alice'));
+  m = chatFoldAppend(m, LEAVE('Alice'));
+  assert.equal(m.text, 'Alice 进出了房间。');
+  console.log('场景 5.5 通过：同名去重（' + s.text + ' / ' + m.text + '）');
+}
+
 // ---------- 第二部分：服务端负载 ----------
 const service = new LobbyService({}, {});
 const payloads = [];
@@ -94,4 +107,4 @@ assert.equal(payloads[0].text, 'Alice 离开了自定义房间。');
 assert.equal(payloads[1].fold, undefined, '非进出类消息不应带 fold');
 console.log('场景 6 通过：fold 负载仅随进出类消息下发');
 
-console.log('\n全部 6 个场景通过：issue #113 房间进出消息折叠');
+console.log('\n全部 7 个场景通过：issue #113/#124 房间进出消息折叠与同名去重');
