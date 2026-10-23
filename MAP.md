@@ -41,7 +41,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 - `static/intro/director.js` / `replay-board.js`：1080p 合成、字幕/背景、原生棋盘与隔离闪烁；真实回放与 16 方模拟数据仅含显示所需字段。
 - `static/intro/assets/manifest.json`：哈希模型/共享贴图、音轨、回放、背景及字体地址；`licenses/` 保留第三方许可。`src/server/auth-service.ts` 只公开读取这些静态资源，`src/server.ts` 协商 gzip/Brotli 并给哈希素材不可变缓存。
 - `tools/build-intro-data.mjs` / `build-intro-fonts.py` / `import-intro-assets.mjs`：从备份制作工程重新准备素材的开发工具，正常站点构建不访问原工程。`tools/fixtures/intro-replay-hashes.json` 为原始回放状态校验摘要。
-- 验证：`tools/test-intro-{data,models,lifecycle}.mjs`、`scripts/test-intro-{assets,entry,cdn}.mjs`、`scripts/test-{static-cdn,cdn-runtime}.mjs`；详见 `docs/realtime-intro.md`。
+- 验证：`tools/test-intro-{blink-white,data,models,lifecycle}.mjs`、`scripts/test-intro-{assets,entry,cdn}.mjs`、`scripts/test-{static-cdn,cdn-runtime}.mjs`；详见 `docs/realtime-intro.md`。
 
 ## 目录结构树
 

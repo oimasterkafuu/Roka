@@ -137,10 +137,18 @@ export function createReplayBoard(data, assets = {}) {
       y = Math.floor(k / data.m) * CELL_H,
       code = state.grid[k];
     if (clear) target.clearRect(x, y, CELL_W, CELL_H);
+    // Isolated blink fades toward white like the in-game map on its light page.
+    if (opacity < 1) {
+      target.fillStyle = '#fff';
+      target.fillRect(x, y, CELL_W, CELL_H);
+    }
     target.globalAlpha = opacity;
     // CSS td border is part of the cell and therefore participates in opacity.
     target.fillStyle = '#000';
-    target.fillRect(x, y, CELL_W, CELL_H);
+    target.fillRect(x, y, CELL_W, 1);
+    target.fillRect(x, y + CELL_H - 1, CELL_W, 1);
+    target.fillRect(x, y + 1, 1, CELL_H - 2);
+    target.fillRect(x + CELL_W - 1, y + 1, 1, CELL_H - 2);
     target.fillStyle = code < 200 ? PALETTE[code % 50] : code === 204 ? '#808080' : '#dcdcdc';
     target.fillRect(x + 1, y + 1, CELL_W - 2, CELL_H - 2);
     const name =
