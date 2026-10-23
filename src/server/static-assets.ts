@@ -29,7 +29,6 @@ export class StaticAssetDelivery {
   ) {
     this.root = path.join(cwd, 'static');
     let revision = env.ROKA_STATIC_COMMIT || '';
-    let clean = true;
     if (revision && !SHA.test(revision))
       throw new Error('ROKA_STATIC_COMMIT must be a full 40-character commit SHA');
     if (!revision) {
@@ -40,18 +39,12 @@ export class StaticAssetDelivery {
         })
           .toString()
           .trim();
-        clean = !execFileSync('git', ['status', '--porcelain', '--untracked-files=normal', '--', 'static'], {
-          cwd,
-          stdio: ['ignore', 'pipe', 'ignore'],
-        })
-          .toString()
-          .trim();
       } catch {
-        clean = false;
+        // Archive deployments can provide ROKA_STATIC_COMMIT explicitly.
       }
     }
     this.commit = SHA.test(revision) ? revision : '';
-    this.enabled = env.ROKA_STATIC_CDN !== '0' && !!this.commit && (clean || env.ROKA_STATIC_CDN === '1');
+    this.enabled = env.ROKA_STATIC_CDN !== '0' && !!this.commit;
     const origins = (env.ROKA_STATIC_CDN_ORIGINS || DEFAULT_ORIGINS.join(','))
       .split(',')
       .map((s) => s.trim())
@@ -105,6 +98,7 @@ export class StaticAssetDelivery {
 
   html(source: string): string {
     if (!this.enabled) return source;
+    const preloads: string[] = [];
     let html = source.replace(
       /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi,
       (tag, raw: string, body: string) => {
@@ -115,6 +109,15 @@ export class StaticAssetDelivery {
           return tag;
         const src = attrs.src;
         if (src && !this.localFile(src)) return tag;
+        if (src && !Object.prototype.hasOwnProperty.call(attrs, 'nomodule')) {
+          const escape = (value: string) =>
+            value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+          const rel = attrs.type === 'module' ? 'modulepreload' : 'preload';
+          const as = attrs.type === 'module' ? '' : ' as="script"';
+          preloads.push(
+            `<link rel="${rel}"${as} href="${escape(this.url(src))}" integrity="${this.integrity(src)}" crossorigin="${escape(attrs.crossorigin || 'anonymous')}" />`,
+          );
+        }
         delete attrs.src;
         delete attrs.integrity;
         const descriptor = src ? { src, attrs, integrity: this.integrity(src) } : { attrs };
@@ -143,6 +146,6 @@ export class StaticAssetDelivery {
     html = html.replace(/(["'])(\/[^\s"'<>]*)\1/g, (_all, q: string, url: string) => q + this.url(url) + q);
     const config = { bases: this.bases, commit: this.commit, version: this.version };
     const bootstrap = `<script>window.ROKA_ASSET_CONFIG=${jsonForHtml(config)};\n${this.runtime.replace(/<\/script/gi, '<\\/script')}\n</script>`;
-    return html.replace(/<head\b[^>]*>/i, (head) => head + bootstrap);
+    return html.replace(/<head\b[^>]*>/i, (head) => head + bootstrap + preloads.join(''));
   }
 }
