@@ -100,7 +100,7 @@ export class StaticAssetDelivery {
     if (!this.enabled) return source;
     const preloads: string[] = [];
     let html = source.replace(
-      /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi,
+      /<script\b([^>]*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi,
       (tag, raw: string, body: string) => {
         const attrs: Record<string, string> = {};
         for (const match of raw.matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g))

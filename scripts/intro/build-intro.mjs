@@ -29,6 +29,12 @@ await build({
   target: ['es2022'],
   minify: true,
   legalComments: 'eof',
+  // Three.js uses Math.random for visual helpers and generated object IDs.
+  // Keep the same uniform [0, 1) contract with a browser CSPRNG source.
+  define: { 'Math.random': '__rokaSecureRandom' },
+  banner: {
+    js: 'const __rokaRandomBuffer = new Uint32Array(1); function __rokaSecureRandom() { globalThis.crypto.getRandomValues(__rokaRandomBuffer); return __rokaRandomBuffer[0] / 4294967296; }',
+  },
 });
 // Normalize insignificant trailing whitespace in embedded upstream GLSL.
 await fs.writeFile(
