@@ -189,7 +189,7 @@
     stage.setAttribute('role', 'img');
     stage.setAttribute('aria-label', 'Roka 游戏介绍片实时画面');
     viewport.append(stage);
-    var status = element('p', 'intro-status', '正在加载实时画面与音乐…');
+    var status = element('p', 'intro-status', '正在获取素材清单…');
     status.setAttribute('role', 'status');
     var statusOverlay = element('div', 'intro-status-overlay');
     statusOverlay.append(status);
@@ -205,11 +205,12 @@
     var progress = element('input', 'intro-progress');
     progress.type = 'range';
     progress.min = '0';
-    progress.max = '124';
-    progress.step = '0.1';
+    progress.max = '1';
+    progress.step = '1';
     progress.value = '0';
-    progress.setAttribute('aria-label', '介绍片播放进度');
-    var time = element('span', 'intro-time', '0:00 / 2:04');
+    progress.setAttribute('aria-label', '介绍片加载进度');
+    progress.setAttribute('aria-valuetext', '素材加载 0%');
+    var time = element('span', 'intro-time', '0%');
     var skip = button('跳过并关闭', close);
     var retry = button('重新加载', watch);
     retry.hidden = true;
@@ -374,8 +375,16 @@
             setState('ended');
             status.textContent = '介绍片已结束。准备好加入 Roka 了吗？';
           },
+          onLoadProgress: function (completed, total) {
+            if (!isActive() || session.state !== 'loading') return;
+            var percent = total ? Math.floor((completed / total) * 100) : 100;
+            progress.max = String(total);
+            progress.value = String(completed);
+            time.textContent = percent + '%';
+            progress.setAttribute('aria-valuetext', '素材加载 ' + percent + '%');
+          },
           onProgress: function (seconds, duration) {
-            if (!isActive()) return;
+            if (!isActive() || !session.player) return;
             progress.max = String(duration);
             progress.value = String(seconds);
             time.textContent = timeLabel(seconds) + ' / ' + timeLabel(duration);
@@ -395,6 +404,11 @@
         }
         session.player = player;
         progress.max = String(player.duration);
+        progress.step = '0.1';
+        progress.value = '0';
+        progress.setAttribute('aria-label', '介绍片播放进度');
+        progress.setAttribute('aria-valuetext', '0:00，共 ' + timeLabel(player.duration));
+        time.textContent = '0:00 / ' + timeLabel(player.duration);
         pause.disabled = mute.disabled = progress.disabled = false;
         status.textContent = '画面由本机实时绘制';
         await player.play();

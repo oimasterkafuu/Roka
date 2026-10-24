@@ -26,8 +26,10 @@ export async function createIntroPlayer(stage, options) {
   state.created++;
   state.logicalSize = [stage.clientWidth, stage.clientHeight];
   state.options = options;
+  options.onLoadProgress(0, 35);
   if (state.delayCreate) await new Promise(resolve => setTimeout(resolve, state.delayCreate));
   if (state.failCreate) throw new Error('test renderer failure');
+  options.onLoadProgress(35, 35);
   let playRequest = 0;
   const player = {
     duration: 124,
@@ -115,12 +117,10 @@ try {
     document.body.appendChild(backdrop);
   });
   assert.deepEqual(
-    await page
-      .locator('.notify-permission-card button.inverted')
-      .evaluate((node) => {
-        const style = getComputedStyle(node);
-        return [style.color, style.backgroundColor];
-      }),
+    await page.locator('.notify-permission-card button.inverted').evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [style.color, style.backgroundColor];
+    }),
     ['rgb(255, 255, 255)', 'rgb(0, 128, 128)'],
     'notify primary button stays white-on-teal under the body.home cascade',
   );
@@ -149,8 +149,42 @@ try {
   assert.equal(runtimeRequests.length, 0, 'dismissal never downloads the renderer');
 
   await page.goto(origin + '/about');
+  await page.evaluate(() => {
+    window.__introTest.delayCreate = 200;
+  });
   await page.getByRole('button', { name: '重播游戏介绍片' }).click();
+  await page.waitForFunction(() => window.__introTest.created === 1);
+  assert.equal(await page.locator('.intro-progress').count(), 1);
+  assert.equal(await page.locator('input.intro-progress[type="range"]').count(), 1);
+  await page.locator('.intro-progress').evaluate((node) => {
+    node.dataset.testIdentity = 'shared-loading-playback-range';
+  });
+  assert.deepEqual(
+    await page
+      .locator('.intro-progress')
+      .evaluate((node) => [node.disabled, node.max, node.value, node.getAttribute('aria-label')]),
+    [true, '35', '0', '介绍片加载进度'],
+  );
+  assert.equal(await page.locator('.intro-time').textContent(), '0%');
+  await page.evaluate(() => window.__introTest.options.onLoadProgress(17, 35));
+  assert.equal(await page.locator('.intro-progress').inputValue(), '17');
+  assert.equal(await page.locator('.intro-time').textContent(), '48%');
+  assert.equal(await page.locator('.intro-progress').getAttribute('aria-valuetext'), '素材加载 48%');
   await page.waitForFunction(() => window.__introTest.played === 1);
+  assert.equal(await page.locator('.intro-progress').count(), 1, 'loading and playback share one range');
+  assert.deepEqual(
+    await page
+      .locator('.intro-progress')
+      .evaluate((node) => [
+        node.dataset.testIdentity,
+        node.disabled,
+        node.max,
+        node.value,
+        node.getAttribute('aria-label'),
+      ]),
+    ['shared-loading-playback-range', false, '124', '0', '介绍片播放进度'],
+  );
+  assert.equal(await page.locator('.intro-time').textContent(), '0:00 / 2:04');
   assert.equal(await page.evaluate(() => window.__introTest.audio), 1);
   assert.deepEqual(await page.evaluate(() => window.__introTest.logicalSize), [1920, 1080]);
   assert.equal(runtimeRequests.length, 1);

@@ -22,10 +22,15 @@ export async function materials(load) {
       vertexColors: true,
     });
   }
+  const [stone, roof, wood] = await Promise.all([
+    pbr('medieval_blocks_03', 0xc3b8a1, 0.75),
+    pbr('slate_floor_02', 0x777d82, 0.7),
+    pbr('wood_planks_grey', 0x76624a, 0.6),
+  ]);
   return {
-    stone: await pbr('medieval_blocks_03', 0xc3b8a1, 0.75),
-    roof: await pbr('slate_floor_02', 0x777d82, 0.7),
-    wood: await pbr('wood_planks_grey', 0x76624a, 0.6),
+    stone,
+    roof,
+    wood,
     iron: new T.MeshStandardMaterial({ color: 0x24282a, roughness: 0.7, metalness: 0.55 }),
   };
 }

@@ -1,6 +1,6 @@
 import { createScene } from './scene.js';
 import { createDirector } from './director.js';
-import { fetchIntroAsset } from './asset-loading.js';
+import { createIntroAssetLoader, fetchIntroAsset } from './asset-loading.js';
 
 // Presentation is driven by the audio clock, never accumulated animation deltas.
 // A slow device drops frames without stretching music, replay ticks or camera paths.
@@ -10,6 +10,7 @@ export async function createIntroPlayer(stage, options = {}) {
     signal,
     onEnded = () => {},
     onProgress = () => {},
+    onLoadProgress = () => {},
     onStateChange = () => {},
     onStatus = () => {},
   } = options;
@@ -89,6 +90,16 @@ export async function createIntroPlayer(stage, options = {}) {
     abortCheck();
     const manifest = await json('/intro/assets/manifest.json');
     abortCheck();
+    const files = { ...manifest.files, ...manifest.images, ...manifest.fonts };
+    const assetLoader = createIntroAssetLoader({ files, signal: combined });
+    await assetLoader.preload({
+      onProgress(completed, total) {
+        onLoadProgress(completed, total);
+        onStatus(`正在并行加载素材 ${completed}/${total}`);
+      },
+    });
+    abortCheck();
+    onStatus('下载完成，正在初始化实时画面…');
     const family = {
       serif: 'RokaIntroSerif',
       cn: 'RokaIntroCN',
@@ -96,11 +107,8 @@ export async function createIntroPlayer(stage, options = {}) {
       sans: 'RokaIntroSans',
       quicksand: 'Quicksand',
     };
-    const loadImage = async ([name, url]) => {
-      const response = await fetchAsset(url, { signal: combined });
-      if (!response.ok) throw new Error('Intro image unavailable');
-      const blob = await response.blob();
-      const image = await createImageBitmap(blob);
+    const loadImage = async (name) => {
+      const image = await createImageBitmap(await assetLoader.blob(name));
       // Bitmap decoding cannot be aborted; close a result that arrives after cancellation.
       if (combined.aborted) {
         image.close();
@@ -108,10 +116,8 @@ export async function createIntroPlayer(stage, options = {}) {
       }
       images[name] = image;
     };
-    const loadFont = async ([name, url]) => {
-      const response = await fetchAsset(url, { signal: combined });
-      if (!response.ok) throw new Error('Intro font unavailable');
-      const data = await response.arrayBuffer();
+    const loadFont = async (name) => {
+      const data = await (await assetLoader.blob(name)).arrayBuffer();
       const font = new FontFace(family[name], data, {
         weight: ['serif', 'cn', 'quicksand'].includes(name) ? '700' : '400',
       });
@@ -120,22 +126,23 @@ export async function createIntroPlayer(stage, options = {}) {
       fonts.push(font);
       document.fonts.add(font);
     };
-    onStatus('正在载入模型、回放与音乐…');
     const [plan, replays, loadedAudio] = await Promise.all([
-      json(manifest.files['plan.json']),
-      json(manifest.files['replays.json']),
+      assetLoader.json('plan.json'),
+      assetLoader.json('replays.json'),
       audioContext
-        ? fetchAsset(manifest.files['score.mp3'], { signal: combined }).then(async (response) => {
-            if (!response.ok) throw new Error('Intro soundtrack unavailable');
-            return audioContext.decodeAudioData(await response.arrayBuffer());
-          })
+        ? assetLoader
+            .blob('score.mp3')
+            .then((blob) => blob.arrayBuffer())
+            .then((data) => audioContext.decodeAudioData(data))
         : null,
-      Promise.all(Object.entries(manifest.images).map(loadImage)),
-      Promise.all(Object.entries(manifest.fonts).map(loadFont)),
-      createScene({ assets: manifest, signal: combined, onStatus, nativeResolution: true }).then((result) => {
-        if (destroyed) result.dispose();
-        else scene = result;
-      }),
+      Promise.all(Object.keys(manifest.images).map(loadImage)),
+      Promise.all(Object.keys(manifest.fonts).map(loadFont)),
+      createScene({ assets: manifest, assetLoader, signal: combined, nativeResolution: true }).then(
+        (result) => {
+          if (destroyed) result.dispose();
+          else scene = result;
+        },
+      ),
     ]);
     abortCheck();
     audioBuffer = loadedAudio;

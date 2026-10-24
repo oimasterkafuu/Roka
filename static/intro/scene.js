@@ -9,9 +9,9 @@ import { createIntroAssetLoader } from './asset-loading.js';
 import { createLandform } from './landform.js';
 import { materials, fortress } from './architecture.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-export async function createScene({ assets, signal, onStatus = () => {}, nativeResolution = false }) {
+export async function createScene({ assets, assetLoader: sharedLoader, signal, nativeResolution = false }) {
   const manager = new T.LoadingManager();
-  const assetLoader = createIntroAssetLoader({ files: assets.files, signal });
+  const assetLoader = sharedLoader || createIntroAssetLoader({ files: assets.files, signal });
   const resources = new Set(),
     roots = new Set();
   let disposed = false,
@@ -81,10 +81,45 @@ export async function createScene({ assets, signal, onStatus = () => {}, nativeR
       BASE = '',
       ASSET = '';
 
-    manager.onProgress = (url, loaded, total) => onStatus(`正在加载场景素材 ${loaded}/${total}`);
-
-    const motionProfile = await json('motion-profile.json');
-    const data = await json('world.json');
+    const motionProfileTask = json('motion-profile.json');
+    const worldTask = json('world.json');
+    const skyTask = (async () =>
+      tracked(new HDRLoader(manager)).loadAsync(await assetLoader.blobURL(BASE + 'sky.hdr')))();
+    // Fetch through the commit-pinned runtime before decoding. Flip at decode time because
+    // WebGL ignores UNPACK_FLIP_Y_WEBGL for ImageBitmap sources.
+    const bitmapLoader = new T.ImageBitmapLoader(manager).setOptions({
+      imageOrientation: 'flipY',
+      premultiplyAlpha: 'none',
+    });
+    const texLoader = {
+      async loadAsync(name) {
+        const image = await bitmapLoader.loadAsync(await assetLoader.blobURL(name));
+        const texture = own(new T.Texture(image));
+        texture.flipY = false;
+        texture.needsUpdate = true;
+        check();
+        return texture;
+      },
+    };
+    const groundTask = Promise.all(
+      [BASE + 'ground.jpg', BASE + 'ground-normal.jpg'].map((name) => texLoader.loadAsync(name)),
+    );
+    const rockTask = Promise.all(
+      [
+        ASSET + 'rock_face_03-diff.jpg',
+        ASSET + 'rock_face_03-nor_gl.jpg',
+        ASSET + 'rock_face_03-rough.jpg',
+      ].map((name) => texLoader.loadAsync(name)),
+    );
+    const mudTask = texLoader.loadAsync(ASSET + 'brown_mud_02-diff.jpg');
+    const gltfLoader = tracked(new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder));
+    const modelsTask = Promise.all(
+      ['knight-hero.glb', 'knight-lod.glb', 'knight-crowd.glb'].map(async (name) =>
+        gltfLoader.loadAsync(await assetLoader.modelURL(name)),
+      ),
+    );
+    const buildingMatsTask = materials(texLoader);
+    const [motionProfile, data] = await Promise.all([motionProfileTask, worldTask]);
     const { n, m, cellX: CX, cellZ: CZ, focusCell, palette } = data,
       grid = data.frame.grid;
     const worldWidth = m * CX,
@@ -129,31 +164,14 @@ export async function createScene({ assets, signal, onStatus = () => {}, nativeR
     const fill = new T.DirectionalLight(0xa4c3df, 0.6);
     fill.position.set(60, 40, 80);
     scene.add(fill);
-    const sky = await tracked(new HDRLoader(manager)).loadAsync(await assetLoader.blobURL(BASE + 'sky.hdr'));
+    const sky = await skyTask;
     sky.mapping = T.EquirectangularReflectionMapping;
     scene.background = sky;
     scene.environment = sky;
     scene.environmentIntensity = 0.5;
     scene.backgroundIntensity = 0.48;
     scene.backgroundRotation.y = 2.8;
-    // Fetch through the commit-pinned runtime before decoding. Flip at decode time because
-    // WebGL ignores UNPACK_FLIP_Y_WEBGL for ImageBitmap sources.
-    const bitmapLoader = new T.ImageBitmapLoader(manager).setOptions({
-      imageOrientation: 'flipY',
-      premultiplyAlpha: 'none',
-    });
-    const texLoader = {
-      async loadAsync(name) {
-        const image = await bitmapLoader.loadAsync(await assetLoader.blobURL(name));
-        const texture = own(new T.Texture(image));
-        texture.flipY = false;
-        texture.needsUpdate = true;
-        check();
-        return texture;
-      },
-    };
-    const groundTex = await texLoader.loadAsync(BASE + 'ground.jpg'),
-      normalTex = await texLoader.loadAsync(BASE + 'ground-normal.jpg');
+    const [groundTex, normalTex] = await groundTask;
     groundTex.colorSpace = T.SRGBColorSpace;
     for (const tx of [groundTex, normalTex]) {
       tx.wrapS = tx.wrapT = T.RepeatWrapping;
@@ -210,15 +228,13 @@ export async function createScene({ assets, signal, onStatus = () => {}, nativeR
     const wetValues = new Float32Array(pos.count);
     for (let k = 0; k < pos.count; k++) wetValues[k] = wetness(pos.getX(k), pos.getZ(k));
     terrainGeo.setAttribute('wetness', new T.BufferAttribute(wetValues, 1));
-    const rockD = await texLoader.loadAsync(ASSET + 'rock_face_03-diff.jpg'),
-      rockN = await texLoader.loadAsync(ASSET + 'rock_face_03-nor_gl.jpg'),
-      rockR = await texLoader.loadAsync(ASSET + 'rock_face_03-rough.jpg');
+    const [rockD, rockN, rockR] = await rockTask;
     for (const tx of [rockD, rockN, rockR]) {
       tx.wrapS = tx.wrapT = T.RepeatWrapping;
       tx.anisotropy = 4;
     }
     rockD.colorSpace = T.SRGBColorSpace;
-    const mudD = await texLoader.loadAsync(ASSET + 'brown_mud_02-diff.jpg');
+    const mudD = await mudTask;
     mudD.colorSpace = T.SRGBColorSpace;
     mudD.wrapS = mudD.wrapT = T.RepeatWrapping;
     mudD.anisotropy = 4;
@@ -521,12 +537,7 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
     lilyMesh.receiveShadow = true;
     waterGroup.add(lilyMesh);
 
-    const gltfLoader = tracked(new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder));
-    const [heroGL, midGL, lowGL] = await Promise.all([
-      ...['knight-hero.glb', 'knight-lod.glb', 'knight-crowd.glb'].map(async (name) =>
-        gltfLoader.loadAsync(await assetLoader.modelURL(name)),
-      ),
-    ]);
+    const [heroGL, midGL, lowGL] = await modelsTask;
     function recolor(original, owner, stone = false) {
       if (!original) return null;
       const img = original.image,
@@ -575,7 +586,7 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
       return cache.get(key);
     }
     const bronze = new T.MeshStandardMaterial({ color: 0xb39152, roughness: 0.45, metalness: 0.55 });
-    const buildingMats = await materials(texLoader);
+    const buildingMats = await buildingMatsTask;
     const buildings = [];
     function castle(index, owner, main = false) {
       const result = fortress(buildingMats, true, !main);

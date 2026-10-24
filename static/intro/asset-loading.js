@@ -122,6 +122,23 @@ export function createIntroAssetLoader({ files = {}, signal } = {}) {
       );
     return models.get(path);
   }
+  function preload({ onProgress = () => {} } = {}) {
+    check();
+    const names = Object.keys(files);
+    const total = names.length;
+    let completed = 0;
+    onProgress(0, total);
+    return Promise.all(
+      names.map((name) => {
+        const task = /\.gltf(?:\?|$)/i.test(resolve(name)) ? modelURL(name) : blob(name);
+        return task.then(() => {
+          check();
+          completed++;
+          onProgress(completed, total);
+        });
+      }),
+    );
+  }
   function dispose() {
     if (disposed) return;
     disposed = true;
@@ -134,5 +151,5 @@ export function createIntroAssetLoader({ files = {}, signal } = {}) {
     models.clear();
   }
   signal?.addEventListener('abort', dispose, { once: true });
-  return { json, blobURL, modelURL, dispose };
+  return { json, blob, blobURL, modelURL, preload, dispose };
 }

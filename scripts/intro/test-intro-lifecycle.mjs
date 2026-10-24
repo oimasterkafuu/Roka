@@ -8,6 +8,7 @@ const instantiate = new Function(
   'createScene',
   'createDirector',
   'fetchIntroAsset',
+  'createIntroAssetLoader',
   source.replace(/^import .*;\n/gm, '').replace('export async function', 'return async function'),
 );
 const deferred = () => {
@@ -184,6 +185,46 @@ function harness(settings = {}) {
       const runtime = globalThis.ROKA_ASSETS;
       return runtime?.fetch ? runtime.fetch(path, options) : globalThis.fetch(path, options);
     },
+    ({ files, signal }) => {
+      const blobs = new Map();
+      const fetchAsset = (path) => {
+        const runtime = globalThis.ROKA_ASSETS;
+        const options = { signal };
+        return runtime?.fetch ? runtime.fetch(path, options) : globalThis.fetch(path, options);
+      };
+      const blob = (name) => {
+        const path = files[name] || name;
+        if (!blobs.has(path))
+          blobs.set(
+            path,
+            fetchAsset(path).then(() => new Blob([name.endsWith('.json') ? '{}' : 'asset'])),
+          );
+        return blobs.get(path);
+      };
+      return {
+        blob,
+        async json(name) {
+          return JSON.parse(await (await blob(name)).text());
+        },
+        blobURL: blob,
+        modelURL: blob,
+        async preload({ onProgress }) {
+          const names = Object.keys(files);
+          let completed = 0;
+          onProgress(0, names.length);
+          await Promise.all(
+            names.map((name) =>
+              blob(name).then(() => {
+                onProgress(++completed, names.length);
+              }),
+            ),
+          );
+        },
+        dispose() {
+          blobs.clear();
+        },
+      };
+    },
   );
   const controller = new AbortController();
   return {
@@ -345,7 +386,7 @@ try {
     const sceneSource = await fs.readFile(new URL('../../static/intro/scene.js', import.meta.url), 'utf8');
     assert(!source.includes('素材已就绪') && !sceneSource.includes('素材已就绪'));
     assert(!sceneSource.includes('光影'), 'scene loading never claims lighting initialization');
-    assert.match(sceneSource, /正在加载场景素材 \$\{loaded\}\/\$\{total\}/);
+    assert(!sceneSource.includes('正在加载场景素材'), 'Three manager cannot overwrite unified loading progress');
   }
   {
     const h = harness();
