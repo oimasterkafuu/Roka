@@ -248,7 +248,7 @@ function onSpectateViewTab() {
   socket.emit('spectate_view', { team: spectate_view_team });
 }
 
-// 按当前排行榜重建视角 tabs（全图 + 各参赛玩家）；仅玩家集合变化时重建以保留选中态。
+// 按当前排行榜重建视角 tabs（全图 + 仍有存活成员的参赛队伍）；仅集合变化时重建以保留选中态。
 function refreshSpectateViewTabs(lb) {
   var section = $('#spectate-view-section');
   if (!section.length) return;
@@ -258,14 +258,17 @@ function refreshSpectateViewTabs(lb) {
     return;
   }
   section.css('display', '');
-  var teamGame = fogTeamGame(lb);
+  var alive = lb.filter(function (entry) {
+    return entry.team > 0 && entry.class_ != 'dead';
+  });
+  var teamGame = fogTeamGame(alive);
   var labels = [];
   var teams = {};
-  for (var i = 0; i < lb.length; i++) {
-    var label = fogDisplayName(lb[i].uid, lb[i].team, teamGame);
+  for (var i = 0; i < alive.length; i++) {
+    var label = fogDisplayName(alive[i].uid, alive[i].team, teamGame);
     if (typeof teams[label] != 'undefined') continue;
     labels.push(label);
-    teams[label] = lb[i].team;
+    teams[label] = alive[i].team;
   }
   var key = labels.slice().sort().join('|');
   if (key == spectate_view_labels.slice().sort().join('|')) return;

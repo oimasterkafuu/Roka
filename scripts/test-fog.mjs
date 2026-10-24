@@ -6,17 +6,19 @@
 //    b. fog=1 的格子 grid_type ∈ {200 空地, 201 山脉, 204 沼泽} 且 army_cnt=0（视野外不泄真实地形/归属）；
 //    c. 己方主城格 fog=0；视野内只能看到 1 座主城（自己的）；
 // 3) 对照房间：默认配置（不开迷雾）的 update 帧不得携带 fog 字段。
-// 4) 观战视角：中途进房观战者默认全图；spectate_view 选定队伍后按该队伍迷雾视野下发
-//    （复用同一套迷雾不变量断言），存活参赛者的切换请求被忽略，切回 team=0 恢复全图。
+// 4) 观战视角：真实 update()/render() 覆盖全图→队伍 1→队伍 2→全图及后续差分；
+//    dead 成员 tabs 排除与失效选中回退；淘汰队伍自动/手动回退全图且不泄露存活空视野。
 // 5) Bot 房间（issue #51）：bot 进房后迷雾被强制关闭，且房主再次开启请求被拒绝。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 90 秒。
 
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -132,11 +134,258 @@ async function signUser(store, jwtSecret, username, password) {
   return jwt.sign({ sub: username, sid }, jwtSecret, { expiresIn: '1h' });
 }
 
+const renderUpdateSource = fs.readFileSync(path.join(rootDir, 'static', 'main', 'render-update.js'), 'utf8');
+const roomControlsSource = fs.readFileSync(path.join(rootDir, 'static', 'main', 'room-controls.js'), 'utf8');
+
+function createBrowserRenderer(n, m) {
+  const cells = Array.from({ length: n }, () =>
+    Array.from({ length: m }, () => ({ className: '', innerHTML: '' })),
+  );
+  const elements = new Map();
+  const statusChildren = Array.from({ length: 7 }, () => ({}));
+  const statusRoot = { children: [{ children: statusChildren }] };
+  const documentStub = {
+    getElementById() {
+      return { style: { setProperty() {}, removeProperty() {} } };
+    },
+  };
+  function wrap(list) {
+    const api = {
+      0: list[0],
+      length: list.length,
+      css(name, value) {
+        for (const element of list) {
+          element.style ||= {};
+          if (typeof name === 'object') Object.assign(element.style, name);
+          else if (typeof value !== 'undefined') element.style[name] = value;
+        }
+        return typeof value === 'undefined' && typeof name === 'string' ? list[0]?.style?.[name] : api;
+      },
+      html(value) {
+        if (typeof value === 'undefined') return list[0]?.innerHTML;
+        for (const element of list) element.innerHTML = value;
+        return api;
+      },
+      addClass(name) {
+        for (const element of list) element.className = `${element.className || ''} ${name}`.trim();
+        return api;
+      },
+      removeClass(name) {
+        for (const element of list) {
+          element.className = String(element.className || '')
+            .split(/\s+/)
+            .filter((item) => item && item !== name)
+            .join(' ');
+        }
+        return api;
+      },
+      children() {
+        return wrap(list.flatMap((element) => element.children || []));
+      },
+    };
+    return api;
+  }
+  function $(selector) {
+    if (typeof selector === 'object') return wrap([selector]);
+    if (!elements.has(selector)) {
+      elements.set(selector, selector === '#status-alert' ? statusRoot : { style: {} });
+    }
+    return wrap([elements.get(selector)]);
+  }
+  const context = vm.createContext({
+    $,
+    document: documentStub,
+    console,
+    n,
+    m,
+    scale: 3,
+    player: 0,
+    selx: -1,
+    sely: -1,
+    selt: 1,
+    route: [],
+    have_route: Array.from({ length: 4 }, () => Array.from({ length: n }, () => Array(m).fill(false))),
+    have_build: Array.from({ length: n }, () => Array(m).fill('')),
+    grid_type: Array.from({ length: n }, () => Array(m)),
+    army_cnt: Array.from({ length: n }, () => Array(m)),
+    isolated: Array.from({ length: n }, () => Array(m).fill(0)),
+    fog: Array.from({ length: n }, () => Array(m).fill(0)),
+    cell_elems: cells,
+    cell_html: Array.from({ length: n }, () => Array(m).fill('')),
+    dire_class: ['arrow_u', 'arrow_d', 'arrow_l', 'arrow_r'],
+    dire_char: ['↑', '↓', '←', '→'],
+    is_replay: false,
+    replay_id: null,
+    client_id: 'spectator',
+    game_ended: false,
+    lost: false,
+    lb_lock_digits: { army: 0, land: 0 },
+    LB_LOCK_DIGITS_MAX: 6,
+    fog_mode: false,
+    setRoomTopLeftVisible() {},
+    anyRouteQueued: () => false,
+    armyCountShrinkClass: () => '',
+    usernameEnsureColors() {},
+    usernameLinkHtml: (name) => String(name),
+    htmlescape: String,
+    fogObserverView: () => false,
+    fogTeamGame: () => false,
+    fogDisplayName: (name) => name,
+    refreshSpectateViewTabs() {},
+    clearAllRoutes() {},
+    hideSurrenderAlert() {},
+    refreshSpectateMode() {},
+  });
+  vm.runInContext(renderUpdateSource, context, { filename: 'static/main/render-update.js' });
+  return {
+    update(data) {
+      context.update(data);
+      const map = elements.get('#map');
+      assert.notEqual(map?.style?.display, 'none', '真实 render() 不应隐藏地图');
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < m; j++) {
+          assert.match(cells[i][j].className, /^s3(?: |$)/, `格子 ${i},${j} 应有有效渲染 class`);
+          assert.equal(typeof cells[i][j].innerHTML, 'string', `格子 ${i},${j} 应完成内容渲染`);
+        }
+      }
+    },
+    flat(key) {
+      return context[key].flat();
+    },
+    cells,
+  };
+}
+
+function assertBrowserBoard(client, label) {
+  if (client.browserError) throw client.browserError;
+  assert(client.browser, `${client.name}：缺少真实客户端渲染器`);
+  for (const key of ['grid_type', 'army_cnt', 'fog']) {
+    assert.deepEqual(client.browser.flat(key), client.board[key], `${client.name}：${label} 后 ${key} 合并结果不一致`);
+  }
+  assert.equal(client.browser.flat('grid_type').length, client.n * client.m, `${client.name}：${label} 后棋盘长度无效`);
+  assert(client.browser.cells.flat().some((cell) => /(?:^| )c\d+(?: |$)/.test(cell.className)), `${client.name}：${label} 后渲染结果没有任何领地`);
+}
+
+function testSpectateViewTabs() {
+  const section = { style: {} };
+  const tabs = {
+    children: [{ value: '全图' }, { innerHTML: '全图' }],
+    removeChild(child) {
+      this.children.splice(this.children.indexOf(child), 1);
+    },
+    get lastChild() {
+      return this.children[this.children.length - 1];
+    },
+  };
+  const emitted = [];
+  const documentStub = {};
+  function wrap(list) {
+    const api = {
+      0: list[0],
+      length: list.length,
+      css(name, value) {
+        for (const element of list) {
+          element.style ||= {};
+          element.style[name] = value;
+        }
+        return api;
+      },
+      attr(name, value) {
+        if (typeof value === 'undefined') return list[0]?.[name];
+        for (const element of list) element[name] = value;
+        return api;
+      },
+      val(value) {
+        if (typeof value === 'undefined') return list[0]?.value;
+        for (const element of list) element.value = value;
+        return api;
+      },
+      html(value) {
+        if (typeof value === 'undefined') return list[0]?.innerHTML;
+        for (const element of list) element.innerHTML = value;
+        return api;
+      },
+      text(value) {
+        for (const element of list) element.innerHTML = String(value);
+        return api;
+      },
+      append(child) {
+        for (const element of list) element.children.push(child[0]);
+        return api;
+      },
+      on() {
+        return api;
+      },
+      ready() {
+        return api;
+      },
+    };
+    return api;
+  }
+  function $(selector) {
+    if (selector === documentStub) return wrap([documentStub]);
+    if (selector === '#spectate-view-section') return wrap([section]);
+    if (selector === '#tabs-spectate-view') return wrap([tabs]);
+    if (typeof selector === 'object') return wrap([selector]);
+    if (typeof selector === 'string' && selector.startsWith('<')) return wrap([{ children: [] }]);
+    throw new Error(`观战 tabs 测试不支持的选择器：${selector}`);
+  }
+  const context = vm.createContext({
+    $,
+    document: documentStub,
+    window: { setInterval() {} },
+    _: { debounce: (fn) => fn },
+    socket: { emit: (event, data) => emitted.push({ event, data }) },
+    is_replay: false,
+    in_game: true,
+    game_ended: false,
+    fog_mode: true,
+    player: 0,
+    self_team: 0,
+    spectate_view_team: 2,
+    max_teams: 16,
+    htmlescape: String,
+    fogTeamGame(entries) {
+      const counts = {};
+      for (const entry of entries) {
+        counts[entry.team] = (counts[entry.team] || 0) + 1;
+        if (counts[entry.team] >= 2) return true;
+      }
+      return false;
+    },
+    fogDisplayName: (uid, team, teamGame) => (teamGame ? `队伍 ${team}` : uid),
+  });
+  vm.runInContext(roomControlsSource, context, { filename: 'static/main/room-controls.js' });
+  const alive = [
+    { uid: 'alice', team: 1, class_: '' },
+    { uid: 'bob', team: 2, class_: '' },
+  ];
+  context.refreshSpectateViewTabs(alive);
+  assert.deepEqual(Array.from(context.spectate_view_labels), ['alice', 'bob'], '存活成员应生成视角 tabs');
+  context.refreshSpectateViewTabs([alive[0], { ...alive[1], class_: 'dead' }]);
+  assert.deepEqual(Array.from(context.spectate_view_labels), ['alice'], 'dead 成员不得保留视角 tab');
+  assert.equal(context.spectate_view_team, 0, '当前选中队伍失效后应复位全图');
+  assert.equal(emitted.at(-1)?.event, 'spectate_view', '失效视角应通知服务端');
+  assert.equal(emitted.at(-1)?.data?.team, 0, '失效视角应通知服务端回全图');
+  assert.equal(tabs.children[0].value, '全图', '失效视角的 tab 选中态应回全图');
+
+  emitted.length = 0;
+  context.spectate_view_team = 2;
+  context.refreshSpectateViewTabs([
+    alive[0],
+    { ...alive[1], class_: 'dead' },
+    { uid: 'carol', team: 2, class_: '' },
+  ]);
+  assert(context.spectate_view_labels.includes('carol'), '同队仍有存活成员时应保留队伍视角');
+  assert.equal(context.spectate_view_team, 2, '同队仍有存活成员时不得误回全图');
+  assert.equal(emitted.length, 0, '有效队伍视角不应触发额外回退');
+}
+
 /**
  * 最小对局客户端：进房自动准备；像前端一样合并 update 帧
  * （全量/差分），把合并后的最新局面快照存到 client.board 供断言。
  */
-function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botToken }) {
+function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botToken, browser = false }) {
   const socket = ioClient(baseUrl, {
     transports: ['websocket', 'polling'],
     extraHeaders: cookie ? { cookie: `auth_token=${encodeURIComponent(cookie)}` } : undefined,
@@ -172,6 +421,8 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
       fogFieldSeen: false,
       fogFieldAbsent: false,
     };
+    client.browser = browser ? createBrowserRenderer(data.n, data.m) : null;
+    client.browserError = null;
   });
   socket.on('update', (data) => {
     if (!client.board) return;
@@ -194,6 +445,13 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
     merge('grid_type', data.grid_type);
     merge('army_cnt', data.army_cnt);
     merge('fog', data.fog);
+    if (client.browser && !client.browserError) {
+      try {
+        client.browser.update(data);
+      } catch (error) {
+        client.browserError = error;
+      }
+    }
   });
   socket.on('room_update', (data) => {
     if (typeof data?.fog !== 'undefined') {
@@ -258,8 +516,104 @@ function assertFogInvariants(client) {
   }
 }
 
+async function testEliminatedSpectatorView() {
+  const { GameEngine } = await import(pathToFileURL(path.join(rootDir, 'dist', 'game-engine.js')).href);
+  let browser = null;
+  const frames = [];
+  const engine = await GameEngine.create(
+    {
+      speed: 1,
+      width_ratio: 0.34,
+      height_ratio: 0.34,
+      swamp_ratio: 0.1,
+      map_token: 'eliminated-spectator-view',
+      map_mode: 'random',
+      map_region: 'china',
+      allow_team: true,
+      fog: true,
+      map_size: 'normal',
+      player_names: ['alice', 'bob', 'carol'],
+      player_teams: [1, 2, 3],
+    },
+    ['sid-a', 'sid-b', 'sid-c'],
+    ['id-a', 'id-b', 'id-c'],
+    'eliminated-spectator-view',
+    {
+      update: (sid, frame) => {
+        if (sid !== 'spectator' && sid !== 'early-spectator') return;
+        frames.push(frame);
+        if (sid === 'spectator') browser?.update(frame);
+      },
+      emitInitMap: (sid, data) => {
+        if (sid === 'spectator') browser = createBrowserRenderer(data.n, data.m);
+      },
+      chatMessage: () => undefined,
+      endGame: () => undefined,
+      md5: (input) => input,
+      replayStore: { saveReplay: async () => '' },
+    },
+  );
+  for (let i = 0; i < engine.n; i++) {
+    for (let j = 0; j < engine.m; j++) {
+      engine.owner[i][j] = 0;
+      engine.gridType[i][j] = 0;
+      engine.armyCnt[i][j] = 0;
+    }
+  }
+  for (let player = 1; player <= 3; player++) {
+    engine.owner[0][player] = player;
+    engine.gridType[0][player] = -2;
+    engine.armyCnt[0][player] = 10;
+  }
+  engine.addSpectator('spectator');
+  engine.setSpectatorView('spectator', 2);
+  const aliveFrame = frames.at(-1);
+  assert.equal(aliveFrame.is_diff, false, '存活队伍视角切换必须发送全量帧');
+  assert(aliveFrame.fog.some((value) => value === 0), '存活队伍必须有可见区域');
+  assert(aliveFrame.grid_type.includes(102), '存活队伍必须看到自己的主城');
+  assert(browser.cells[0][2].className.includes('general'), '存活队伍主城必须实际渲染');
+
+  engine.markEliminated(1);
+  for (let i = 0; i < engine.n; i++) {
+    for (let j = 0; j < engine.m; j++) {
+      if (engine.owner[i][j] === 2) {
+        engine.owner[i][j] = 0;
+        engine.gridType[i][j] = 0;
+        engine.armyCnt[i][j] = 0;
+      }
+    }
+  }
+  await engine.sendMap(false);
+  const automaticFallback = frames.at(-1);
+  assert.equal(automaticFallback.is_diff, true, '已选队伍淘汰后的自动回退应保持差分广播');
+  assert(browser.flat('fog').every((value) => value === 0), '已选队伍淘汰后不得继续发送全 fog 视野');
+  assert(browser.cells.flat().some((cell) => cell.className.includes('general')), '自动回退后的真实渲染不得空白');
+  engine.setSpectatorView('spectator', 2);
+  const eliminatedFrame = frames.at(-1);
+  assert.equal(eliminatedFrame.is_diff, false, '淘汰队伍视角回退必须发送全量帧');
+  assert(eliminatedFrame.fog.every((value) => value === 0), '淘汰队伍不得留下全 fog 空棋盘');
+  assert(eliminatedFrame.grid_type.includes(101) && eliminatedFrame.grid_type.includes(103), '回退后应显示其他存活队伍');
+  assert(browser.cells.flat().some((cell) => cell.className.includes('general')), '淘汰后真实渲染不得空白');
+  await engine.sendMap(false);
+  const eliminatedDiff = frames.at(-1);
+  assert.equal(eliminatedDiff.is_diff, true, '淘汰视角回退后仍应使用差分广播');
+  assert(browser.cells.flat().some((cell) => cell.className.includes('general')), '淘汰视角后续差分不得空白');
+
+  engine.pstat[1] = 0;
+  engine.spec[1] = false;
+  engine.deadOrder[1] = 0;
+  engine.addSpectator('early-spectator');
+  engine.setSpectatorView('early-spectator', 2);
+  const earlyFrame = frames.at(-1);
+  assert(earlyFrame.fog.every((value) => value === 1), '尚未选主城的存活队伍不得泄露全图');
+  assert(!earlyFrame.grid_type.includes(101) && !earlyFrame.grid_type.includes(103), '存活空视野不得显示其他队伍');
+  log('场景 4 通过：淘汰队伍回退全图，存活但无领土队伍不泄露全图');
+}
+
 async function main() {
   ensureBuild();
+  testSpectateViewTabs();
+  log('观战 tabs 通过：dead 成员排除，失效选中视角自动回全图');
 
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roka-test-fog-'));
   const port = await findFreePort();
@@ -314,7 +668,13 @@ async function main() {
   // 场景 1b：观战者视角切换——默认全图；spectate_view 选定队伍后按该队伍迷雾视野下发；
   // 存活参赛者的切换请求被忽略；切回 0 恢复全图。
   log('场景 1b：观战者选择玩家视角');
-  const s = createGameClient(baseUrl, { cookie: tokenS, room: ROOM_FOG, name: 'S', autoReady: false });
+  const s = createGameClient(baseUrl, {
+    cookie: tokenS,
+    room: ROOM_FOG,
+    name: 'S',
+    autoReady: false,
+    browser: true,
+  });
   await waitFor(() => s.frames >= 2, 10_000, '观战者收到初始全图帧');
   await waitFor(() => s.updates.some((frame) => frame.is_diff === true), 10_000, '观战者收到差分帧');
   const firstSpectatorFull = s.updates[0];
@@ -338,39 +698,41 @@ async function main() {
   if (!s.board.fogFieldSeen || countFogged(s) !== 0 || countGenerals(s) !== 2) {
     throw new Error('观战者默认应为全图视野（fog 全 0、双方主城可见）');
   }
-  const switchStart = s.updates.length;
-  s.socket.emit('spectate_view', { team: 1 });
-  await waitFor(
-    () => s.updates.length > switchStart && countFogged(s) > 0,
-    10_000,
-    '观战者切换到队伍 1 视角',
-  );
-  const switchFrame = s.updates[switchStart];
-  if (!switchFrame || switchFrame.is_diff !== false) {
-    throw new Error('观战视角切换后应立即发送全量帧并重置差分基线');
+  assertBrowserBoard(s, '初始全图及后续差分');
+
+  async function switchSpectatorView(team, label) {
+    const start = s.updates.length;
+    s.socket.emit('spectate_view', { team });
+    await waitFor(() => s.updates.length > start, 10_000, `${label}全量帧`);
+    const full = s.updates[start];
+    assert.equal(full?.is_diff, false, `${label}必须立即发送全量帧`);
+    for (const key of ['grid_type', 'army_cnt', 'isolated', 'fog']) {
+      assert.equal(full?.[key]?.length, s.n * s.m, `${label}全量帧 ${key} 长度无效`);
+    }
+    assertBrowserBoard(s, label);
+    await waitFor(
+      () => s.updates.slice(start + 1).some((frame) => frame.is_diff === true),
+      10_000,
+      `${label}后续差分帧`,
+    );
+    assertBrowserBoard(s, `${label}后续差分`);
   }
-  await waitFor(
-    () => s.updates.slice(switchStart + 1).some((frame) => frame.is_diff === true),
-    10_000,
-    '观战者视角切换后收到差分帧',
-  );
+
+  await switchSpectatorView(1, '切换到队伍 1');
   assertFogInvariants(s);
-  log('观战者队伍视角满足迷雾不变量');
+  log('观战者队伍 1 视角经真实 update()/render() 后满足迷雾不变量');
+  await switchSpectatorView(2, '切换到队伍 2');
+  assertFogInvariants(s);
+  log('观战者队伍 2 视角经真实 update()/render() 后满足迷雾不变量');
   a.socket.emit('spectate_view', { team: 2 });
   await sleep(1200);
   assertFogInvariants(a);
   log('存活参赛者的视角切换请求已被忽略');
-  const fullStart = s.updates.length;
-  s.socket.emit('spectate_view', { team: 0 });
-  await waitFor(
-    () => s.frames >= 2 && countFogged(s) === 0 && countGenerals(s) === 2,
-    10_000,
-    '观战者切回全图',
-  );
-  if (s.updates[fullStart]?.is_diff !== false) {
-    throw new Error('切回全图后应立即发送全量帧并重置差分基线');
+  await switchSpectatorView(0, '切回全图');
+  if (countFogged(s) !== 0 || countGenerals(s) !== 2) {
+    throw new Error('切回全图后应恢复双方主城及全视野');
   }
-  log('场景 1b 通过：观战视角可切换且不泄漏、可恢复全图');
+  log('场景 1b 通过：多次观战视角切换及后续差分均非空白');
   s.socket.disconnect();
   const rejoined = createGameClient(baseUrl, { cookie: tokenS, room: ROOM_FOG, name: 'S', autoReady: false });
   await waitFor(() => rejoined.frames >= 1, 10_000, '移除后重新加入的观战者收到首帧');
@@ -426,7 +788,8 @@ async function main() {
   }
   log('场景 3 通过：bot 房间无法开启迷雾');
 
-  finish(0, '测试通过：迷雾过滤、默认兼容与 bot 房禁用均符合预期');
+  await testEliminatedSpectatorView();
+  finish(0, '测试通过：迷雾过滤、观战视角切换、默认兼容与 bot 房禁用均符合预期');
 }
 
 main().catch((error) => finish(1, `测试异常：${error.stack || error.message}`));

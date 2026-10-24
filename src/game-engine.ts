@@ -898,7 +898,7 @@ export class GameEngine {
       // 观战席/已战败玩家可按 spectatorViewTeams 选择的队伍视角接收迷雾帧；
       // diff 基线始终记录「最后实际下发的快照」，跨视角切换由 setSpectatorView
       // 补发的全量帧重新对齐，因此这里照常 diff 即可。
-      const povTeam = p >= 0 && this.fogEnabled ? (this.spectatorViewTeams.get(this.playerSids[p]) ?? 0) : 0;
+      const povTeam = p >= 0 && this.fogEnabled ? this.spectatorPovTeam(this.playerSids[p]) : 0;
       const snapshot =
         povTeam > 0
           ? this.buildTeamFoggedSnapshot(povTeam, visionCache)
@@ -959,7 +959,7 @@ export class GameEngine {
         // 外部观战者按 sid 独立维护基线；视角切换/新连接后的首帧为全量，
         // 后续与玩家一样只发送数组差分。
         for (const spectatorSid of this.externalSpectatorSids) {
-          const povTeam = this.fogEnabled ? (this.spectatorViewTeams.get(spectatorSid) ?? 0) : 0;
+          const povTeam = this.fogEnabled ? this.spectatorPovTeam(spectatorSid) : 0;
           const spectatorSnapshot =
             povTeam > 0
               ? this.buildTeamFoggedSnapshot(povTeam, visionCache)
@@ -1108,9 +1108,20 @@ export class GameEngine {
     this.spectatorSnapshotLast.delete(sid);
   }
 
+  private isTeamAlive(teamId: number): boolean {
+    return this.team.some(
+      (team, index) => team === teamId && this.deadOrder[index] === 0 && this.pstat[index] !== LEFT_GAME,
+    );
+  }
+
+  private spectatorPovTeam(sid: string): number {
+    const teamId = this.spectatorViewTeams.get(sid) ?? 0;
+    return teamId > 0 && this.isTeamAlive(teamId) ? teamId : 0;
+  }
+
   /**
    * 观战视角切换（纯显示层，仅迷雾对局）：team > 0 时该连接改看指定队伍的
-   * 迷雾视野，team <= 0（或队伍不存在）恢复全图。存活参赛者的请求直接忽略，
+   * 迷雾视野，team <= 0、队伍不存在或已全员淘汰时恢复全图。存活参赛者的请求直接忽略，
    * 防止借观战视角窥探他队视野；对局内玩家的迷雾计算不受影响。
    * 切换后立即补发一帧全量帧（并同步 diff 基线），客户端无需等到下个 Tick。
    */
@@ -1118,7 +1129,7 @@ export class GameEngine {
     if (!this.fogEnabled || this.isActiveParticipant(sid)) {
       return;
     }
-    const povTeam = Number.isInteger(team) && team > 0 && this.team.includes(team) ? team : 0;
+    const povTeam = Number.isInteger(team) && team > 0 && this.isTeamAlive(team) ? team : 0;
     if (povTeam > 0) {
       this.spectatorViewTeams.set(sid, povTeam);
     } else {
@@ -1213,11 +1224,12 @@ export class GameEngine {
     this.playerSids[id] = newSid;
     this.playerIds[id] = this.md5(newSid);
     // 观战视角偏好随 sid 换绑迁移（观战席/已战败玩家重连后保留所选视角）。
-    const povTeam = this.spectatorViewTeams.get(oldSid) ?? 0;
-    if (povTeam > 0) {
+    const requestedPovTeam = this.spectatorViewTeams.get(oldSid) ?? 0;
+    if (requestedPovTeam > 0) {
       this.spectatorViewTeams.delete(oldSid);
-      this.spectatorViewTeams.set(newSid, povTeam);
+      this.spectatorViewTeams.set(newSid, requestedPovTeam);
     }
+    const povTeam = this.fogEnabled && this.isTeamAlive(requestedPovTeam) ? requestedPovTeam : 0;
     this.disconnectedAt[id] = null;
     this.watching[id] = true;
     this.afkLastMoveTurn[id] = this.turn;
