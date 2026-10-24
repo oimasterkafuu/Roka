@@ -12,6 +12,7 @@ const playerSource = await readFile(new URL('../../static/intro/player-source.js
 const instantiate = new Function(
   'createScene',
   'createDirector',
+  'fetchIntroAsset',
   playerSource.replace(/^import .*;\n/gm, '').replace('export async function', 'return async function'),
 );
 
@@ -120,6 +121,7 @@ const createPlayer = instantiate(
       },
     };
   },
+  (path, options) => globalThis.fetch(path, options),
 );
 
 try {

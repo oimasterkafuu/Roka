@@ -81,8 +81,7 @@ export async function createScene({ assets, signal, onStatus = () => {}, nativeR
       BASE = '',
       ASSET = '';
 
-    manager.onProgress = (url, loaded, total) =>
-      onStatus(loaded >= total ? '素材已就绪，正在初始化光影与动画…' : `正在加载场景素材 ${loaded}/${total}`);
+    manager.onProgress = (url, loaded, total) => onStatus(`正在加载场景素材 ${loaded}/${total}`);
 
     const motionProfile = await json('motion-profile.json');
     const data = await json('world.json');
@@ -1054,7 +1053,6 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
       },
     });
     check();
-    onStatus('正在准备光影与动画…');
     renderAt('march', 0, 8);
     check();
     return {

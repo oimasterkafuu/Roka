@@ -1,5 +1,6 @@
 import { createScene } from './scene.js';
 import { createDirector } from './director.js';
+import { fetchIntroAsset } from './asset-loading.js';
 
 // Presentation is driven by the audio clock, never accumulated animation deltas.
 // A slow device drops frames without stretching music, replay ticks or camera paths.
@@ -75,8 +76,7 @@ export async function createIntroPlayer(stage, options = {}) {
   signal?.addEventListener('abort', destroy, { once: true });
 
   function fetchAsset(path, options) {
-    const runtime = globalThis.ROKA_ASSETS;
-    return runtime?.fetch ? runtime.fetch(path, options) : fetch(path, options);
+    return fetchIntroAsset(path, options);
   }
 
   async function json(url) {

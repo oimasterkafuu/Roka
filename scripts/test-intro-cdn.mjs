@@ -3,18 +3,36 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const code = await fs.readFile(path.join(root, 'static/intro/asset-loading.js'), 'utf8');
-const { createIntroAssetLoader } = await import(
+const { createIntroAssetLoader, fetchIntroAsset } = await import(
   `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`
 );
 const original = {
   fetch: globalThis.fetch,
   runtime: globalThis.ROKA_ASSETS,
+  caches: globalThis.caches,
   create: URL.createObjectURL,
   revoke: URL.revokeObjectURL,
 };
 const objects = new Map(),
   revoked = [],
-  requests = [];
+  requests = [],
+  stored = new Map();
+const cacheState = { failPut: false };
+const cache = {
+  async match(key) {
+    return stored.get(key)?.clone();
+  },
+  async put(key, response) {
+    if (cacheState.failPut) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    stored.set(key, response.clone());
+  },
+};
+globalThis.caches = {
+  async open(name) {
+    assert.equal(name, 'roka-intro-assets-v1');
+    return cache;
+  },
+};
 let serial = 0;
 URL.createObjectURL = (blob) => {
   const url = `blob:intro-test/${++serial}`;
@@ -65,11 +83,30 @@ try {
   );
   const [one, two] = await Promise.all([loader.blobURL('ground.jpg'), loader.blobURL('ground.jpg')]);
   assert.equal(one, two, 'concurrent texture fetches share one resource blob');
+  const ground = await objects.get(one).text();
   const count = objects.size;
   loader.dispose();
   loader.dispose();
   assert.equal(revoked.length, count, 'all model and dependency URLs are revoked exactly once');
   assert.throws(() => loader.blobURL('ground.jpg'), { name: 'AbortError' });
+
+  const networkAfterColdLoad = requests.length;
+  const reopened = createIntroAssetLoader({ files: manifest.files });
+  const cachedURL = await reopened.blobURL('ground.jpg');
+  assert.equal(requests.length, networkAfterColdLoad, 'a new loader reuses persistent hashed assets');
+  assert.equal(await objects.get(cachedURL).text(), ground, 'persistent hits preserve response bytes');
+  reopened.dispose();
+  assert([...stored.keys()].every((key) => key.startsWith('https://roka.invalid/intro/assets/')));
+
+  const beforeManifest = requests.length;
+  for (let i = 0; i < 2; i++) {
+    const response = await fetchIntroAsset('/intro/assets/manifest.json', {
+      signal: new AbortController().signal,
+    });
+    assert.equal((await response.json()).files['plan.json'], manifest.files['plan.json']);
+  }
+  assert.equal(requests.length, beforeManifest + 4, 'the mutable manifest always uses the network');
+  assert(![...stored.keys()].some((key) => key.endsWith('/manifest.json')));
 
   // Relative glTF dependencies resolve against the model path, and data URIs stay local.
   const seen = [];
@@ -78,25 +115,44 @@ try {
     return name.endsWith('.gltf')
       ? new Response(
           JSON.stringify({
-            buffers: [{ uri: 'unit.bin' }],
-            images: [{ uri: '../shared/cloth.png' }, { uri: 'data:image/png;base64,AA==' }],
+            buffers: [{ uri: 'unit.0123456789abcdef.bin' }],
+            images: [
+              { uri: '../shared/cloth.0123456789abcdef.png' },
+              { uri: 'data:image/png;base64,AA==' },
+            ],
           }),
         )
       : new Response('resource');
   };
-  const relative = createIntroAssetLoader({ files: { unit: '/intro/assets/model/unit.gltf' } });
+  const files = { unit: '/intro/assets/model/unit.0123456789abcdef.gltf' };
+  const relative = createIntroAssetLoader({ files });
   const relativeURL = await relative.modelURL('unit');
   const model = JSON.parse(await objects.get(relativeURL).text());
   assert.equal(model.images[1].uri, 'data:image/png;base64,AA==');
   assert.deepEqual(
     new Set(seen),
     new Set([
-      '/intro/assets/model/unit.gltf',
-      '/intro/assets/model/unit.bin',
-      '/intro/assets/shared/cloth.png',
+      '/intro/assets/model/unit.0123456789abcdef.gltf',
+      '/intro/assets/model/unit.0123456789abcdef.bin',
+      '/intro/assets/shared/cloth.0123456789abcdef.png',
     ]),
   );
+  const nestedRequests = seen.length;
   relative.dispose();
+  const cachedRelative = createIntroAssetLoader({ files });
+  const cachedRelativeURL = await cachedRelative.modelURL('unit');
+  const cachedModel = JSON.parse(await objects.get(cachedRelativeURL).text());
+  assert.equal(seen.length, nestedRequests, 'nested glTF dependencies persist across loader disposal');
+  assert.equal(await objects.get(cachedModel.buffers[0].uri).text(), 'resource');
+  cachedRelative.dispose();
+
+  const cachedAbort = new AbortController();
+  const cancelledHit = createIntroAssetLoader({ signal: cachedAbort.signal });
+  const hit = cancelledHit.blobURL('/intro/assets/model/unit.0123456789abcdef.bin');
+  cachedAbort.abort();
+  await assert.rejects(hit, { name: 'AbortError' });
+  assert.equal(seen.length, nestedRequests, 'cancelled cache hits never fall through to the network');
+  cancelledHit.dispose();
 
   // Decoding/response consumption can finish after cancellation: never allocate a late URL.
   let finish;
@@ -118,15 +174,48 @@ try {
   assert.equal(serial, before, 'late response allocates no leaked object URL');
   pendingLoader.dispose();
 
-  // Native fetch remains supported for standalone previews without the site runtime.
+  // Native fetch remains supported for standalone previews without Cache Storage or the site runtime.
   delete globalThis.ROKA_ASSETS;
+  delete globalThis.caches;
   globalThis.fetch = async (name) => {
-    assert.equal(name, '/intro/assets/local.json');
+    assert.equal(name, '/intro/assets/local.0123456789abcdef.json');
     return new Response('{"standalone":true}');
   };
   const standalone = createIntroAssetLoader();
-  assert.deepEqual(await standalone.json('/intro/assets/local.json'), { standalone: true });
+  assert.deepEqual(await standalone.json('/intro/assets/local.0123456789abcdef.json'), {
+    standalone: true,
+  });
   standalone.dispose();
+
+  globalThis.caches = { open: async () => cache };
+  let fallbackRequests = 0;
+  globalThis.ROKA_ASSETS = {};
+  globalThis.ROKA_ASSETS.fetch = async () => {
+    fallbackRequests++;
+    return new Response('fallback');
+  };
+  cacheState.failPut = true;
+  for (let i = 0; i < 2; i++) {
+    const fallback = createIntroAssetLoader();
+    const url = await fallback.blobURL('/intro/assets/quota.0123456789abcdef.txt');
+    assert.equal(await objects.get(url).text(), 'fallback', 'cache quota failures preserve playback');
+    fallback.dispose();
+  }
+  assert.equal(fallbackRequests, 2, 'failed cache writes do not create false hits');
+  cacheState.failPut = false;
+
+  let errorRequests = 0;
+  globalThis.ROKA_ASSETS.fetch = async () => {
+    errorRequests++;
+    return errorRequests === 1 ? new Response('unavailable', { status: 503 }) : new Response('{"ok":true}');
+  };
+  const errors = createIntroAssetLoader();
+  await assert.rejects(errors.json('/intro/assets/error.0123456789abcdef.json'), /503/);
+  errors.dispose();
+  const retry = createIntroAssetLoader();
+  assert.deepEqual(await retry.json('/intro/assets/error.0123456789abcdef.json'), { ok: true });
+  assert.equal(errorRequests, 2, 'error responses are never cached');
+  retry.dispose();
 
   const scene = await fs.readFile(path.join(root, 'static/intro/scene.js'), 'utf8');
   assert.match(scene, /imageOrientation:\s*'flipY'/);
@@ -137,12 +226,14 @@ try {
   const entry = await fs.readFile(path.join(root, 'static/intro.js'), 'utf8');
   assert.match(entry, /window\.ROKA_ASSETS\.import\('/);
   console.log(
-    'intro CDN: pinned nested glTF resources, deduplicated textures, standalone fallback, abort cleanup, and decode orientation passed',
+    'intro CDN: persistent hashed assets, fresh manifests, nested glTF reuse, cache fallbacks, cancellation, and decode orientation passed',
   );
 } finally {
   globalThis.fetch = original.fetch;
   if (original.runtime === undefined) delete globalThis.ROKA_ASSETS;
   else globalThis.ROKA_ASSETS = original.runtime;
+  if (original.caches === undefined) delete globalThis.caches;
+  else globalThis.caches = original.caches;
   URL.createObjectURL = original.create;
   URL.revokeObjectURL = original.revoke;
 }

@@ -7,6 +7,7 @@ const source = await fs.readFile(new URL('../../static/intro/player-source.js', 
 const instantiate = new Function(
   'createScene',
   'createDirector',
+  'fetchIntroAsset',
   source.replace(/^import .*;\n/gm, '').replace('export async function', 'return async function'),
 );
 const deferred = () => {
@@ -40,6 +41,7 @@ function harness(settings = {}) {
     stops: 0,
     images: [],
     states: [],
+    statuses: [],
     progress: [],
     ended: 0,
   };
@@ -178,6 +180,10 @@ function harness(settings = {}) {
       return scene;
     },
     () => director,
+    (path, options) => {
+      const runtime = globalThis.ROKA_ASSETS;
+      return runtime?.fetch ? runtime.fetch(path, options) : globalThis.fetch(path, options);
+    },
   );
   const controller = new AbortController();
   return {
@@ -197,6 +203,7 @@ function harness(settings = {}) {
           audioContext: audio,
           signal: controller.signal,
           onStateChange: (state) => stats.states.push(state),
+          onStatus: (status) => stats.statuses.push(status),
           onProgress: (time) => stats.progress.push(time),
           onEnded: () => stats.ended++,
         },
@@ -324,13 +331,30 @@ try {
     assert.equal(h.fontSet.size, 0);
   }
   {
+    const font = deferred();
+    const h = harness({ font });
+    const pending = h.create();
+    await flush();
+    assert(!h.stats.statuses.includes('画面与音乐已就绪'), 'a pending required asset blocks readiness');
+    font.resolve();
+    const player = await pending;
+    assert.equal(h.stats.statuses.at(-1), '画面与音乐已就绪');
+    player.destroy();
+  }
+  {
+    const sceneSource = await fs.readFile(new URL('../../static/intro/scene.js', import.meta.url), 'utf8');
+    assert(!source.includes('素材已就绪') && !sceneSource.includes('素材已就绪'));
+    assert(!sceneSource.includes('光影'), 'scene loading never claims lighting initialization');
+    assert.match(sceneSource, /正在加载场景素材 \$\{loaded\}\/\$\{total\}/);
+  }
+  {
     const h = harness();
     h.controller.abort();
     await assert.rejects(h.create(), { name: 'AbortError' });
     assert.equal(h.stats.requests, 0, 'an already-cancelled player never starts asset loading');
   }
   console.log(
-    'intro lifecycle: playback position, cancellation, pending audio races and late resource disposal passed',
+    'intro lifecycle: truthful readiness, playback position, cancellation, pending audio races and late resource disposal passed',
   );
 } finally {
   for (const [key, value] of original) {
