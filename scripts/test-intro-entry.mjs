@@ -32,7 +32,7 @@ export async function createIntroPlayer(stage, options) {
   options.onLoadProgress(35, 35);
   let playRequest = 0;
   const player = {
-    duration: 124,
+    duration: 120,
     async play() {
       const request = ++playRequest;
       state.played++;
@@ -42,7 +42,7 @@ export async function createIntroPlayer(stage, options) {
     pause() { playRequest++; state.paused++; options.onStateChange('paused'); },
     resume() { state.resumed++; options.onStateChange('playing'); },
     setMuted(value) { state.muted = value; },
-    seek(value) { state.seeked = value; options.onProgress(value, 124); },
+    seek(value) { state.seeked = value; options.onProgress(value, 120); },
     destroy() { playRequest++; state.destroyed++; },
   };
   return player;
@@ -182,9 +182,9 @@ try {
         node.value,
         node.getAttribute('aria-label'),
       ]),
-    ['shared-loading-playback-range', false, '124', '0', '介绍片播放进度'],
+    ['shared-loading-playback-range', false, '120', '0', '介绍片播放进度'],
   );
-  assert.equal(await page.locator('.intro-time').textContent(), '0:00 / 2:04');
+  assert.equal(await page.locator('.intro-time').textContent(), '0:00 / 2:00');
   assert.equal(await page.evaluate(() => window.__introTest.audio), 1);
   assert.deepEqual(await page.evaluate(() => window.__introTest.logicalSize), [1920, 1080]);
   assert.equal(runtimeRequests.length, 1);

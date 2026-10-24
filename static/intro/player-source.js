@@ -30,7 +30,8 @@ export async function createIntroPlayer(stage, options = {}) {
   let offset = 0;
   let clockStart = 0;
   let lastFrame = -1;
-  const metrics = { frames: 0, totalRenderMs: 0, maxRenderMs: 0, renderSamples: [], duration: 124 };
+  let duration = 0;
+  const metrics = { frames: 0, totalRenderMs: 0, maxRenderMs: 0, renderSamples: [], duration };
   const canvas = document.createElement('canvas');
   canvas.width = 1920;
   canvas.height = 1080;
@@ -145,6 +146,8 @@ export async function createIntroPlayer(stage, options = {}) {
       ),
     ]);
     abortCheck();
+    duration = plan.duration;
+    metrics.duration = duration;
     audioBuffer = loadedAudio;
     director = createDirector(canvas, { assets: images, plan, replays, scene });
     if (scene.canvas) stage.append(scene.canvas);
@@ -156,7 +159,7 @@ export async function createIntroPlayer(stage, options = {}) {
     // The selected clock is fixed for this play interval, avoiding jumps on audio suspension.
     let audioClock = false;
     const clock = () => (audioClock ? audioContext.currentTime : performance.now() / 1000);
-    const current = () => Math.min(124, Math.max(0, offset + (playing ? clock() - clockStart : 0)));
+    const current = () => Math.min(duration, Math.max(0, offset + (playing ? clock() - clockStart : 0)));
 
     function syncResolution() {
       const rect = canvas.getBoundingClientRect();
@@ -192,7 +195,7 @@ export async function createIntroPlayer(stage, options = {}) {
       metrics.totalRenderMs += cost;
       metrics.maxRenderMs = Math.max(metrics.maxRenderMs, cost);
       if (metrics.renderSamples.length < 240) metrics.renderSamples.push(cost);
-      onProgress(time, 124);
+      onProgress(time, duration);
     }
 
     function tick() {
@@ -205,8 +208,8 @@ export async function createIntroPlayer(stage, options = {}) {
           draw(time);
         }
         if (!playing || destroyed) return;
-        if (time >= 124) {
-          offset = 124;
+        if (time >= duration) {
+          offset = duration;
           playing = desiredPlaying = false;
           stopAudio();
           onStateChange('ended');
@@ -225,7 +228,7 @@ export async function createIntroPlayer(stage, options = {}) {
       if (destroyed || playing) return;
       desiredPlaying = true;
       const request = ++playRequest;
-      if (offset >= 124) offset = 0;
+      if (offset >= duration) offset = 0;
       if (audioContext?.state === 'suspended') {
         try {
           await audioContext.resume();
@@ -262,7 +265,7 @@ export async function createIntroPlayer(stage, options = {}) {
       cancelAnimationFrame(raf);
       stopAudio();
       if (wasRequested) {
-        onProgress(offset, 124);
+        onProgress(offset, duration);
         onStateChange('paused');
       }
     }
@@ -271,11 +274,11 @@ export async function createIntroPlayer(stage, options = {}) {
       if (destroyed) return;
       const wasRequested = desiredPlaying;
       pause();
-      offset = Math.max(0, Math.min(124, Number(seconds) || 0));
+      offset = Math.max(0, Math.min(duration, Number(seconds) || 0));
       lastFrame = -1;
       draw(offset);
-      if (wasRequested && offset < 124) return play();
-      onStateChange(offset >= 124 ? 'ended' : 'paused');
+      if (wasRequested && offset < duration) return play();
+      onStateChange(offset >= duration ? 'ended' : 'paused');
     }
 
     view.addEventListener?.('resize', handleResize);
@@ -291,7 +294,7 @@ export async function createIntroPlayer(stage, options = {}) {
     onStatus(audioContext ? '画面与音乐已就绪' : '当前浏览器将静音播放');
     abortCheck();
     return {
-      duration: 124,
+      duration,
       play,
       pause,
       resume: play,

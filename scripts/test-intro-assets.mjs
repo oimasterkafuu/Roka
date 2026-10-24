@@ -29,7 +29,7 @@ if (base) {
   assert.equal(response.headers.get('Content-Encoding'), 'br');
   assert.match(response.headers.get('Cache-Control'), /immutable/);
   const body = await response.json();
-  assert.equal(body.duration, 124);
+  assert.equal(body.duration, 120);
   const head = await fetch(base + manifest.files['knight-hero.glb'], { method: 'HEAD' });
   assert.equal(head.status, 200);
   assert.equal((await head.text()).length, 0);

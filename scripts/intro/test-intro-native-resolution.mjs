@@ -18,10 +18,10 @@ const instantiate = new Function(
 );
 
 const plan = {
-  duration: 124,
+  duration: 120,
   fps: 30,
-  frames: Array.from({ length: 124 * 30 }, () => ({ shot: 0 })),
-  shots: [{ name: 'prologue', start: 0, end: 124 }],
+  frames: Array.from({ length: 120 * 30 }, () => ({ shot: 0 })),
+  shots: [{ name: 'prologue', start: 0, end: 120 }],
 };
 const replays = { sources: {}, actions: {} };
 const display = { width: 960, height: 540 };
