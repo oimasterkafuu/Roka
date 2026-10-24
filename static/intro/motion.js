@@ -90,7 +90,9 @@ export class Motion {
       this.shadows.push(m);
     }
   }
-  update(t, mode = 'walk', gesture = false) {
+  // `gesture` is a 0..1 raised-arm weight; each frame rebuilds the pose from the
+  // idle base, so partial weights stay continuous across shot boundaries and seeks.
+  update(t, mode = 'walk', gesture = 0) {
     const a = this.a,
       idle = mode === 'idle',
       clipName = mode === 'run' ? 'run' : 'walk',
@@ -183,14 +185,17 @@ export class Motion {
         error: actual.distanceTo(target),
       });
     }
-    if (idle && gesture) {
+    if (idle && gesture > 0) {
       const arm = this.bones.RightArm,
         elbow = this.bones.RightForeArm;
       const p0 = arm.getWorldPosition(V()),
         p1 = elbow.getWorldPosition(V());
       const direction = new T.Vector3(0.55, 0.12, -0.78).normalize();
-      rotateWorld(arm, Q().setFromUnitVectors(p1.sub(p0).normalize(), direction));
-      elbow.rotation.z += 0.15;
+      const raise = Q().setFromUnitVectors(p1.sub(p0).normalize(), direction);
+      // Blend from the fresh idle base pose so weight changes stay continuous and
+      // every frame (including seeks) recomputes the same pose from scratch.
+      rotateWorld(arm, Q().slerp(raise, Math.min(1, gesture)));
+      elbow.rotation.z += 0.15 * Math.min(1, gesture);
     }
     a.model.updateMatrixWorld(true);
   }

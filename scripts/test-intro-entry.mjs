@@ -13,6 +13,7 @@ const bootstrap = await fs.readFile(root + 'static/intro.js', 'utf8');
 const css = await fs.readFile(root + 'static/styles/intro.css', 'utf8');
 const siteCss =
   (await fs.readFile(root + 'static/styles/base.css', 'utf8')).split('/* 字体优先')[0] +
+  (await fs.readFile(root + 'static/styles/chat-and-alert.css', 'utf8')) +
   (await fs.readFile(root + 'static/styles/home.css', 'utf8'));
 for (const name of ['index', 'about']) {
   const html = await fs.readFile(root + 'static/' + name + '.html', 'utf8');
@@ -99,11 +100,37 @@ try {
   await page.waitForTimeout(100);
   assert.equal(await page.locator('dialog').count(), 0, 'notification explanation takes priority');
   assert.equal(runtimeRequests.length, 0, 'no renderer download before consent');
-  await page.locator('.notify-permission-backdrop').evaluate((node) => node.remove());
+  // The real card markup notify.js injects must keep the teal/white primary
+  // button under the later same-specificity `body.home *` cascade of home.css.
+  await page.evaluate(() => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'notify-permission-backdrop';
+    const card = document.createElement('div');
+    card.className = 'alert center notify-permission-card';
+    const primary = document.createElement('button');
+    primary.className = 'small inverted';
+    primary.textContent = '开启通知';
+    card.appendChild(primary);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+  });
+  assert.deepEqual(
+    await page
+      .locator('.notify-permission-card button.inverted')
+      .evaluate((node) => {
+        const style = getComputedStyle(node);
+        return [style.color, style.backgroundColor];
+      }),
+    ['rgb(255, 255, 255)', 'rgb(0, 128, 128)'],
+    'notify primary button stays white-on-teal under the body.home cascade',
+  );
+  await page.evaluate(() => {
+    document.querySelectorAll('.notify-permission-backdrop').forEach((node) => node.remove());
+  });
   await page.getByRole('heading', { name: '是否观看游戏介绍片' }).waitFor();
   assert.equal(
     await page.locator('.intro-description').evaluate((node) => getComputedStyle(node).color),
-    'rgb(192, 206, 222)',
+    'rgb(37, 48, 66)',
     'home universal color does not override intro text',
   );
   assert.equal(
