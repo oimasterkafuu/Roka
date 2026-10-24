@@ -13,14 +13,15 @@ const instantiate = new Function(
   'createScene',
   'createDirector',
   'fetchIntroAsset',
+  'createIntroAssetLoader',
   playerSource.replace(/^import .*;\n/gm, '').replace('export async function', 'return async function'),
 );
 
 const plan = {
-  duration: 124,
+  duration: 120,
   fps: 30,
-  frames: Array.from({ length: 124 * 30 }, () => ({ shot: 0 })),
-  shots: [{ name: 'prologue', start: 0, end: 124 }],
+  frames: Array.from({ length: 120 * 30 }, () => ({ shot: 0 })),
+  shots: [{ name: 'prologue', start: 0, end: 120 }],
 };
 const replays = { sources: {}, actions: {} };
 const display = { width: 960, height: 540 };
@@ -122,6 +123,44 @@ const createPlayer = instantiate(
     };
   },
   (path, options) => globalThis.fetch(path, options),
+  ({ files }) => {
+    const blobs = new Map();
+    const blob = (name) => {
+      const path = files[name] || name;
+      if (!blobs.has(path))
+        blobs.set(
+          path,
+          globalThis
+            .fetch(path)
+            .then((response) => response.json())
+            .then((data) => new Blob([JSON.stringify(data)])),
+        );
+      return blobs.get(path);
+    };
+    return {
+      blob,
+      async json(name) {
+        return JSON.parse(await (await blob(name)).text());
+      },
+      blobURL: blob,
+      modelURL: blob,
+      async preload({ onProgress }) {
+        const names = Object.keys(files);
+        let completed = 0;
+        onProgress(0, names.length);
+        await Promise.all(
+          names.map((name) =>
+            blob(name).then(() => {
+              onProgress(++completed, names.length);
+            }),
+          ),
+        );
+      },
+      dispose() {
+        blobs.clear();
+      },
+    };
+  },
 );
 
 try {

@@ -1,4 +1,4 @@
-/** Reproduce only the public replay ticks used by the 124-second introduction.
+/** Reproduce only the public replay ticks used by the 120-second introduction.
  * Usage: node scripts/intro/build-intro-data.mjs [trailer-dir] [output-dir]
  * No user IDs, player names, or private metadata enter the browser bundle.
  */
@@ -6,10 +6,11 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
+import { trimStandaloneCharge } from './trim-intro-plan.mjs';
 const source = process.argv[2] || '/workspace/roka-trailer';
 const out = process.argv[3] || 'static/intro/assets';
 const read = async (p) => JSON.parse(await readFile(p, 'utf8'));
-const plan = await read(path.join(source, 'v5/assets/plan.json'));
+const plan = trimStandaloneCharge(await read(path.join(source, 'v5/assets/plan.json')));
 const compare = plan.shots.find((s) => s.name === 'charge_compare');
 Object.assign(compare, { source: 'Y5bAFF7R2i8s', tickStart: 628, tickEnd: 638, roi: [4, 12, 5, 6] });
 plan.comparison = {

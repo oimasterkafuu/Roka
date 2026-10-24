@@ -1,6 +1,6 @@
 import { createScene } from './scene.js';
 import { createDirector } from './director.js';
-import { fetchIntroAsset } from './asset-loading.js';
+import { createIntroAssetLoader, fetchIntroAsset } from './asset-loading.js';
 
 // Presentation is driven by the audio clock, never accumulated animation deltas.
 // A slow device drops frames without stretching music, replay ticks or camera paths.
@@ -10,6 +10,7 @@ export async function createIntroPlayer(stage, options = {}) {
     signal,
     onEnded = () => {},
     onProgress = () => {},
+    onLoadProgress = () => {},
     onStateChange = () => {},
     onStatus = () => {},
   } = options;
@@ -29,7 +30,8 @@ export async function createIntroPlayer(stage, options = {}) {
   let offset = 0;
   let clockStart = 0;
   let lastFrame = -1;
-  const metrics = { frames: 0, totalRenderMs: 0, maxRenderMs: 0, renderSamples: [], duration: 124 };
+  let duration = 0;
+  const metrics = { frames: 0, totalRenderMs: 0, maxRenderMs: 0, renderSamples: [], duration };
   const canvas = document.createElement('canvas');
   canvas.width = 1920;
   canvas.height = 1080;
@@ -89,6 +91,16 @@ export async function createIntroPlayer(stage, options = {}) {
     abortCheck();
     const manifest = await json('/intro/assets/manifest.json');
     abortCheck();
+    const files = { ...manifest.files, ...manifest.images, ...manifest.fonts };
+    const assetLoader = createIntroAssetLoader({ files, signal: combined });
+    await assetLoader.preload({
+      onProgress(completed, total) {
+        onLoadProgress(completed, total);
+        onStatus(`正在并行加载素材 ${completed}/${total}`);
+      },
+    });
+    abortCheck();
+    onStatus('下载完成，正在初始化实时画面…');
     const family = {
       serif: 'RokaIntroSerif',
       cn: 'RokaIntroCN',
@@ -96,11 +108,8 @@ export async function createIntroPlayer(stage, options = {}) {
       sans: 'RokaIntroSans',
       quicksand: 'Quicksand',
     };
-    const loadImage = async ([name, url]) => {
-      const response = await fetchAsset(url, { signal: combined });
-      if (!response.ok) throw new Error('Intro image unavailable');
-      const blob = await response.blob();
-      const image = await createImageBitmap(blob);
+    const loadImage = async (name) => {
+      const image = await createImageBitmap(await assetLoader.blob(name));
       // Bitmap decoding cannot be aborted; close a result that arrives after cancellation.
       if (combined.aborted) {
         image.close();
@@ -108,10 +117,8 @@ export async function createIntroPlayer(stage, options = {}) {
       }
       images[name] = image;
     };
-    const loadFont = async ([name, url]) => {
-      const response = await fetchAsset(url, { signal: combined });
-      if (!response.ok) throw new Error('Intro font unavailable');
-      const data = await response.arrayBuffer();
+    const loadFont = async (name) => {
+      const data = await (await assetLoader.blob(name)).arrayBuffer();
       const font = new FontFace(family[name], data, {
         weight: ['serif', 'cn', 'quicksand'].includes(name) ? '700' : '400',
       });
@@ -120,24 +127,27 @@ export async function createIntroPlayer(stage, options = {}) {
       fonts.push(font);
       document.fonts.add(font);
     };
-    onStatus('正在载入模型、回放与音乐…');
     const [plan, replays, loadedAudio] = await Promise.all([
-      json(manifest.files['plan.json']),
-      json(manifest.files['replays.json']),
+      assetLoader.json('plan.json'),
+      assetLoader.json('replays.json'),
       audioContext
-        ? fetchAsset(manifest.files['score.mp3'], { signal: combined }).then(async (response) => {
-            if (!response.ok) throw new Error('Intro soundtrack unavailable');
-            return audioContext.decodeAudioData(await response.arrayBuffer());
-          })
+        ? assetLoader
+            .blob('score.mp3')
+            .then((blob) => blob.arrayBuffer())
+            .then((data) => audioContext.decodeAudioData(data))
         : null,
-      Promise.all(Object.entries(manifest.images).map(loadImage)),
-      Promise.all(Object.entries(manifest.fonts).map(loadFont)),
-      createScene({ assets: manifest, signal: combined, onStatus, nativeResolution: true }).then((result) => {
-        if (destroyed) result.dispose();
-        else scene = result;
-      }),
+      Promise.all(Object.keys(manifest.images).map(loadImage)),
+      Promise.all(Object.keys(manifest.fonts).map(loadFont)),
+      createScene({ assets: manifest, assetLoader, signal: combined, nativeResolution: true }).then(
+        (result) => {
+          if (destroyed) result.dispose();
+          else scene = result;
+        },
+      ),
     ]);
     abortCheck();
+    duration = plan.duration;
+    metrics.duration = duration;
     audioBuffer = loadedAudio;
     director = createDirector(canvas, { assets: images, plan, replays, scene });
     if (scene.canvas) stage.append(scene.canvas);
@@ -149,7 +159,7 @@ export async function createIntroPlayer(stage, options = {}) {
     // The selected clock is fixed for this play interval, avoiding jumps on audio suspension.
     let audioClock = false;
     const clock = () => (audioClock ? audioContext.currentTime : performance.now() / 1000);
-    const current = () => Math.min(124, Math.max(0, offset + (playing ? clock() - clockStart : 0)));
+    const current = () => Math.min(duration, Math.max(0, offset + (playing ? clock() - clockStart : 0)));
 
     function syncResolution() {
       const rect = canvas.getBoundingClientRect();
@@ -185,7 +195,7 @@ export async function createIntroPlayer(stage, options = {}) {
       metrics.totalRenderMs += cost;
       metrics.maxRenderMs = Math.max(metrics.maxRenderMs, cost);
       if (metrics.renderSamples.length < 240) metrics.renderSamples.push(cost);
-      onProgress(time, 124);
+      onProgress(time, duration);
     }
 
     function tick() {
@@ -198,8 +208,8 @@ export async function createIntroPlayer(stage, options = {}) {
           draw(time);
         }
         if (!playing || destroyed) return;
-        if (time >= 124) {
-          offset = 124;
+        if (time >= duration) {
+          offset = duration;
           playing = desiredPlaying = false;
           stopAudio();
           onStateChange('ended');
@@ -218,7 +228,7 @@ export async function createIntroPlayer(stage, options = {}) {
       if (destroyed || playing) return;
       desiredPlaying = true;
       const request = ++playRequest;
-      if (offset >= 124) offset = 0;
+      if (offset >= duration) offset = 0;
       if (audioContext?.state === 'suspended') {
         try {
           await audioContext.resume();
@@ -255,7 +265,7 @@ export async function createIntroPlayer(stage, options = {}) {
       cancelAnimationFrame(raf);
       stopAudio();
       if (wasRequested) {
-        onProgress(offset, 124);
+        onProgress(offset, duration);
         onStateChange('paused');
       }
     }
@@ -264,11 +274,11 @@ export async function createIntroPlayer(stage, options = {}) {
       if (destroyed) return;
       const wasRequested = desiredPlaying;
       pause();
-      offset = Math.max(0, Math.min(124, Number(seconds) || 0));
+      offset = Math.max(0, Math.min(duration, Number(seconds) || 0));
       lastFrame = -1;
       draw(offset);
-      if (wasRequested && offset < 124) return play();
-      onStateChange(offset >= 124 ? 'ended' : 'paused');
+      if (wasRequested && offset < duration) return play();
+      onStateChange(offset >= duration ? 'ended' : 'paused');
     }
 
     view.addEventListener?.('resize', handleResize);
@@ -284,7 +294,7 @@ export async function createIntroPlayer(stage, options = {}) {
     onStatus(audioContext ? '画面与音乐已就绪' : '当前浏览器将静音播放');
     abortCheck();
     return {
-      duration: 124,
+      duration,
       play,
       pause,
       resume: play,

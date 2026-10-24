@@ -10,7 +10,7 @@ const source = process.argv[2];
 if (!source) throw new Error('Usage: node scripts/intro/import-intro-assets.mjs /path/to/roka-trailer');
 const out = path.resolve('static/intro/assets');
 await fs.mkdir(out, { recursive: true });
-const manifest = { version: 1, width: 1920, height: 1080, duration: 124, files: {}, images: {}, fonts: {} };
+const manifest = { version: 1, width: 1920, height: 1080, duration: 120, files: {}, images: {}, fonts: {} };
 const bytes = {};
 async function emit(name, data) {
   const ext = path.extname(name),

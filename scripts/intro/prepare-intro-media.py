@@ -27,6 +27,6 @@ for key in ['crown', 'city', 'mountain', 'swamp']:
 manifest['images']['qr'] = emit('join-qr.png', (source / 'v4/assets/join-qr.png').read_bytes())
 with tempfile.TemporaryDirectory() as temp:
     output = Path(temp) / 'score.mp3'
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(source / 'v4/assets/soundtrack-final.wav'), '-filter_complex', '[0:a]asplit=3[a][b][c];[a]atrim=0:88,asetpts=PTS-STARTPTS[x];[b]atrim=84:88,asetpts=PTS-STARTPTS[y];[c]atrim=88:120,asetpts=PTS-STARTPTS[z];[x][y][z]concat=n=3:v=0:a=1[out]', '-map', '[out]', '-c:a', 'libmp3lame', '-b:a', '192k', str(output)], check=True)
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(source / 'v4/assets/soundtrack-final.wav'), '-c:a', 'libmp3lame', '-b:a', '192k', str(output)], check=True)
     manifest['files']['score.mp3'] = emit('score.mp3', output.read_bytes())
 (assets / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')

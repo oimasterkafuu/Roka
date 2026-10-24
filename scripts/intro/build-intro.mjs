@@ -6,6 +6,8 @@ import { gzipSync, brotliCompressSync, constants } from 'node:zlib';
 const root = 'static/intro';
 const assetDir = `${root}/assets`;
 const manifest = JSON.parse(await fs.readFile(`${assetDir}/manifest.json`));
+const plan = JSON.parse(await fs.readFile(`${assetDir}/plan.json`));
+manifest.duration = plan.duration;
 async function indexAsset(name) {
   const data = await fs.readFile(`${assetDir}/${name}`),
     ext = path.extname(name),

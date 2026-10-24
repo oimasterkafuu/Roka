@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "1.70.7",
+  "version": "1.71.0",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -44,7 +44,7 @@
     "test:asset-versioning": "node scripts/test-asset-versioning.mjs",
     "observe:bot": "node scripts/observe-bot-match.mjs",
     "build:intro": "node scripts/intro/build-intro.mjs",
-    "test:intro": "node scripts/intro/test-intro-data.mjs && node scripts/intro/test-intro-models.mjs && node scripts/intro/test-intro-lifecycle.mjs && node scripts/intro/test-intro-gesture.mjs && node scripts/intro/test-intro-blink-white.mjs && node scripts/intro/test-intro-native-resolution.mjs && node scripts/test-intro-assets.mjs && node scripts/test-intro-cdn.mjs",
+    "test:intro": "node scripts/intro/test-intro-data.mjs && node scripts/intro/test-intro-models.mjs && node scripts/intro/test-intro-lifecycle.mjs && node scripts/intro/test-intro-gesture.mjs && node scripts/intro/test-intro-blink-white.mjs && node scripts/intro/test-intro-native-resolution.mjs && node scripts/intro/test-intro-media.mjs && node scripts/test-intro-assets.mjs && node scripts/test-intro-cdn.mjs",
     "test:static-cdn": "node scripts/test-static-cdn.mjs",
     "test:cdn-runtime": "node scripts/test-cdn-runtime.mjs"
   },

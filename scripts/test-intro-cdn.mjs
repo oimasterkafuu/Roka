@@ -116,10 +116,7 @@ try {
       ? new Response(
           JSON.stringify({
             buffers: [{ uri: 'unit.0123456789abcdef.bin' }],
-            images: [
-              { uri: '../shared/cloth.0123456789abcdef.png' },
-              { uri: 'data:image/png;base64,AA==' },
-            ],
+            images: [{ uri: '../shared/cloth.0123456789abcdef.png' }, { uri: 'data:image/png;base64,AA==' }],
           }),
         )
       : new Response('resource');
@@ -217,16 +214,124 @@ try {
   assert.equal(errorRequests, 2, 'error responses are never cached');
   retry.dispose();
 
+  const deferred = () => {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    return { promise, resolve, reject };
+  };
+  const pendingRequests = new Map();
+  globalThis.ROKA_ASSETS.fetch = (name) => {
+    const task = deferred();
+    pendingRequests.set(name, task);
+    return task.promise;
+  };
+  const parallelFiles = {
+    model: '/intro/assets/parallel.0123456789abcdef.gltf',
+    data: '/intro/assets/parallel.0123456789abcdef.json',
+    image: '/intro/assets/parallel.0123456789abcdef.png',
+    font: '/intro/assets/parallel.0123456789abcdef.woff2',
+  };
+  const parallel = createIntroAssetLoader({ files: parallelFiles });
+  const progress = [];
+  const preloading = parallel.preload({ onProgress: (...args) => progress.push(args) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(progress, [[0, 4]], 'progress starts with a stable top-level total');
+  assert.deepEqual(
+    new Set(pendingRequests.keys()),
+    new Set(Object.values(parallelFiles)),
+    'every top-level request starts before any response completes',
+  );
+  for (const name of ['data', 'image', 'font'])
+    pendingRequests.get(parallelFiles[name]).resolve(new Response('asset'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(progress.at(-1)[0], 3);
+  pendingRequests.get(parallelFiles.model).resolve(
+    new Response(
+      JSON.stringify({
+        buffers: [{ uri: 'first.0123456789abcdef.bin' }],
+        images: [{ uri: 'second.0123456789abcdef.png' }],
+      }),
+    ),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  const firstDependency = '/intro/assets/first.0123456789abcdef.bin';
+  const secondDependency = '/intro/assets/second.0123456789abcdef.png';
+  assert(
+    pendingRequests.has(firstDependency) && pendingRequests.has(secondDependency),
+    'nested glTF dependencies start together',
+  );
+  assert.equal(progress.at(-1)[0], 3, 'a glTF parent is incomplete while its dependencies are pending');
+  pendingRequests.get(firstDependency).resolve(new Response('first'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(progress.at(-1)[0], 3, 'one nested response does not complete its parent task');
+  pendingRequests.get(secondDependency).resolve(new Response('second'));
+  await preloading;
+  assert.deepEqual(progress.at(-1), [4, 4]);
+  assert(
+    progress.every(([, total]) => total === 4),
+    'nested dependencies never grow the total',
+  );
+  assert(progress.every(([completed], index) => index === 0 || completed === progress[index - 1][0] + 1));
+  assert.equal(
+    new Set(progress.map(([completed]) => completed)).size,
+    5,
+    'each top-level task counts exactly once',
+  );
+  parallel.dispose();
+
+  const reuseFiles = {
+    model: '/intro/assets/reuse.0123456789abcdef.gltf',
+    data: '/intro/assets/reuse.0123456789abcdef.json',
+    image: '/intro/assets/reuse.0123456789abcdef.png',
+    font: '/intro/assets/reuse.0123456789abcdef.woff2',
+  };
+  const reuseRequests = new Map();
+  globalThis.ROKA_ASSETS.fetch = async (name) => {
+    reuseRequests.set(name, (reuseRequests.get(name) || 0) + 1);
+    if (name.endsWith('.gltf'))
+      return new Response(JSON.stringify({ buffers: [{ uri: 'nested.0123456789abcdef.bin' }] }));
+    return new Response(name.endsWith('.json') ? '{"ok":true}' : 'asset');
+  };
+  delete globalThis.caches;
+  const uncached = createIntroAssetLoader({ files: reuseFiles });
+  await uncached.preload();
+  await uncached.json('data');
+  await uncached.blob('image');
+  await uncached.blobURL('font');
+  await uncached.modelURL('model');
+  assert([...reuseRequests.values()].every((count) => count === 1));
+  assert.equal(reuseRequests.size, 5, 'preload and decode share blobs without Cache Storage');
+  uncached.dispose();
+
+  globalThis.caches = { open: async () => cache };
+  const cold = createIntroAssetLoader({ files: reuseFiles });
+  await cold.preload();
+  cold.dispose();
+  const beforeWarm = [...reuseRequests.values()].reduce((sum, count) => sum + count, 0);
+  const warm = createIntroAssetLoader({ files: reuseFiles });
+  await warm.preload();
+  await warm.json('data');
+  await warm.blob('image');
+  await warm.blobURL('font');
+  await warm.modelURL('model');
+  const afterWarm = [...reuseRequests.values()].reduce((sum, count) => sum + count, 0);
+  assert.equal(afterWarm, beforeWarm, 'a warm preloaded loader never returns to the network');
+  warm.dispose();
+
   const scene = await fs.readFile(path.join(root, 'static/intro/scene.js'), 'utf8');
   assert.match(scene, /imageOrientation:\s*'flipY'/);
   assert.match(scene, /premultiplyAlpha:\s*'none'/);
   assert.match(scene, /texture\.flipY\s*=\s*false/);
-  assert.match(scene, /HDRLoader\(manager\)\)\.loadAsync\(await assetLoader\.blobURL/);
+  assert.match(scene, /HDRLoader\(manager\)/);
+  assert.match(scene, /blobURL\(BASE \+ 'sky\.hdr'\)/);
   assert(!scene.includes('fetch('), 'Three scene remote requests must go through the resource owner');
   const entry = await fs.readFile(path.join(root, 'static/intro.js'), 'utf8');
   assert.match(entry, /window\.ROKA_ASSETS\.import\('/);
   console.log(
-    'intro CDN: persistent hashed assets, fresh manifests, nested glTF reuse, cache fallbacks, cancellation, and decode orientation passed',
+    'intro CDN: parallel preload, stable progress, persistent/no-cache reuse, fresh manifests, nested glTF, fallbacks, cancellation, and decode orientation passed',
   );
 } finally {
   globalThis.fetch = original.fetch;

@@ -8,6 +8,7 @@ const instantiate = new Function(
   'createScene',
   'createDirector',
   'fetchIntroAsset',
+  'createIntroAssetLoader',
   source.replace(/^import .*;\n/gm, '').replace('export async function', 'return async function'),
 );
 const deferred = () => {
@@ -80,7 +81,7 @@ function harness(settings = {}) {
         : Promise.resolve();
     },
     decodeAudioData() {
-      return Promise.resolve({ duration: 124 });
+      return Promise.resolve({ duration: 120 });
     },
     createGain() {
       return {
@@ -184,6 +185,51 @@ function harness(settings = {}) {
       const runtime = globalThis.ROKA_ASSETS;
       return runtime?.fetch ? runtime.fetch(path, options) : globalThis.fetch(path, options);
     },
+    ({ files, signal }) => {
+      const blobs = new Map();
+      const fetchAsset = (path) => {
+        const runtime = globalThis.ROKA_ASSETS;
+        const options = { signal };
+        return runtime?.fetch ? runtime.fetch(path, options) : globalThis.fetch(path, options);
+      };
+      const blob = (name) => {
+        const path = files[name] || name;
+        if (!blobs.has(path))
+          blobs.set(
+            path,
+            fetchAsset(path).then(
+              () =>
+                new Blob([
+                  name === 'plan.json' ? '{"duration":120}' : name.endsWith('.json') ? '{}' : 'asset',
+                ]),
+            ),
+          );
+        return blobs.get(path);
+      };
+      return {
+        blob,
+        async json(name) {
+          return JSON.parse(await (await blob(name)).text());
+        },
+        blobURL: blob,
+        modelURL: blob,
+        async preload({ onProgress }) {
+          const names = Object.keys(files);
+          let completed = 0;
+          onProgress(0, names.length);
+          await Promise.all(
+            names.map((name) =>
+              blob(name).then(() => {
+                onProgress(++completed, names.length);
+              }),
+            ),
+          );
+        },
+        dispose() {
+          blobs.clear();
+        },
+      };
+    },
   );
   const controller = new AbortController();
   return {
@@ -221,6 +267,7 @@ try {
     const h = harness({ cdn: true });
     assert.equal(h.stats.requests, 0, 'preparing playback starts no requests before consent');
     const player = await h.create();
+    assert.equal(player.duration, 120);
     assert.equal(h.stats.requests, 6, 'manifest, replay JSON, audio, image and font use the runtime');
     assert(
       h.stats.paths.every((url) =>
@@ -244,7 +291,7 @@ try {
     await player.seek(70);
     assert.equal(h.stats.starts.at(-1), 70, 'seek restarts a single audio source at selected time');
     assert.equal(h.frames.size, 1, 'seek never leaves duplicate animation loops');
-    h.audio.currentTime = 100;
+    h.audio.currentTime = 120;
     h.frame();
     assert.equal(h.stats.ended, 1);
     assert.equal(h.frames.size, 0, 'completed presentation does not loop');
@@ -345,7 +392,10 @@ try {
     const sceneSource = await fs.readFile(new URL('../../static/intro/scene.js', import.meta.url), 'utf8');
     assert(!source.includes('素材已就绪') && !sceneSource.includes('素材已就绪'));
     assert(!sceneSource.includes('光影'), 'scene loading never claims lighting initialization');
-    assert.match(sceneSource, /正在加载场景素材 \$\{loaded\}\/\$\{total\}/);
+    assert(
+      !sceneSource.includes('正在加载场景素材'),
+      'Three manager cannot overwrite unified loading progress',
+    );
   }
   {
     const h = harness();

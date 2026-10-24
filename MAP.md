@@ -34,14 +34,14 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 
 ## 实时介绍片
 
-- `static/intro.js` / `static/styles/intro.css`：轻量入口、一次性同意弹窗、关于页重播、固定 16:9 舞台、播放控件与取消清理。首页认证/通知提示就绪后发送 `roka:home-ready`，防止弹窗堆叠。
-- `static/intro/player-source.js` → `player.js`：按需载入、Web Audio 时间轴、30 fps 调度、WebGL/Canvas 分层合成、按 CSS 显示尺寸 × DPR 调整实时物理分辨率、暂停/跳转/退出生命周期；`scripts/intro/build-intro.mjs` 用 esbuild 构建并生成预压缩资源。
-- `static/intro/asset-loading.js`：提供共享 CDN 请求与哈希素材 Cache Storage 持久缓存，加载模型、HDR 与纹理；可变清单不持久缓存，重写 glTF 内部依赖为去重的 blob URL，退出时取消请求并释放。
-- `static/intro/scene.js` / `motion.js` / `gesture.js` / `landform.js` / `architecture.js`：原片三维镜头、原生分辨率 WebGL 与后处理、接地 IK、领队手势权重（leader→ascend 平滑过渡）、连续山脊与沼泽、材质合批和分阶段施工。
-- `static/intro/director.js` / `replay-board.js`：1920×1080 逻辑构图、原生分辨率合成、字幕/背景、原生棋盘与隔离闪烁；真实回放与 16 方模拟数据仅含显示所需字段。
-- `static/intro/assets/manifest.json`：哈希模型/共享贴图、音轨、回放、背景及字体地址；`licenses/` 保留第三方许可。`src/server/auth-service.ts` 只公开读取这些静态资源，`src/server.ts` 协商 gzip/Brotli 并给哈希素材不可变缓存。
-- `scripts/intro/build-intro-data.mjs` / `build-intro-fonts.py` / `import-intro-assets.mjs`：从备份制作工程重新准备素材的开发工具，正常站点构建不访问原工程。`scripts/intro/fixtures/intro-replay-hashes.json` 为原始回放状态校验摘要。
-- 验证：`scripts/intro/test-intro-{blink-white,data,gesture,models,lifecycle,native-resolution}.mjs`、`scripts/test-intro-{assets,entry,cdn}.mjs`、`scripts/test-{static-cdn,cdn-runtime}.mjs`；详见 `docs/realtime-intro.md`。
+- `static/intro.js` / `static/styles/intro.css`：轻量入口、一次性同意弹窗、关于页重播、固定 16:9 舞台、播放控件与取消清理；加载/播放复用同一 range，分别显示禁用 seek 的素材百分比与可 seek 的播放时间。首页认证/通知提示就绪后发送 `roka:home-ready`，防止弹窗堆叠。
+- `static/intro/player-source.js` → `player.js`：按需载入、共享 loader 全素材并行预载与解码、plan.duration 驱动的 Web Audio 时间轴、30 fps 调度、WebGL/Canvas 分层合成、按 CSS 显示尺寸 × DPR 调整实时物理分辨率、暂停/跳转/退出生命周期；`scripts/intro/build-intro.mjs` 用 esbuild 构建并生成预压缩资源。
+- `static/intro/asset-loading.js`：提供共享 CDN 请求与哈希素材 Cache Storage 持久缓存，以清单顶层任务为固定总数并行预载并汇报单调进度；glTF 父任务等待嵌套依赖，后续 JSON/Blob/模型解码复用同实例结果。可变清单不持久缓存，重写 glTF 内部依赖为去重的 blob URL，退出时取消请求并释放。
+- `static/intro/scene.js` / `motion.js` / `gesture.js` / `landform.js` / `architecture.js`：原片三维镜头、原生分辨率 WebGL 与后处理、接地 IK、领队手势权重（leader→ascend 平滑过渡）、连续山脊与沼泽、材质合批和分阶段施工；charge 动画保留给左右对照左侧调用。
+- `static/intro/director.js` / `replay-board.js`：1920×1080 逻辑构图、原生分辨率合成、字幕/背景、原生棋盘与隔离闪烁；84–88 秒直接进入 charge_compare 左右对照，真实回放与 16 方模拟数据仅含显示所需字段。
+- `static/intro/assets/manifest.json`：哈希模型/共享贴图、120 秒音轨、回放、背景及字体地址；`licenses/` 保留第三方许可。`src/server/auth-service.ts` 只公开读取这些静态资源，`src/server.ts` 协商 gzip/Brotli 并给哈希素材不可变缓存。
+- `scripts/intro/build-intro-data.mjs` / `trim-intro-plan.mjs` / `build-intro-fonts.py` / `import-intro-assets.mjs`：从备份制作工程重新准备素材的开发工具，正常站点构建不访问原工程；剪辑变换移除独立 charge 并重排后续 shot/frame/beat。`prepare-intro-media.py` 直接输出原始 120 秒配乐。`scripts/intro/fixtures/intro-replay-hashes.json` 为原始回放状态校验摘要。
+- 验证：`scripts/intro/test-intro-{blink-white,data,gesture,media,models,lifecycle,native-resolution}.mjs`、`scripts/test-intro-{assets,entry,cdn}.mjs`、`scripts/test-{static-cdn,cdn-runtime}.mjs`；其中 data 测试覆盖剪点前后映射与连续性，media 测试实测 PCM 120 秒并对期望剪辑做相关/RMS 校验，CDN 测试验证真实并行、稳定进度及有/无持久缓存的复用，入口浏览器测试覆盖同一 range 的加载与 seek 切换；详见 `docs/realtime-intro.md`。
 
 ## 目录结构树
 

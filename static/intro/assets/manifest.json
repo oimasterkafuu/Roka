@@ -2,7 +2,7 @@
   "version": 1,
   "width": 1920,
   "height": 1080,
-  "duration": 124,
+  "duration": 120,
   "files": {
     "knight-hero.glb": "/intro/assets/knight-hero.6bb51eb98f8c0d49.gltf",
     "knight-lod.glb": "/intro/assets/knight-lod.8acb191b9b1edeec.gltf",
@@ -25,9 +25,9 @@
     "ground.jpg": "/intro/assets/ground.d570c10b1d5302f4.jpg",
     "ground-normal.jpg": "/intro/assets/ground-normal.f4f9d9671c660f4e.jpg",
     "sky.hdr": "/intro/assets/sky.5477b7dbb2aea4a6.hdr",
-    "plan.json": "/intro/assets/plan.dbf7d79932b977b7.json",
+    "plan.json": "/intro/assets/plan.250d88ed71978d99.json",
     "replays.json": "/intro/assets/replays.7441473e89e8f92e.json",
-    "score.mp3": "/intro/assets/score.526f2eefdc557d3b.mp3"
+    "score.mp3": "/intro/assets/score.ab28048b21de615a.mp3"
   },
   "images": {
     "crown": "/intro/assets/crown.ebb8133c5bb0e0f1.png",
