@@ -107,3 +107,12 @@
   font-size: 14px;
   padding: 8px 18px;
 }
+/* Card-scoped selectors beat the later same-specificity body.home cascade. */
+.notify-permission-card button.inverted {
+  background-color: var(--color-primary);
+  color: #ffffff;
+}
+.notify-permission-card button.inverted:hover {
+  background-color: var(--color-primary-hover);
+  color: #ffffff;
+}
