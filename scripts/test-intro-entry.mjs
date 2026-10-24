@@ -8,6 +8,13 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
+const escapeHtml = (value) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 const root = fileURLToPath(new URL('../', import.meta.url));
 const bootstrap = await fs.readFile(root + 'static/intro.js', 'utf8');
 const css = await fs.readFile(root + 'static/styles/intro.css', 'utf8');
@@ -61,7 +68,8 @@ const server = http.createServer((request, response) => {
     response.end(css);
   } else if (url.pathname === '/intro/player.js') {
     response.setHeader('Content-Type', 'application/javascript');
-    setTimeout(() => response.end(engine), Number(url.searchParams.get('v')) || 0);
+    const rendererDelay = url.searchParams.get('v') === '200' ? 200 : 0;
+    setTimeout(() => response.end(engine), rendererDelay);
   } else {
     const home = url.pathname === '/';
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -80,7 +88,7 @@ const server = http.createServer((request, response) => {
       };
       window.AudioContext = class {constructor(){this.state='running';window.__introTest.audio++}
       resume(){return Promise.resolve()} close(){this.state='closed';window.__introTest.audioClosed=true;return Promise.resolve()}};
-      </script><script defer src="/intro.js?v=test" data-version="${url.searchParams.get('delay') || 'test'}"></script>
+      </script><script defer src="/intro.js?v=test" data-version="${escapeHtml(url.searchParams.get('delay') || 'test')}"></script>
       </head><body class="${home ? 'home' : ''}">
       <button id="outside">Outside</button><button data-intro-replay>重播游戏介绍片</button>
       ${url.searchParams.has('notify') ? '<div class="notify-permission-backdrop">Notifications</div>' : ''}

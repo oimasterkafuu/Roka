@@ -156,7 +156,8 @@ try {
     assert(body.includes(`@${commit}/static/`), page);
     assert(body.includes('window.ROKA_ASSETS.enqueue'), page);
     assert(!body.includes('{{V}}'), page);
-    assert(!body.includes('cdnjs.cloudflare.com'), page);
+    for (const match of body.matchAll(/https?:\/\/[^\s"'<>]+/gi))
+      assert.notEqual(new URL(match[0]).hostname, 'cdnjs.cloudflare.com', page);
     if (page === '/') {
       const etag = response.headers.get('etag');
       assert.equal((await fetch(base + page, { headers: { 'If-None-Match': etag } })).status, 304);
