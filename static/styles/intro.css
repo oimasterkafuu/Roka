@@ -10,72 +10,75 @@ dialog.intro-dialog {
   margin: auto;
   padding: 20px;
   overflow: auto;
-  border: 1px solid #364b63;
-  border-radius: 18px;
-  background: #0b1523;
-  color: #edf4ff;
-  box-shadow: 0 24px 100px #0009;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-card);
   text-align: left;
   font:
-    16px/1.5 system-ui,
+    16px/1.5 var(--font-main),
     sans-serif;
 }
 .intro-dialog::backdrop {
-  background: #020813d9;
+  background: rgba(15, 23, 42, 0.4);
 }
 .intro-dialog.intro-offer {
-  width: min(520px, calc(100vw - 24px));
-  padding: 26px;
+  width: min(480px, calc(100vw - 24px));
+  padding: 24px;
 }
 .intro-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
 }
 .intro-dialog .intro-header h2 {
   margin: 0;
-  color: #f3f7ff;
+  color: var(--color-text);
   font:
-    700 22px/1.4 system-ui,
+    700 20px/1.4 var(--font-main),
     sans-serif;
 }
 .intro-dialog .intro-description {
-  margin: 10px 0 18px;
-  color: #c0cede;
+  margin: 8px 0 18px;
+  color: var(--color-text);
   font-size: 14px;
 }
 .intro-dialog .intro-button {
   box-sizing: border-box;
-  min-height: 42px;
+  min-height: 40px;
   margin: 0;
-  padding: 8px 14px;
-  border: 1px solid #526780;
-  border-width: 1px !important;
-  border-radius: 8px;
-  background: #192b40;
-  color: #f3f7ff;
+  padding: 8px 18px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
   font:
-    600 14px/1.4 system-ui,
+    600 14px/1.4 var(--font-main),
     sans-serif;
   cursor: pointer;
   white-space: nowrap;
+  transition:
+    background-color 0.2s ease-in-out,
+    box-shadow 0.2s ease-in-out;
 }
 .intro-dialog .intro-button:hover {
-  background: #29415d;
+  background: var(--color-surface-hover);
+  box-shadow: var(--shadow-sm-hover);
 }
 .intro-dialog .intro-primary {
-  border-color: #92f0db;
-  background: #98f2de;
-  color: #08221f;
+  background: var(--color-primary);
+  color: #ffffff;
 }
 .intro-dialog .intro-primary:hover {
-  background: #c6fff2;
+  background: var(--color-primary-hover);
 }
 .intro-dialog .intro-button:focus-visible,
 .intro-dialog .intro-progress:focus-visible {
-  outline: 3px solid #b5f8ed !important;
-  outline-offset: 3px;
+  outline: 3px solid rgba(0, 128, 128, 0.45) !important;
+  outline-offset: 2px;
 }
 .intro-dialog .intro-button:disabled {
   opacity: 0.45;
@@ -88,8 +91,11 @@ dialog.intro-dialog {
 .intro-controls {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+}
+.intro-offer-actions {
+  justify-content: flex-end;
 }
 .intro-viewport {
   position: relative;
@@ -111,42 +117,54 @@ dialog.intro-dialog {
 .intro-stage canvas {
   display: block;
 }
+.intro-status-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
 .intro-dialog .intro-status {
-  min-height: 21px;
-  margin: 10px 0;
-  color: #c0cede;
-  font-size: 13px;
+  margin: 0;
+  padding: 10px 18px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: var(--shadow-sm-hover);
+  color: var(--color-text);
+  font-size: 14px;
 }
 .intro-progress {
   flex: 1 1 100px;
   min-width: 70px;
   width: auto;
-  accent-color: #98f2de;
+  accent-color: var(--color-primary);
   cursor: pointer;
 }
 .intro-dialog .intro-time {
-  color: #c0cede;
+  color: var(--color-text);
   font:
-    12px/1.5 ui-monospace,
+    600 12px/1.5 ui-monospace,
     monospace;
   white-space: nowrap;
 }
 @media (max-width: 600px) {
   .intro-dialog {
-    padding: 12px;
-    border-radius: 12px;
+    padding: 16px;
+  }
+  .intro-dialog.intro-offer {
+    padding: 20px;
   }
   .intro-dialog .intro-header h2 {
     font-size: 18px;
   }
   .intro-dialog .intro-description {
-    font-size: 12px;
+    font-size: 13px;
   }
   .intro-controls {
-    gap: 8px;
+    gap: 6px;
   }
   .intro-dialog .intro-button {
-    padding: 8px 10px;
+    padding: 8px 12px;
     font-size: 13px;
   }
   .intro-controls .intro-progress {
@@ -200,17 +218,23 @@ dialog.intro-player {
   top: max(16px, env(safe-area-inset-top));
   right: max(16px, env(safe-area-inset-right));
   pointer-events: auto;
-  background: #09121dcc;
 }
 .intro-bottom {
   position: absolute;
   inset: auto 0 0;
-  padding: 42px max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom))
-    max(20px, env(safe-area-inset-left));
-  background: linear-gradient(transparent, #020711e8);
+  display: flex;
+  justify-content: center;
+  padding: 0 max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
 }
 .intro-bottom .intro-controls {
   pointer-events: auto;
+  box-sizing: border-box;
+  max-width: min(920px, 100%);
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-sm-hover);
 }
 .intro-screen.intro-controls-hidden {
   cursor: none;

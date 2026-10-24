@@ -4,6 +4,7 @@ import * as T from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { Motion } from './motion.js';
+import { leaderGestureWeight, ascendPullback } from './gesture.js';
 import { createIntroAssetLoader } from './asset-loading.js';
 import { createLandform } from './landform.js';
 import { materials, fortress } from './architecture.js';
@@ -80,7 +81,8 @@ export async function createScene({ assets, signal, onStatus = () => {}, nativeR
       BASE = '',
       ASSET = '';
 
-    manager.onProgress = (url, loaded, total) => onStatus(`载入场景素材 ${loaded}/${total}`);
+    manager.onProgress = (url, loaded, total) =>
+      onStatus(loaded >= total ? '素材已就绪，正在初始化光影与动画…' : `正在加载场景素材 ${loaded}/${total}`);
 
     const motionProfile = await json('motion-profile.json');
     const data = await json('world.json');
@@ -685,8 +687,8 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
       for (let c = 0; c < 5; c++) {
         if (r === 0 && c === 2) continue;
         const seed = r * 5 + c + 1600,
-          x = heroBase.x + (c - 2) * 1.48 + (hash(seed, 1) - 0.5) * 0.36,
-          z = heroBase.z + r * 2.2 + (hash(seed, 2) - 0.5) * 0.45;
+          x = heroBase.x + (c - 2) * 1.62 + (hash(seed, 1) - 0.5) * 0.36,
+          z = heroBase.z + r * 2.4 + (hash(seed, 2) - 0.5) * 0.45;
         soldier(marchArmy, x, z, 3, r === 0 ? 'hero' : 'mid', false, seed);
       }
     for (let k = 0; k < grid.length; k++) {
@@ -919,7 +921,7 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
         camera.fov = 48;
       } else if (name === 'leader' || isAscend) {
         active = ortho;
-        const a = isAscend ? smooth(Math.min(1, u / 0.8)) : 0,
+        const a = isAscend ? ascendPullback(u) : 0,
           pan = isAscend ? smooth((u - 0.22) / 0.58) : 0,
           height = 9 * Math.pow(360 / 9, a),
           target = heroBase
@@ -967,7 +969,7 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
           tr.motion.update(
             name === 'prologue' ? 0 : t,
             name === 'march' || name === 'prologue' ? 'walk' : isCharge ? 'run' : 'idle',
-            name === 'leader' && tr.lead,
+            tr.lead ? leaderGestureWeight(name, t) : 0,
           );
           for (const c of tr.motion.contacts) {
             if (c.age >= 0 && c.age < 0.32 && fxIndex < stepFX.length) {
@@ -1008,13 +1010,10 @@ roughnessFactor=mix(roughnessFactor,.40,vWet*.7);`,
         d.sp.position.z = d.z + t * 0.1;
         d.sp.material.opacity = 0.1 + 0.025 * Math.sin(t + d.phase);
       }
-      const shadowRadius = isAscend
-        ? lerp(24, 210, smooth(u / 0.8))
-        : isBuild || name === 'resolve'
-          ? 22
-          : 22;
+      const ascendA = isAscend ? ascendPullback(u) : 0;
+      const shadowRadius = isAscend ? lerp(24, 210, ascendA) : 22;
       const shadowTarget = isAscend
-        ? heroBase.clone().lerp(new T.Vector3(), smooth(u / 0.8))
+        ? heroBase.clone().lerp(new T.Vector3(), ascendA)
         : isBuild || name === 'resolve'
           ? focus
           : heroBase

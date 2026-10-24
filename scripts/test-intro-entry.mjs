@@ -103,7 +103,7 @@ try {
   await page.getByRole('heading', { name: '是否观看游戏介绍片' }).waitFor();
   assert.equal(
     await page.locator('.intro-description').evaluate((node) => getComputedStyle(node).color),
-    'rgb(192, 206, 222)',
+    'rgb(37, 48, 66)',
     'home universal color does not override intro text',
   );
   assert.equal(

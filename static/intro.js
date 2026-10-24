@@ -191,6 +191,8 @@
     viewport.append(stage);
     var status = element('p', 'intro-status', '正在加载实时画面与音乐…');
     status.setAttribute('role', 'status');
+    var statusOverlay = element('div', 'intro-status-overlay');
+    statusOverlay.append(status);
     var controls = element('div', 'intro-controls');
     var pause = button('暂停', togglePause);
     var mute = button('静音', function () {
@@ -217,9 +219,9 @@
     var dismiss = button('关闭', close, 'intro-button intro-close');
     dismiss.setAttribute('aria-label', '关闭介绍片');
     var bottom = element('div', 'intro-bottom');
-    bottom.append(status, controls);
+    bottom.append(controls);
     chrome.append(dismiss, bottom);
-    screen.append(viewport, chrome);
+    screen.append(viewport, statusOverlay, chrome);
     session.dialog.append(screen);
     screen.focus();
 
@@ -301,7 +303,7 @@
       }
       if (session.state === 'ended' && state !== 'ended') status.textContent = '画面由本机实时绘制';
       session.state = state;
-      status.hidden = state === 'playing';
+      status.hidden = state === 'playing' || state === 'paused';
       showControls();
       pause.textContent = state === 'ended' ? '重新播放' : state === 'paused' ? '继续播放' : '暂停';
       if (state === 'playing') session.onVisibility();
