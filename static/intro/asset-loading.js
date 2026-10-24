@@ -1,3 +1,45 @@
+const INTRO_CACHE = 'roka-intro-assets-v1';
+
+function introCacheKey(path) {
+  const url = new URL(path, globalThis.location?.origin || 'https://roka.invalid');
+  if (!url.pathname.startsWith('/intro/assets/') || !/\.[a-f0-9]{16}\./.test(url.pathname)) return null;
+  return new URL(url.pathname + url.search, globalThis.location?.origin || 'https://roka.invalid').href;
+}
+
+function abortIfNeeded(signal) {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+}
+
+export async function fetchIntroAsset(path, options = {}) {
+  const { signal } = options;
+  abortIfNeeded(signal);
+  const key = introCacheKey(path);
+  let cache;
+  if (key) {
+    try {
+      cache = await globalThis.caches.open(INTRO_CACHE);
+      abortIfNeeded(signal);
+      const cached = await cache.match(key);
+      abortIfNeeded(signal);
+      if (cached) return cached;
+    } catch (error) {
+      abortIfNeeded(signal);
+    }
+  }
+  const runtime = globalThis.ROKA_ASSETS;
+  const response = await (runtime?.fetch ? runtime.fetch(path, options) : fetch(path, options));
+  abortIfNeeded(signal);
+  if (cache && response.ok) {
+    try {
+      await cache.put(key, response.clone());
+      abortIfNeeded(signal);
+    } catch (error) {
+      abortIfNeeded(signal);
+    }
+  }
+  return response;
+}
+
 /** All remote bytes go through the commit-pinned runtime before Three sees them.
  * Blob URLs keep nested glTF requests on that same asset revision and avoid
  * cross-origin canvas taint when recoloring decoded model textures.
@@ -15,8 +57,7 @@ export function createIntroAssetLoader({ files = {}, signal } = {}) {
   };
   const resolve = (name) => files[name] || name;
   function fetchAsset(path) {
-    const runtime = globalThis.ROKA_ASSETS;
-    return runtime?.fetch ? runtime.fetch(path, { signal: combined }) : fetch(path, { signal: combined });
+    return fetchIntroAsset(path, { signal: combined });
   }
   function blob(name) {
     check();
