@@ -1655,7 +1655,7 @@ const boot = async (): Promise<void> => {
         lobbyService.humanVerified.add(socket.id);
         const lobbyId = lobbyService.lobbyOfSid.get(socket.id);
         if (lobbyId) {
-          lobbyService.reorderLobbyForVerification(lobbyId);
+          lobbyService.reorderLobbyForVerification(lobbyId, socket.id);
         }
         // WebCrypto 摘要是异步的：client_verify 可能晚于进房到达，此时首帧
         // room_update 已按未验证渲染（[AI] 误标的存量显示）。验证一旦落地
@@ -1815,7 +1815,7 @@ const boot = async (): Promise<void> => {
           serverBotAllowMultiLine: socket.data.serverBotAllowMultiLine === true,
           bot: socket.data.isBot === true,
         });
-        // 非官方 Bot 当日在官方 Bot 房间的累计停留已达上限：拒绝进房——
+        // 非官方 AI 当日在官方 Bot 房间的累计停留已达上限：拒绝进房——
         // 不加入房间组、不发 room_update 与加入广播，仅向房间提示原因。
         if (joinResult.blocked) {
           lobbyService.sendLobbySystemMessage(io, roomVal, joinResult.blocked);
