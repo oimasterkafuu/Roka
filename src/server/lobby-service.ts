@@ -45,9 +45,10 @@ const LOBBY_HEARTBEAT_SWEEP_MS = 60_000;
  * 防止挂着的浏览器标签页靠心跳长期占用房间席位并维持在线状态。 */
 const LOBBY_MAX_DWELL_MS = 12 * 3600_000;
 
-/** 非官方 Bot（ROKA_BOT_TOKENS 接入）每日（服务器本地日历日）在官方 Bot 房间的
- * 累计停留上限；达到上限后当日无法再进入任何官方 Bot 房间。人类与官方托管 Bot 不受影响。 */
-const BOT_DWELL_DAILY_LIMIT_MS = 3 * 3600_000;
+/** 非官方 AI（与房间 AI 标记一致：未通过 humanVerified 且非托管 Bot）每日
+ *（服务器本地日历日）在官方 Bot 房间的累计停留上限；达到上限后自动移出，
+ * 且当日无法再进入任何官方 Bot 房间。人类与官方托管 Bot 不受影响。 */
+const BOT_DWELL_DAILY_LIMIT_MS = 4 * 3600_000;
 
 const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
@@ -91,11 +92,11 @@ class LobbyService {
   /** 房间成员本次进房的时间（sid → ms 时间戳）；重进房间时重置，用于停留上限检测。 */
   private readonly lobbyJoinedAt = new Map<string, number>();
 
-  /** 非官方 Bot 在官方 Bot 房间的进行中计时段（sid → {uid, gid, sinceMs}）；
+  /** 非官方 AI 在官方 Bot 房间的进行中计时段（sid → {uid, gid, sinceMs}）；
    * 只记进房时房内已有托管 Bot 成员的记录（快照判定，进入后官方 Bot 离开不追溯）。 */
   private readonly botDwell = new Map<string, { uid: string; gid: string; sinceMs: number }>();
 
-  /** 非官方 Bot 每日（服务器本地日历日 YYYY-MM-DD）在官方 Bot 房间的累计停留毫秒数；
+  /** 非官方 AI 每日（服务器本地日历日 YYYY-MM-DD）在官方 Bot 房间的累计停留毫秒数；
    * 每次读写时惰性 rollover（date 不同即重置该 uid 桶）。内存态，服务器重启清零。 */
   private readonly botDwellDaily = new Map<string, { date: string; ms: number }>();
   /** 豁免心跳踢出的 sid（ROKA_BOT_TOKENS 鉴权的 bot 连接，由 server.ts 维护）。 */
@@ -302,13 +303,13 @@ class LobbyService {
       bot?: boolean;
     },
   ): { blocked?: string } {
-    // 非官方 Bot 的官方 Bot 房每日停留上限：官方 Bot 房按进房时刻快照判定
-    // （房内已有任一托管 Bot 成员即为官方 Bot 房；进入后官方 Bot 离开不追溯），
-    // 该 uid 当日累计停留达到上限后拒绝进入任何官方 Bot 房间（人类与托管 Bot 不受限）。
-    const isUserBot = options?.bot === true && options?.serverBot !== true;
+    // 非官方 AI 的官方 Bot 房每日停留上限：AI 身份与房间标记共用 humanVerified，
+    // 不看 JWT、ROKA_BOT_TOKENS 或 socket.data.isBot；官方托管 Bot 除外。
+    // 官方 Bot 房按进房时刻快照判定（进入后官方 Bot 离开不追溯）。
+    const isUnofficialAi = options?.serverBot !== true && !this.humanVerified.has(sid);
     const isServerBotRoom = (this.lobbyPlayers.get(gid) ?? []).some((player) => player.serverBot === true);
-    if (isUserBot && isServerBotRoom && this.botDwellDailyMs(uid) >= BOT_DWELL_DAILY_LIMIT_MS) {
-      return { blocked: `${uid} 今日在官方 Bot 房间的累计停留已达 3 小时上限，暂时无法进入。` };
+    if (isUnofficialAi && isServerBotRoom && this.botDwellTotalMs(uid) >= BOT_DWELL_DAILY_LIMIT_MS) {
+      return { blocked: `${uid} 今日在官方 Bot 房间的累计停留已达 4 小时上限，暂时无法进入。` };
     }
 
     this.lobbyOfSid.set(sid, gid);
@@ -394,8 +395,8 @@ class LobbyService {
       }
     }
     players.splice(insertIndex, 0, player);
-    if (isUserBot && isServerBotRoom) {
-      // 非官方 Bot 进入官方 Bot 房：开始计时段（退出时由 leaveLobby 结算进当日桶）。
+    if (isUnofficialAi && isServerBotRoom) {
+      // 非官方 AI 进入官方 Bot 房：开始计时段（退出时由 leaveLobby 结算进当日桶）。
       this.botDwell.set(sid, { uid, gid, sinceMs: Date.now() });
     }
     return {};
@@ -432,6 +433,17 @@ class LobbyService {
       return 0;
     }
     return bucket.ms;
+  }
+
+  /** 当日已累计时间与该 uid 所有进行中计时段之和，供进房拦截和自动踢出共用。 */
+  private botDwellTotalMs(uid: string, now = Date.now()): number {
+    let total = this.botDwellDailyMs(uid);
+    for (const record of this.botDwell.values()) {
+      if (record.uid === uid) {
+        total += Math.max(0, now - record.sinceMs);
+      }
+    }
+    return total;
   }
 
   /** 把一段停留累加进某 uid 的当日桶（date 不同即重置该桶后再累加，惰性 rollover）。 */
@@ -471,10 +483,10 @@ class LobbyService {
   }
 
   /**
-   * 启动房间心跳扫描（全局单一定时器）：每分钟检查一次，准备阶段超过
-   * LOBBY_HEARTBEAT_TIMEOUT_MS 无心跳、或在房停留累计超过 LOBBY_MAX_DWELL_MS
-   * 的成员被自动移出房间并收到 room_kick 事件（前端据此跳转首页）；
-   * heartbeatExempt 中的 bot 连接与对局进行中的房间不受影响。
+   * 启动房间状态扫描（全局单一定时器）：每分钟检查一次非官方 AI 的官方 Bot 房
+   * 停留上限，以及准备阶段超过 LOBBY_HEARTBEAT_TIMEOUT_MS 无心跳、或在房停留
+   * 累计超过 LOBBY_MAX_DWELL_MS 的成员。超限者收到 room_kick 并跳回首页；
+   * 对局进行中不打断，待终局回到准备阶段后检查。
    */
   startLobbyHeartbeatSweep(io: SocketIOServer): void {
     if (this.heartbeatSweepTimer) {
@@ -486,7 +498,28 @@ class LobbyService {
     this.heartbeatSweepTimer.unref();
   }
 
+  /** 非官方 AI 每日官方 Bot 房累计达到 4 小时后，在准备阶段自动移出。 */
+  private sweepBotDwellLimits(io: SocketIOServer, onlyLobbyId?: string): void {
+    const now = Date.now();
+    const uids = new Set([...this.botDwell.values()].map((record) => record.uid));
+    const exceededUids = new Set(
+      [...uids].filter((uid) => this.botDwellTotalMs(uid, now) >= BOT_DWELL_DAILY_LIMIT_MS),
+    );
+    for (const [sid, record] of [...this.botDwell]) {
+      if (onlyLobbyId && record.gid !== onlyLobbyId) continue;
+      if (!exceededUids.has(record.uid) || this.humanVerified.has(sid)) continue;
+      // 对局内不踢；endGame 删除 gameInstances 后会针对该房间立即再跑一次。
+      if (this.isLobbyGameRunning(record.gid)) continue;
+      if (this.lobbyOfSid.get(sid) !== record.gid) {
+        this.settleBotDwell(sid);
+        continue;
+      }
+      this.kickFromLobby(io, sid, record.gid, '因今日在官方 Bot 房间累计停留已达 4 小时上限，');
+    }
+  }
+
   private sweepInactiveLobbyMembers(io: SocketIOServer): void {
+    this.sweepBotDwellLimits(io);
     const now = Date.now();
     for (const [sid, lastHeartbeat] of this.lobbyHeartbeats) {
       const lobbyId = this.lobbyOfSid.get(sid);
@@ -512,7 +545,7 @@ class LobbyService {
    * 心跳超时踢出：复用离开房间的清理逻辑（移出成员、广播房间/首页失效、
    * 重新检查开局条件），并向该 socket 发送 room_kick 让前端重定向到首页。
    */
-  private kickFromLobby(io: SocketIOServer, sid: string, lobbyId: string): void {
+  private kickFromLobby(io: SocketIOServer, sid: string, lobbyId: string, reason?: string): void {
     this.lobbyHeartbeats.delete(sid);
     this.lobbyJoinedAt.delete(sid);
     this.humanVerified.delete(sid);
@@ -525,7 +558,7 @@ class LobbyService {
     io.to(`sid_${sid}`).emit('room_kick', {});
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
-      const kickVerb = `因长时间未活跃被移出了${kickSeat}。`;
+      const kickVerb = reason ? `${reason}被移出了${kickSeat}。` : `因长时间未活跃被移出了${kickSeat}。`;
       this.sendLobbySystemMessage(io, roomVal, `${uid} ${kickVerb}`, {
         name: uid,
         verb: kickVerb,
@@ -611,7 +644,11 @@ class LobbyService {
     return { human: count(human), ai: count(ai) };
   }
 
-  reorderLobbyForVerification(gid: string): void {
+  reorderLobbyForVerification(gid: string, sid?: string): void {
+    // 补验真人后与房间 AI 标记同步解除停留计时；已作为 AI 停留的部分仍计入当日桶。
+    if (sid && this.humanVerified.has(sid)) {
+      this.settleBotDwell(sid);
+    }
     const players = this.lobbyPlayers.get(gid);
     if (!players) return;
     const sorted = [...players].sort((a, b) => {
@@ -894,6 +931,8 @@ class LobbyService {
               member.ready = false;
             }
           }
+          // 对局结束回到准备阶段：先立即检查非官方 AI 停留上限，再广播终局房间状态。
+          this.sweepBotDwellLimits(io, lobby);
           // 对局结束回到准备阶段后，若宽限期清理使房间只剩 bot，同样重置设置。
           this.resetLobbyConfigIfOnlyBots(io, lobby);
           this.emitRoomUpdate(io, lobby);
@@ -1092,7 +1131,7 @@ class LobbyService {
       this.lobbyJoinedAt.delete(oldSid);
       this.lobbyJoinedAt.set(sid, joinedAt);
     }
-    // 非官方 Bot 的官方 Bot 房计时段随换绑转移到新 sid 且保留 sinceMs
+    // 非官方 AI 的官方 Bot 房计时段随换绑转移到新 sid 且保留 sinceMs
     // （对局中断线重连不丢计时段）；旧 sid 无记录则不新建。
     const botDwellRecord = this.botDwell.get(oldSid);
     if (botDwellRecord) {
