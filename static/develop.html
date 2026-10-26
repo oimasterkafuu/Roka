@@ -27,8 +27,8 @@
     <div id="app">
       <h1 class="doc-title">Roka 网站开发</h1>
       <p class="doc-subtitle">
-        Roka 是实时方格领土战争游戏（TypeScript + Fastify + Socket.IO，前端为无构建原生
-        JS）。本页是与仓库代码核对过的开发指南：项目结构、本地流程、检查命令、提交与部署约定。仓库：
+        Roka 使用 TypeScript、Fastify 与 Socket.IO，前端主体为原生
+        JavaScript。本页面向新开发者，介绍项目结构、本地流程、检查、贡献与部署约定。仓库：
         <a
           class="doc-link"
           href="https://github.com/oimasterkafuu/Roka"
@@ -41,268 +41,244 @@
       <section class="doc-panel">
         <h2>1. 贡献流程</h2>
         <ol>
-          <li>在 GitHub 上 fork 仓库到你自己的账号。</li>
-          <li>
-            clone 你的 fork，并创建一个只聚焦单一主题的分支（<code>feat/xxx</code>、<code>fix/xxx</code>
-            等命名）。
-          </li>
-          <li>完成功能开发后推送分支，并发起 PR。</li>
-          <li>PR 描述请说明动机、实现方式、影响范围和验证结果。</li>
+          <li>外部贡献者 fork 仓库并 clone 自己的 fork；维护者从主仓库创建功能分支。</li>
+          <li>每个分支只处理一个主题，使用 <code>feat/xxx</code>、<code>fix/xxx</code> 等名称。</li>
+          <li>完成开发与验证后推送分支并创建 PR，说明动机、实现、影响范围和验证结果。</li>
+          <li>根据评审意见更新同一个分支，保持提交聚焦，不混入无关文件。</li>
         </ol>
-        <p style="margin-top: 8px">
-          仓库根目录的 <code>AGENTS.md</code>（开发准则）与
-          <code>MAP.md</code>（项目地图）是贡献前必读文件；本页内容即取自二者与源码。直接推送
-          <code>main</code> 仅限维护者（提交需 GPG 签名，见第 5 节），外部贡献一律走 PR。
+        <p>
+          开始修改前请阅读仓库根目录的 <code>AGENTS.md</code> 与
+          <code>MAP.md</code>。维护者直接提交需要配置指定作者身份并启用 GPG 签名；外部贡献通过 PR 进行。
         </p>
       </section>
 
       <section class="doc-panel">
         <h2>2. 环境要求</h2>
         <ul>
-          <li>Node.js（建议 20+，自带 Corepack）。</li>
+          <li>建议使用 Node.js 22，与仓库工作流一致，并启用 Corepack。</li>
           <li>
-            包管理器统一使用 <code>pnpm</code>（版本由 <code>package.json</code> 的
-            <code>packageManager</code> 字段锁定，通过 Corepack 管理）；请勿使用 npm 或 yarn。
+            统一使用 <code>pnpm</code>，版本由 <code>package.json</code> 的
+            <code>packageManager</code> 锁定；不要使用 npm 或 yarn。
           </li>
         </ul>
         <pre class="code-snippet"><code>corepack enable
-corepack prepare --activate
 pnpm install
 pnpm run dev        # http://localhost:23333</code></pre>
       </section>
 
       <section class="doc-panel">
-        <h2>3. 项目结构地图</h2>
-        <pre class="code-snippet"><code>src/           后端源码（TypeScript，tsc 编译到 dist/ 运行）
-  server.ts      唯一入口：Fastify 路由 + Socket.IO 事件总装
-  game-engine.ts 对局核心（Tick 循环、战斗、连通、投降、回放记录）
-  game-engine/   引擎子模块（常量/选点/榜单/编码/迷雾/回放工具/增兵）
-  map/           五种 map_mode 地图生成器（纯函数）+ 华夏地区配置
-  server/        服务层：auth / captcha / lobby / presence / webhook /
-                 server-bot-manager / auto-ban-policy
-  types.ts       全项目共享类型与协议定义（改协议基本都要动这里）
-  *-store.ts     持久化存储（用户/动态/公告/回放）+ binary-store 底座
-static/        纯静态前端（原生 JS + jQuery，无构建，原样下发）
-  index.html     首页/大厅（脚本基本内联）
-  game.html      对局/回放共用骨架 + main.js + main/（加载顺序敏感）
-  styles/        按页面切分的样式表（docs.css 为文档页共享样式），
-                 main.css 只做 @import 聚合
-  vendor/katex/  本地化 KaTeX（公告/动态与文档页的公式渲染）
-  docs.js        文档页共享脚本（登录态/导航/公式渲染）
-  develop*.html  本页与 bot 协议权威文档
-bot-template/  四个参考 bot（random-patch / simple-strategy / anti-human / apex）
-scripts/       维护与测试脚本（数据迁移、bot 冒烟、对局观测分析）
-data/          运行时数据（gitignored，见下）
-dist/          tsc 构建产物（请勿手动编辑）</code></pre>
-        <h3>数据文件（data/）</h3>
+        <h2>3. 项目结构</h2>
+        <pre class="code-snippet"><code>src/           后端 TypeScript 源码
+  server.ts      唯一入口：Fastify 路由与 Socket.IO 事件
+  game-engine.ts 对局核心：Tick、战斗、连通、投降与回放
+  game-engine/   常量、选点、榜单、编码、迷雾、回放与增兵模块
+  map/           地图生成器与华夏地区配置
+  server/        认证、验证码、房间、在线状态、托管与部署服务
+  types.ts       共享类型与协议定义
+  *-store.ts     用户、动态、公告与回放存储
+static/        前端源码与静态素材
+  index.html     首页与大厅
+  game.html      对局与回放骨架，配合 main.js 和 main/
+  styles/        页面样式，main.css 负责聚合
+  intro/         介绍片运行时与独立构建产物
+  develop*.html  网站开发指南与 bot 协议文档
+bot-template/  四个 bot 参考实现
+scripts/       测试、维护、迁移与观测脚本
+data/          运行时数据，不入库
+dist/          构建产物，不手工编辑</code></pre>
+        <p>逐文件职责与修改定位见 <code>MAP.md</code>，本页不重复完整源码地图。</p>
+
+        <h3>3.1 运行时数据</h3>
         <table class="doc-table">
           <tr>
             <th><code>users.bin</code> / <code>feeds.bin</code></th>
-            <td>
-              用户/动态存储：v8 serialize + brotli 压缩（binary-store 底座），写入前自动生成
-              <code>.bak</code> 备份，损坏自动回退。
-            </td>
+            <td>用户与动态数据，使用 v8 serialize 与 brotli；写入时保留 <code>.bak</code> 备份。</td>
           </tr>
           <tr>
             <th><code>announcement.json</code></th>
-            <td>公告：单文件 JSON，原子串行写 + <code>.bak</code> 备份。</td>
+            <td>公告数据，原子写入并保留 <code>.bak</code> 备份。</td>
           </tr>
           <tr>
             <th><code>server-bots.json</code></th>
             <td>
-              托管策略 bot 的重启恢复状态：<code>{ username, room, template, allowTeam, allowFog }</code>
+              托管恢复状态：<code>{ username, room, template, allowTeam, allowFog, allowMultiLine }</code>
               列表。
             </td>
           </tr>
           <tr>
             <th><code>replays/</code></th>
             <td>
-              回放：<code>&lt;id&gt;.rpl</code>（ops-v1 操作流，v8+brotli）、<code>index.bin</code>（索引）、
-              <code>&lt;id&gt;.rpb.gz</code>（RPB4 观看二进制 gzip 缓存，解码在前端）。
+              <code>&lt;id&gt;.rpl</code> 操作流、<code>index.bin</code> 索引与
+              <code>&lt;id&gt;.rpb.gz</code> 观看缓存。
             </td>
           </tr>
         </table>
-        <p style="margin-top: 8px">
-          更细的逐文件说明见仓库 <code>MAP.md</code>；它同时规定了「改什么动哪里」的速查表（改协议需同步
-          <code>src/types.ts</code>、<code>static/develop-bot.html</code>、<code>bot-template/</code>
-          与前端消费方）。
-        </p>
       </section>
 
       <section class="doc-panel">
-        <h2>4. 常用命令（package.json scripts）</h2>
+        <h2>4. 常用命令</h2>
+        <p>命令以 <code>package.json</code> 的 <code>scripts</code> 为准。</p>
         <table class="doc-table">
           <tr>
             <th><code>pnpm run dev</code></th>
-            <td>
-              tsx 直跑 <code>src/server.ts</code> 开发服务器（默认端口 23333，<code>PORT</code> 环境变量或
-              <code>--port</code> 可覆盖）。
-            </td>
+            <td>用 tsx 启动开发服务器，默认端口 23333，并显式关闭静态 CDN。</td>
           </tr>
           <tr>
             <th><code>pnpm run build</code></th>
-            <td><code>tsc</code> 类型检查并编译 <code>src/</code> 到 <code>dist/</code>。</td>
+            <td>先独立构建介绍片及压缩资源，再用 tsc 编译 <code>src/</code> 到 <code>dist/</code>。</td>
           </tr>
           <tr>
             <th><code>pnpm start</code></th>
-            <td>运行构建产物 <code>dist/server.js</code>（生产方式）。</td>
+            <td>运行 <code>dist/server.js</code>。</td>
           </tr>
           <tr>
             <th><code>pnpm run lint</code></th>
-            <td>ESLint 检查（仅 <code>src/**/*.ts</code>；<code>lint:fix</code> 自动修复）。</td>
+            <td>ESLint 检查 <code>src/**/*.ts</code>；<code>lint:fix</code> 可自动修复。</td>
           </tr>
           <tr>
             <th><code>pnpm run format</code></th>
             <td>
-              Prettier
-              自动格式化（<code>src/**/*.ts</code>、<code>static/**</code>、<code>README.md</code>、<code>AGENTS.md</code>）。
+              Prettier 格式化 <code>src/**/*.ts</code>、<code>static/**</code>、<code>README.md</code> 与
+              <code>AGENTS.md</code>。
             </td>
+          </tr>
+          <tr>
+            <th><code>pnpm test</code></th>
+            <td>运行聚合回归套件；也可按需执行单项 <code>test:*</code>，部分测试需要先构建。</td>
           </tr>
           <tr>
             <th><code>pnpm run test:bot</code></th>
-            <td>bot 集成测试：临时数据目录起服务，两个 random-patch-bot 自动开局对局即通过。</td>
-          </tr>
-          <tr>
-            <th>其余 <code>test:*</code></th>
-            <td>
-              各模块回归脚本（server-bot 托管、lobby
-              守卫、迷雾、多线、部署更新、presence、存储、地图生成、回放缓存等，共 25
-              个），均为自包含冒烟/单元测试，按需单跑；部分需先 <code>pnpm run build</code>。
-            </td>
+            <td>在临时数据目录启动服务，让两个 random-patch-bot 自动开局，验证基本接入与对局流程。</td>
           </tr>
           <tr>
             <th><code>pnpm run observe:bot</code></th>
-            <td>对局观测/病理分析：录帧并生成 bot 行为报告（维护向，非提交前必需）。</td>
+            <td>录制 bot 对局并生成行为分析报告，用于策略维护。</td>
           </tr>
         </table>
       </section>
 
       <section class="doc-panel">
-        <h2>5. 提交前检查与提交规范</h2>
+        <h2>5. 检查、提交与合并</h2>
         <div class="tips">
           <b>提交前最小检查：</b>
           <ul>
             <li>
               <code>pnpm run lint</code>、<code>pnpm run build</code>、<code>pnpm run format</code> 均通过。
             </li>
+            <li>检查 <code>git diff</code>，不混入无关改动，并确认锁文件与依赖清单一致。</li>
+            <li>运行方式、接口或配置变化时同步更新 <code>README.md</code>。</li>
+            <li>文件结构、模块职责或协议变化时同步更新 <code>MAP.md</code>。</li>
             <li>
-              不混入无关改动，提交主题单一；<code>pnpm-lock.yaml</code> 与
-              <code>package.json</code> 保持一致。
-            </li>
-            <li>修改了行为（运行方式、接口、配置等）时，已同步更新 <code>README.md</code>。</li>
-            <li>新增、删除或移动文件，或改变模块职责/协议时，已同步更新 <code>MAP.md</code>。</li>
-            <li>
-              合并进 <code>main</code> 的任何改动都必须提升 <code>package.json</code> 版本号（SemVer：新功能
-              minor，其余 patch）。
+              合并到 <code>main</code> 的更新必须提升版本号：破坏性变更 major，新功能 minor，其余 patch。
             </li>
           </ul>
         </div>
-        <h3>提交信息</h3>
+
+        <h3>5.1 提交信息</h3>
         <p>
-          遵循 Conventional Commits：<code>&lt;type&gt;(&lt;scope&gt;): &lt;subject&gt;</code>。常用 type：
-          <code>feat</code>、<code>fix</code>、<code>refactor</code>、<code>perf</code>、<code>docs</code>、
-          <code>style</code
-          >、<code>test</code>、<code>chore</code>、<code>ci</code>、<code>revert</code>。subject
-          用英文祈使句、首字母小写、不超过 72 字符；破坏性变更标注 <code>BREAKING CHANGE:</code>。
+          使用 Conventional Commits：<code>&lt;type&gt;(&lt;scope&gt;): &lt;subject&gt;</code>。subject
+          为英文祈使句，首字母小写且不超过 72 字符。常用类型包括
+          <code>feat</code
+          >、<code>fix</code>、<code>refactor</code>、<code>perf</code>、<code>docs</code>、<code>style</code>、<code>test</code>、<code>chore</code>、<code
+            >ci</code
+          >
+          与 <code>revert</code>；破坏性变更需标注 <code>BREAKING CHANGE:</code>。
         </p>
-        <h3>合并与签名（维护者流程）</h3>
+
+        <h3>5.2 PR 合并工作流</h3>
         <p>
-          直接提交到主仓库需配置作者 <code>oimasterkafuu &lt;hi@oim.moe&gt;</code> 并启用 GPG 签名。PR 统一由
-          <code>bump-version-and-merge</code> 工作流处理：在 PR 下评论
+          <code>bump-version-and-merge.yml</code> 支持在 PR 下评论
           <code>OK. &lt;major|minor|patch&gt; [merge|squash|rebase]</code
-          >（仅限维护者），自动提升版本号、检测冲突后合并。
+          >，或由维护者手动触发。工作流会升版、检查冲突并按指定策略合并；评论触发仅限指定维护者，且只支持同仓库分支。合并后自动删除的分支仅限
+          <code>dev/</code> 前缀。
         </p>
       </section>
 
       <section class="doc-panel">
-        <h2>6. 部署机制：推 main 即上线</h2>
-        <p>
-          生产部署以 GitHub <code>main</code> 为准：仓库配置了 push webhook（<code>POST /postreceive</code
-          >，HMAC-SHA256 签名校验），服务端收到后自动执行部署流水线：
-        </p>
-        <pre class="code-snippet"><code>git fetch origin main && git reset --hard origin/main
+        <h2>6. 部署机制</h2>
+        <p>生产环境以 GitHub <code>main</code> 为准。push webhook 经 HMAC-SHA256 校验后触发：</p>
+        <pre class="code-snippet"><code>git fetch origin main
+git reset --hard origin/main
 pnpm install --frozen-lockfile
 pnpm run build
-（systemd 下 exit 由守护进程拉起重启，否则自重启）</code></pre>
+# systemd 环境退出并由守护进程重启，其他环境自行重启。</code></pre>
         <ul>
           <li>
-            <b>更新排队状态机</b>：有对局进行中时不立即重启——进入排队状态（全站广播
-            <code>deploy_queued</code
-            >、禁止开新局、对局内显示「系统即将更新」横幅），最后一局结束后立即部署；宽限期（默认 120
-            秒）到期仍未结束的对局按当前排行榜名次强制清算后部署。
+            有对局运行时先进入更新排队：广播状态、禁止开新局，最后一局结束后部署；默认 120
+            秒宽限到期时按当前名次清算残余对局。
           </li>
+          <li>生产工作区中未推送的改动可能被自动部署覆盖，验证完成后应及时推送。</li>
           <li>
-            只在本地改等于没有生效；服务器工作区未推送的改动会被下一次自动部署直接 <code>reset --hard</code>
-            覆盖丢失。因此仓库约定：改动验证通过后第一时间推送到 GitHub。
-          </li>
-          <li>
-            部署期间浏览器端由 Service Worker
-            兜底：导航请求失败时显示「正在更新」页（<code>static/updating.html</code>），服务恢复后自动跳回。
+            重启期间 Service Worker 为导航请求显示 <code>static/updating.html</code>，服务恢复后自动返回。
           </li>
         </ul>
       </section>
 
       <section class="doc-panel">
-        <h2>7. CI 与自动化</h2>
+        <h2>7. 自动化</h2>
         <table class="doc-table">
           <tr>
             <th>CodeQL</th>
             <td>
-              <code>push</code>/<code>pull_request</code> 到
-              <code>main</code> 及每周一定时触发（javascript-typescript，build-mode:
-              none）。扫描出的告警需第一时间修复，不留 open 积压。
+              在 <code>main</code> 的 push、PR 与每周一定时任务中扫描 JavaScript/TypeScript，使用
+              <code>build-mode: none</code>；告警应及时处理。
             </td>
           </tr>
           <tr>
             <th>Dependabot</th>
-            <td>
-              npm 生态每天检查更新（<code>open-pull-requests-limit: 50</code>）。Dependabot PR
-              必须第一时间逐个处理，合并走第 5 节的工作流（一律 patch 升版）。
-            </td>
+            <td>npm 生态每天检查，开放 PR 上限为 50。依赖 PR 逐个处理，合并时统一提升 patch 版本。</td>
           </tr>
           <tr>
-            <th>bump-version-and-merge</th>
-            <td>
-              仓库唯一合并工作流（见第 5 节）：PR 评论触发升版本号并自动合并，<code>dev/</code>
-              前缀分支合并后自动删除。
-            </td>
+            <th>版本与合并</th>
+            <td>由第 5.2 节的工作流执行，不要把它当作覆盖所有测试的 CI。</td>
           </tr>
         </table>
       </section>
 
       <section class="doc-panel">
-        <h2>8. 开发边界与约定</h2>
+        <h2>8. 前端与静态资源</h2>
         <ul>
+          <li>前端主体是原生 JavaScript 与 jQuery，不经过统一前端打包；对局页脚本全局化且加载顺序敏感。</li>
           <li>
-            大厅、房间、回放、认证、验证码等页面与服务端行为都在本仓库；<code>bot-template/</code>
-            为只读参考实现，网站开发不要改动。
+            普通静态文件由静态服务直接提供；全部 HTML 及
+            <code>main.css</code>、<code>main.js</code>、<code>sw.js</code>、<code>sw-register.js</code>
+            会替换 <code>{{V}}</code> 为当前版本号后发出。
           </li>
           <li>
-            <code>dist/</code> 是构建产物，任何情况下不手工编辑；行为与源码不符时先重新
-            <code>pnpm run build</code>。
+            生产环境可把 JS、CSS、字体、图片与介绍片素材指向固定提交的 CDN，HTML、API 与 Socket.IO
+            仍由本站提供；开发命令默认使用同源资源。
           </li>
           <li>
-            前端无构建流程，<code>static/</code> 原样下发；对局页脚本（<code>main.js</code> 与
-            <code>main/*</code>）全局化且加载顺序敏感，新增脚本注意顺序。
+            介绍片是独立构建入口，<code>scripts/intro/build-intro.mjs</code> 将
+            <code>player-source.js</code> 打包为 <code>static/intro/player.js</code> 并生成压缩资源，已包含在
+            <code>pnpm run build</code> 中。
           </li>
-          <li>
-            Socket.IO 协议或格子编码变更需前后端同步：<code>src/types.ts</code>、
-            <code>src/game-engine/map-encoding.ts</code>、<code>src/server.ts</code>、前端消费方，并同步更新
-            <code>static/develop-bot.html</code> 权威文档。
-          </li>
-          <li>
-            工具链约定：<code>tsconfig.json</code> 刻意关闭 strict（改动会影响整个编译面）；ESLint 只查
-            <code>src/**/*.ts</code>；Prettier 风格为单引号/分号/尾逗号/110 列。
-          </li>
-          <li>Issue 与 PR 都在 GitHub 主仓库进行；安全问题与疑似 bug 请先开 issue 描述复现步骤。</li>
         </ul>
       </section>
 
       <section class="doc-panel">
-        <h2>9. 机器人开发</h2>
-        <p>
-          想要用代码征服这款游戏？对局协议（连接鉴权、房间与回合事件、格子编码、操作集、托管规则）有独立的权威文档，与本页同源维护。
-        </p>
+        <h2>9. 开发边界</h2>
+        <ul>
+          <li>
+            源码修改放在 <code>src/</code> 与 <code>static/</code>，不要手工编辑
+            <code>dist/</code>；行为与源码不符时先重新构建。
+          </li>
+          <li>
+            网站功能开发不要把 <code>bot-template/</code> 当作服务端源码修改；需要调整 bot
+            时应单独验证对应模板。
+          </li>
+          <li>
+            Socket.IO 协议或格子编码变化要同步修改类型、服务端、前端消费方与
+            <code>static/develop-bot.html</code>。
+          </li>
+          <li><code>tsconfig.json</code> 刻意关闭 strict；改变严格度会影响整个后端编译面。</li>
+          <li>Prettier 使用单引号、分号、尾逗号与 110 列宽度，规则见仓库配置文件。</li>
+        </ul>
+      </section>
+
+      <section class="doc-panel">
+        <h2>10. 机器人开发</h2>
+        <p>连接鉴权、房间事件、对局帧、队列序号、格子编码、操作与托管规则见独立协议文档。</p>
         <div class="cta-row">
           <button data-goto="/develop/bot" class="small inverted">查看机器人开发文档</button>
         </div>

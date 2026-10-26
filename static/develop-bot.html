@@ -28,10 +28,9 @@
     <div id="app">
       <h1 class="doc-title">Roka 机器人开发协议</h1>
       <p class="doc-subtitle">
-        本文档是 Roka 对局协议的权威说明，每个事件名、字段与数值都与服务端实现（<code>src/server.ts</code>、
-        <code>src/server/lobby-service.ts</code
-        >、<code>src/game-engine/</code>、<code>src/types.ts</code>）逐条核对。 人类和 AI
-        都可以直接照着写出一个可用的 bot。仓库：
+        本文面向新 bot 开发者，说明当前连接、房间、对局与队列协议。实现依据为
+        <code>src/server.ts</code>、<code>src/server/lobby-service.ts</code>、<code>src/game-engine.ts</code>
+        与 <code>src/types.ts</code>。仓库：
         <a
           class="doc-link"
           href="https://github.com/oimasterkafuu/Roka"
@@ -43,51 +42,50 @@
 
       <section class="doc-panel">
         <h2>1. 快速开始</h2>
-        <p>
-          仓库 <code>bot-template/</code> 下内置四个参考实现（均为独立 pnpm 包，仅依赖
-          <code>socket.io-client</code>）：
-        </p>
+        <p>仓库 <code>bot-template/</code> 下提供四个独立 pnpm 包：</p>
         <table class="doc-table">
           <tr>
             <th><code>random-patch-bot</code></th>
             <td>
-              协议最小参考（单文件
-              <code>index.js</code
-              >）：进房、自动准备、周期心跳、维护本地全图缓存，每回合随机挑一个合法动作发送
-              <code>attack</code>。建议先把它跑通，再替换决策逻辑。仅 CLI，不可被服务端托管。
+              最小协议参考：进房、自动准备、周期心跳、维护本地全图，每回合随机发送一个合法
+              <code>attack</code>。仅支持 CLI，不能被服务端托管。
             </td>
           </tr>
           <tr>
             <th><code>simple-strategy-bot</code></th>
             <td>
-              综合策略 bot（扩张/防卫/救援/进攻/经济/后勤/开局规划管线），<code>strategy.js</code> 导出
-              <code>attachStrategy</code>，CLI 与服务端托管共用同一份实现，用法见包内 <code>USAGE.md</code>。
+              综合策略 bot，包含扩张、防卫、救援、进攻、经济与后勤管线。<code>strategy.js</code> 导出
+              <code>attachStrategy</code>，CLI 与服务端托管共用实现。
             </td>
           </tr>
           <tr>
             <th><code>anti-human-bot</code></th>
             <td>
-              独立重写的强对抗 bot（自带测试与离线训练体系），<code>server-bot.js</code> 导出
-              <code>attachStrategy</code>，可托管。
+              强对抗 bot，自带测试与离线训练工具。<code>server-bot.js</code> 导出
+              <code>attachStrategy</code>，支持托管。
             </td>
           </tr>
           <tr>
             <th><code>apex-bot</code></th>
             <td>
-              战术战役 bot（救城/拆建筑优先、滚动集结推进、迷宫专用策略），<code>strategy.js</code> 导出
-              <code>attachStrategy</code>，可托管。
+              战术战役 bot，包含救城、建筑处理、集结推进与迷宫策略。<code>strategy.js</code> 导出
+              <code>attachStrategy</code>，支持托管。
             </td>
           </tr>
         </table>
 
         <h3>1.1 获取 token</h3>
         <p>
-          登录有图形验证码，bot 无法自动登录。先在浏览器登录，然后从开发者工具的 Cookie 中复制
-          <code>auth_token</code> 的值（即登录 JWT，有效期 7 天）。建议给 bot
-          单独注册账号，避免与浏览器互相顶号（见第 2 节单会话限制）。
+          登录需要图形验证码。使用普通账号运行 bot 时，先在浏览器登录，再从开发者工具的 Cookie 中复制
+          <code>auth_token</code> 的值作为 JWT。JWT 有效期为 7 天；重新登录会轮换会话并使其失效。建议给 bot
+          使用独立账号，避免与浏览器互相顶号。
         </p>
 
-        <h3>1.2 环境变量（random-patch-bot / simple-strategy-bot）</h3>
+        <h3>1.2 环境变量</h3>
+        <p>
+          下表适用于 <code>random-patch-bot</code>、<code>simple-strategy-bot</code> 与
+          <code>apex-bot</code>：
+        </p>
         <table class="doc-table">
           <tr>
             <th><code>BOT_SERVER</code></th>
@@ -95,45 +93,40 @@
           </tr>
           <tr>
             <th><code>BOT_ROOM</code></th>
-            <td>必填。要加入的房间号。</td>
+            <td>必填，要加入的房间号。</td>
           </tr>
           <tr>
             <th><code>BOT_TOKEN</code></th>
-            <td>必填。上一步复制的 <code>auth_token</code> Cookie 值。</td>
+            <td>必填，<code>auth_token</code> Cookie 的值。</td>
           </tr>
           <tr>
             <th><code>BOT_TEAM</code></th>
-            <td>组队模式下的目标队伍号，默认 <code>1</code>；非组队模式会被服务端规整为参赛。</td>
+            <td>组队模式下的目标队伍号，默认 <code>1</code>；非组队模式会归为参赛席。</td>
           </tr>
           <tr>
             <th><code>BOT_AUTO_READY</code></th>
-            <td>默认 <code>1</code>（自动参赛并准备）；设为 <code>0</code> 关闭。</td>
+            <td>默认 <code>1</code>，自动参赛并准备；设为 <code>0</code> 关闭。</td>
           </tr>
           <tr>
             <th><code>BOT_ACTION_DELAY_MS</code></th>
-            <td>
-              每回合决策后的发送延迟毫秒数，默认 <code>120</code>（apex-bot 默认
-              <code>0</code>，收到最新帧即决策）。
-            </td>
+            <td>决策后的发送延迟，前两个模板默认 <code>120</code> 毫秒，apex-bot 默认 <code>0</code>。</td>
           </tr>
         </table>
         <pre class="code-snippet"><code>cd bot-template/random-patch-bot
 pnpm install
 BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=your-room BOT_TOKEN=your-auth-token pnpm start</code></pre>
-        <p style="margin-top: 8px">
-          <code>anti-human-bot</code> 的环境变量集合略有不同：无 <code>BOT_TEAM</code> /
-          <code>BOT_ACTION_DELAY_MS</code>，另有 <code>BOT_PARAMS</code>（策略参数
-          JSON），且默认连接生产服务器 <code>https://roka.oim.moe:444/</code>、默认房间
-          <code>bot</code>；详见其 <code>USAGE.md</code>。
+        <p>
+          <code>anti-human-bot</code> 使用略有不同的环境变量：没有 <code>BOT_TEAM</code> 与
+          <code>BOT_ACTION_DELAY_MS</code>，另有策略参数 <code>BOT_PARAMS</code>；默认连接
+          <code>https://roka.oim.moe:444/</code>，默认房间为 <code>bot</code>。详见包内
+          <code>USAGE.md</code>。
         </p>
 
-        <h3>1.3 由管理员在服务端托管运行</h3>
+        <h3>1.3 服务端托管</h3>
         <p>
-          超级管理员可以在后台管理页 <code>/admin</code> 的「策略 Bot」分区直接启动可托管模板（
-          <code>simple-strategy-bot</code>、<code>anti-human-bot</code>、<code>apex-bot</code>
-          会被自动枚举，<code>random-patch-bot</code>
-          不在其列）：只需提供已注册用户名与房间号，服务端在本进程内用内存临时令牌连接自身 socket
-          完成登录，无需验证码与 token。托管规则的完整说明见第 7 节。
+          超级管理员可在 <code>/admin</code> 的「策略
+          Bot」分区启动可托管模板。只需提供已注册用户名、房间号、模板及房间权限；服务端在进程内使用内存临时令牌连接自身，无需额外提供
+          JWT。完整规则见第 7 节。
         </p>
       </section>
 
@@ -142,160 +135,132 @@ BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=your-room BOT_TOKEN=your-auth-token p
         <table class="doc-table">
           <tr>
             <th>Socket 地址</th>
-            <td>与站点同源，Socket.IO 默认路径 <code>/socket.io/</code>。</td>
+            <td>与站点同源，Socket.IO 默认路径为 <code>/socket.io/</code>。</td>
           </tr>
           <tr>
             <th>transport</th>
-            <td>服务端仅允许 <code>websocket</code> 与 <code>polling</code>。</td>
+            <td>服务端允许 <code>websocket</code> 与 <code>polling</code>。</td>
           </tr>
           <tr>
-            <th>鉴权优先级</th>
+            <th>鉴权顺序</th>
             <td>
-              握手中间件依次尝试：1) <code>auth.token</code> 命中 <code>ROKA_BOT_TOKENS</code> 表；2)
-              <code>auth.token</code> 命中服务端托管 bot 内存令牌；3) 按 JWT 校验（优先
-              <code>auth.token</code>，缺省时回退握手 Cookie 里的 <code>auth_token</code>）。JWT
-              除签名外还校验会话有效性：重新登录会轮换 session 使旧令牌失效。
+              握手中间件依次检查 <code>auth.token</code> 是否命中 <code>ROKA_BOT_TOKENS</code>、是否命中托管
+              bot 内存令牌，再按 JWT 校验。JWT 可从 <code>auth.token</code> 提供；未提供时读取握手 Cookie 中的
+              <code>auth_token</code>。
             </td>
           </tr>
           <tr>
             <th>Bot 专用令牌</th>
             <td>
-              服务端可用环境变量 <code>ROKA_BOT_TOKENS</code>（格式
-              <code>"token1:username1,token2:username2"</code>，用户名须匹配
-              <code>[A-Za-z0-9_]{3,20}</code>）配置合成 bot 账号：握手 <code>auth.token</code>
-              命中表项时直接以对应用户名放行，无需注册。
+              服务端可通过 <code>ROKA_BOT_TOKENS</code> 配置合成 bot 账号，格式为
+              <code>"token1:username1,token2:username2"</code>。用户名须匹配
+              <code>[A-Za-z0-9_]{3,20}</code>；命中后直接使用对应用户名，无需注册。
             </td>
           </tr>
           <tr>
             <th>鉴权失败</th>
             <td>
-              连接被拒绝，客户端收到
-              <code>connect_error</code>（消息如「未登录或登录已失效。」；已封禁账号收到封禁文案）。例外：带
-              <code>?home=1</code> 的连接匿名放行，仅接收首页全局广播，收不到 <code>set_id</code>。
+              客户端收到 <code>connect_error</code>，消息可能是「未登录或登录已失效。」或封禁原因。带
+              <code>?home=1</code> 的匿名连接只用于首页全局广播，不下发 <code>set_id</code>，也不能进入对局。
             </td>
           </tr>
           <tr>
-            <th>身份标识 <code>set_id</code></th>
+            <th><code>set_id</code></th>
             <td>
-              连接后服务器下发 <code>set_id</code>（字符串），值为当前 socket id 的 MD5。后续在
-              <code>room_update.players[].sid</code>、<code>init_map.player_ids</code> 与
-              <code>update.kills</code> 中都用这个 ID 标识自己。
+              连接后服务端下发当前 socket id 的 MD5 字符串。在 <code>room_update.players[].sid</code>、
+              <code>init_map.player_ids</code> 与 <code>update.kills</code> 中使用这个 ID 识别自己。
             </td>
           </tr>
           <tr>
             <th>单会话限制</th>
             <td>
-              同一用户名同时只允许一个
-              socket：新连接成功后，该账号的旧连接会被服务端直接断开（顶号，旧连接只收到底层
-              disconnect，无业务事件）。<b>例外</b>：bot 连接（<code>ROKA_BOT_TOKENS</code>
-              合成账号与服务端托管 bot）不参与顶号互斥，不会顶掉同名的浏览器连接，也不会被顶掉。
+              普通 JWT 连接按用户名互斥，新连接会断开同一账号的旧连接。使用
+              <code>ROKA_BOT_TOKENS</code> 或托管令牌的 bot
+              不参与互斥，不会顶掉同名浏览器连接，也不会被其顶掉。
             </td>
           </tr>
           <tr>
-            <th>断线宽限与换绑</th>
+            <th>断线重连</th>
             <td>
-              对局中掉线（含被顶号）有 10 秒宽限期：期间不判挂机、不投降，操作队列继续执行。10
-              秒内重新连接并对同一房间发送 <code>join_game_room</code>
-              即可恢复对局：服务端把该玩家的 socket 换绑到新连接，<b>清空其操作队列</b>，并补发
-              <code>init_map</code> 与一帧全量 <code>update</code>（注意此时
-              <code>init_map.player_ids</code> 与 <code>update.kills</code> 中的自己 ID 已变为新
-              <code>set_id</code
-              >）。超过宽限期以「挂机」原因自动投降并转为观战。换绑按用户名匹配且只在同类连接之间进行（bot
-              连接只能接管 bot
-              的旧席位、浏览器连接只能接管浏览器的旧席位）：同名人类玩家在对局中打开房间页不会抢走 bot
-              的席位，而是作为新成员进房观战。
-            </td>
-          </tr>
-          <tr>
-            <th>真人校验 <code>client_verify</code></th>
-            <td>
-              网页客户端在拿到 <code>set_id</code> 后、进房之前发送 <code>client_verify</code>（<code
-                >{ sig }</code
-              >，sig 为会话戳与连接 id 的派生签名）；<code>room_heartbeat</code>
-              携带同签名为补充路径。校验通过的连接被服务端记为真人； 未通过的连接（bot 一律不通过）在
-              <code>room_update.players[]</code> 与对局排行榜中带
-              <code>ai: true</code> 标记（前端显示「[AI]」前缀），并影响房主归属与全 AI 房强制 4x 判定（见 3.1
-              与 7.2）。网页先发送验证再进房，同一连接事件按序处理，首次房间更新即正确识别真人。 普通账号 JWT
-              登录的第三方 bot 未通过验证时自动显示「[AI]」，无需管理员配置名单。
+              对局中断线后有 10 秒宽限期，期间不判挂机，已排队指令继续执行。重新连接并对同一房间发送
+              <code>join_game_room</code> 后，服务端按用户名与连接类别匹配席位：bot 只能接管 bot
+              席位，普通连接只能接管普通连接席位。换绑会清空操作队列，补发 <code>init_map</code> 与全量
+              <code>update</code>；自己的 <code>set_id</code> 会改变。超过宽限期将以「挂机」原因投降。
             </td>
           </tr>
         </table>
-        <pre class="code-snippet"><code>// JS 连接示例（socket.io-client）
-const { io } = require('socket.io-client');
+        <pre class="code-snippet"><code>const { io } = require('socket.io-client');
 const socket = io(BOT_SERVER, {
   transports: ['websocket', 'polling'],
   auth: { token: BOT_TOKEN }
 });
-socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre>
+socket.on('set_id', (id) => {
+  // 保存为自己的 client id。
+});</code></pre>
       </section>
 
       <section class="doc-panel">
-        <h2>3. 房间阶段协议（开局前）</h2>
+        <h2>3. 房间阶段协议</h2>
 
         <h3>3.1 Client → Server</h3>
         <table class="doc-table">
           <tr>
             <th><code>join_game_room</code></th>
             <td>
-              <code>{ room: string }</code>。房间号仅限制长度
-              <code>1..15</code>，无字符集限制；不合法时静默忽略。先尝试断线换绑（见第 2
-              节），否则正常进房；本连接已在其他房间时重复发送会被忽略。房主为房间成员列表首位，按三档确定：
-              真人（进房时已通过 <code>client_verify</code> 校验）插在既有真人之后——任何真人进房即接任房主；
-              非官方 AI（令牌 bot、第三方 bot、未通过校验的连接）在房内无真人时居首位当房主； 服务端托管 bot
-              永远排尾、不当房主。判定以进房那一刻为准，进房后补验真人不重排队列。
-              对局进行中进房自动成为观战者，补发 <code>init_map</code>（<code>general: [-1, -1]</code
-              >）与一帧全量 <code>update</code>。
+              <code>{ room: string }</code>。房间号 trim 后长度为
+              <code>1..15</code
+              >，不限制字符集；不合法时忽略。服务端先尝试断线换绑，否则正常进房；已经在其他房间时重复发送无效。房间成员列表首位是房主。托管
+              bot 固定排在普通成员之后，不当房主。对局进行中进房会成为观战者，并收到
+              <code>init_map</code>（<code>general: [-1, -1]</code>）与全量 <code>update</code>。
             </td>
           </tr>
           <tr>
             <th><code>change_team</code></th>
             <td>
-              <code>{ team: number }</code>。合法范围 <code>0..16</code>：<code>0</code>
-              表示观战（同时强制取消准备）；<code>1..16</code> 表示参赛/队伍号。非组队模式下，非 0 会被规整为
-              <code>1</code>（参赛）。参赛者满 16
-              人时从观战转参赛会被拒绝。对局进行中仅观战者与已战败玩家可换队（决定下一局的「观战/参与」模式），存活参赛者需等对局结束。
+              <code>{ team: number }</code>，范围为 <code>0..16</code>。<code>0</code>
+              表示观战并取消准备，<code>1..16</code> 表示参赛或队伍号；非组队模式将非 0 值归为
+              <code>1</code>。参赛席满 16
+              人时不能从观战转为参赛。对局进行中只有观战者与已出局玩家可换队，用于决定下一局是否参赛。
             </td>
           </tr>
           <tr>
             <th><code>change_ready</code></th>
             <td>
               <code>{ ready: boolean }</code
-              >。仅参赛者有效（观战席恒为未准备），且仅在房间未开局时生效；部署更新排队期间会被拒绝并收到提示消息。
+              >。仅参赛席在准备阶段有效，观战席始终未准备；部署更新排队期间会被拒绝并收到提示。
             </td>
           </tr>
           <tr>
             <th><code>change_game_conf</code></th>
             <td>
-              可选字段 patch，仅房主可改，对局进行中不生效。合法字段：
-              <code>speed</code>（0.5~4
-              浮点）、<code>allow_team</code>（bool）、<code>fog</code>（bool，迷雾远征）、<code>multi_line</code>（bool，全局队列）、<code>map_size</code>（<code>normal|large</code>，其余值归一为
-              <code>normal</code
-              >）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>，未知值归一为
-              <code>random</code
-              >）、<code>map_region</code>（华夏模式地区：<code>qin|han|tang|liao|song|yuan|ming|china|taiwan</code>；别名
-              <code>three-kingdoms</code>、<code>northern-dynasties</code> 归一为 <code>han</code>，旧值
-              <code>qing</code> / <code>hong-kong</code> 归一为 <code>china</code>，其他未知值和缺省值回退为
-              <code>china</code>）、<code>map_token</code>（trim 后最长 32；非空输入视为自定义种子，
-              对局结束后沿用不重随机，清空则恢复每局随机）。华夏系列仅在每年中国时区（Asia/Shanghai）10 月 1
-              日至 10 月 7 日（含全天）开放；非活动期设置请求会被拒绝（房间消息提示），过期房间配置在
-              <code>room_update</code> 与开局时回退为
-              <code>random</code>（配置本体不改）。回放重建不受当前日期影响。
-              房间内存在不允许组队的服务端托管策略 Bot 时不允许组队：<code>allow_team</code>
-              开启请求会被拒绝（房间消息提示），且托管 Bot 进房时会强制关闭已开启的组队模式；允许组队的托管
-              Bot 则由房主自由开关组队。同理，房间内存在第三方 Bot 或未允许迷雾的托管 Bot 时不允许开启
-              <code>fog</code>；存在第三方 Bot 或未允许全局队列的托管 Bot 时不允许开启
-              <code>multi_line</code>，这类 Bot 进房时会强制关闭已开启的迷雾/全局队列。
+              仅房主可在准备阶段发送设置 patch。字段包括 <code>speed</code>（0.5~4）、
+              <code>allow_team</code>、<code>fog</code>、<code>multi_line</code>（布尔值）、
+              <code>map_size</code
+              >（<code>normal|large</code>）、<code>map_mode</code>（<code>random|maze|archipelago|mediterranean|huaxia</code>）、
+              <code>map_region</code>（<code>qin|han|tang|liao|song|yuan|ming|china|taiwan</code>）与
+              <code>map_token</code>（trim 后最多 32 字符）。未知地图模式回退为
+              <code>random</code>，未知地区回退为
+              <code>china</code>。非空种子会沿用到下一局，清空后每局重新随机。
+            </td>
+          </tr>
+          <tr>
+            <th>房间设置限制</th>
+            <td>
+              华夏地图仅在每年 <code>Asia/Shanghai</code> 时区 10 月 1 日至 10 月 7
+              日开放；其他时间不能选用，已有配置在快照与开局时按
+              <code>random</code> 使用。房间内有不允许组队的托管 bot 时不能开启组队；有第三方 bot
+              或未获相应许可的托管 bot 时，不能开启迷雾或全局队列。相关 bot 进房也会强制关闭对应设置。
             </td>
           </tr>
           <tr>
             <th><code>room_heartbeat</code></th>
             <td>
-              <code>{}</code>（网页端附带 <code>{ visible, focused }</code>，服务端不解析字段）。房间页每 30
-              秒上报一次，证明标签页仍然开启。仅在房间准备阶段检查：超过 600 秒未收到心跳，或在房停留累计超过
-              12 小时（即使心跳正常）的成员会被服务端自动移出房间（收到
-              <code>room_kick</code>）。对局进行中不检查（对局断线走 10
-              秒宽限期机制，停留超限也等本局结束后再移出）。所有 bot 连接（<code>ROKA_BOT_TOKENS</code>
-              与服务端托管 bot）豁免心跳与停留检查；使用普通用户 JWT 的 bot 需自行周期发送心跳。
+              发送 <code>{}</code> 即可，服务端不解析其他字段。房间页每 30 秒发送一次。准备阶段超过 600
+              秒没有心跳，或在房累计超过 12 小时，会被移出并收到
+              <code>room_kick</code>。对局中不执行这项检查；使用普通 JWT 的 bot 要自行发送心跳，<code
+                >ROKA_BOT_TOKENS</code
+              >
+              与托管 bot 豁免。
             </td>
           </tr>
         </table>
@@ -305,18 +270,12 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
           <tr>
             <th><code>room_update</code></th>
             <td>
-              房间状态快照：
+              房间快照字段为
               <code
                 >{ speed, allow_team, fog, multi_line, map_size, map_token, map_token_custom, map_mode,
                 map_region, in_game, update_queued, players, ready, need, ready_counts }</code
-              >。<code>fog=true</code> 表示本房间开启了迷雾远征；<code>单一全局队列</code>
-              表示本房间开启了全局队列（对局协议变化见 5.6）；<code>map_token_custom=true</code>
-              表示当前种子为房主自定义（对局结束后沿用不重随机）；<code>map_mode</code>/<code
-                >map_region</code
-              >
-              均为归一化后的值。<code>update_queued=true</code> 表示部署更新排队中：禁止开新局（
-              <code>change_ready</code> 会被拒绝并收到提示消息），宽限期（默认 120
-              秒）内未结束的对局将按当前名次清算。
+              >。 <code>multi_line=true</code> 表示开启全局队列；<code>map_token_custom=true</code>
+              表示种子由房主设置；<code>update_queued=true</code> 表示部署更新排队中，不能开新局。
             </td>
           </tr>
           <tr>
@@ -325,119 +284,101 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
               每项为
               <code
                 >{ sid, uid, team, ready, server_bot?, server_bot_allow_team?, server_bot_allow_fog?,
-                server_bot_allow_multi_line?, bot?, ai? }</code
-              >： <code>sid</code> 为该玩家 socket id 的 MD5；<code>uid</code> 为用户名；<code>team</code> 为
-              0（观战）或队伍号；<code>ready</code> 为准备状态（观战席恒为 <code>false</code>）；
-              <code>server_bot</code> 仅在服务端托管策略 Bot 成员上为 <code>true</code>；
-              <code>server_bot_allow_team</code> / <code>server_bot_allow_fog</code> /
-              <code>server_bot_allow_multi_line</code> 仅在 <code>server_bot</code> 为
-              <code>true</code> 时下发，表示该 Bot 是否允许组队/迷雾/全局队列； <code>bot</code> 在任意 Bot
-              成员（含第三方 Bot）上为 <code>true</code>；<code>ai</code> 在未通过真人校验的连接上为
-              <code>true</code>（见第 2 节 <code>client_verify</code>）。
+                server_bot_allow_multi_line?, bot? }</code
+              >。 <code>sid</code> 是 socket id 的 MD5，<code>uid</code> 是用户名，<code>team=0</code>
+              表示观战。<code>server_bot</code> 标记托管成员，三个
+              <code>server_bot_allow_*</code> 字段表示其组队、迷雾与全局队列许可；<code>bot=true</code>
+              标记第三方或托管 bot 成员。
             </td>
           </tr>
           <tr>
             <th><code>ready</code> / <code>need</code> / <code>ready_counts</code></th>
             <td>
-              <code>ready</code>/<code>need</code> 分别为全体参赛者准备数和旧版多数门槛（floor(参赛人数 / 2) +
-              1；不足 2 人时为 0），不再作为开局判据；标量达标不代表两组均达标，客户端应用参赛人数而非 need >
-              1 判断能否准备；<code>ready_counts</code>
-              的 human/ai 分别给出 ready、need、total。观战席不计，每个非空组按 ceil(total / 2)
-              计算，所有非空组达标且总参赛人数至少 2
-              人才自动开局。组队模式下若所有参赛者处于同一队伍，服务端拒绝开局并提示调整队伍。
+              <code>ready</code> 是全体参赛席准备数，<code>need</code>
+              是房间列表使用的汇总阈值，不能单独作为开局判据。 <code>ready_counts.human</code> 与
+              <code>ready_counts.ai</code> 都包含
+              <code>{ ready, need, total }</code>，观战席不计入。总参赛人数为 2 时，所有参赛者都必须准备；达到
+              3 人后，每个非空分组分别要求
+              <code>ready ≥ ceil(total / 2)</code
+              >。所有非空分组达标才会自动开局。组队模式下，所有参赛者在同一队伍时不会开局。
             </td>
           </tr>
           <tr>
             <th><code>starting</code></th>
-            <td>
-              <code>{}</code>。满足开局条件后广播，表示即将进入对局；约 2 秒后首帧，随后收到
-              <code>init_map</code>。
-            </td>
+            <td><code>{}</code>。对局创建并下发 <code>init_map</code> 后广播；再等待约 2 秒开始 Tick。</td>
           </tr>
           <tr>
             <th><code>chat_message</code></th>
             <td>
-              聊天消息：<code>{ sender, color, text, team }</code>。系统消息 <code>sender</code> 为空、
-              <code>color=0</code>；跨房间转发的非队伍消息额外带 <code>room</code>（来源房间号）。
-              进出类系统消息（加入/离开/重连/被移出）额外带可选 <code>fold: { name, verb }</code>
-              供客户端合并连续消息显示，纯展示字段，bot 可忽略。
+              字段为 <code>{ sender, color, text, team, room?, fold? }</code>。系统消息的
+              <code>sender</code> 为空且 <code>color=0</code>；跨房间消息带来源房间号
+              <code>room</code>。进出消息的 <code>fold: { name, verb }</code> 只用于界面合并显示，bot 可忽略。
             </td>
           </tr>
           <tr>
             <th><code>room_kick</code></th>
-            <td>
-              <code>{}</code>。因心跳超时（准备阶段 600 秒无 <code>room_heartbeat</code>）或在房停留超过 12
-              小时被服务端移出房间；网页端收到后跳转回首页。被移出后连接仍然保留，可重新
-              <code>join_game_room</code>。
-            </td>
+            <td><code>{}</code>。因心跳或停留限制被移出房间；连接仍保留，可再次进房。</td>
           </tr>
           <tr>
             <th><code>deploy_queued</code></th>
             <td>
-              <code>{ queued }</code>。部署更新排队状态全局广播（所有连接，含首页）：<code>queued=true</code>
-              表示进入排队（网页端对局中显示「系统即将更新」横幅、禁用开始按钮）；<code>false</code>
-              表示更新未重启而结束（失败或演练），排队状态解除。排队状态解除后服务端不主动重开对局，bot
-              需照常重新准备触发开局。
+              <code>{ queued }</code>，全局广播部署排队状态。<code>true</code> 表示禁止开新局；
+              <code>false</code> 表示排队解除。解除后不会自动重开，bot 应照常重新准备。
             </td>
           </tr>
           <tr>
             <th><code>left</code></th>
-            <td><code>{}</code>。<code>return_room</code> / <code>leave</code> 的确认回执。</td>
+            <td><code>{}</code>，<code>return_room</code> 或 <code>leave</code> 的回执。</td>
           </tr>
         </table>
         <div class="tips">
-          <b>提示：</b>房间内只剩 bot（所有剩余成员
-          <code>bot=true</code>，观战的人类除外）时，服务端会在准备阶段把房间设置整体重置为默认值（speed
-          1、不组队、无迷雾、无全局队列、随机新种子、<code>map_mode=random</code>、<code>map_size=normal</code>）并提示；对局进行中不触发，等本局结束后才重置。
+          <b>提示：</b>准备阶段如果剩余成员全部带有 <code>bot=true</code>，房间设置会恢复默认值：速度
+          1、不组队、无迷雾、无全局队列、随机地图、标准尺寸与新随机种子。对局结束时再执行这项检查。
         </div>
       </section>
 
       <section class="doc-panel">
-        <h2>4. 对局阶段协议（开局后）</h2>
+        <h2>4. 对局阶段协议</h2>
 
         <h3>4.1 开局事件 <code>init_map</code></h3>
         <table class="doc-table">
           <tr>
             <th><code>n</code> / <code>m</code></th>
-            <td>地图行数 / 列数。格子下标 <code>idx = x * m + y</code>（行优先）。</td>
+            <td>地图行数与列数。格子下标为 <code>idx = x * m + y</code>，按行优先展开。</td>
           </tr>
           <tr>
             <th><code>player_ids</code></th>
             <td>
-              所有玩家的 MD5 SID 数组。用 <code>set_id</code> 在其中查找下标（从 0 开始），你的 owner id =
-              <code>index + 1</code>；查不到即为观战。
+              参赛者 ID 数组。用 <code>set_id</code> 找到从 0 开始的下标，自己的 owner id 为下标加
+              1；找不到时表示观战。
             </td>
           </tr>
           <tr>
             <th><code>general</code></th>
-            <td><code>[x, y]</code>，你自己的主城坐标；观战者为 <code>[-1, -1]</code>。</td>
+            <td><code>[x, y]</code>，自己的主城坐标；观战者为 <code>[-1, -1]</code>。</td>
           </tr>
           <tr>
             <th><code>next_seq</code></th>
             <td>
-              可选，仅参赛席下发（观战席无自身队列不下发）：服务端为你分配的下一个操作序号。本地每入队一条
-              <code>attack</code>/<code>build</code> 指令即分配一个单调递增的 seq，必须从该值继续计数，与
-              <code>update.lst_moves</code> 下发的 seq 对齐摘除本地镜像队列。<strong
-                >断线重连换绑时也会随补发的 <code>init_map</code> 重新下发</strong
-              >（服务端序号已递增），收到后必须用它覆盖本地计数器，否则两端 seq 永久错位、lst_moves
-              永远摘不到队列项（移动箭头/建造标志永不消失）。
+              仅参赛席下发，表示服务端将分配的下一个操作序号。本地从该值开始，为每条成功入队的
+              <code>attack</code> 或 <code>build</code> 分配递增
+              <code>seq</code>。重连后必须用新值覆盖本地计数器。
             </td>
           </tr>
           <tr>
             <th><code>queue_ops</code></th>
             <td>
-              可选，仅参赛席下发：服务端当前为你保留的操作队列拷贝（元素形如
-              <code>{ kind: 'm', x, y, dx, dy, mode, seq }</code> 或
-              <code>{ kind: 'b' | 'c', x, y, seq }</code>），用于重建本地镜像队列；断线重连换绑时同样随
-              <code>init_map</code> 补发（换绑会清空服务端队列，此时为空数组）。
+              仅参赛席下发，是服务端当前操作队列的拷贝。移动项为
+              <code>{ kind: 'm', x, y, dx, dy, mode, seq }</code>，建造项为
+              <code>{ kind: 'b' | 'c', x, y, seq }</code
+              >。用它建立本地镜像队列；重连换绑会清空队列，因此补发值为空数组。
             </td>
           </tr>
           <tr>
-            <th><code>multi_line</code> / <code>队列项数量</code></th>
+            <th><code>multi_line</code></th>
             <td>
-              可选，仅房间开启「全局队列」时下发：<code>单一全局队列</code>，<code>队列项数量</code>
-              为当前队列数（v2 起队列条数按需动态增长、不设上限，开局为
-              1）。缺省即为单线对局。调度与路由规则见 5.6。
+              可选布尔值。开局创建对局时，参赛席在全局队列模式下收到
+              <code>true</code>；缺省表示单线串行。重连时保留已收到的房间模式状态。
             </td>
           </tr>
         </table>
@@ -448,158 +389,126 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
             <th>整体结构</th>
             <td>
               <code
-                >{ grid_type, army_cnt, isolated, fog?, lst_move, leaderboard, turn, kills, game_end, is_diff,
-                replay? }</code
+                >{ grid_type, army_cnt, isolated, fog?, lst_moves, leaderboard, turn, kills, game_end,
+                is_diff, replay? }</code
               >
             </td>
           </tr>
           <tr>
             <th><code>turn</code></th>
             <td>
-              Tick 计数（前端显示为 <code>Math.floor(turn/2)</code> 回合）。1 Tick = 0.5 秒（速度
-              1x），实际间隔为 <code>500 / speed</code> 毫秒，speed 0.5~4 只缩放 Tick 间隔。奇数 Tick
-              各队操作执行顺序反转（后手补偿）。
+              Tick 计数，界面回合数为 <code>Math.floor(turn / 2)</code>。速度 1 时每 Tick 0.5 秒，实际间隔为
+              <code>500 / speed</code> 毫秒。奇数 Tick 反转玩家操作顺序。
             </td>
           </tr>
           <tr>
             <th><code>is_diff = false</code></th>
             <td>
-              全量帧：<code>grid_type</code>、<code>army_cnt</code>、<code>isolated</code> 都是长度
-              <code>n*m</code> 的全量数组，按行优先展开。下发时机：开局/进房/重连补发、每 50 Tick 定期、每
-              Tick 约 1/51 概率随机补发、终局帧；观战者每 Tick 都收全量帧。
+              全量帧，三个地图数组长度均为 <code>n*m</code>。开局、每 50
+              Tick、随机补发、终局、重连与观战视角切换时会发送；中途进房的观战者首帧也是全量帧。
             </td>
           </tr>
           <tr>
             <th><code>is_diff = true</code></th>
             <td>
-              差分帧：<code>grid_type</code>/<code>army_cnt</code>/<code>isolated</code> 均为 index-value 对：
-              <code>[idx0, val0, idx1, val1, ...]</code>。机器人需要在本地缓存全图并增量合并（<code
-                >isolated</code
-              >
-              在差分帧中可能为空数组，表示本帧无孤军状态变化）。
+              差分帧，<code>grid_type</code>、<code>army_cnt</code>、<code>isolated</code> 与可选
+              <code>fog</code> 都编码为 <code>[idx0, val0, idx1, val1, ...]</code>。bot
+              应维护全量缓存并逐对覆盖；空数组表示没有变化。
             </td>
           </tr>
           <tr>
-            <th><code>isolated</code> 取值</th>
-            <td>
-              <code>0</code> 正常；<code>1</code> 断链宽限期（断链后前 10 Tick，只闪烁、尚未衰减）；<code
-                >2</code
-              >
-              衰减期（第 11 Tick 起每 2 Tick 衰减一次，公式见 5.3）。
-            </td>
+            <th><code>isolated</code></th>
+            <td><code>0</code> 正常，<code>1</code> 断链宽限期，<code>2</code> 衰减期。</td>
           </tr>
           <tr>
             <th><code>fog</code></th>
             <td>
-              可选数组，仅房间开启「迷雾远征」的实时对局下发（回放与默认观战不含视野过滤）：长度
-              <code>n*m</code>（差分帧同样为 index-value 对），<code>1</code> 表示该格在己方队伍视野外，<code
-                >0</code
-              >
-              表示可见（全视野接收者在迷雾对局中收到全 0 数组）。过滤规则见 5.4。
+              可选数组，仅迷雾对局的实时帧下发。<code>1</code> 表示视野外，<code>0</code>
+              表示可见；全视野接收者收到全 0 数组。差分帧同样使用 index-value 对。
             </td>
           </tr>
           <tr>
-            <th><code>lst_move</code></th>
+            <th><code>lst_moves</code></th>
             <td>
-              <code>{ x, y, dx, dy, half, mode, op, skip, line? }</code>。表示服务器本 Tick
-              为你执行的最近操作（用于客户端队列确认）。<code>op</code>：<code>'m'</code> 推兵、<code
-                >'b'</code
-              >
-              建成指挥所、<code>'c'</code> 升级主城（后两者 <code>dx=dy=-1</code>）。本 Tick 无执行时为
-              <code>{ x:-1, y:-1, dx:-1, dy:-1, half:false, mode:0, op:'m' }</code>。 <code>skip</code> 为本
-              Tick 被执行操作之前因条件不满足被自动丢弃的队首操作数（无执行时为本 Tick
-              全部丢弃数）；失效操作会被服务器直接移出队列，后续操作在同一 Tick
-              继续尝试执行。观战者收到的是占位值（全 -1，<code>skip=0</code>）。
-              <code>line</code> 仅全局队列对局下发：本 Tick 调度的是第几条队列（0 起，skip
-              丢弃也发生在该队列）。
+              <code>number[]</code>，包含本 Tick 当前玩家所有出队操作的
+              <code>seq</code
+              >，无论执行成功还是因条件不满足被丢弃都包括在内；无出队时为空数组。观战者收到空数组。客户端按序号从本地镜像队列摘除对应项，不依赖逐操作回执。
             </td>
           </tr>
           <tr>
             <th><code>leaderboard[]</code></th>
             <td>
-              每项结构：<code>{ team, uid, army, land, class_, dead, id, ai? }</code>。<code>army</code>
-              为全图兵力合计，<code>land</code> 为格数，<code>id</code> 为座位号（1 起），<code>dead</code>
-              为出局次序（0 = 存活）。<code>class_</code>：<code>''</code> 正常；<code>'dead'</code>
-              已离场/出局；<code>'afk'</code> 断线宽限计数中（连接中断但尚未判负，宽限期内会出现）。
-              <code>ai</code> 按开局时真人校验结果保存快照：未验证为 <code>true</code>，
-              后续补验、断线换绑或成员移除不改变本局标记。仅参赛者入榜。
+              每项为 <code>{ team, uid, army, land, class_, dead, id }</code>。<code>army</code>
+              是兵力合计，<code>land</code> 是领土格数，<code>id</code> 是从 1 开始的座位号，
+              <code>dead=0</code> 表示存活，其他值表示出局次序。<code>class_</code> 为 <code>''</code>、<code
+                >'dead'</code
+              >
+              或 <code>'afk'</code>。仅参赛者入榜。
             </td>
           </tr>
           <tr>
             <th><code>kills</code></th>
             <td>
-              <code>Record&lt;sid_md5, killer_name&gt;</code>。当你被击败时，键为你的
-              <code>set_id</code>。值为击杀者用户名；无攻击者的系统接管为 <code>'系统'</code>，投降/挂机路径为
-              <code>'投降'</code> / <code>'挂机'</code>。
+              <code>Record&lt;sid_md5, killer_name&gt;</code>。自己出局时键为当前
+              <code>set_id</code>；值是击杀者用户名，或
+              <code>'系统'</code>、<code>'投降'</code>、<code>'挂机'</code>。
             </td>
           </tr>
           <tr>
             <th><code>game_end</code></th>
-            <td><code>true</code> 表示该帧为终局帧（终局帧必为全量帧）。</td>
+            <td><code>true</code> 表示终局帧；终局帧为全量帧。</td>
           </tr>
           <tr>
             <th><code>replay</code></th>
-            <td>可选字符串，仅在终局帧出现，表示回放 ID（<code>/replays/&lt;id&gt;</code> 可观看）。</td>
+            <td>可选字符串，仅在终局帧出现，是回放 ID。</td>
           </tr>
         </table>
 
-        <h3>4.3 格子编码（<code>grid_type</code> 线上编码）</h3>
+        <h3>4.3 格子编码 <code>grid_type</code></h3>
         <table class="doc-table">
           <tr>
             <th><code>0..49</code></th>
             <td>
-              普通地块，owner id = code（0 表示无兵中立，极少出现；中立空地一般为 200）。服务端内部记为
-              <code>0</code>。
+              普通地块，owner id = code；<code>0</code> 可表示带兵的中立内部状态，常见中立空地为
+              <code>200</code>。
             </td>
           </tr>
           <tr>
             <th><code>50..99</code></th>
-            <td>
-              指挥所，owner id = code - 50（内部 <code>-1</code>）。只能由玩家建造（<code>build</code>
-              操作，相当于 X 键，消耗 50 兵），地图不再预置；与普通地块一样每 50 Tick +1
-              兵（不享受爆发期加成），是连通锚点。
-            </td>
+            <td>指挥所，owner id = code - 50。只能由玩家建造，每 50 Tick 增兵，是连通锚点。</td>
           </tr>
           <tr>
             <th><code>100..149</code></th>
-            <td>
-              主城（将军），owner id = code - 100（内部 <code>-2</code>）。每 Tick +1 兵；失去所有主城即出局。
-            </td>
+            <td>主城，owner id = code - 100。每 Tick 增兵；失去所有主城即出局。</td>
           </tr>
           <tr>
             <th><code>150..199</code></th>
-            <td>己方沼泽，owner id = code - 150（内部 <code>2</code>）。不产兵、不可建造，但参与连通。</td>
+            <td>己方沼泽，owner id = code - 150。不产兵、不可建造，但参与连通。</td>
           </tr>
           <tr>
             <th><code>200</code></th>
-            <td>可见空地（中立）。</td>
+            <td>中立空地。</td>
           </tr>
           <tr>
             <th><code>201</code></th>
-            <td>
-              可见山脉（内部 <code>1</code>），不可通行、不可被推兵选中。迷雾对局中视野外山脉仍保持为
-              <code>201</code>。
-            </td>
+            <td>山脉，不可通行。迷雾视野外的山脉仍编码为 <code>201</code>。</td>
           </tr>
           <tr>
             <th><code>204</code></th>
-            <td>可见中立沼泽。迷雾对局中视野外沼泽（含敌方沼泽）统一抹成 <code>204</code>（隐藏归属）。</td>
+            <td>中立沼泽。迷雾视野外的沼泽统一编码为 <code>204</code>，不暴露归属。</td>
           </tr>
         </table>
-        <p style="margin-top: 8px">
-          <code>army_cnt</code> 与 <code>grid_type</code> 同维度。默认无迷雾远征：<code>update</code>
-          始终携带全图真实状态（全图可见）；房间开启「迷雾远征」时改为按视野过滤（见 5.4）。
-        </p>
+        <p><code>army_cnt</code> 与 <code>grid_type</code> 使用相同下标。</p>
 
         <h3>4.4 <code>update</code> 帧示例</h3>
-        <pre class="code-snippet"><code>// 全量帧（is_diff=false，节选）
+        <pre class="code-snippet"><code>// 全量帧节选。
 {
   "turn": 42,
   "is_diff": false,
-  "grid_type": [201, 200, 101, 1, 200, /* ... 长度 n*m */],
-  "army_cnt":  [0, 0, 25, 3, 0, /* ... 长度 n*m */],
-  "isolated":  [0, 0, 0, 0, 0, /* ... 长度 n*m */],
-  "lst_move": { "x": 3, "y": 4, "dx": 3, "dy": 5, "half": false, "mode": 2, "op": "m", "skip": 1 },
+  "grid_type": [201, 200, 101, 1, 200],
+  "army_cnt": [0, 0, 25, 3, 0],
+  "isolated": [0, 0, 0, 0, 0],
+  "lst_moves": [7, 8],
   "leaderboard": [
     { "team": 1, "uid": "alice", "army": 128, "land": 21, "class_": "", "dead": 0, "id": 1 }
   ],
@@ -607,8 +516,15 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
   "game_end": false
 }
 
-// 差分帧（is_diff=true，节选）：index-value 对
-{ "turn": 43, "is_diff": true, "grid_type": [17, 2, 58, 1], "army_cnt": [17, 6, 58, 0], "isolated": [] }</code></pre>
+// 差分帧节选：本地镜像中 seq 7、8 的指令都已出队。
+{
+  "turn": 43,
+  "is_diff": true,
+  "grid_type": [17, 2, 58, 1],
+  "army_cnt": [17, 6, 58, 0],
+  "isolated": [],
+  "lst_moves": [9]
+}</code></pre>
       </section>
 
       <section class="doc-panel">
@@ -618,369 +534,258 @@ socket.on('set_id', (id) => { /* 保存为自己的 client id */ });</code></pre
         <table class="doc-table">
           <tr>
             <th>主城</th>
-            <td>每 Tick +1 兵（无主城即出局，故恒为正常领土）。</td>
+            <td>每 Tick +1 兵。</td>
           </tr>
           <tr>
-            <th>普通地块 / 指挥所</th>
-            <td>
-              <code>turn % 50 == 0</code> 时 +1（即第 50、100、… Tick），孤军不产兵；指挥所不享受爆发期加成。
-            </td>
+            <th>普通地块与指挥所</th>
+            <td>每 50 Tick +1 兵，孤军不产兵；指挥所不享受爆发期加成。</td>
           </tr>
           <tr>
             <th>爆发期</th>
-            <td>
-              第 26~50 Tick（闭区间）：正常普通领土每 Tick 额外 +1（与 50 整除可叠加，第 50 Tick 当 Tick
-              +2）。
-            </td>
+            <td>第 26~50 Tick，正常普通领土每 Tick 额外 +1；第 50 Tick 可与基础增兵叠加。</td>
           </tr>
           <tr>
-            <th>沼泽 / 中立格</th>
-            <td>永不产兵。兵力无上限。</td>
+            <th>沼泽与中立格</th>
+            <td>不产兵，兵力没有上限。</td>
           </tr>
         </table>
 
         <h3>5.2 战斗结算</h3>
         <ul>
           <li>
-            攻击兵力必须<b>严格大于</b>防守兵力才能占领；未严格大于（含相等）时进攻失败但双方互损：进攻方损失全部推出兵力，防守方等量扣除（最低到
-            0，归属与建筑不变）。
+            攻击兵力必须严格大于防守兵力才能占领；相等或更小时，进攻方损失全部推出兵力，防守方等量减兵，归属与建筑不变。
           </li>
+          <li>占领后目标格兵力为攻击兵力减去守军兵力；指挥所与主城被占领后降为普通地块。</li>
           <li>
-            占领有损耗：占领成功后目标格新兵力 =
-            <b>攻击兵力 − 守军兵力</b>；被占领的指挥所/主城会被摧毁（降级为普通地块）。
-          </li>
-          <li>
-            攻下敌方最后一座主城 →
-            该玩家出局，残余领土<b>不再转移</b>给攻击方：锚点全部拆除为普通地块、兵力按断链规则减半（
-            \(\lfloor n/2 \rfloor\)，1 兵保持为
-            1，减半后归零直接变中立），随后全部沦为孤军并按孤军规则逐渐衰减至中立。
+            攻下敌方最后一座主城后，该玩家出局，剩余领土不转移给攻击方，而是拆除锚点、按断链规则减半并进入孤军衰减。
           </li>
         </ul>
 
         <h3>5.3 连通与孤军</h3>
         <p>
-          连通按<b>队伍</b>计算：经由连续的本队存活成员格子四方向连通到队内任意存活成员的主城/指挥所即为正常领土（只要队伍在这一块里还握有任意一座主城/指挥所，全队的这块领土都可操控）；否则成为孤军（见
-          <code>update.isolated</code>）：
+          连通按队伍计算：本队存活成员的格子四方向连通到队内任意存活成员的主城或指挥所，即为正常领土；否则成为孤军。
         </p>
         <div class="formula">
-          断链瞬间兵力减半：\[ n' = \lfloor n / 2 \rfloor \quad (n = 1 \text{ 时保持 } 1\text{；减半后} \le 0
-          \text{ 直接变中立}) \] 断链后前 10 Tick 只闪烁（isolated = 1），不衰减；第 11 Tick
-          起进入衰减期（isolated = 2），每 2 Tick：\[ n \leftarrow n - \max\left(1, \lceil 0.05\, n
-          \rceil\right) \] 归零变中立、建筑拆除；重新连通立即恢复正常且兵力翻倍（\(n \leftarrow 2n\)）。
+          断链瞬间兵力减半：\[ n' = \lfloor n / 2 \rfloor \quad (n = 1 \text{ 时保持 } 1) \]
+          减半后归零直接变中立。前 10 Tick 为宽限期（<code>isolated=1</code>）；第 11 Tick 起每 2 Tick
+          衰减一次（<code>isolated=2</code>）：\[ n \leftarrow n - \max\left(1, \lceil 0.05\,n \rceil\right)
+          \] 归零变中立并拆除建筑；重新连通后立即恢复正常且兵力翻倍。
         </div>
-        <p style="margin-top: 8px">
-          孤军格子不可推兵、不可建造（校验直接失败）。被切断的领土会持续衰减，扩张时务必保持连通。
-        </p>
+        <p>孤军格不能推兵或建造。</p>
 
-        <h3>5.4 迷雾远征（fog-vision）</h3>
-        <p>
-          房间可开关（默认关闭）。开启后，存活参赛者只收到己方队伍视野内的真实状态；观战者、已出局者与回放始终全视野。
-        </p>
+        <h3>5.4 迷雾远征</h3>
+        <p>默认关闭。开启后，存活参赛者只收到己方队伍视野内的真实状态；观战者与已出局玩家默认全视野。</p>
         <div class="formula">
-          视野范围为己方（含队友）任意格子切比雪夫距离不超过 1 的全部格子：\[ \mathrm{visible}(i) = \exists\,
-          (x, y) \in \text{己方格}:\ \max(|x_i - x|,\ |y_i - y|) \le 1 \]
+          视野为己方任意格子的切比雪夫距离 1 范围：\[ \mathrm{visible}(i) = \exists (x, y) \in \text{己方格}:\
+          \max(|x_i-x|,\ |y_i-y|) \le 1 \]
         </div>
         <ul>
           <li>
-            视野外格子：<code>grid_type</code> 中山脉保持 <code>201</code>，沼泽（含敌方沼泽）统一抹成
-            <code>204</code>，其余一切（敌方领地、指挥所、主城、中立城市、空地）一律抹成 <code>200</code>；
-            <code>army_cnt</code> 与 <code>isolated</code> 均为 0，并附
-            <code>fog</code> 标记——视野外的真实地形、归属与兵力都不会下发。
+            视野外：山脉为 <code>201</code>，所有沼泽为 <code>204</code>，其余格子为 <code>200</code>；<code
+              >army_cnt</code
+            >
+            与 <code>isolated</code> 都为 0，<code>fog=1</code>。
           </li>
-          <li>
-            视野内一切照常下发：地形、归属与兵力完整，包含敌队指挥所（owner+50）、敌队主城（owner+100）与中立城市（<code>50</code>）。
-          </li>
-          <li>观战者可用 <code>spectate_view</code> 切换到某支队伍的视角（见 6.7）。</li>
+          <li>视野内：真实地形、归属与兵力完整下发，包括敌方指挥所与主城。</li>
+          <li>观战者可用 <code>spectate_view</code> 选择队伍视野，见 6.7。</li>
         </ul>
 
         <h3>5.5 投降、挂机与终局</h3>
         <ul>
           <li>
-            投降 =
-            立即放弃所有控制权：若队内仍有其他存活成员，全部领土（含兵力）转移给编号最小的存活队友，主城降级为指挥所；否则主城与所有指挥所拆除为普通空地，领土兵力减半后沦为孤军进入自然衰减。投降后转为观战。
+            投降后转为观战。若仍有存活队友，领土转给编号最小的存活队友，主城降为指挥所；否则拆除锚点，领土减半并成为孤军。
           </li>
           <li>
-            挂机判定：自最后一次成功执行操作起，闲置满 60 Tick 且满 60
-            秒（两者同时满足）自动以「挂机」投降；断线超过 10 秒宽限期同样以「挂机」投降。
+            自最后一次成功操作起，闲置满 60 Tick 且满 60 秒会自动投降；断线超过 10 秒宽限期也会自动投降。
           </li>
           <li>
-            存活队伍数 ≤ 1 时对局结束：广播 <code>game_end=true</code> 全量终局帧（携带 <code>replay</code>
-            回放 ID），随后结算
-            rating。部署更新排队宽限到期时，残余对局按当前排行榜名次强制清算（同样产出终局帧与回放）。
+            存活队伍数不超过 1 时对局结束，发送带 <code>game_end=true</code> 与回放 ID
+            的全量帧。部署清算也会走正常终局与结算流程。
           </li>
-          <li>
-            回放为 ops-v1 操作流，观看时由引擎整场重建；回放帧恒为全视野，不含 <code>fog</code> 字段，bot
-            无需消费回放协议。
-          </li>
+          <li>回放以 <code>ops-v1</code> 操作流保存，观看时由引擎重建；bot 不需要消费回放数据。</li>
         </ul>
 
-        <h3>5.6 队列模式：单线串行 / 全局队列（multi-line）</h3>
+        <h3>5.6 单线串行与全局队列并行</h3>
         <p>
-          房间可开关（<code>multi_line</code>，默认关闭）。两种模式下指令都会进入每名玩家<b>唯一</b>的全局大队列（按到达顺序入队，入队分配单调递增
-          <code>seq</code>），区别只在每 Tick 的调度语义：
+          两种模式都为每名玩家维护一个按到达顺序排列的队列。每条指令入队时获得单调递增的
+          <code>seq</code>；<code>multi_line</code> 只改变 Tick 调度方式，不改变入队方式。
         </p>
         <ul>
           <li>
-            <b>单线串行（默认，<code>multi_line=false</code>）</b>：每 Tick
-            每玩家只从大队列<b>头部</b>依次弹出指令，丢弃失效指令（校验失败或执行无效），直到成功执行<b>第一条有效指令</b>为止——每
-            Tick 每玩家最多执行一条操作，后续指令原地等待下一 Tick。被摘除的指令（执行 + 丢弃）的
-            <code>seq</code> 全部进入当 Tick 的 <code>lst_moves</code> 下发。
+            <b>单线串行（默认，<code>multi_line=false</code>）：</b>每 Tick
+            从队首开始处理。条件不满足的指令直接出队，继续检查下一项；第一条成功执行的指令出队后，本 Tick
+            停止，后续指令等待下一 Tick。
           </li>
           <li>
-            <b>全局队列并行（<code>multi_line=true</code>）</b>：把队列中的移动指令看作有向边，每 Tick 所有<b
-              >入度为 0</b
-            >
-            的头部指令各执行一步（真并行，issue
-            #107）；建造指令在其格子不再是任何待发移动指令的出发格时尝试执行。空队列不占
-            Tick，只有一条指令链时节奏与单线完全一致。
-          </li>
-        </ul>
-        <p>
-          全局队列模式开启后，指令不再由客户端指定队列：<code>attack</code>/<code>build</code> 携带的可选
-          <code>line</code> 字段<b>被忽略</b>，服务端按下列起始点规则自动路由（单线模式同样忽略
-          <code>line</code>，所有指令按全局时间序串行）。
-        </p>
-        <ul>
-          <li>
-            路由（起始点规则）：每条队列跟踪自己的<b>起始点</b>（队列第一条待发指令的出发格），并随执行
-            沿已执行指令链逐格推进。新移动指令的出发格是某条队列的起始点时：该起始点上待发方向一致则
-            并入该队列，方向不同则<b>分兵</b>另立队列（同一出发点的多个方向各自成线）；出发格不是任何
-            队列的起始点、但已是某条队列待发指令的到达格时，<b>挂到第一条匹配队列的队尾</b>等待接续
-            （链式挂尾，issue #107——例：先发「从 A 移到 B」再发「从 B 移到 C」，B 是 A→B 的到达格
-            而非起始点，B→C 依次入队同一队列，A→B 执行后 B→C 自动接续执行，与单线手动排队
-            语义一致）。其余情况开辟新队列。建造指令无方向：建造格是某条队列起始点则并入该队列，
-            否则另立队列，不参与链式挂尾判定。
+            <b>全局队列并行（<code>multi_line=true</code>）：</b>把待发移动指令看成
+            <code>(x,y) → (dx,dy)</code> 的有向边。出发格不是任何待发移动目标格的指令入度为 0，同一 Tick
+            都可尝试执行。若拓扑剥离后仍有移动指令成环，每 Tick 额外强制尝试其中
+            <code>seq</code> 最小的一条，避免死锁。
           </li>
           <li>
-            队列管理（不分模式）：<code>clear_queue</code> 清空当前玩家的全部待发指令（Q 键）；
-            <code>pop_queue</code>
-            按指令入队的全局时间序撤回<b>最后一条</b>指令（E 键，可能位于任意一条队列的队尾）， 携带的
-            <code>line</code> 字段被忽略。
+            <b>建造：</b
+            >并行模式下，建造格不是任何待发移动的出发格时，建造指令才可尝试执行。所有符合条件的指令按队列顺序处理；同一格的
+            <code>b</code>、<code>c</code> 因此可在同一 Tick 依次出队。
           </li>
           <li>
-            调度：<b>真并行</b>（issue #107）——每 Tick 遍历该玩家全部队列，每条<b>非空</b>队列
-            各自丢弃失效队首并执行首条有效操作（不再轮转游标 1/N）。空队列不占
-            Tick，只维护一条队列时节奏与单线完全一致；回放协议（ops-v1）无需改动。
+            <b>失效与汇报：</b>移动或建造在执行时校验，条件不满足即出队且不产生消耗。两种模式都把本 Tick
+            所有出队项的 <code>seq</code> 放入 <code>update.lst_moves</code>，客户端据此同步本地镜像。
           </li>
           <li>
-            <code>旧版 lst_move.line</code> 标明本 Tick 汇报的队列（含 skip 丢弃）：同一 Tick
-            多条队列都有活动时只汇报<b>最后一条活动队列</b>，bot 据此逐队列同步本地队列镜像，
-            未被汇报的队列按本地镜像自行推进即可。
-          </li>
-          <li>
-            不消费全局队列字段的旧客户端/bot 照常对局：其指令由服务端按起始点规则自动归入队列（首个指令落
-            在队列 0），行为与单线局等价。房间内存在第三方 Bot 或未允许全局队列的托管 Bot 时无法开启该模式（见
-            3 与 7.2）。
+            <b>队列管理：</b><code>clear_queue</code> 清空全部待发指令，<code>pop_queue</code>
+            删除全局队尾一条指令，两种模式语义相同。
           </li>
         </ul>
       </section>
-      <section class="doc-panel">
-        <h2>6. 对局内可发送操作</h2>
 
-        <h3>6.1 <code>attack</code>（推兵）</h3>
+      <section class="doc-panel">
+        <h2>6. 对局内操作</h2>
+
+        <h3>6.1 <code>attack</code> 推兵</h3>
         <table class="doc-table">
           <tr>
             <th>payload</th>
             <td>
-              <code>{ x, y, dx, dy, mode, half, line? }</code>。坐标均为 <code>[row, col]</code>。<code
-                >(x,y)</code
-              >
-              是起点，<code>(dx,dy)</code> 是目标，要求四邻接（<code>|x-dx| + |y-dy| = 1</code
-              >）。入队时只解析字段不校验局面；执行时校验：起点归己方、非孤军、兵力 &gt; 0、目标不是山。<code
-                >line</code
-              >
-              可选但<b>已被忽略</b>（v3 全局队列 起队列由服务端按起始点规则自动路由，见 5.6）。
+              <code>{ x, y, dx, dy, mode }</code>。<code>(x,y)</code> 是起点，<code>(dx,dy)</code>
+              是四邻接目标。入队时只解析字段，执行时检查起点归属、连通、兵力与目标地形。
             </td>
           </tr>
           <tr>
-            <th><code>mode = 2</code> 全冲</th>
-            <td>
-              推出 <code>A - 1</code>（A 为起点兵力，只留 1 兵看守）。对应普通点击 / WASD 之外的「全力」操作。
-            </td>
+            <th><code>mode=0</code> 智能分兵</th>
+            <td>为其他三个方向的非山脉、非本队相邻格保留驻军后推出余量，对应 Shift + WASD。</td>
           </tr>
           <tr>
-            <th><code>mode = 1</code> 半兵</th>
-            <td>先按智能分兵算出理论推出量，再减半取整（一次性）。对应 Z 键。</td>
+            <th><code>mode=1</code> 半兵</th>
+            <td>先计算智能分兵的理论推出量，再减半取整，对应 Z 键。</td>
           </tr>
           <tr>
-            <th><code>mode = 0</code> 智能分兵</th>
-            <td>
-              为其他三个方向的「非山脉且非本队」相邻格保留驻军后推出余量。对应 Shift。公式见下方（A =
-              起点兵力）。
-            </td>
+            <th><code>mode=2</code> 全冲</th>
+            <td>只留 1 兵，推出其余全部兵力，对应普通 WASD。</td>
           </tr>
           <tr>
-            <th><code>half</code> 兼容回退</th>
+            <th>队友主城</th>
             <td>
-              仅当 <code>mode</code> 缺失或不是 0/1/2 时：<code>half=true</code> 回退为
-              <code>mode=1</code>，否则按 <code>mode=0</code> 处理。有效的
-              <code>mode</code> 始终优先。<b>注意</b>：不显式传 <code>mode</code> 且
-              <code>half</code> 缺省/false 时是智能分兵而非全冲；要全冲请显式传 <code>mode: 2</code>。
-            </td>
-          </tr>
-          <tr>
-            <th>队友主城累兵与转属</th>
-            <td>
-              有效推兵进入存活队友主城时会累兵；若该队友执行当刻拥有至少两座主城，目标主城还会自动转属出兵玩家（保持建筑及后续产兵），最后一座只累兵不转属。空推兵或点击不能转属，无需额外事件。
+              有效推兵进入存活队友主城会累兵；若队友当时至少有两座主城，目标主城转属出兵玩家，最后一座只累兵。
             </td>
           </tr>
         </table>
         <div class="formula">
-          设 \(A\) 为起点兵力，保留量 \(B\) 为其余三方向相邻格中「非山脉且非本队」格子的驻军之和： \[ B =
-          \sum_{\text{威胁方向}} (\text{兵力} - 1), \qquad push = \max(0,\ A - B - 1) \]
-          <code>mode = 1</code> 时再减半：\(push = \lfloor push / 2 \rfloor\)。 最终推出 \(\min(push,\ A -
-          1)\)；推出 0 兵为无效操作。
+          设起点兵力为 \(A\)，其他三个方向需要保留的兵力合计为 \(B\)：\[ push = \max(0,\ A-B-1) \]
+          <code>mode=1</code> 再取 \(\lfloor push/2 \rfloor\)，最终推出量不超过 \(A-1\)；推出 0 兵时指令失效。
         </div>
-        <pre class="code-snippet"><code>// 从 (3,4) 向 (3,5) 全冲
+        <pre class="code-snippet"><code>// 从 (3,4) 向 (3,5) 全冲。
 socket.emit('attack', { x: 3, y: 4, dx: 3, dy: 5, mode: 2 });</code></pre>
 
-        <h3>6.2 <code>build</code>（建造）</h3>
+        <h3>6.2 <code>build</code> 建造</h3>
         <p>
-          <code>{ x, y, op, line? }</code>。<code>op='b'</code> 建造指挥所（相当于 X 键），<code>op='c'</code>
-          升级主城（相当于 C 键），均消耗 50 兵；其他 <code>op</code> 值直接被忽略。与
-          <code>attack</code> 共用同一队列（v3 全局队列 对局中按起始点规则自动归入队列：建造格是
-          某条队列的起始点则并入该队列，否则另立队列；可选 <code>line</code> 字段已被忽略），每 Tick
-          每玩家最多执行一条队列操作，队列长度无上限。服务端入队只记录合法的
-          <code>op</code>
-          与坐标，不校验地形、归属、兵力或连通，可排在队列很靠后的未来位置；执行时才校验（指挥所须建在己方普通地块、主城须由己方指挥所升级、兵力
-          ≥ 50、非孤军），条件不满足会自动跳过（通过
-          <code>旧版 lst_move.skip</code> 告知丢弃数量），不会产生消耗。在普通地块上连发 <code>b</code> +
-          <code>c</code> 两条即可两 Tick 后建成主城（相当于在普通地块按 C 键）。
+          发送 <code>{ x, y, op }</code>。<code>op='b'</code> 建指挥所，<code>op='c'</code>
+          升级主城，均消耗 50
+          兵；其他值忽略。建造与推兵进入同一队列，执行时才校验归属、地形、兵力与连通。指挥所必须建在己方正常普通地块，主城由己方正常指挥所升级；条件不满足时指令出队且不扣兵。连续发送
+          <code>b</code> 与 <code>c</code> 可先建指挥所再升级；单线模式分两
+          Tick，并行模式满足调度条件时可在同一 Tick 完成。
         </p>
+        <pre class="code-snippet"><code>socket.emit('build', { x: 3, y: 4, op: 'b' });
+socket.emit('build', { x: 3, y: 4, op: 'c' });</code></pre>
 
         <h3>6.3 队列管理</h3>
         <table class="doc-table">
           <tr>
             <th><code>clear_queue</code></th>
-            <td>
-              清空当前玩家待执行操作队列（Q 键），任何模式下语义相同。携带的
-              <code>line</code> 字段被忽略。
-            </td>
+            <td>清空自己的全部待发指令，对应 Q 键；同时清除本地镜像。</td>
           </tr>
           <tr>
             <th><code>pop_queue</code></th>
-            <td>
-              删除队尾一条待执行操作（E 键）：按入队的全局时间序撤回
-              <b>全局最后一条</b>指令（可位于任意队列队尾），不区分队列，携带的 <code>line</code>
-              字段被忽略。
-            </td>
+            <td>删除全局队尾一条待发指令，对应 E 键；同时删除本地镜像队尾。</td>
           </tr>
         </table>
 
         <h3>6.4 <code>send_message</code></h3>
         <p>
-          <code>{ text, team }</code>。<code>team=true</code>
-          表示队伍频道（仅同队成员可见）；否则房间广播。空白文本被忽略。
+          <code>{ text, team }</code>。<code>team=true</code> 发送给同队成员，否则房间广播；空白文本忽略。
         </p>
 
         <h3>6.5 <code>surrender</code></h3>
-        <p>
-          投降并转观战：立即放弃所有控制权（规则见 5.5）。注意：24 小时内 20 回合内手动投降满 3
-          次会触发自动封禁（见 7.3），bot 应避免快速投降策略。
-        </p>
+        <p>投降并转为观战。20 回合内手动投降会计入快速投降统计，达到第 7.3 节的条件可能触发自动封禁。</p>
 
         <h3>6.6 <code>return_room</code> / <code>leave</code></h3>
-        <p>退出对局返回房间（对局中按离开投降处理）。服务端会回 <code>left</code>。</p>
+        <p>退出对局并返回房间；存活参赛者按离开投降处理。服务端回发 <code>left</code>。</p>
 
-        <h3>6.7 <code>spectate_view</code>（观战视角）</h3>
+        <h3>6.7 <code>spectate_view</code> 观战视角</h3>
         <p>
-          仅迷雾对局的观战者可用；存活参赛者请求被忽略。<code>{ team }</code>：<code>team &gt; 0</code>
-          且该队伍存在时，改按该队伍的可见性下发迷雾帧（与该队伍玩家所见一致）；<code>team &lt;= 0</code>
-          恢复全图。切换后服务端立即补发一帧全量帧（并对齐 diff 基线）。
+          仅迷雾对局的非存活参赛者可用，存活参赛者的请求无效。<code>{ team }</code> 中
+          <code>team &gt; 0</code>
+          且队伍仍存活时，切换到该队视野；其他值恢复全图。切换后立即补发全量帧并对齐差分基线。
         </p>
       </section>
 
       <section class="doc-panel">
-        <h2>7. 服务端托管 Bot 与运行限制</h2>
+        <h2>7. 托管与运行限制</h2>
 
-        <h3>7.1 托管机制</h3>
+        <h3>7.1 服务端托管</h3>
         <ul>
           <li>
-            仅超级管理员可操作：<code>GET /api/admin/bots</code>、<code>GET /api/admin/bot-templates</code>、
-            <code>POST /api/admin/bots/start</code>（<code
-              >{ username, room, template, allowTeam, allowFog, allowMultiLine }</code
-            >）、 <code>POST /api/admin/bots/stop</code>。
+            仅超级管理员可调用 <code>GET /api/admin/bots</code>、<code>GET /api/admin/bot-templates</code
+            >、<code>POST /api/admin/bots/start</code> 与 <code>POST /api/admin/bots/stop</code>。启动参数为
+            <code>{ username, room, template, allowTeam, allowFog, allowMultiLine }</code>。
           </li>
           <li>
-            模板自动枚举：<code>bot-template/</code> 一级子目录中存在 <code>strategy.js</code> 或
-            <code>server-bot.js</code> 且导出 <code>attachStrategy</code> 的即为可托管模板（模板 ID =
-            目录名，展示名/描述取自其 package.json）。<code>random-patch-bot</code> 没有该入口，不可托管。
+            模板自动枚举 <code>bot-template/</code> 一级子目录：存在 <code>strategy.js</code> 或
+            <code>server-bot.js</code> 且导出 <code>attachStrategy</code> 即可托管，模板 ID 为目录名。
           </li>
           <li>
-            启动校验：用户存在且未封禁、房间号长度 1~15、模板可托管；同一用户名或同一房间已有托管 bot
-            时冲突（HTTP 409）。
+            启动时校验用户存在且未封禁、房间号合法、模板可加载；同一用户名或同一房间已有托管 bot 时返回 HTTP
+            409。
           </li>
           <li>
-            不另起进程：每次启动生成随机内存令牌（stop 即失效），在服务器进程内用 socket.io-client
-            连本机回环地址完成正常握手；服务端固定向策略传
-            <code>{ room, team: 1, autoReady: true, log }</code>（anti-human-bot 有意忽略 team 参数、固定首选
-            2 队并自主避让人类队伍）。
+            托管不另起进程。管理器向策略传入
+            <code>{ room, team: 1, autoReady: true, log }</code>；停止时拆除监听、断开连接并删除内存令牌。
           </li>
           <li>
-            重启自动恢复：运行中 bot 的
-            <code>{ username, room, template, allowTeam, allowFog, allowMultiLine }</code> 列表原子写入
-            <code>data/server-bots.json</code
-            >；服务重启后逐条重新校验并按原配置自动启动，失效记录记警告跳过并清除。
+            运行状态以 <code>{ username, room, template, allowTeam, allowFog, allowMultiLine }</code> 列表写入
+            <code>data/server-bots.json</code>，重启后逐条重新校验并恢复。
           </li>
         </ul>
 
-        <h3>7.2 托管 Bot 的特权与约束</h3>
+        <h3>7.2 房间行为</h3>
         <ul>
-          <li>不参与单会话顶号互斥；豁免房间心跳与 12 小时停留踢出。</li>
+          <li>托管 bot 不参与单会话互斥，豁免心跳与 12 小时停留检查，固定排在普通成员之后且不当房主。</li>
           <li>
-            进房时固定排在所有普通成员之后，永远不会成为房主；bot 单独在房时暂居首位。房主按三档归属：
-            房内真人（进房时已通过 <code>client_verify</code>）中的最先进房者 &gt; 无真人时最先进房的非官方
-            AI（令牌/第三方 bot）&gt; 托管 bot（不当房主）。真人进房即从 AI 手中接任房主。
+            <code>allowTeam</code>、<code>allowFog</code>、<code>allowMultiLine</code>
+            决定对应房间设置是否可用；第三方 bot 不允许开启迷雾或全局队列。
           </li>
+          <li>策略要自行处理对局结束后的重新准备；管理器不保证自动重开。</li>
           <li>
-            <code>allowTeam=false</code> 的托管 bot 进房会强制关闭组队模式，房主开启组队的请求也会被拒绝；
-            未允许迷雾的 bot（含第三方 bot）同理强制关闭迷雾；未允许全局队列的 bot（含第三方
-            bot）同理强制关闭全局队列。
-          </li>
-          <li>
-            <code>allowMultiLine=true</code> 仅表示该 bot 被允许进入全局队列局；bot
-            自身的最简策略可以只使用队列 0（行为等价单线），不需要实现多队列调度也能正常对局。
-          </li>
-          <li>
-            开局时若所有参赛席位（<code>team !== 0</code>，观战不计）均未通过真人校验——即全 AI 房，含官方托管
-            bot、令牌 bot 与第三方用户 bot——该局强制以 4x
-            速度进行，不受房间速度设置影响，房间内会收到系统提示；任一参赛席位是真人则不强制。
-            非观战成员按已验证真人与 AI（未通过真人校验的连接）分别统计，每个非空组准备人数须达到
-            ceil(该组人数 / 2)，空组自动满足；两组均达标且总参赛人数至少 2 人才自动开局。
-          </li>
-          <li>
-            对局结束后的自动重新准备是策略自己的行为（由后续
-            <code>room_update</code> 驱动），不是管理器保证；编写可托管策略时应实现这一点。
+            非托管 bot 进入已有托管 bot 的房间后，按服务器本地日历日累计停留最多 4
+            小时。到限后在准备阶段被移出，当天不能再次进入这类房间；对局中不会中途移出，断线重连保留计时。
           </li>
         </ul>
 
-        <h3>7.3 自动封禁策略（对 bot 账号同样适用）</h3>
+        <h3>7.3 自动封禁策略</h3>
         <table class="doc-table">
           <tr>
             <th>快速投降</th>
-            <td>20 回合内手动投降计一次 <code>rapid_surrender</code>；24 小时内满 3 次触发自动封禁。</td>
+            <td>20 回合内手动投降计一次，24 小时内满 3 次触发自动封禁。</td>
           </tr>
           <tr>
             <th>挂机</th>
             <td>
-              挂机（afk）判负计一次；24 小时内满 6 次触发自动封禁。纯 1v1 对局的 afk
-              不计；主动离开（leave）与断线超时不计入任何计数。
+              挂机判负计一次，24 小时内满 6 次触发；双人 1v1 的挂机不计。主动离开与断线超时不计入这两项统计。
             </td>
           </tr>
           <tr>
             <th>封禁时长</th>
-            <td>
-              基础 1 小时，按历史自动封禁次数翻倍（\(60 \times 2^n\) 分钟，\(n\) 为历史自动封禁次数），封顶 7
-              天；连续 14 天无违规则计数重置。
-            </td>
+            <td>基础 1 小时，按已有自动封禁次数翻倍，最长 7 天；连续 14 天无相关违规则重置梯度计数。</td>
+          </tr>
+          <tr>
+            <th>Bot 账号</th>
+            <td><code>ROKA_BOT_TOKENS</code> 与托管 bot 豁免这项纪律统计；普通 JWT 连接按普通账号处理。</td>
           </tr>
         </table>
       </section>
 
       <section class="doc-panel">
-        <h2>8. 增量帧合并示例</h2>
-        <pre class="code-snippet"><code>// 已知 n, m 和本地 fullGrid/fullArmy/fullIsolated（长度 n*m）
-function applyDiff(pairs, target) {
+        <h2>8. 增量帧与队列镜像示例</h2>
+        <pre class="code-snippet"><code>function applyDiff(pairs, target) {
   if (!Array.isArray(pairs)) return;
   for (let i = 0; i + 1 &lt; pairs.length; i += 2) {
     target[pairs[i]] = pairs[i + 1];
@@ -991,25 +796,21 @@ function applyUpdate(frame) {
   if (frame.is_diff) {
     applyDiff(frame.grid_type, fullGrid);
     applyDiff(frame.army_cnt, fullArmy);
-    if (frame.isolated) applyDiff(frame.isolated, fullIsolated);
+    applyDiff(frame.isolated, fullIsolated);
     if (frame.fog) applyDiff(frame.fog, fullFog);
   } else {
     fullGrid = frame.grid_type.slice();
     fullArmy = frame.army_cnt.slice();
-    fullIsolated = (frame.isolated || new Array(n * m).fill(0)).slice();
+    fullIsolated = frame.isolated.slice();
     if (frame.fog) fullFog = frame.fog.slice();
   }
+
+  const removed = new Set(frame.lst_moves);
+  localQueue = localQueue.filter((op) => !removed.has(op.seq));
 }</code></pre>
         <div class="tips">
-          <b>提示：</b>
-          <ul>
-            <li>任何时刻都维护一份全量缓存，避免只依赖 diff 帧。</li>
-            <li>
-              收到 <code>is_diff=false</code> 全量帧时，用它重置本地状态（每 50 Tick
-              必有一帧，另有随机补发）。
-            </li>
-            <li>断线重连后本地队列已被服务端清空，且自己 ID 变为新 <code>set_id</code>，需同步重置。</li>
-          </ul>
+          <b>提示：</b>始终在本地维护全量地图与带 <code>seq</code> 的队列镜像。全量帧到达时重置地图；收到
+          <code>init_map</code> 时以 <code>next_seq</code> 和 <code>queue_ops</code> 重建队列状态。
         </div>
       </section>
 
@@ -1017,33 +818,24 @@ function applyUpdate(frame) {
         <h2>9. 常见坑</h2>
         <ul>
           <li>
-            <b>单会话顶号</b>：同一用户名新连接会顶掉旧连接。用普通用户 JWT 的 bot
-            与浏览器同账号并存时会互相挤掉，建议给 bot 单独注册账号（或使用服务端
-            <code>ROKA_BOT_TOKENS</code> 合成账号）。
+            <b>账号互斥：</b>普通 JWT bot 与浏览器使用同一账号会互相顶号，优先使用独立账号或 bot 专用令牌。
           </li>
           <li>
-            <b>队列节流</b>：每 Tick 每条队列最多执行一条队列操作（全局队列对局为全部非空队列真并行， 见
-            5.6）。一帧内连发多条 <code>attack</code>/<code>build</code>
-            只是入队，不会立刻全部生效；规划节奏时按 Tick 计算。
+            <b>重连序号：</b>换绑后自己的 ID 会变化，队列被清空，但 <code>next_seq</code> 不会从 1
+            重新开始；必须应用补发的同步字段。
           </li>
           <li>
-            <b>推兵模式优先级</b>：按键上 Shift（智能分兵，<code>mode=0</code>）&gt;
-            Z（半兵，<code>mode=1</code>）&gt; 普通（全冲，<code>mode=2</code>）。不显式传
-            <code>mode</code> 且 <code>half=false</code>（或省略）时，服务端按
-            <code>mode=0</code> 智能分兵处理——旧式
-            <code>{ x, y, dx, dy, half: false }</code> 并不等于全冲；要全冲请显式传 <code>mode: 2</code>。
+            <b>出队确认：</b>按 <code>update.lst_moves</code> 中的 seq
+            摘除本地项。数组同时包含执行成功与失效出队的指令。
           </li>
           <li>
-            <b>操作确认</b>：服务端不回 ACK，用 <code>update.lst_move</code> 对照本地队列：<code>skip</code>
-            条队首操作被丢弃后，本 Tick 执行的那一条与 <code>lst_move</code> 匹配。全局队列对局按
-            <code>旧版 lst_move.line</code> 对照对应队列。
+            <b>调度节奏：</b>单线模式每 Tick 至多成功执行一条；并行模式可让多条独立移动链与同格建造在同一 Tick
+            出队。
           </li>
+          <li><b>推兵模式：</b>显式传 <code>mode</code>。智能分兵为 0，半兵为 1，全冲为 2。</li>
           <li>
-            <b>孤军不可操作</b>：<code>isolated != 0</code> 的格子不可推兵、不可建造，推兵校验会直接失败。
-          </li>
-          <li>
-            <b>山脉不可通行</b
-            >：推兵目标为山（<code>201</code>）时校验失败；迷雾对局中视野外的「空地」可能是任何地形，向视野外推兵照样按真实地形校验。
+            <b>孤军与山脉：</b><code>isolated != 0</code> 的格子不能操作，目标为
+            <code>201</code> 的移动会失效。迷雾外的实际地形仍由服务端校验。
           </li>
         </ul>
         <div class="nav-row">
@@ -1056,10 +848,5 @@ function applyUpdate(frame) {
     <script src="/vendor/katex/katex.min.js?v={{V}}"></script>
     <script src="/vendor/katex/auto-render.min.js?v={{V}}"></script>
     <script src="/docs.js?v={{V}}"></script>
-    <p>
-      <strong>v3 队列协议：</strong>实时 update 使用 <code>lst_moves</code> 序号数组，数组包含本 Tick
-      执行和丢弃的全部操作 seq；空数组表示无出队。<code>init_map.next_seq</code> 与
-      <code>queue_ops</code> 用于重连对齐。旧回放仍兼容标量 <code>lst_move</code> 与 <code>line</code>。
-    </p>
   </body>
 </html>
