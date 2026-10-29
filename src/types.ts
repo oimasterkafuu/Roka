@@ -101,9 +101,6 @@ export interface RoomUpdatePayload {
   /** 部署更新排队中（禁止开新局，前端据此禁用开始按钮并显示提示）。 */
   update_queued: boolean;
   players: RoomPlayerView[];
-  ready: number;
-  /** Legacy majority threshold; 0 when fewer than two participants. Not a start gate. */
-  need: number;
   /** Readiness split by verified humans and AI; spectators are excluded. */
   ready_counts: {
     human: { ready: number; need: number; total: number };
@@ -111,6 +108,7 @@ export interface RoomUpdatePayload {
   };
 }
 
+/** 内部历史回放操作结构，不属于实时对外契约。 */
 export interface MovePayload {
   x: number;
   y: number;
@@ -153,15 +151,18 @@ export interface UpdatePayload {
    * diff 帧中与 grid_type 一样以 [index, value] 对编码。回放不含此字段。
    */
   fog?: number[];
-  lst_moves?: number[];
-  /** 旧回放兼容字段。实时新协议使用 lst_moves。 */
-  lst_move?: MovePayload;
+  lst_moves: number[];
   leaderboard: LeaderboardEntry[];
   turn: number;
   kills: Record<string, string>;
   game_end: boolean;
   is_diff: boolean;
   replay?: string;
+}
+
+/** 内部回放帧；历史操作字段不属于实时 socket 契约。 */
+export interface ReplayFrame extends UpdatePayload {
+  lst_move: MovePayload;
 }
 
 export interface ReplayPatchPayload {
@@ -184,7 +185,7 @@ export interface ReplayPatch {
 export interface ReplayData {
   n: number;
   m: number;
-  initial: UpdatePayload;
+  initial: ReplayFrame;
   patches: ReplayPatch[];
   meta?: ReplayMeta;
 }
@@ -297,8 +298,6 @@ export interface RoomListItem {
   total: number;
   playing: number;
   spectators: number;
-  ready: number;
-  need: number;
   ready_counts: RoomUpdatePayload['ready_counts'];
   running: boolean;
   /** 多线争锋房间标记（仅在为 true 时下发）：首页房间列表据此显示模式标识。 */

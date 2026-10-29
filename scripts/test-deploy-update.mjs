@@ -10,6 +10,7 @@
 //   后排队状态解除（deploy_queued {queued:false}），可以重新开局。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 90 秒。
 
+import { createHmac } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -277,7 +278,7 @@ async function main() {
     headers: {
       'content-type': 'application/json',
       'x-github-event': 'push',
-      'x-webhook-secret': WEBHOOK_SECRET,
+      'x-hub-signature-256': `sha256=${createHmac('sha256', WEBHOOK_SECRET).update(JSON.stringify({ ref: 'refs/heads/main' })).digest('hex')}`,
     },
     body: JSON.stringify({ ref: 'refs/heads/main' }),
   });

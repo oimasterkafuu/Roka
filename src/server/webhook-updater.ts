@@ -41,17 +41,7 @@ class WebhookUpdater {
 
   isAuthorized(rawBody: Buffer, headers: Record<string, unknown>): boolean {
     const githubSignature = this.readHeader(headers, 'x-hub-signature-256');
-    if (githubSignature) {
-      return this.verifyGithubSignature(rawBody, githubSignature);
-    }
-
-    const directSecret =
-      this.readHeader(headers, 'x-webhook-secret') ?? this.readHeader(headers, 'x-kana-webhook-secret');
-    if (directSecret) {
-      return this.safeEqual(directSecret, this.webhookSecret);
-    }
-
-    return false;
+    return githubSignature !== null && this.verifyGithubSignature(rawBody, githubSignature);
   }
 
   requestUpdate(): boolean {

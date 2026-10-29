@@ -273,7 +273,7 @@ socket.on('set_id', (id) => {
               房间快照字段为
               <code
                 >{ speed, allow_team, fog, multi_line, map_size, map_token, map_token_custom, map_mode,
-                map_region, in_game, update_queued, players, ready, need, ready_counts }</code
+                map_region, in_game, update_queued, players, ready_counts }</code
               >。 <code>multi_line=true</code> 表示开启全局队列；<code>map_token_custom=true</code>
               表示种子由房主设置；<code>update_queued=true</code> 表示部署更新排队中，不能开新局。
             </td>
@@ -292,11 +292,9 @@ socket.on('set_id', (id) => {
             </td>
           </tr>
           <tr>
-            <th><code>ready</code> / <code>need</code> / <code>ready_counts</code></th>
+            <th><code>ready_counts</code></th>
             <td>
-              <code>ready</code> 是全体参赛席准备数，<code>need</code>
-              是房间列表使用的汇总阈值，不能单独作为开局判据。 <code>ready_counts.human</code> 与
-              <code>ready_counts.ai</code> 都包含
+              <code>ready_counts.human</code> 与 <code>ready_counts.ai</code> 都包含
               <code>{ ready, need, total }</code>，观战席不计入。总参赛人数为 2 时，所有参赛者都必须准备；达到
               3 人后，每个非空分组分别要求
               <code>ready ≥ ceil(total / 2)</code
@@ -328,7 +326,7 @@ socket.on('set_id', (id) => {
           </tr>
           <tr>
             <th><code>left</code></th>
-            <td><code>{}</code>，<code>return_room</code> 或 <code>leave</code> 的回执。</td>
+            <td><code>{}</code>，<code>return_room</code> 的回执。</td>
           </tr>
         </table>
         <div class="tips">
@@ -707,7 +705,7 @@ socket.emit('build', { x: 3, y: 4, op: 'c' });</code></pre>
         <h3>6.5 <code>surrender</code></h3>
         <p>投降并转为观战。20 回合内手动投降会计入快速投降统计，达到第 7.3 节的条件可能触发自动封禁。</p>
 
-        <h3>6.6 <code>return_room</code> / <code>leave</code></h3>
+        <h3>6.6 <code>return_room</code></h3>
         <p>退出对局并返回房间；存活参赛者按离开投降处理。服务端回发 <code>left</code>。</p>
 
         <h3>6.7 <code>spectate_view</code> 观战视角</h3>

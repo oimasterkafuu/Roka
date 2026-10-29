@@ -53,7 +53,7 @@
  *      进攻/输送不得把要害抽空，只有紧急防御集结可破格；
  *   8. 全部候选按评分排序，每 tick 最多下发 MAX_OPS_PER_TURN 条（同格
  *      不重复取源），紧急防御抢占队列；本地队列镜像上限 MAX_LOCAL_QUEUE，
- *      用 lst_move 同步，避免过期指令堆积；recentMoves 记录最近数 tick
+ *      用 lst_moves 同步，避免过期指令堆积；recentMoves 记录最近数 tick
  *      的移动方向，恰好互逆的移动直接丢弃（防往返抖动）。下发建造令前
  *      会先清掉镜像中从同格出兵的旧 op（否则旧 op 先执行会把建设资金
  *      抽空）。
@@ -168,6 +168,7 @@ function attachStrategy(socket, options) {
     state.isolated = new Array(n * m).fill(0);
     state.lastTurn = -1;
     state.queue = [];
+    state.nextSeq = 1;
     state.dead = false;
     state.lastCityTurn = -1000;
     state.plan = null;
@@ -231,22 +232,13 @@ function attachStrategy(socket, options) {
     return true;
   }
 
-  // 用 lst_move 同步本地队列镜像：skip 条队首被丢弃，若本 Tick 有执行（x >= 0）再少一条。
-  function syncQueue(lstMove) {
-    if (!lstMove || typeof lstMove !== 'object') {
-      return;
-    }
-    let drop = Number.parseInt(String(lstMove.skip ?? '0'), 10) || 0;
-    if (Number.parseInt(String(lstMove.x ?? '-1'), 10) >= 0) {
-      drop += 1;
-    }
-    if (drop > 0) {
-      state.queue.splice(0, drop);
-    }
+  function syncQueue(seqs) {
+    const removed = new Set(seqs);
+    state.queue = state.queue.filter((op) => !removed.has(op.seq));
   }
 
   function enqueueOp(op) {
-    state.queue.push(op);
+    state.queue.push({ ...op, seq: state.nextSeq++ });
     socket.emit(op.kind === 'build' ? 'build' : 'attack', op.payload);
   }
 
@@ -526,7 +518,7 @@ function attachStrategy(socket, options) {
     const allowTeam = toBoolean(data.allow_team);
     const team = Number.parseInt(String(self.team ?? '0'), 10) || 0;
     const ready = toBoolean(self.ready);
-    const need = Number.parseInt(String(data?.need ?? '0'), 10) || 0;
+    const participants = data.players.filter((p) => Number(p.team) !== 0).length;
     const now = Date.now();
 
     if (now - state.lastLobbyActionAt < 1000) {
@@ -540,7 +532,7 @@ function attachStrategy(socket, options) {
       return;
     }
 
-    if (need <= 1) {
+    if (participants < 2) {
       return;
     }
 
@@ -598,6 +590,12 @@ function attachStrategy(socket, options) {
     }
 
     resetMap(n, m);
+    state.nextSeq = data.next_seq;
+    state.queue = data.queue_ops.map((op) => ({
+      seq: op.seq,
+      kind: op.kind === 'm' ? 'attack' : 'build',
+      payload: op.kind === 'm' ? op : { x: op.x, y: op.y, op: op.kind },
+    }));
     state.inGame = true;
 
     const playerIds = Array.isArray(data?.player_ids) ? data.player_ids.map((item) => String(item)) : [];
@@ -653,7 +651,7 @@ function attachStrategy(socket, options) {
       return;
     }
     state.lastTurn = turn;
-    syncQueue(payload?.lst_move);
+    syncQueue(payload.lst_moves);
 
     if (payload?.game_end) {
       state.inGame = false;

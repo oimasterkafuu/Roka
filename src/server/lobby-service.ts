@@ -584,7 +584,6 @@ class LobbyService {
       this.lobbyConfig.set(gid, conf);
     }
 
-    const need = this.getReq(players);
     if (this.getPlayingCount(players) < 2) {
       for (const player of players) {
         player.ready = false;
@@ -607,7 +606,6 @@ class LobbyService {
       ...(!this.humanVerified.has(player.sid) ? { ai: true } : {}),
     }));
 
-    const ready = players.filter((player) => player.ready && player.team !== 0).length;
     const readyCounts = this.getReadyCounts(players);
 
     return {
@@ -623,8 +621,6 @@ class LobbyService {
       in_game: this.isLobbyGameRunning(gid),
       update_queued: this.updateQueued,
       players: roomPlayers,
-      ready,
-      need,
       ready_counts: readyCounts,
     };
   }
@@ -669,7 +665,6 @@ class LobbyService {
       }
 
       const playing = players.filter((player) => player.team !== 0).length;
-      const ready = players.filter((player) => player.ready && player.team !== 0).length;
 
       rooms.push({
         room,
@@ -677,8 +672,6 @@ class LobbyService {
         total: players.length,
         playing,
         spectators: players.length - playing,
-        ready,
-        need: this.getReq(players),
         ready_counts: this.getReadyCounts(players),
         running: this.isLobbyGameRunning(room),
         ...(this.lobbyConfig.get(room)?.multi_line === true ? { multi_line: true } : {}),
@@ -1397,16 +1390,6 @@ class LobbyService {
     }
 
     await this.userStore.applyRatingUpdates(updates).catch(() => undefined);
-  }
-
-  private getReq(players: LobbyPlayer[]): number {
-    const playingCount = this.getPlayingCount(players);
-    if (playingCount < 2) {
-      return 0;
-    }
-    // Legacy clients use need > 1 to decide whether to ready up.
-    // Actual start eligibility is exclusively determined by getReadyCounts.
-    return Math.floor(playingCount / 2) + 1;
   }
 }
 

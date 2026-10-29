@@ -115,8 +115,8 @@ function collectPossibleActions() {
         if (targetCode === 201) {
           continue;
         }
-        actions.push({ x, y, dx, dy, half: false });
-        actions.push({ x, y, dx, dy, half: true });
+        actions.push({ x, y, dx, dy, mode: 0 });
+        actions.push({ x, y, dx, dy, mode: 1 });
       }
     }
   }
@@ -183,7 +183,7 @@ function autoReadyFromRoomUpdate(data) {
   const team = Number.parseInt(String(self.team ?? '0'), 10) || 0;
   const ready = toBoolean(self.ready);
   const targetTeam = allowTeam ? BOT_TEAM : 1;
-  const need = Number.parseInt(String(data?.need ?? '0'), 10) || 0;
+  const participants = data.players.filter((p) => Number(p.team) !== 0).length;
   const now = Date.now();
 
   if (now - state.lastLobbyActionAt < 1000) {
@@ -197,7 +197,7 @@ function autoReadyFromRoomUpdate(data) {
     return;
   }
 
-  if (need <= 1) {
+  if (participants < 2) {
     return;
   }
 

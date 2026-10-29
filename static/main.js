@@ -787,7 +787,7 @@ function addroute(x, y, d, mode) {
   if (lost === true || game_ended === true || in_game !== true) return;
   var seq = next_seq++;
   route.push({ x: x, y: y, d: d, mode: mode, seq: seq });
-  socket.emit('attack', { x: x, y: y, dx: x + dire[d].x, dy: y + dire[d].y, mode: mode, half: mode == 1 });
+  socket.emit('attack', { x: x, y: y, dx: x + dire[d].x, dy: y + dire[d].y, mode: mode });
   render();
 }
 function addbuild(x, y, op) {

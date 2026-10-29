@@ -10,4 +10,4 @@ test('非法差分原子拒绝', () => { const s=create(); s.apply(full()); asse
 test('拒绝旧帧与错误尺寸', () => { const s=create(); s.apply(full()); assert.equal(s.apply({...full(),turn:-1}),false); assert.equal(s.apply({...full(),grid_type:[51]}),false); });
 test('结束与死亡状态', () => { const s=create(); s.apply({...full(),game_end:true,leaderboard:[{id:1,team:1,dead:1}]}); assert.ok(s.ended); assert.ok(s.dead); });
 test('未知玩家不操作', () => { const s=new BoardState({n:1,m:1,player_ids:['other']},'me'); assert.equal(s.playerId,0); });
-test('保留实际执行回执并附带对应turn，无回执不沿用旧动作',()=>{const s=create();s.apply({...full(),lst_move:{x:0,y:0,dx:0,dy:1,op:'m'}});assert.equal(s.lastMove.turn,0);assert.equal(s.lastMove.op,'m');s.apply({...full(),turn:1});assert.equal(s.lastMove,null);});
+test('仅消费序号数组回执，不读取旧操作字段',()=>{const s=create();s.apply({...full(),lst_moves:[7,8]});assert.deepEqual(s.lastMove,{seqs:[7,8],turn:0});s.apply({...full(),turn:1,lst_moves:[]});assert.deepEqual(s.lastMove,{seqs:[],turn:1});});

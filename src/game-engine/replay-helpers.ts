@@ -4,7 +4,7 @@ import {
   ReplayMoveDirection,
   ReplayPatch,
   ReplayPatchPayload,
-  UpdatePayload,
+  ReplayFrame,
 } from '../types';
 
 const getDiff = (next: number[], prev: number[]): number[] => {
@@ -17,7 +17,7 @@ const getDiff = (next: number[], prev: number[]): number[] => {
   return diff;
 };
 
-const cloneMovePayload = (move: UpdatePayload['lst_move']): UpdatePayload['lst_move'] => ({
+const cloneMovePayload = (move: ReplayFrame['lst_move']): ReplayFrame['lst_move'] => ({
   x: move.x,
   y: move.y,
   dx: move.dx,
@@ -39,7 +39,7 @@ const cloneLeaderboard = (leaderboard: LeaderboardEntry[]): LeaderboardEntry[] =
   }));
 
 const buildReplayPatchPayload = (
-  frame: UpdatePayload,
+  frame: ReplayFrame,
   gridDiff: number[],
   armyDiff: number[],
   isolatedDiff: number[],
@@ -54,7 +54,7 @@ const buildReplayPatchPayload = (
   game_end: frame.game_end,
 });
 
-const buildReplayPatch = (prevFrame: UpdatePayload, nextFrame: UpdatePayload): ReplayPatch => ({
+const buildReplayPatch = (prevFrame: ReplayFrame, nextFrame: ReplayFrame): ReplayPatch => ({
   forward: buildReplayPatchPayload(
     nextFrame,
     getDiff(nextFrame.grid_type, prevFrame.grid_type),

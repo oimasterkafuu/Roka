@@ -17,8 +17,7 @@ function attachBot(socket, {
     lastLobbyCommand = -Infinity;
   }
   function switchRoom() {
-    // join_game_room ignores joins while lobbyOfSid is occupied. Neither leave nor
-    // return_room releases it: only disconnect does. Wait for room_update(false),
+    // join_game_room ignores joins while lobbyOfSid is occupied. return_room does not release it: only disconnect does. Wait for room_update(false),
     // not death/game_end, so server endGame has also cleared its game routing.
     if (!pendingRoom || !room || running || room.in_game || !socket.connected) return;
     currentRoom = pendingRoom;
@@ -44,7 +43,7 @@ function attachBot(socket, {
     if (!data || !Array.isArray(data.players) || typeof data.in_game !== 'boolean') return;
     if (!data.in_game && (!room || running)) resetIntermission();
     // Retain only operational fields; never read or retain map_token/auth tokens.
-    room = { in_game: data.in_game, players: data.players.map(({ sid, uid, team, ready }) => ({ sid, uid, team, ready })), need: data.need };
+    room = { in_game: data.in_game, players: data.players.map(({ sid, uid, team, ready }) => ({ sid, uid, team, ready })), ready_counts: data.ready_counts };
     running = data.in_game;
     if (!running) { board = null; returning = false; }
     const self = room.players.find((p) => p.sid === clientId);
@@ -106,7 +105,7 @@ function attachBot(socket, {
       metrics = { count:0, sent:0, idle:0, ms:0, max:0, gaps:0 };
     }
     if (selected) {
-      const { kind, reason: rawReason, ...action } = selected;
+      const { kind, half, reason: rawReason, ...action } = selected;
       const reason = typeof rawReason === 'string' ? rawReason : JSON.stringify(rawReason);
       socket.emit(kind, action);
       if (kind === 'build') log(`[建造] turn=${board.turn} ${reason} (${action.x},${action.y})`);
@@ -123,7 +122,7 @@ function attachBot(socket, {
     if (cancelReady) { cancelReady = false; emitLobby('change_ready', { ready: false }); return; }
     if (!autoReady) return;
     if (Number(self.team) === 0) { emitLobby('change_team', { team: 1 }); return; }
-    if (now() >= readyAt && Number(room.need) > 1 && !self.ready) emitLobby('change_ready', { ready: true });
+    if (now() >= readyAt && room.players.filter((p) => Number(p.team) !== 0).length >= 2 && !self.ready) emitLobby('change_ready', { ready: true });
   };
   const timer = schedule(tick, 100);
   const heartbeat = schedule(() => { if (!closed && socket.connected) socket.emit('room_heartbeat'); }, 30000);

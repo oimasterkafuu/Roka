@@ -20,7 +20,7 @@ import { FeedCooldownException, FeedStore } from './feed-store';
 import { GameEngine } from './game-engine';
 import { isHuaxiaSeasonActive } from './map/huaxia-season';
 import { resolveMapSizeRatioByPlayers } from './map/map-size';
-import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
+import { DEFAULT_MAP_REGION, isMapRegion, normalizeMapRegion } from './map/huaxia-regions';
 import { ratingTier } from './rating-color';
 import { encodeReplayPatchBinary } from './replay-patch-binary';
 import { buildReplayStats } from './server/replay-stats';
@@ -116,7 +116,6 @@ const webhookUpdater = new WebhookUpdater(
 );
 lobbyService.onGameEnded = () => webhookUpdater.notifyGameEnded();
 
-type PushWebhookPayload = { ref?: unknown };
 const GENERAL_RATE_LIMIT = { max: 1000, timeWindow: '1 minute' };
 const WEBHOOK_RATE_LIMIT = { max: 20, timeWindow: '1 minute' };
 const AUTH_PAGE_RATE_LIMIT = { max: 60, timeWindow: '1 minute' };
@@ -446,57 +445,6 @@ const parseJsonObject = (text: string): Record<string, unknown> | null => {
   return null;
 };
 
-const readHeaderValue = (headers: Record<string, unknown>, key: string): string | null => {
-  const value = headers[key];
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (Array.isArray(value) && typeof value[0] === 'string') {
-    return value[0];
-  }
-  return null;
-};
-
-const parsePushWebhookPayload = (
-  body: unknown,
-  rawBody: Buffer,
-  headers: Record<string, unknown>,
-): PushWebhookPayload | null => {
-  const rawText = rawBody.toString('utf8');
-  const directJson = parseJsonObject(rawText);
-  if (directJson) {
-    return directJson;
-  }
-
-  const contentType = readHeaderValue(headers, 'content-type') ?? '';
-  const mightBeFormBody =
-    contentType.includes('application/x-www-form-urlencoded') || rawText.includes('payload=');
-  if (mightBeFormBody) {
-    const encodedPayload = new URLSearchParams(rawText).get('payload');
-    if (encodedPayload) {
-      const parsedPayload = parseJsonObject(encodedPayload);
-      if (parsedPayload) {
-        return parsedPayload;
-      }
-    }
-  }
-
-  if (body && typeof body === 'object' && !Buffer.isBuffer(body)) {
-    const bodyObject = body as Record<string, unknown>;
-    if (typeof bodyObject.payload === 'string') {
-      const payloadInBody = parseJsonObject(bodyObject.payload);
-      if (payloadInBody) {
-        return payloadInBody;
-      }
-    }
-    if ('ref' in bodyObject) {
-      return bodyObject;
-    }
-  }
-
-  return null;
-};
-
 if (runtimeEnv.createdKeys.length > 0) {
   app.log.info({ keys: runtimeEnv.createdKeys }, '已自动补全缺失环境变量到 .env。');
 }
@@ -558,7 +506,8 @@ const boot = async (): Promise<void> => {
   await app.register(async (webhookApp) => {
     const webhookRateLimitPreHandler = webhookApp.rateLimit(WEBHOOK_RATE_LIMIT);
 
-    webhookApp.addContentTypeParser('*', { parseAs: 'buffer' }, (_request, payload, done) => {
+    webhookApp.removeContentTypeParser('application/json');
+    webhookApp.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_request, payload, done) => {
       done(null, payload);
     });
 
@@ -586,8 +535,8 @@ const boot = async (): Promise<void> => {
       }
 
       if (event === 'push') {
-        const payload = parsePushWebhookPayload(body, rawBody, headers);
-        if (!payload) {
+        const payload = parseJsonObject(rawBody.toString('utf8'));
+        if (!payload || typeof payload.ref !== 'string') {
           return reply.code(400).send({ error: 'Invalid webhook payload.' });
         }
 
@@ -601,7 +550,6 @@ const boot = async (): Promise<void> => {
     };
 
     webhookApp.post('/postreceive', { preHandler: webhookRateLimitPreHandler }, postReceiveHandler);
-    webhookApp.post('/postreceive/', { preHandler: webhookRateLimitPreHandler }, postReceiveHandler);
   });
 
   const authPageRateLimitPreHandler = app.rateLimit(AUTH_PAGE_RATE_LIMIT);
@@ -1350,10 +1298,6 @@ const boot = async (): Promise<void> => {
 
   app.get('/', async (request, reply) => serveAssetTemplate(request, reply, 'index.html', 'text/html'));
 
-  app.get('/rooms', async (_request, reply) => reply.redirect('/'));
-
-  app.get('/replays', async (_request, reply) => reply.redirect('/'));
-
   app.get('/u/:username', async (request, reply) => {
     const { username } = request.params as { username: string };
     if (!USERNAME_REGEX.test(username)) {
@@ -1376,16 +1320,6 @@ const boot = async (): Promise<void> => {
   app.get('/tutorial/interactive', async (request, reply) =>
     serveAssetTemplate(request, reply, 'tutorial.html', 'text/html'),
   );
-
-  app.get('/games', async (_request, reply) => {
-    let html = '';
-    let count = 0;
-    for (const game of lobbyService.gameInstances.values()) {
-      count += 1;
-      html += `房间${count}：${game.names.join(' ')}<br>`;
-    }
-    return reply.type('text/html').send(html);
-  });
 
   app.get('/replays/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -1479,6 +1413,9 @@ const boot = async (): Promise<void> => {
       return reply.code(403).send({ error: '华夏系列地图仅在每年 10 月 1 日至 10 月 7 日开放。' });
     }
     const players = parseMapExamplePlayerCount(query.players);
+    if (query.map_region !== undefined && !isMapRegion(query.map_region)) {
+      return reply.code(400).send({ error: '无效的 map_region。' });
+    }
     const mapRegion = normalizeMapRegion(query.map_region);
     const example = await buildMapExample(mapMode, players, mapRegion);
     return reply.send({
@@ -1489,16 +1426,7 @@ const boot = async (): Promise<void> => {
 
   app.get('/favicon.ico', async (_request, reply) => reply.code(204).send());
 
-  app.setNotFoundHandler(async (request, reply) => {
-    const reqPath = request.url.split('?')[0] || '/';
-    if (reqPath === '/favicon.ico' || reqPath.startsWith('/api/') || reqPath.startsWith('/socket.io/')) {
-      return reply.code(404).type('text/plain').send('Not Found');
-    }
-    if (reqPath.includes('.') && !reqPath.startsWith('/games/')) {
-      return reply.code(404).type('text/plain').send('Not Found');
-    }
-    return reply.redirect(`/games/${lobbyService.randomRoomId()}`);
-  });
+  app.setNotFoundHandler(async (_request, reply) => reply.code(404).type('text/plain').send('Not Found'));
 
   const io = new SocketIOServer(app.server, {
     transports: ['websocket', 'polling'],
@@ -1683,51 +1611,28 @@ const boot = async (): Promise<void> => {
       markHumanVerified(data);
     });
 
-    // 多线争锋的可选战线编号解析：缺省/非法时按 undefined 处理（引擎回退战线 0）。
-    const parseLine = (value: unknown): number | undefined => {
-      const parsed = Number.parseInt(String(value), 10);
-      return Number.isNaN(parsed) ? undefined : parsed;
-    };
+    socket.on('attack', (data: { x: unknown; y: unknown; dx: unknown; dy: unknown; mode: unknown }) => {
+      const gid = lobbyService.gameUid.get(socket.id);
+      if (!gid) {
+        return;
+      }
+      if (!data || Object.hasOwn(data, 'half') || Object.hasOwn(data, 'line')) return;
+      if (data.mode !== 0 && data.mode !== 1 && data.mode !== 2) return;
+      const mode: MoveMode = data.mode;
+      lobbyService.gameInstances
+        .get(gid)
+        ?.addMove(
+          socket.id,
+          Number.parseInt(String(data.x), 10),
+          Number.parseInt(String(data.y), 10),
+          Number.parseInt(String(data.dx), 10),
+          Number.parseInt(String(data.dy), 10),
+          mode,
+        );
+    });
 
-    socket.on(
-      'attack',
-      (data: {
-        x: unknown;
-        y: unknown;
-        dx: unknown;
-        dy: unknown;
-        half: unknown;
-        mode: unknown;
-        line?: unknown;
-      }) => {
-        const gid = lobbyService.gameUid.get(socket.id);
-        if (!gid) {
-          return;
-        }
-        const parsedMode = Number.parseInt(String(data.mode), 10);
-        const mode: MoveMode =
-          parsedMode === 1 || parsedMode === 2
-            ? parsedMode
-            : parsedMode === 0
-              ? 0
-              : Boolean(data.half)
-                ? 1
-                : 0;
-        lobbyService.gameInstances
-          .get(gid)
-          ?.addMove(
-            socket.id,
-            Number.parseInt(String(data.x), 10),
-            Number.parseInt(String(data.y), 10),
-            Number.parseInt(String(data.dx), 10),
-            Number.parseInt(String(data.dy), 10),
-            mode,
-            parseLine(data.line),
-          );
-      },
-    );
-
-    socket.on('build', (data: { x: unknown; y: unknown; op: unknown; line?: unknown }) => {
+    socket.on('build', (data: { x: unknown; y: unknown; op: unknown }) => {
+      if (!data || Object.hasOwn(data, 'line')) return;
       const gid = lobbyService.gameUid.get(socket.id);
       if (!gid) {
         return;
@@ -1738,16 +1643,11 @@ const boot = async (): Promise<void> => {
       }
       lobbyService.gameInstances
         .get(gid)
-        ?.addBuild(
-          socket.id,
-          Number.parseInt(String(data.x), 10),
-          Number.parseInt(String(data.y), 10),
-          op,
-          parseLine(data.line),
-        );
+        ?.addBuild(socket.id, Number.parseInt(String(data.x), 10), Number.parseInt(String(data.y), 10), op);
     });
 
-    socket.on('clear_queue', () => {
+    socket.on('clear_queue', (data?: unknown) => {
+      if (data && typeof data === 'object' && Object.hasOwn(data, 'line')) return;
       const gid = lobbyService.gameUid.get(socket.id);
       if (!gid) {
         return;
@@ -1760,7 +1660,8 @@ const boot = async (): Promise<void> => {
       game.clearQueue(socket.id);
     });
 
-    socket.on('pop_queue', () => {
+    socket.on('pop_queue', (data?: unknown) => {
+      if (data && typeof data === 'object' && Object.hasOwn(data, 'line')) return;
       const gid = lobbyService.gameUid.get(socket.id);
       if (!gid) {
         return;
@@ -2105,6 +2006,7 @@ const boot = async (): Promise<void> => {
         }
 
         if (hasOwn('map_region')) {
+          if (!isMapRegion(payload.map_region)) return;
           const mapRegion = normalizeMapRegion(payload.map_region);
           if (mapRegion !== oldConf.map_region) {
             nextConf.map_region = mapRegion;
@@ -2229,7 +2131,6 @@ const boot = async (): Promise<void> => {
     };
 
     socket.on('return_room', doReturnRoom);
-    socket.on('leave', doReturnRoom);
 
     socket.on('disconnect', () => {
       if (!isBot) {

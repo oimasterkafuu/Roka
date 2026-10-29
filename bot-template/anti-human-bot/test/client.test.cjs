@@ -11,7 +11,7 @@ class Socket {
   disconnect() { this.disconnects++; this.connected = false; this.receive('disconnect', 'io client disconnect'); }
   connect() { this.connected = true; this.receive('connect'); }
 }
-const lobby = (extra = {}) => ({ in_game: false, players: [{ sid: 'me', uid: 'bot', team: 1, ready: false }], need: 2, speed: 1, map_mode: 'fixed', ...extra });
+const lobby = (extra = {}) => ({ in_game: false, players: [{ sid: 'me', uid: 'bot', team: 1, ready: false }, { sid: 'other', uid: 'other', team: 1, ready: false }], speed: 1, map_mode: 'fixed', ...extra });
 const command = (s, text, extra = {}) => s.receive('chat_message', { sender: 'oimaster', color: 1, text, team: false, ...extra });
 const events = (s, event) => s.sent.filter(([e]) => e === event);
 function setup(t, options = {}) {
@@ -112,7 +112,7 @@ test('自动准备开启后观战席先参赛，节流且不更改房间配置�
 test('当前房间取消待切房后恢复准备计时，单人不反复准备', t => {
   const [s, b] = setup(t); s.receive('room_update', lobby({ in_game: true }));
   command(s, '/ready'); command(s, '/room abc'); command(s, '/room bot');
-  s.receive('room_update', lobby({ need: 1 })); s.advance(10000); b.tick(); assert.equal(s.sent.length, 0);
+  s.receive('room_update', lobby({ players: [{ sid: 'me', uid: 'bot', team: 1, ready: false }] })); s.advance(10000); b.tick(); assert.equal(s.sent.length, 0);
   s.receive('room_update', lobby()); b.tick(); assert.deepEqual(s.sent, [['change_ready', { ready: true }]]);
   assert.equal(s.disconnects, 0);
 });
