@@ -2,15 +2,15 @@
 
 ## 路径与版本
 
-生产路径为 `https://cdn.jsdmirror.com/gh/oimasterkafuu/Roka@<文件最后修改的 40 位 SHA>/static/<文件>`。服务启动时一次 `git ls-files -z` 、一次 `git log --name-only -z` 及浅克隆边界查询 建立已跟踪路径到最后修改提交的映射，请求期间不调用 Git、不启动 watcher。文件 A 的修改不会改变 B 的 CDN URL；package version 的改变同样不会改变未修改文件的 URL。
+生产路径为 `https://testingcf.jsdelivr.net/gh/oimasterkafuu/Roka@<文件最后修改的 40 位 SHA>/static/<文件>`。服务启动时一次 `git ls-files -z` 、一次 `git log --name-only -z` 及浅克隆边界查询 建立已跟踪路径到最后修改提交的映射，请求期间不调用 Git、不启动 watcher。文件 A 的修改不会改变 B 的 CDN URL；package version 的改变同样不会改变未修改文件的 URL。
 
 CDN 地址移除全局 `v` query，保留其他 query 与 hash。例如旧版 `/Roka@<静态树 SHA>/static/crown.png?v=2.0.1` 改为 `/Roka@<crown.png 最后修改 SHA>/static/crown.png`，更新 main.js 或版本号后该地址不变。最后的本站回退仍保留原始 query，保持原有模板注入、ETag 与本地缓存语义。
 
-HTML、preload、有序脚本描述、运行时 `ROKA_ASSETS.url/fetch/import` 和 Worker 实现均查自己的 pathname。各提供方使用该文件同一 SHA；preload 与实际脚本请求完全一致。CSS 入口由运行时带 SRI 下载，然后递归解析 `@import` 和 `url()`：嵌套样式、字体及图片分别查询自身 SHA，通过同一故障切换 fetch 下载后生成页面生命周期内复用的 blob URL。这样浏览器不会把相对依赖错误地绑定到父 CSS 的提交；样式 link 顺序和属性保留，脚本队列等待样式完成。CSS 依赖并行预取，共享 CSS 素材只下载一次，blob 随页面销毁释放。不要直接把未处理的 CDN CSS URL 放进动态 link；动态样式应调用 `ROKA_ASSETS.stylesheet(path, integrity, attrs)`。
+HTML、preload、有序脚本描述、运行时 `ROKA_ASSETS.url/fetch/import` 和 Worker 实现均查自己的 pathname。各提供方使用该文件同一 SHA；preload 与实际脚本请求完全一致。CSS 入口由运行时带 SRI 下载，然后递归解析 `@import` 和 `url()`：嵌套样式、字体及图片分别查询自身 SHA，通过同一故障切换 fetch 下载后生成页面生命周期内复用的 blob URL。这样浏览器不会把相对依赖错误地绑定到父 CSS 的提交；样式 link 顺序和属性保留，脚本队列等待样式完成。首屏在内联同背景加载提示下等待初始样式，样式完成即展示，不等待脚本队列。整个 CSS 依赖图超过 4 秒（包括正文、字体和图片等待）或失败时，当前 link 改用保留原 query 的同源原生 CSS，并保留入口 SRI；此降级路径的嵌套依赖由浏览器同源解析。再等待最多 8 秒后解除提示并让 ready 报错，避免永久遮挡；同源也失败时无法保证完整样式。迟到 CDN 结果不会覆盖同源 link。CSS 依赖并行预取，共享 CSS 素材只下载一次，blob 随页面销毁释放。不要直接把未处理的 CDN CSS URL 放进动态 link；动态样式应调用 `ROKA_ASSETS.stylesheet(path, integrity, attrs)`。
 
 介绍片 manifest、哈希素材及 glTF buffer/image 依赖沿用现有 loader，每次请求经逐文件运行时解析，模型内部依赖转换成可释放 blob URL。播放器由构建脚本打包，不包含浏览器需要解析的相对模块导入。项目当前没有独立 Web Worker；Service Worker 使用下述同源装载器。
 
-默认候选依次为 `cdn.jsdmirror.com`、`cdn.jsdmirror.cn`、`testingcf.jsdelivr.net`、本站。前两个属于同一运营方，第三个为独立提供方。只在请求失败、非成功 HTTP 状态或脚本/入口 CSS 完整性校验失败后切换。入口脚本通过 preload 并行下载，再按依赖顺序执行，不用超时重插方式冒险重复执行；素材 fetch 等待响应头每个源最多 8 秒，使用者取消时立即停止且不切换。模型依赖先经 CDN 下载为可释放的 blob URL，共享贴图只取一次。
+默认候选依次为 `testingcf.jsdelivr.net`、`cdn.jsdmirror.com`、`cdn.jsdmirror.cn`、本站。后两个属于同一运营方。2026-10-30 本机全新浏览器上下文的直连与显式代理对照中，镜像双域对真实逐文件 SHA 持续返回 521（另有 429），独立源的 CSS 请求成功，因此调整顺序；这不代表独立源在所有网络可用，脚本请求仍观察到超时。只在请求失败、非成功 HTTP 状态或脚本/入口 CSS 完整性校验失败后切换。入口脚本通过 preload 并行下载，再按依赖顺序执行，不用超时重插方式冒险重复执行；素材 fetch 等待响应头每个源最多 8 秒，使用者取消时立即停止且不切换。模型依赖先经 CDN 下载为可释放的 blob URL，共享贴图只取一次。
 
 HTML 仍由本站动态生成，以保留认证与会话凭据；`/api/`、`/socket.io/`、导航路径不改写。浏览器要求 Service Worker 注册入口同源，因此 `/sw.js?v=<站点版本>` 仅返回小型装载器，通过 `importScripts` 获取固定版本的 CDN 实现。最后回退 `/sw.js?source=1` 为原实现，避免递归。没有上传或下载整段 MP4，介绍片由用户同意后按需加载静态素材并在客户端实时绘制。
 

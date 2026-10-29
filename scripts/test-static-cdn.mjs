@@ -17,6 +17,10 @@ const artifact = path.join(root, 'static', `.cdn-build-test-${process.pid}.gz`);
 try {
   await writeFile(artifact, 'generated build artifact');
   const production = new StaticAssetDelivery(version, root, {});
+  assert.deepEqual(
+    production.bases.slice(0, -1).map((base) => new URL(base).origin),
+    ['https://testingcf.jsdelivr.net', 'https://cdn.jsdmirror.com', 'https://cdn.jsdmirror.cn'],
+  );
   assert(production.enabled, 'generated/untracked build artifacts must not disable production CDN');
   assert.match(production.commit, /^[a-f0-9]{40}$/);
 } finally {
@@ -51,6 +55,7 @@ const html = delivery.html(
   '<head></head><img src="/crown.png" srcset="/city.png 1x, /mountain.png 2x"><script src="/notify.js"></script><a href="/api/version">API</a>',
 );
 assert.match(html, /sha384-/);
+assert.match(html, /id="roka-initial-style"/);
 assert.match(html, /rel="preload" as="script"/);
 assert.match(html, /crossorigin="anonymous"/);
 assert(html.includes(`${delivery.bases[0]}mountain.png 2x`));

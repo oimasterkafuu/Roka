@@ -44,7 +44,7 @@ node training/long-eval.cjs --help
 
 ## 静态资源 CDN
 
-线上 JS、CSS、字体、图标和介绍片的模型、贴图、HDR、回放与音轨，统一从 GitHub CDN 获取。默认首选 `cdn.jsdmirror.com`，失败依次尝试 `.cn`、`testingcf.jsdelivr.net`，最后回源；脚本与入口样式还校验 SHA-384。所有 CDN 地址固定完整 40 位 commit，部署启动时按每个文件自身的最后修改提交建立映射，CDN 地址不带整站 `?v=`；未修改文件不会随其他资源或 package version 更新而刷新。嵌套 CSS、字体与模型依赖也逐文件解析。介绍片仍为客户端实时渲染，没有整段视频下载。
+线上 JS、CSS、字体、图标和介绍片的模型、贴图、HDR、回放与音轨，统一从 GitHub CDN 获取。默认首选 `testingcf.jsdelivr.net`，失败依次尝试 `cdn.jsdmirror.com`、`cdn.jsdmirror.cn`，最后回源；脚本与入口样式还校验 SHA-384。所有 CDN 地址固定完整 40 位 commit，部署启动时按每个文件自身的最后修改提交建立映射，CDN 地址不带整站 `?v=`；未修改文件不会随其他资源或 package version 更新而刷新。嵌套 CSS、字体与模型依赖也逐文件解析。首屏样式就绪前显示加载提示；CSS 依赖图超过 4 秒时使用保留原 query 的同源原生样式（嵌套依赖同源），同源再等待最多 8 秒后解除加载提示，避免永久遮挡。介绍片仍为客户端实时渲染，没有整段视频下载。
 
 `pnpm run dev` 默认使用同源；其他启动方式可用 `ROKA_STATIC_CDN=0` 显式关闭。生产构建生成的压缩副本不影响 CDN 启用。未跟踪、无法确定提交或无 Git 历史的文件安全回本站。归档部署可用 `ROKA_STATIC_COMMIT=<完整 SHA>` 强制覆盖所有文件版本；`ROKA_STATIC_CDN_ORIGINS` 可覆盖候选 HTTPS 域名（逗号分隔）。HTML、API、Socket.IO 与 Service Worker 注册入口保持本站来源。国内三运营商抽样可用，但免费 CDN 没有可靠 SLA，已保留故障回退。配置、发布预热与检测证据见 [CDN 说明](docs/static-cdn.md)。
 
