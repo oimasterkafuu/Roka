@@ -246,6 +246,8 @@ export class GameEngine {
 
   /** 历史 ops-v1 未标记自动转属，重建时必须沿用旧推兵语义。 */
   private readonly autoCrownTransfer: boolean;
+  private readonly isolatedReinforcementFix: boolean;
+  private isolatedReinforced: Grid<boolean> = [];
 
   private readonly externalSpectatorSids: Set<string>;
 
@@ -351,7 +353,10 @@ export class GameEngine {
     this.mountainRatio = seededMountainRatio;
     this.swampRatio = gameConf.swamp_ratio;
     this.autoCrownTransfer = gid !== '__replay_build__' || gameConf.auto_crown_transfer === true;
+    this.isolatedReinforcementFix =
+      gid !== '__replay_build__' || gameConf.isolated_reinforcement_fix === true;
     this.replayMeta = {
+      isolated_reinforcement_fix: this.isolatedReinforcementFix,
       auto_crown_transfer: true,
       width_ratio: gameConf.width_ratio,
       height_ratio: gameConf.height_ratio,
@@ -487,6 +492,7 @@ export class GameEngine {
         map_size: replay.meta.map_size ?? 'normal',
         map_region: normalizeMapRegion(replay.meta.map_region),
         auto_crown_transfer: replay.meta.auto_crown_transfer === true,
+        isolated_reinforcement_fix: replay.meta.isolated_reinforcement_fix === true,
       },
       dummyPlayerSids,
       dummyPlayerIds,
@@ -667,6 +673,9 @@ export class GameEngine {
     this.gridType = generated.gridType;
     this.st = generated.st;
     this.isolated = Array.from({ length: this.n }, () => Array.from({ length: this.m }, () => false));
+    this.isolatedReinforced = Array.from({ length: this.n }, () =>
+      Array.from({ length: this.m }, () => false),
+    );
     this.isolatedAge = Array.from({ length: this.n }, () => Array.from({ length: this.m }, () => 0));
   }
 
@@ -1313,6 +1322,7 @@ export class GameEngine {
               this.armyCnt[i][j] = 0;
               this.isolated[i][j] = false;
               this.isolatedAge[i][j] = 0;
+              this.isolatedReinforced[i][j] = false;
               continue;
             }
           }
@@ -1414,6 +1424,16 @@ export class GameEngine {
     const attacker = this.owner[x][y];
     const defender = this.owner[dx][dy];
 
+    if (
+      this.isolatedReinforcementFix &&
+      this.isolated[dx][dy] &&
+      defender > 0 &&
+      this.team[defender - 1] === this.team[attacker - 1]
+    ) {
+      // 接收新兵后，本次孤军周期不再享有重连翻倍（含自有及存活/已故队友）。
+      this.isolatedReinforced[dx][dy] = true;
+    }
+
     if (defender === attacker) {
       this.armyCnt[x][y] -= cnt;
       this.armyCnt[dx][dy] += cnt;
@@ -1450,6 +1470,7 @@ export class GameEngine {
     this.armyCnt[dx][dy] = cnt - defense;
     this.isolated[dx][dy] = false;
     this.isolatedAge[dx][dy] = 0;
+    this.isolatedReinforced[dx][dy] = false;
 
     if (wasCrown && defender > 0 && this.countCrowns(defender) === 0) {
       // 敌方最后一座主城被占领：立即出局，剩余领土全部沦为孤军（见 kill）。
@@ -1496,6 +1517,7 @@ export class GameEngine {
       }
       this.isolated[x][y] = false;
       this.isolatedAge[x][y] = 0;
+      this.isolatedReinforced[x][y] = false;
       return;
     }
     this.armyCnt[x][y] = current - decay;
@@ -1570,21 +1592,24 @@ export class GameEngine {
         if (ownerId <= 0) {
           this.isolated[i][j] = false;
           this.isolatedAge[i][j] = 0;
+          this.isolatedReinforced[i][j] = false;
           continue;
         }
 
         const wasIsolated = this.isolated[i][j];
         if (connected[i][j]) {
           if (wasIsolated) {
-            // 重连：恢复正常，兵力按当前兵力 ×2。
+            // 仅未接兵的孤军恢复翻倍；接兵标记在本次重连后清除。
+            if (!this.isolatedReinforced[i][j]) this.armyCnt[i][j] *= 2;
             this.isolated[i][j] = false;
             this.isolatedAge[i][j] = 0;
-            this.armyCnt[i][j] *= 2;
+            this.isolatedReinforced[i][j] = false;
           }
           continue;
         }
 
         if (!wasIsolated) {
+          this.isolatedReinforced[i][j] = false;
           // 新断链：立即减半（1 兵特例保持为 1），随后进入宽限期，本 Tick 不衰减。
           this.isolated[i][j] = true;
           this.isolatedAge[i][j] = 1;
@@ -1594,6 +1619,7 @@ export class GameEngine {
             this.armyCnt[i][j] = 0;
             this.isolated[i][j] = false;
             this.isolatedAge[i][j] = 0;
+            this.isolatedReinforced[i][j] = false;
           }
           continue;
         }
