@@ -44,9 +44,9 @@ node training/long-eval.cjs --help
 
 ## 静态资源 CDN
 
-线上 JS、CSS、字体、图标和介绍片的模型、贴图、HDR、回放与音轨，统一从 GitHub CDN 获取。默认首选 `cdn.jsdmirror.com`，失败依次尝试 `.cn`、`testingcf.jsdelivr.net`，最后回源；脚本与入口样式还校验 SHA-384。所有 CDN 地址固定完整 40 位 commit，部署自动选取最近一次修改 `static/` 的提交，避免 `main` 缓存导致旧文件混用。介绍片仍为客户端实时渲染，没有整段视频下载。
+线上 JS、CSS、字体、图标和介绍片的模型、贴图、HDR、回放与音轨，统一从 GitHub CDN 获取。默认首选 `cdn.jsdmirror.com`，失败依次尝试 `.cn`、`testingcf.jsdelivr.net`，最后回源；脚本与入口样式还校验 SHA-384。所有 CDN 地址固定完整 40 位 commit，部署启动时按每个文件自身的最后修改提交建立映射，CDN 地址不带整站 `?v=`；未修改文件不会随其他资源或 package version 更新而刷新。嵌套 CSS、字体与模型依赖也逐文件解析。介绍片仍为客户端实时渲染，没有整段视频下载。
 
-`pnpm run dev` 默认使用同源；其他启动方式可用 `ROKA_STATIC_CDN=0` 显式关闭。生产构建生成的压缩副本不影响 CDN 启用。归档部署可用 `ROKA_STATIC_COMMIT=<完整 SHA>` 指定版本；`ROKA_STATIC_CDN_ORIGINS` 可覆盖候选 HTTPS 域名（逗号分隔）。HTML、API、Socket.IO 与 Service Worker 注册入口保持本站来源。国内三运营商抽样可用，但免费 CDN 没有可靠 SLA，已保留故障回退。配置、发布预热与检测证据见 [CDN 说明](docs/static-cdn.md)。
+`pnpm run dev` 默认使用同源；其他启动方式可用 `ROKA_STATIC_CDN=0` 显式关闭。生产构建生成的压缩副本不影响 CDN 启用。未跟踪、无法确定提交或无 Git 历史的文件安全回本站。归档部署可用 `ROKA_STATIC_COMMIT=<完整 SHA>` 强制覆盖所有文件版本；`ROKA_STATIC_CDN_ORIGINS` 可覆盖候选 HTTPS 域名（逗号分隔）。HTML、API、Socket.IO 与 Service Worker 注册入口保持本站来源。国内三运营商抽样可用，但免费 CDN 没有可靠 SLA，已保留故障回退。配置、发布预热与检测证据见 [CDN 说明](docs/static-cdn.md)。
 
 ## 游戏规则
 
@@ -106,3 +106,7 @@ node training/long-eval.cjs --help
 协议说明：实时 `update` 使用 `lst_moves: number[]` 汇报本 Tick 当前玩家所有出队操作的 `seq`，执行成功和丢弃均包含；无出队时为空数组。`init_map` 提供 `next_seq` 与 `queue_ops` 用于断线重连对齐。实时队列入口只接受现行参数，移动必须提供数值 `mode: 0 | 1 | 2`；返回房间只使用 `return_room`。房间计数只使用 `ready_counts`。
 
 部署 webhook 使用 `POST /postreceive`，请求为原始 JSON，必须带 `x-hub-signature-256`（以 `WEBHOOK_SECRET` 对原始请求字节计算 SHA-256 HMAC）；GitHub webhook 的 Content type 配置为 `application/json`。
+
+孤军接兵规则：新对局中，自有或同队（含已出局队友）孤军格收到有效援兵后，本次孤军周期重连不再翻倍；同 Tick 与延迟重连均适用。未接兵孤军仍保留断链减半、重连 ×2。重连、中立化、敌方占领后清除接兵标记，再次断链重新开始周期。ops-v1 的 `meta.isolated_reinforcement_fix: true` 启用此规则，历史回放缺省保留原结算，不改变操作流格式。
+
+回归：`pnpm run test:isolated-reinforcement`（先构建）；原始回放审计：`node scripts/audit-isolated-replay.cjs <只读回放路径>`，分别按历史及修复规则重放原始 ops，输出孤军接兵前后兵力、归属玩家状态与关键 Tick。

@@ -196,6 +196,8 @@ export interface GameConfig extends LobbyConfig {
   map_size_version?: 1 | 2;
   /** 仅供回放重建选择历史规则；实时对局始终启用。 */
   auto_crown_transfer?: boolean;
+  /** 孤军接兵后抑制本次重连翻倍；历史回放缺省沿用旧规则。 */
+  isolated_reinforcement_fix?: boolean;
 }
 
 export interface ReplayMeta {
@@ -208,6 +210,8 @@ export interface ReplayMeta {
   allow_team: boolean;
   /** 新回放启用推兵自动转属；旧回放缺省时沿用原推兵语义。 */
   auto_crown_transfer?: boolean;
+  /** 孤军接兵后抑制本次重连翻倍；历史回放缺省沿用旧规则。 */
+  isolated_reinforcement_fix?: boolean;
   /** 对局是否开启迷雾远征（仅作元信息记录；回放始终全视野）。 */
   fog?: boolean;
   /** 对局是否开启多线争锋（仅作元信息记录；回放操作流与单线局同构）。 */

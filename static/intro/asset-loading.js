@@ -41,7 +41,7 @@ export async function fetchIntroAsset(path, options = {}) {
 }
 
 /** All remote bytes go through the commit-pinned runtime before Three sees them.
- * Blob URLs keep nested glTF requests on that same asset revision and avoid
+ * Blob URLs resolve each nested glTF dependency through its own revision and avoid
  * cross-origin canvas taint when recoloring decoded model textures.
  */
 export function createIntroAssetLoader({ files = {}, signal } = {}) {

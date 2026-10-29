@@ -218,7 +218,7 @@ try {
     await page.evaluate(() => window.ROKA_ASSETS.ready);
     assert(await page.locator('meta[name="roka-session-stamp"]').getAttribute('content'));
     assert.equal(await page.evaluate(() => typeof htmlescape), 'function');
-    assert(network.some((url) => url.startsWith(second + prefix + 'main.js?')));
+    assert(network.some((url) => url === second + prefix + 'main.js'));
     assert(network.some((url) => url.startsWith(base + '/socket.io/')));
     assert.deepEqual(errors, [], 'actual home/about execute without JS errors');
     assert(requests.filter((request) => !request.fail).length > 10);

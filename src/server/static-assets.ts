@@ -13,12 +13,14 @@ const RESOURCE =
   /\.(?:css|js|mjs|png|jpe?g|gif|svg|ico|webp|woff2?|otf|ttf|mp3|mp4|webm|ogg|wav|json|gltf|glb|bin|hdr)$/i;
 const jsonForHtml = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c');
 
-/** A deployment pins the last committed static tree, never a moving branch/tag. */
+/** Resolve immutable revisions once at startup, independently for each tracked file. */
 export class StaticAssetDelivery {
   readonly commit: string;
   readonly enabled: boolean;
   readonly bases: string[];
+  readonly commits: Record<string, string> = {};
   private readonly root: string;
+  private readonly override: string;
   private readonly digests = new Map<string, string>();
   private readonly runtime: string;
 
@@ -28,22 +30,63 @@ export class StaticAssetDelivery {
     env = process.env,
   ) {
     this.root = path.join(cwd, 'static');
-    let revision = env.ROKA_STATIC_COMMIT || '';
+    const revision = env.ROKA_STATIC_COMMIT || '';
+    this.override = revision;
     if (revision && !SHA.test(revision))
       throw new Error('ROKA_STATIC_COMMIT must be a full 40-character commit SHA');
-    if (!revision) {
+    if (!revision && env.ROKA_STATIC_CDN !== '0') {
       try {
-        revision = execFileSync('git', ['log', '-1', '--format=%H', '--', 'static'], {
+        const tracked = new Set(
+          execFileSync('git', ['ls-files', '-z', '--', 'static'], {
+            cwd,
+            stdio: ['ignore', 'pipe', 'ignore'],
+          })
+            .toString()
+            .split('\0'),
+        );
+        const history = execFileSync(
+          'git',
+          [
+            'log',
+            '--full-history',
+            '--topo-order',
+            '--diff-merges=combined',
+            '--format=%x00%H',
+            '--name-only',
+            '-z',
+            '--',
+            'static',
+          ],
+          {
+            cwd,
+            stdio: ['ignore', 'pipe', 'ignore'],
+            maxBuffer: 64 * 1024 * 1024,
+          },
+        ).toString();
+        const shallowPath = execFileSync('git', ['rev-parse', '--git-path', 'shallow'], {
           cwd,
           stdio: ['ignore', 'pipe', 'ignore'],
         })
           .toString()
           .trim();
+        const shallowFile = path.resolve(cwd, shallowPath);
+        const shallow = new Set(
+          existsSync(shallowFile) ? readFileSync(shallowFile, 'utf8').trim().split('\n') : [],
+        );
+        let sha = '';
+        for (const token of history.split('\0')) {
+          const value = token.replace(/^\n+|\n+$/g, '');
+          if (SHA.test(value)) sha = shallow.has(value) ? '' : value;
+          else if (sha && tracked.has(value) && value.startsWith('static/')) {
+            const key = '/' + value.slice(7);
+            if (!this.commits[key]) this.commits[key] = sha;
+          }
+        }
       } catch {
-        // Archive deployments can provide ROKA_STATIC_COMMIT explicitly.
+        // Archive deployments need an explicit override; unknown files stay local.
       }
     }
-    this.commit = SHA.test(revision) ? revision : '';
+    this.commit = revision || Object.values(this.commits)[0] || '';
     this.enabled = env.ROKA_STATIC_CDN !== '0' && !!this.commit;
     const origins = (env.ROKA_STATIC_CDN_ORIGINS || DEFAULT_ORIGINS.join(','))
       .split(',')
@@ -68,6 +111,8 @@ export class StaticAssetDelivery {
   private localFile(url: string): string | null {
     if (!url.startsWith('/') || url.startsWith('//')) return null;
     const pathname = url.split(/[?#]/)[0];
+    if (/%|\\/.test(pathname) || pathname.split('/').some((part) => part === '..' || part === '.'))
+      return null;
     if (!RESOURCE.test(pathname) || pathname.startsWith('/api/') || pathname.startsWith('/socket.io/'))
       return null;
     const filename = path.resolve(this.root, '.' + pathname);
@@ -75,7 +120,17 @@ export class StaticAssetDelivery {
     return filename;
   }
   url(url: string): string {
-    return this.enabled && this.localFile(url) ? this.bases[0] + url.slice(1) : url;
+    const pathname = url.split(/[?#]/)[0];
+    const commit = this.override || this.commits[pathname];
+    if (!this.enabled || !commit || !this.localFile(url)) return url;
+    const parsed = new URL(url, 'https://local.invalid');
+    parsed.searchParams.delete('v');
+    return (
+      this.bases[0].replace('@' + this.commit + '/', '@' + commit + '/') +
+      pathname.slice(1) +
+      parsed.search +
+      parsed.hash
+    );
   }
   private integrity(url: string): string | undefined {
     const filename = this.localFile(url);
@@ -89,8 +144,13 @@ export class StaticAssetDelivery {
   }
 
   worker(source: string): string {
-    if (!this.enabled) return source;
-    const urls = this.bases.map((base) => (base === '/' ? '/sw.js?source=1' : base + 'sw.js'));
+    if (!this.enabled || this.url('/sw.js') === '/sw.js') return source;
+    const urls = this.bases.map((base) =>
+      base === '/'
+        ? '/sw.js?source=1'
+        : base.replace('@' + this.commit + '/', '@' + (this.commits['/sw.js'] || this.commit) + '/') +
+          'sw.js',
+    );
     // Worker registration cannot use a cross-origin script URL. This tiny origin
     // wrapper loads the implementation from the same pinned CDN commit.
     return `/* Origin-scoped registration; implementation is commit-pinned. */\n(function(){var urls=${JSON.stringify(urls)},last;for(var i=0;i<urls.length;i++){try{importScripts(urls[i]);return;}catch(error){last=error;}}throw last;})();\n`;
@@ -129,9 +189,12 @@ export class StaticAssetDelivery {
       const href = tag.match(/\bhref=["']([^"']+)["']/i)?.[1];
       const integrity = href && this.integrity(href);
       if (!integrity) return tag;
-      return tag
-        .replace(/\s+(?:integrity|crossorigin)=["'][^"']*["']/gi, '')
-        .replace(/\s*\/?>$/, ` integrity="${integrity}" crossorigin="anonymous" />`);
+      const attrs: Record<string, string> = {};
+      for (const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+        if (!['href', 'integrity', 'crossorigin'].includes(match[1].toLowerCase()))
+          attrs[match[1]] = match[2] ?? match[3];
+      }
+      return `<script>window.ROKA_ASSETS.stylesheet(${jsonForHtml(href)},${jsonForHtml(integrity)},${jsonForHtml(attrs)});</script>`;
     });
     html = html.replace(
       /\bsrcset=(["'])(.*?)\1/gi,
@@ -143,8 +206,11 @@ export class StaticAssetDelivery {
     );
     // Includes src/href and literal static paths in inline styles. Script bodies
     // are already encoded descriptors; their src remains a canonical local path.
-    html = html.replace(/(["'])(\/[^\s"'<>]*)\1/g, (_all, q: string, url: string) => q + this.url(url) + q);
-    const config = { bases: this.bases, commit: this.commit, version: this.version };
+    html = html.replace(
+      /<script\b[^>]*>[\s\S]*?<\/script>|(["'])(\/[^\s"'<>]*)\1/gi,
+      (all, q: string | undefined, url: string) => (q ? q + this.url(url) + q : all),
+    );
+    const config = { bases: this.bases, commit: this.commit, commits: this.commits, version: this.version };
     const bootstrap = `<script>window.ROKA_ASSET_CONFIG=${jsonForHtml(config)};\n${this.runtime.replace(/<\/script/gi, '<\\/script')}\n</script>`;
     return html.replace(/<head\b[^>]*>/i, (head) => head + bootstrap + preloads.join(''));
   }
