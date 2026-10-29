@@ -29,7 +29,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 
 - 后端 TypeScript（`src/`）经 `pnpm run build` 编译到 `dist/` 运行；`dist/` 不手工编辑。
 - 前端主体无构建流程，`static/` 基本原样下发；介绍片由 `scripts/intro/build-intro.mjs` 单独打包至 `static/intro/player.js`；例外是含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
-- 静态资源发布：`src/server/static-assets.ts` 将 HTML 的资源地址固定到最近静态提交，注入 `static/asset-runtime.js` 处理有序脚本、完整性校验与 CDN 回退；CSS 内引用使用相对路径继承同一 commit。动态接口不经 CDN。详见 `docs/static-cdn.md`。
+- 静态资源发布：`src/server/static-assets.ts` 启动时批量读取 Git 历史，按文件最后修改 SHA 改写 HTML/preload/Worker，CDN 去除整站 v；注入 `static/asset-runtime.js` 处理逐文件 URL、有序脚本、完整性校验与 CDN 回退，并递归下载 CSS/字体/图片为 blob，避免依赖继承父文件 SHA。未知文件单独回源，ROKA_STATIC_COMMIT 可全文件覆盖。动态接口不经 CDN。详见 `docs/static-cdn.md`。
 - 玩家身份 = socket.id（sid）；对局协议与格子编码的权威文档是 `static/develop-bot.html`。
 
 ## 实时介绍片
@@ -427,3 +427,8 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 ## 对外 API 唯一契约（2.0）
 
 房间查询使用 `GET /api/rooms`；首页为 `/`。实时移动必须提供数值 `mode`，队列操作不接受 `line`；出队确认仅下发 `lst_moves` 序号数组，重连通过 `init_map.next_seq/queue_ops` 恢复。返回房间事件为 `return_room`。房间快照和列表的准备门槛仅使用 `ready_counts`。地图区域请求仅接受现行 `MapRegion`，旧地区转换保留在内部回放读取。部署入口只接受 JSON 与 GitHub HMAC 签名。未知路径返回 404。`scripts/test-api-contract.mjs` 覆盖淘汰接口与当前契约的端到端回归。
+
+- `src/game-engine.ts`：`isolatedReinforced` 记录本次孤军周期是否接兵，新局通过 `isolated_reinforcement_fix` meta 启用重连翻倍抑制，旧 ops-v1 缺省沿用历史规则。
+- `scripts/test-isolated-reinforcement.mjs`：真实引擎接兵/重连/生命周期回归，纳入 `pnpm test`；`scripts/audit-isolated-replay.cjs`：只读原始 ops 对照审计。
+
+- 逐文件 CDN 回归：`scripts/test-per-file-cdn.mjs` 使用真实临时 Git 历史检查独立版本与安全回源；`scripts/test-css-per-file-cdn.mjs` 用浏览器检查嵌套 CSS、字体、图片与运行时 import/fetch 的逐文件候选。

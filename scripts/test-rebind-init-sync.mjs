@@ -43,7 +43,10 @@ e.enableAfkSurrender = false;
 // 开局路径基线：init_map 已带 seq 同步字段。
 const startInit = inits.find((x) => x.sid === 'a')?.data;
 check('开局 init_map 带 next_seq=1', startInit?.next_seq === 1);
-check('开局 init_map 带空 queue_ops', Array.isArray(startInit?.queue_ops) && startInit.queue_ops.length === 0);
+check(
+  '开局 init_map 带空 queue_ops',
+  Array.isArray(startInit?.queue_ops) && startInit.queue_ops.length === 0,
+);
 
 // 入队若干条指令，推进服务端 nextSeq。
 e.addMove('a', 0, 0, 0, 1);
@@ -67,9 +70,7 @@ check(
 check('换绑 init_map 带 queue_ops 数组', Array.isArray(rebindInit?.queue_ops));
 check(
   '换绑 queue_ops 与换绑清队后的服务端队列一致（空拷贝）',
-  Array.isArray(rebindInit?.queue_ops) &&
-    rebindInit.queue_ops.length === 0 &&
-    e['pmove'][0].length === 0,
+  Array.isArray(rebindInit?.queue_ops) && rebindInit.queue_ops.length === 0 && e['pmove'][0].length === 0,
 );
 
 // 换绑后服务端 seq 不复位，新入队指令接续递增（客户端用补发的 next_seq 继续计数即可对齐）。
@@ -80,7 +81,10 @@ check('换绑后入队 seq 接续递增', e['pmove'][0][0]?.seq === expectedNext
 inits.length = 0;
 e.addSpectator('spec1');
 const specInit = inits.find((x) => x.sid === 'spec1')?.data;
-check('观战席 init_map 不带 next_seq/queue_ops', specInit?.next_seq === undefined && specInit?.queue_ops === undefined);
+check(
+  '观战席 init_map 带空队列同步字段',
+  specInit?.next_seq === 1 && Array.isArray(specInit?.queue_ops) && specInit.queue_ops.length === 0,
+);
 
 if (failures) process.exit(1);
 console.log('test-rebind-init-sync: 换绑重连 init_map 同步场景全部通过');

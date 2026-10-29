@@ -164,7 +164,7 @@ async function checkTimeout() {
   const pending = sandbox.window.ROKA_ASSETS.fetch('/timeout.json?v=1');
   expire();
   await pending;
-  assert.deepEqual(calls, [bases[0] + 'timeout.json?v=1', bases[1] + 'timeout.json?v=1']);
+  assert.deepEqual(calls, [bases[0] + 'timeout.json', bases[1] + 'timeout.json']);
 }
 
 let browser;

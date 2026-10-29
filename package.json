@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -27,7 +27,7 @@
     "test:rebind-sync": "node scripts/test-rebind-init-sync.mjs",
     "test:ready-counts": "node scripts/test-ready-counts.mjs",
     "test:spectator-broadcast": "node scripts/test-spectator-broadcast.mjs",
-    "test": "pnpm run test:api-contract && pnpm run test:ready-counts && pnpm run test:spectator-broadcast && pnpm run test:multiline-v2 && pnpm run test:rebind-sync && pnpm run test:multiline && pnpm run test:strategy && pnpm run test:fog && pnpm run test:bot && pnpm run test:server-bot && pnpm run test:lobby-guards && pnpm run test:lobby-dwell && pnpm run test:guest-access && pnpm run test:points && pnpm run test:deploy-update && pnpm run test:presence && pnpm run test:map-generation && pnpm run test:huaxia-season && pnpm run test:leaderboard && pnpm run test:storage && pnpm run test:auto-ban-policy && pnpm run test:replay-stats && pnpm run test:replay-cache && pnpm run test:profile-stat-label && pnpm run test:mentions && pnpm run test:crown-transfer && pnpm run test:admin-badge && pnpm run test:client-verify && pnpm run test:bot-dwell-cap && pnpm run test:asset-versioning && pnpm run test:army-num-font",
+    "test": "pnpm run test:api-contract && pnpm run test:ready-counts && pnpm run test:spectator-broadcast && pnpm run test:multiline-v2 && pnpm run test:rebind-sync && pnpm run test:multiline && pnpm run test:strategy && pnpm run test:fog && pnpm run test:bot && pnpm run test:server-bot && pnpm run test:lobby-guards && pnpm run test:lobby-dwell && pnpm run test:guest-access && pnpm run test:points && pnpm run test:deploy-update && pnpm run test:presence && pnpm run test:map-generation && pnpm run test:huaxia-season && pnpm run test:leaderboard && pnpm run test:storage && pnpm run test:auto-ban-policy && pnpm run test:replay-stats && pnpm run test:replay-cache && pnpm run test:profile-stat-label && pnpm run test:mentions && pnpm run test:crown-transfer && pnpm run test:admin-badge && pnpm run test:client-verify && pnpm run test:bot-dwell-cap && pnpm run test:asset-versioning && pnpm run test:army-num-font && pnpm run test:isolated-reinforcement && pnpm run test:per-file-cdn",
     "test:presence": "node scripts/test-presence.mjs",
     "test:map-generation": "pnpm exec tsx scripts/test-map-generation.mjs",
     "test:huaxia-season": "pnpm exec tsx scripts/test-huaxia-season.mjs",
@@ -47,7 +47,9 @@
     "test:intro": "node scripts/intro/test-intro-data.mjs && node scripts/intro/test-intro-models.mjs && node scripts/intro/test-intro-lifecycle.mjs && node scripts/intro/test-intro-gesture.mjs && node scripts/intro/test-intro-blink-white.mjs && node scripts/intro/test-intro-native-resolution.mjs && node scripts/intro/test-intro-media.mjs && node scripts/test-intro-assets.mjs && node scripts/test-intro-cdn.mjs",
     "test:static-cdn": "node scripts/test-static-cdn.mjs",
     "test:cdn-runtime": "node scripts/test-cdn-runtime.mjs",
-    "test:api-contract": "node scripts/test-api-contract.mjs"
+    "test:api-contract": "node scripts/test-api-contract.mjs",
+    "test:isolated-reinforcement": "node scripts/test-isolated-reinforcement.mjs",
+    "test:per-file-cdn": "node scripts/test-per-file-cdn.mjs"
   },
   "repository": {
     "type": "git",

@@ -8,6 +8,7 @@
   var bases = (config.bases && config.bases.length ? config.bases : [origin]).map(function (base) {
     return new URL(String(base).replace(/\/?$/, '/'), origin).href;
   });
+  var override = config.commits && !Object.keys(config.commits).length ? config.commit : '';
   var nativeFetch = window.fetch.bind(window);
   var scripts = new Map();
   var modules = new Map();
@@ -18,6 +19,7 @@
   var started = document.readyState !== 'loading';
   var draining = false;
   var firstError = null;
+  var styles = [];
 
   function isApplicationPath(path) {
     return /^\/(?:api(?:\/|$)|socket\.io(?:\/|$))/.test(path);
@@ -27,6 +29,7 @@
     if (typeof value !== 'string' && !(value instanceof URL)) return null;
     var text = String(value);
     if (!text || /^(?:data:|blob:|javascript:|#)/i.test(text)) return null;
+    if (/\\|%2e|%2f|%5c/i.test(text) || /(?:^|\/)\.\.?(?:\/|[?#]|$)/.test(text)) return null;
     var parsed;
     try {
       parsed = new URL(text, origin);
@@ -36,9 +39,13 @@
     if (!/^https?:$/.test(parsed.protocol)) return null;
     if (parsed.origin === window.location.origin && isApplicationPath(parsed.pathname)) return null;
     for (var index = 0; index < bases.length; index++) {
-      if (parsed.href.indexOf(bases[index]) === 0) {
-        return { path: parsed.href.slice(bases[index].length), index: index };
+      var prefix = bases[index].replace(/@[a-f0-9]{40}\/static\/$/, '@');
+      if (bases[index] !== origin && parsed.href.indexOf(prefix) === 0) {
+        var match = /^([a-f0-9]{40})\/static\/(.*)$/.exec(parsed.href.slice(prefix.length));
+        if (match) return { path: match[2], index: index };
       }
+      if (parsed.href.indexOf(bases[index]) === 0)
+        return { path: parsed.href.slice(bases[index].length), index: index };
     }
     if (!/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(text)) {
       return { path: parsed.pathname.slice(1) + parsed.search + parsed.hash, index: 0 };
@@ -46,19 +53,99 @@
     return null;
   }
 
-  function url(path, index) {
-    var resource = locate(path);
-    if (!resource) return String(path);
-    return bases[index || 0] + resource.path;
-  }
-
   function candidates(path) {
     var resource = locate(path);
-    return resource
-      ? bases.map(function (base) {
-          return base + resource.path;
-        })
-      : [path];
+    if (!resource) return [path];
+    var parsed = new URL('/' + resource.path, origin);
+    var sha = config.commits ? config.commits[parsed.pathname] : config.commit;
+    // An empty map with an override intentionally pins every file.
+    if (override) sha = override;
+    if (!sha) return [origin + resource.path];
+    parsed.searchParams.delete('v');
+    return bases.map(function (base) {
+      return base === origin
+        ? origin + resource.path
+        : base.replace(/@[a-f0-9]{40}\/static\/$/, '@' + sha + '/static/') +
+            parsed.pathname.slice(1) +
+            parsed.search +
+            parsed.hash;
+    });
+  }
+
+  function url(path, index) {
+    var choices = candidates(path);
+    return choices[Math.min(index || 0, choices.length - 1)];
+  }
+
+  // Browsers resolve CSS relatives against the parent commit. Fetch and rewrite
+  // the dependency graph instead, so every child keeps its own immutable URL.
+  var cssResources = new Map();
+  var cssBytes = new Map();
+  function dependencyBlob(path) {
+    var key = url(path);
+    if (!cssBytes.has(key))
+      cssBytes.set(
+        key,
+        fetchAsset(path)
+          .then(function (response) {
+            return response.blob();
+          })
+          .then(function (blob) {
+            return URL.createObjectURL(blob);
+          }),
+      );
+    return cssBytes.get(key);
+  }
+  function cssBlob(path, integrity) {
+    var key = url(path);
+    if (cssResources.has(key)) return cssResources.get(key);
+    var promise = (async function () {
+      var response = await fetchAsset(path, integrity ? { integrity: integrity } : {});
+      var text = await response.text();
+      var matches = Array.from(
+        text.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?|url\(\s*["']?([^"')\s]+)["']?\s*\)/gi),
+      );
+      var replacements = await Promise.all(
+        matches.map(async function (match) {
+          var relative = match[1] || match[2];
+          if (/^(?:data:|blob:|#)/i.test(relative)) return match[0];
+          var parent = locate(path);
+          var resolved = new URL(relative, new URL(parent ? '/' + parent.path : path, origin));
+          var local =
+            resolved.origin === window.location.origin
+              ? resolved.pathname + resolved.search + resolved.hash
+              : resolved.href;
+          if (match[1]) return '@import url("' + (await cssBlob(local)) + '")';
+          return 'url("' + (await dependencyBlob(local)) + '")';
+        }),
+      );
+      for (var index = matches.length - 1; index >= 0; index--) {
+        var match = matches[index];
+        text = text.slice(0, match.index) + replacements[index] + text.slice(match.index + match[0].length);
+      }
+      return URL.createObjectURL(new Blob([text], { type: 'text/css' }));
+    })();
+    cssResources.set(key, promise);
+    return promise;
+  }
+  function stylesheet(path, integrity, attrs) {
+    var link = document.createElement('link');
+    applyAttributes(link, attrs);
+    link.removeAttribute('href');
+    link.rel = 'stylesheet';
+    document.head.append(link);
+    var pending = cssBlob(path, integrity).then(function (href) {
+      return new Promise(function (resolve, reject) {
+        link.onload = resolve;
+        link.onerror = reject;
+        link.href = href;
+      });
+    });
+    styles.push(pending);
+    pending.catch(function (error) {
+      firstError = firstError || error;
+    });
+    return pending;
   }
 
   function abortReason(signal) {
@@ -232,6 +319,7 @@
   async function drain() {
     if (!started || draining) return;
     draining = true;
+    await Promise.allSettled(styles);
     while (normalQueue.length || deferredQueue.length) {
       var job = normalQueue.length ? normalQueue.shift() : deferredQueue.shift();
       try {
@@ -275,7 +363,7 @@
     return promise;
   }
 
-  var api = { url: url, fetch: fetchAsset, import: importAsset, enqueue: enqueue };
+  var api = { url: url, fetch: fetchAsset, import: importAsset, enqueue: enqueue, stylesheet: stylesheet };
   Object.defineProperty(api, 'ready', {
     get: function () {
       var promise = new Promise(function (resolve, reject) {
