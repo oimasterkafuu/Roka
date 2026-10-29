@@ -274,13 +274,12 @@ function update(data, options) {
     }
     general_order = general_kept.concat(general_new);
   }
-  // 新协议按 seq 摘除本地大队列；旧回放按 lst_move 首项兼容。
+  // 按 seq 摘除本地大队列。
   var seqs = Array.isArray(data.lst_moves) ? data.lst_moves : [];
   if (seqs.length)
     route = route.filter(function (op) {
       return seqs.indexOf(op.seq) < 0;
     });
-  else if (data.lst_move && data.lst_move.x != -1) route.shift();
   render();
   lb = data.leaderboard.sort(function (a, b) {
     if (a.army != b.army) return a.army > b.army ? -1 : 1;

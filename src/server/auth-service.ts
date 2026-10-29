@@ -75,9 +75,6 @@ class AuthService {
 
     const publicPages = new Set([
       '/',
-      '/rooms',
-      '/replays',
-      '/games',
       '/develop',
       '/develop/bot',
       '/about',

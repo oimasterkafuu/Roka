@@ -4,9 +4,6 @@ import { AuthService } from '../dist/server/auth-service.js';
 const auth = new AuthService({});
 for (const path of [
   '/',
-  '/rooms',
-  '/replays',
-  '/games',
   '/u/Alice',
   '/develop',
   '/develop/bot',

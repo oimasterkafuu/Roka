@@ -440,7 +440,7 @@ function createArena({
       adapter.attach();
       adapter.socket.trigger('set_id', sids[p]);
     }
-    engine.emitInitMap(sids[p], { n: engine.n, m: engine.m, player_ids: sids, general: engine.generals[p] });
+    engine.emitInitMap(sids[p], { n: engine.n, m: engine.m, player_ids: sids, general: engine.generals[p], next_seq: engine.nextSeq[p], queue_ops: [] });
   }
   // Full frame each tick keeps the offline protocol simple while exercising
   // the exact per-player fog filter and payload shape.
@@ -453,7 +453,6 @@ function createArena({
       const payload = engine.buildFullFramePayload(p, gameEnd);
       payload.leaderboard = leaderboard;
       payload.kills = kills;
-      payload.lst_move = engine.toMovePayload(engine.lstMove[p]);
       payload.lst_moves = engine.lstMoves[p] || [];
       updateSeat(p, payload);
       if (engine.lstMove[p]) {

@@ -166,7 +166,7 @@ function attachStrategy(socket, options = {}) {
     // The server executes one queued operation per tick. When a decision was
     // delayed past the next tick, the old operation can still be at the head
     // of that queue and would be applied to a stale board. The update payload
-    // acknowledges the previous operation through lst_move/skip; only clear
+    // acknowledges the previous operation through lst_moves; only clear
     // when that acknowledgement did not arrive, then append the fresh action.
     if (state.actionPending) {
       socket.emit('clear_queue');
@@ -177,8 +177,9 @@ function attachStrategy(socket, options = {}) {
     state.queued += 1;
     state.lastActionTurn = state.turn;
     state.actionPending = true;
-    state.pendingAction = { ...action };
-    socket.emit(action.kind === 'build' ? 'build' : 'attack', action);
+    state.pendingAction = { ...action, seq: state.nextSeq++ };
+    const { half, ...payload } = action;
+    socket.emit(action.kind === 'build' ? 'build' : 'attack', payload);
   }
 
   function onSetId(id) {
@@ -191,6 +192,7 @@ function attachStrategy(socket, options = {}) {
     const ids = Array.isArray(payload.player_ids) ? payload.player_ids.map(String) : [];
     if (!Number.isInteger(n) || !Number.isInteger(m) || n < 1 || m < 1 || n * m > 100000) return;
     reset(n, m, ids);
+    state.nextSeq = payload.next_seq;
     log(`new game ${n}x${m}, player=${state.playerId}`);
   }
 
@@ -227,19 +229,9 @@ function attachStrategy(socket, options = {}) {
     state.isolated.splice(0, state.size, ...next.isolated);
     state.fog.splice(0, state.size, ...next.fog);
     updatePlayers(payload);
-    const move = payload.lst_moves || payload.lst_move;
-    if (state.actionPending && move) {
-      const hasMove = Number(move.x) >= 0 && Number(move.y) >= 0;
-      const pending = state.pendingAction;
-      const matches = hasMove && pending &&
-        Number(move.x) === Number(pending.x) && Number(move.y) === Number(pending.y) &&
-        String(move.op || 'm') === (pending.kind === 'build' ? String(pending.op || 'b') : 'm') &&
-        (pending.kind !== 'attack' ||
-          (Number(move.dx) === Number(pending.dx) && Number(move.dy) === Number(pending.dy)));
-      if (matches || (!hasMove && Number(move.skip) > 0)) {
-        state.actionPending = false;
-        state.pendingAction = null;
-      }
+    if (state.actionPending && payload.lst_moves.includes(state.pendingAction.seq)) {
+      state.actionPending = false;
+      state.pendingAction = null;
     }
     state.turn = payload.turn;
     state.ended = Boolean(payload.game_end);
@@ -279,7 +271,7 @@ function attachStrategy(socket, options = {}) {
     // The server clears readiness while fewer than two players are present
     // and refuses it during deployment. Do not latch a request it cannot keep:
     // a later room update must still be able to ready us when a human joins.
-    if (payload.update_queued || (Number.isFinite(Number(payload.need)) && Number(payload.need) <= 1)) {
+    if (payload.update_queued || payload.players.filter((p) => Number(p.team) !== 0).length < 2) {
       lastRoomCommand = '';
       return;
     }

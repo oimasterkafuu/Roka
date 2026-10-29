@@ -41,6 +41,7 @@ import {
   QueuedOpKind,
   ReplayActionData,
   ReplayData,
+  ReplayFrame,
   ReplayPatch,
   ReplayMeta,
   UpdatePayload,
@@ -217,11 +218,7 @@ export class GameEngine {
 
   private readonly lstMove: Array<QueuedOp | null>;
 
-  /**
-   * 本 Tick 汇报的队列编号（全局队列模式随 lst_move 下发，供客户端按队列同步队列）：
-   * 并行调度下每 Tick 可能多条队列各执行一条，协议只汇报最后一条有活动
-   * （执行或丢弃）的队列，lst_move/lst_skip/line 三者始终归属同一队列。
-   */
+  /** 本 Tick 每名玩家所有出队操作的 seq（执行或丢弃）。 */
   private readonly lstMoves: number[][];
 
   /**
@@ -765,7 +762,7 @@ export class GameEngine {
     });
   }
 
-  private buildReplayFrame(gameEnd: boolean): UpdatePayload {
+  private buildReplayFrame(gameEnd: boolean): ReplayFrame {
     const snapshot = this.buildInitialReplayMapArrays();
     return {
       grid_type: snapshot.grid_type,
@@ -810,13 +807,6 @@ export class GameEngine {
       });
     }
     return result;
-  }
-
-  private toMovePayload(op: QueuedOp | null): UpdatePayload['lst_move'] {
-    if (!op) return { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm' };
-    return op.kind === 'm'
-      ? { x: op.x, y: op.y, dx: op.dx, dy: op.dy, half: op.mode === 1, mode: op.mode, op: 'm', seq: op.seq }
-      : { x: op.x, y: op.y, dx: -1, dy: -1, half: false, mode: 0, op: op.kind, seq: op.seq };
   }
 
   /**
@@ -904,7 +894,6 @@ export class GameEngine {
           ? this.buildTeamFoggedSnapshot(povTeam, visionCache)
           : this.buildSnapshotFor(p, visionCache);
 
-      const lstMovePayload = this.toMovePayload(p === -1 ? null : this.lstMove[p]);
       const fullSnapshot = stat || p === -1 || this.turn % 50 === 0 || randomInt(51) === 0;
 
       const payload: UpdatePayload = fullSnapshot
@@ -912,7 +901,6 @@ export class GameEngine {
             grid_type: snapshot.grid_type,
             army_cnt: snapshot.army_cnt,
             isolated: snapshot.isolated,
-            lst_move: lstMovePayload,
             lst_moves: p === -1 ? [] : [...this.lstMoves[p]],
             leaderboard,
             turn: this.turn,
@@ -924,7 +912,6 @@ export class GameEngine {
             grid_type: getDiff(snapshot.grid_type, this.gridTypeLast[p]),
             army_cnt: getDiff(snapshot.army_cnt, this.armyCntLast[p]),
             isolated: getDiff(snapshot.isolated, this.isolatedLast[p]),
-            lst_move: lstMovePayload,
             lst_moves: p === -1 ? [] : [...this.lstMoves[p]],
             leaderboard,
             turn: this.turn,
@@ -976,7 +963,6 @@ export class GameEngine {
             isolated: full
               ? spectatorSnapshot.isolated
               : getDiff(spectatorSnapshot.isolated, previous.isolated),
-            lst_move: { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm' },
             lst_moves: [],
             leaderboard,
             turn: this.turn,
@@ -1021,7 +1007,6 @@ export class GameEngine {
       grid_type: snapshot.grid_type,
       army_cnt: snapshot.army_cnt,
       isolated: snapshot.isolated,
-      lst_move: { x: -1, y: -1, dx: -1, dy: -1, half: false, mode: 0, op: 'm' },
       lst_moves: [],
       leaderboard,
       turn: this.turn,
@@ -1051,33 +1036,21 @@ export class GameEngine {
   ): void {
     this.pmove[player].push({ ...op, seq: this.nextSeq[player]++ } as QueuedOp);
   }
-  addMove(
-    playerSid: string,
-    x: number,
-    y: number,
-    dx: number,
-    dy: number,
-    mode: MoveMode = 0,
-    line?: number,
-  ): void {
-    void line;
+  addMove(playerSid: string, x: number, y: number, dx: number, dy: number, mode: MoveMode = 0): void {
     const player = this.playerSidToIndex.get(playerSid);
     if (player === undefined || this.pstat[player] === LEFT_GAME) return;
     this.enqueue(player, { kind: 'm', x, y, dx, dy, mode });
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  addBuild(playerSid: string, x: number, y: number, kind: 'b' | 'c', line?: number): void {
+  addBuild(playerSid: string, x: number, y: number, kind: 'b' | 'c'): void {
     const player = this.playerSidToIndex.get(playerSid);
     if (player === undefined || this.pstat[player] === LEFT_GAME) return;
     this.enqueue(player, { kind, x, y });
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  clearQueue(playerSid: string, line?: number): void {
+  clearQueue(playerSid: string): void {
     const p = this.playerSidToIndex.get(playerSid);
     if (p !== undefined) this.pmove[p].length = 0;
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  popQueue(playerSid: string, line?: number): void {
+  popQueue(playerSid: string): void {
     const p = this.playerSidToIndex.get(playerSid);
     if (p !== undefined) this.pmove[p].pop();
   }
@@ -1095,7 +1068,8 @@ export class GameEngine {
       m: this.m,
       player_ids: [...this.playerIds],
       general: [-1, -1],
-      // 全局队列模式 v2：队列条数动态增长，对观战者下发当前各玩家最大队列数。
+      next_seq: 1,
+      queue_ops: [],
     });
     const snapshot = this.buildSnapshotFor(-1, new Map<number, number[]>());
     this.spectatorSnapshotLast.set(sid, this.cloneSpectatorSnapshot(snapshot));

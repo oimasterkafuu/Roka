@@ -3,7 +3,7 @@
 // observe-bot-match 录制的 frames.jsonl 逐 turn 喂进去，完整复现该 bot 在
 // 对局中的每个决策（队列镜像、防往返、威胁闩锁等跨 tick 状态全部真实运行）。
 // 队列执行按服务端语义模拟：每 tick 依次弹出队首直到一条 op 通过
-// chkMove/chkBuild 校验（失败计 skip），据此合成 lst_move 驱动镜像同步。
+// chkMove/chkBuild 校验（失败计 skip），据此合成 lst_moves 驱动镜像同步。
 // 输出与该 bot 当时的 stdout 日志同格式，可 diff 验证复盘保真度。
 //
 // 用法：
@@ -109,7 +109,7 @@ for (let i = 0; i < 8; i += 1) {
 }
 
 socket.listeners('set_id').forEach((fn) => fn(clientId));
-socket.listeners('init_map').forEach((fn) => fn({ n, m, player_ids: playerIds, general: [-1, -1] }));
+socket.listeners('init_map').forEach((fn) => fn({ n, m, player_ids: playerIds, general: [-1, -1], next_seq: 1, queue_ops: [] }));
 
 /* ---------- 引擎队列执行模拟（wire 编码） ---------- */
 function ownerOf(code) {
@@ -269,6 +269,7 @@ function explainCell(x, y, turn, frameByTurn) {
 /* ---------- 主循环 ---------- */
 const frameByTurn = new Map(frames.map((f) => [f.turn, f]));
 const issued = []; // {turn, line} 复现的 bot 日志
+let serverNextSeq = 1;
 let serverQueue = []; // 服务端队列模拟
 const crownOwnersPrev = new Set();
 const deadOwners = new Set();
@@ -299,17 +300,14 @@ for (const frame of frames) {
   }
 
   // 服务端 tick：弹出队首直到一条 op 校验通过（帧后状态近似执行前状态）。
-  let skipped = 0;
-  let executed = false;
+  const removedSeqs = [];
   while (serverQueue.length > 0) {
     const op = serverQueue.shift();
+    removedSeqs.push(op.seq);
     if (opValid(frame, op)) {
-      executed = true;
       break;
     }
-    skipped += 1;
   }
-  const lstMove = { x: executed ? 0 : -1, skip: skipped };
 
   socket.emitted = [];
   socket.listeners('update').forEach((fn) =>
@@ -320,7 +318,7 @@ for (const frame of frames) {
       isolated: frame.isolated,
       turn,
       kills,
-      lst_move: lstMove,
+      lst_moves: removedSeqs,
       game_end: false,
     }),
   );
@@ -331,7 +329,7 @@ for (const frame of frames) {
     if (e.type === 'clear_queue') {
       serverQueue = [];
     } else {
-      serverQueue.push(e);
+      serverQueue.push({ ...e, seq: serverNextSeq++ });
     }
   }
 

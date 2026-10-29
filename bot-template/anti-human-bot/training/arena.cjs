@@ -81,7 +81,7 @@ function createArena({ mapMode = 'random', seed = 'default', mapSize = 0.5, sync
   const initialization = engine.initializeMap();
   engine.selectGenerals();
   for (let p = 0; p < 2; p++) {
-    engine.emitInitMap(sids[p], { n: engine.n, m: engine.m, player_ids: sids, general: engine.generals[p] });
+    engine.emitInitMap(sids[p], { n: engine.n, m: engine.m, player_ids: sids, general: engine.generals[p], next_seq: engine.nextSeq[p], queue_ops: [] });
   }
   // 原 sendMap 的 randomInt(51) 仅用于全量/差分发送，与规则无关。
   // 保留 update、操作确认、kills 清空和最终 endGame 回调，不存储回放。
@@ -100,7 +100,7 @@ function createArena({ mapMode = 'random', seed = 'default', mapSize = 0.5, sync
         }
       }
       stats[p].rejected += engine.lstSkip[p];
-      engine.update(sids[p], { ...payload, lst_move: engine.toMovePayload(op, engine.lstSkip[p]) });
+      engine.update(sids[p], { ...payload, lst_moves: [...engine.lstMoves[p]] });
       engine.lstMove[p] = null;
       engine.lstSkip[p] = 0;
     }
