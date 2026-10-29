@@ -4,9 +4,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const DEFAULT_ORIGINS = [
+  'https://testingcf.jsdelivr.net',
   'https://cdn.jsdmirror.com',
   'https://cdn.jsdmirror.cn',
-  'https://testingcf.jsdelivr.net',
 ];
 const SHA = /^[a-f0-9]{40}$/;
 const RESOURCE =
@@ -211,7 +211,9 @@ export class StaticAssetDelivery {
       (all, q: string | undefined, url: string) => (q ? q + this.url(url) + q : all),
     );
     const config = { bases: this.bases, commit: this.commit, commits: this.commits, version: this.version };
-    const bootstrap = `<script>window.ROKA_ASSET_CONFIG=${jsonForHtml(config)};\n${this.runtime.replace(/<\/script/gi, '<\\/script')}\n</script>`;
+    const initialStyle =
+      '<style id="roka-initial-style">html{background:#eef1f6}body{visibility:hidden!important}html::before{content:"Roka 加载中…";position:fixed;inset:0;display:grid;place-items:center;color:#253042;font:16px sans-serif}</style>';
+    const bootstrap = `${initialStyle}<script>window.ROKA_ASSET_CONFIG=${jsonForHtml(config)};\n${this.runtime.replace(/<\/script/gi, '<\\/script')}\n</script>`;
     return html.replace(/<head\b[^>]*>/i, (head) => head + bootstrap + preloads.join(''));
   }
 }

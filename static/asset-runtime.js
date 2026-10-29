@@ -134,12 +134,47 @@
     link.removeAttribute('href');
     link.rel = 'stylesheet';
     document.head.append(link);
-    var pending = cssBlob(path, integrity).then(function (href) {
-      return new Promise(function (resolve, reject) {
-        link.onload = resolve;
-        link.onerror = reject;
+    // Bound the whole CSS graph (including response bodies and nested assets),
+    // not just each provider's response headers. Native origin CSS resolves its
+    // relatives on origin and keeps the original query/cache semantics.
+    var pending = new Promise(function (resolve, reject) {
+      var settled = false;
+      var local = false;
+      var timer = setTimeout(useOrigin, 4000);
+      var deadline;
+      function finish(error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(deadline);
+        link.onload = link.onerror = null;
+        if (error) reject(error);
+        else resolve();
+      }
+      function useOrigin() {
+        if (settled || local) return;
+        local = true;
+        if (integrity) link.integrity = integrity;
+        link.onload = function () {
+          finish();
+        };
+        link.onerror = function () {
+          finish(new Error('Origin stylesheet unavailable: ' + path));
+        };
+        var resource = locate(path);
+        link.href = resource ? origin + resource.path : path;
+        deadline = setTimeout(function () {
+          finish(new Error('Origin stylesheet timed out: ' + path));
+        }, 8000);
+      }
+      cssBlob(path, integrity).then(function (href) {
+        if (settled || local) return;
+        link.onload = function () {
+          finish();
+        };
+        link.onerror = useOrigin;
         link.href = href;
-      });
+      }, useOrigin);
     });
     styles.push(pending);
     pending.catch(function (error) {
@@ -320,6 +355,9 @@
     if (!started || draining) return;
     draining = true;
     await Promise.allSettled(styles);
+    // Reveal as soon as initial styles settle, independently of slow scripts.
+    var loadingStyle = document.getElementById('roka-initial-style');
+    if (loadingStyle) loadingStyle.remove();
     while (normalQueue.length || deferredQueue.length) {
       var job = normalQueue.length ? normalQueue.shift() : deferredQueue.shift();
       try {
