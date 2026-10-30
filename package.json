@@ -65,7 +65,7 @@
   "homepage": "https://github.com/oimasterkafuu/Roka#readme",
   "dependencies": {
     "@fastify/rate-limit": "^11.2.1",
-    "@fastify/static": "^10.1.7",
+    "@fastify/static": "^10.1.8",
     "@napi-rs/canvas": "^1.0.13",
     "fastify": "^5.12.7",
     "jsonwebtoken": "^9.0.3",
