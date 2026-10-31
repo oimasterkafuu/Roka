@@ -68,6 +68,20 @@ try {
   );
   assert(html.includes(stable));
   assert(html.includes('ROKA_ASSETS.stylesheet'));
+  // Browser-valid script endings must preserve bodies during URL rewriting.
+  for (const end of ['</script >', '</ScRiPt foo="bar">', '</script/>', '</script\n>']) {
+    const body = 'window.fixture="/b.js";';
+    const transformed = next.html('<head></head><script>' + body + end + '<img src="/b.js">');
+    const calls = [];
+    const scripts = [...transformed.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+    vm.runInNewContext(scripts.at(-1)[1], {
+      window: { ROKA_ASSETS: { enqueue: (...args) => calls.push(args) } },
+    });
+    assert.equal(calls[0][1], body, end);
+    assert(transformed.includes('<img src="' + stable + '">'), end);
+    const external = '<script src="https://example.invalid/a.js">' + body + end;
+    assert(next.html('<head></head>' + external).includes(external), end);
+  }
   const shallowCwd = cwd + '-shallow';
   try {
     execFileSync('git', ['clone', '--depth=1', 'file://' + cwd, shallowCwd], { stdio: 'ignore' });

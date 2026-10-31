@@ -599,8 +599,10 @@ async function testServerEndpoints() {
   );
   const bannedLeaderboard = await apiGet(baseUrl, '/api/leaderboard');
   assert(
-    isBanned(bannedLeaderboard.data.items.find((item) => item.username === GRANTED_ADMIN)),
-    'leaderboard 封禁管理员',
+    [GRANTED_ADMIN, NORMAL_USER].every(
+      (name) => !bannedLeaderboard.data.items.some((item) => item.username === name),
+    ),
+    'leaderboard 排除有效封禁的管理员及普通用户',
   );
   const bannedFeed = await apiGet(baseUrl, '/api/feeds');
   const bannedPost = bannedFeed.data.items.find((item) => item.author === ADMIN_USER);

@@ -110,3 +110,5 @@ node training/long-eval.cjs --help
 孤军接兵规则：新对局中，自有或同队（含已出局队友）孤军格收到有效援兵后，本次孤军周期重连不再翻倍；同 Tick 与延迟重连均适用。未接兵孤军仍保留断链减半、重连 ×2。重连、中立化、敌方占领后清除接兵标记，再次断链重新开始周期。ops-v1 的 `meta.isolated_reinforcement_fix: true` 启用此规则，历史回放缺省保留原结算，不改变操作流格式。
 
 回归：`pnpm run test:isolated-reinforcement`（先构建）；原始回放审计：`node scripts/audit-isolated-replay.cjs <只读回放路径>`，分别按历史及修复规则重放原始 ops，输出孤军接兵前后兵力、归属玩家状态与关键 Tick。
+
+维护回归：`pnpm run test:per-file-cdn` 覆盖浏览器接受的 script 结束标签，确保 CDN URL 改写不触及脚本正文；`pnpm run test:admin-badge` 验证有效封禁用户（含管理员）不上排行榜，解封后恢复。文字教程的调兵说明与队友非最后主城自动转属规则保持一致。

@@ -160,7 +160,7 @@ export class StaticAssetDelivery {
     if (!this.enabled) return source;
     const preloads: string[] = [];
     let html = source.replace(
-      /<script\b([^>]*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi,
+      /<script\b([^>]*)>([\s\S]*?)<\/script(?:[\s/][^>]*)?>/gi,
       (tag, raw: string, body: string) => {
         const attrs: Record<string, string> = {};
         for (const match of raw.matchAll(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g))
@@ -207,7 +207,7 @@ export class StaticAssetDelivery {
     // Includes src/href and literal static paths in inline styles. Script bodies
     // are already encoded descriptors; their src remains a canonical local path.
     html = html.replace(
-      /<script\b[^>]*>[\s\S]*?<\/script>|(["'])(\/[^\s"'<>]*)\1/gi,
+      /<script\b[^>]*>[\s\S]*?<\/script(?:[\s/][^>]*)?>|(["'])(\/[^\s"'<>]*)\1/gi,
       (all, q: string | undefined, url: string) => (q ? q + this.url(url) + q : all),
     );
     const config = { bases: this.bases, commit: this.commit, commits: this.commits, version: this.version };
