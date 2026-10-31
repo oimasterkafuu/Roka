@@ -1,3 +1,4 @@
+import { deriveLastGameAt, isValidLastGameAt } from './rating-activity';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -74,7 +75,7 @@ export interface PublicProfile {
   provisional: boolean;
   points: number;
   level: UserLevelProgress;
-  ratingRawRank: number;
+  ratingRawRank: number | null;
   ratingDisplayRank: string;
   createdAt: number;
   isAdmin: boolean;
@@ -285,14 +286,6 @@ const RATING_HISTORY_MAX = 1000;
  */
 export const LEADERBOARD_INACTIVITY_MS = 7 * 24 * 3600 * 1000;
 
-/**
- * 用户最后活动时间（旧口径）：取 lastSeenAt（socket 上线/下线）与 updatedAt
- * （对局结算、登录等账号变更）的较大者。现仅用作旧数据的一次性过渡 fallback——
- * 用户缺 lastGameAt 字段时以此作为初始比赛活跃时间，此后活跃只认比赛。
- */
-export const getLastActiveAt = (user: { lastSeenAt?: number; updatedAt: number }): number =>
-  Math.max(user.updatedAt, user.lastSeenAt ?? 0);
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -462,6 +455,16 @@ export class UserStore {
       const userFile = await this.loadFromBinary();
       this.replaceUsers(userFile.users);
       this.pointsMigrationVersion = userFile.pointsMigrationVersion ?? 0;
+      const now = Date.now();
+      let migrated = false;
+      for (const user of this.usersByKey.values()) {
+        const result = deriveLastGameAt(user, now);
+        if (result.source !== 'valid') {
+          user.lastGameAt = result.value;
+          migrated = true;
+        }
+      }
+      if (migrated) await this.persist();
       if (await this.migrateRoles()) {
         return;
       }
@@ -517,6 +520,7 @@ export class UserStore {
       isAdmin: this.usersByKey.size === 0 ? true : undefined,
       isSuperAdmin: this.usersByKey.size === 0 ? true : undefined,
       ratingHistory: [],
+      lastGameAt: 0,
     };
 
     this.usersByKey.set(key, user);
@@ -664,16 +668,12 @@ export class UserStore {
     };
   }
 
-  getRatingRank(usernameInput: string): { rawRank: number; displayRank: string } | null {
+  getRatingRank(
+    usernameInput: string,
+    now: number = Date.now(),
+  ): { rawRank: number; displayRank: string } | null {
     const username = this.normalize(usernameInput);
-    const users = [...this.usersByKey.values()]
-      .filter((user) => (user.ratingGames ?? 0) > 0)
-      .sort((a, b) => {
-        const ratingDiff =
-          toDisplayRating(b.rating ?? DEFAULT_RATING, b.ratingGames ?? 0) -
-          toDisplayRating(a.rating ?? DEFAULT_RATING, a.ratingGames ?? 0);
-        return ratingDiff || a.createdAt - b.createdAt || a.username.localeCompare(b.username);
-      });
+    const users = this.getRatingCandidates(now);
     const index = users.findIndex((user) => this.normalize(user.username) === username);
     if (index < 0) return null;
     const rawRank = index + 1;
@@ -890,7 +890,7 @@ export class UserStore {
       provisional: isProvisionalRating(rating, ratingGames),
       points,
       level: getUserLevelProgress(points),
-      ratingRawRank: ratingRank?.rawRank ?? 0,
+      ratingRawRank: ratingRank?.rawRank ?? null,
       ratingDisplayRank: ratingRank?.displayRank ?? '-',
       createdAt: user.createdAt,
       isAdmin: user.isAdmin === true,
@@ -925,32 +925,32 @@ export class UserStore {
 
   listTopRated(limit: number, now: number = Date.now()): TopRatedEntry[] {
     const capped = Math.max(1, Math.min(100, Math.floor(limit) || 10));
-    const entries: TopRatedEntry[] = [];
-    for (const user of this.usersByKey.values()) {
-      const ratingGames = user.ratingGames ?? 0;
-      if (ratingGames <= 0) {
-        continue;
-      }
-      // 有效封禁不上榜：封禁过期经 getBanStatus 惰性解除后自动回榜。
-      if (this.getBanStatus(user.username).banned) {
-        continue;
-      }
-      // 不活跃下榜：≥7 天无比赛（lastGameAt，对局结算刷新）即隐藏，重新结算一局后回榜。
-      // lastGameAt 缺失的旧数据用旧的 getLastActiveAt 作一次性过渡初始值，
-      // 此后登录/上线不再续命，活跃只认比赛。
-      const lastGameAt = user.lastGameAt ?? getLastActiveAt(user);
-      if (now - lastGameAt >= LEADERBOARD_INACTIVITY_MS) {
-        continue;
-      }
-      entries.push({
+    return this.getRatingCandidates(now)
+      .slice(0, capped)
+      .map((user) => ({
         username: user.username,
-        rating: toDisplayRating(user.rating ?? DEFAULT_RATING, ratingGames),
-        ratingGames,
-        provisional: isProvisionalRating(user.rating ?? DEFAULT_RATING, ratingGames),
+        rating: toDisplayRating(user.rating ?? DEFAULT_RATING, user.ratingGames ?? 0),
+        ratingGames: user.ratingGames ?? 0,
+        provisional: isProvisionalRating(user.rating ?? DEFAULT_RATING, user.ratingGames ?? 0),
+      }));
+  }
+
+  private getRatingCandidates(now: number): StoredUser[] {
+    return [...this.usersByKey.values()]
+      .filter(
+        (user) =>
+          (user.ratingGames ?? 0) > 0 &&
+          !((user.bannedUntil ?? 0) < 0 || (user.bannedUntil ?? 0) > now) &&
+          isValidLastGameAt(user.lastGameAt, now) &&
+          user.lastGameAt > 0 &&
+          now - user.lastGameAt < LEADERBOARD_INACTIVITY_MS,
+      )
+      .sort((a, b) => {
+        const ratingDiff =
+          toDisplayRating(b.rating ?? DEFAULT_RATING, b.ratingGames ?? 0) -
+          toDisplayRating(a.rating ?? DEFAULT_RATING, a.ratingGames ?? 0);
+        return ratingDiff || a.createdAt - b.createdAt || a.username.localeCompare(b.username);
       });
-    }
-    entries.sort((a, b) => b.rating - a.rating);
-    return entries.slice(0, capped);
   }
 
   /**
