@@ -432,3 +432,5 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - `scripts/test-isolated-reinforcement.mjs`：真实引擎接兵/重连/生命周期回归，纳入 `pnpm test`；`scripts/audit-isolated-replay.cjs`：只读原始 ops 对照审计。
 
 - 逐文件 CDN 回归：`scripts/test-per-file-cdn.mjs` 使用真实临时 Git 历史检查独立版本与安全回源；`scripts/test-css-per-file-cdn.mjs` 用浏览器检查嵌套 CSS、字体、图片与运行时 import/fetch 的逐文件候选。
+
+- 维护回归：`scripts/test-per-file-cdn.mjs` 覆盖带空白、属性、斜杠及大小写的 script 结束标签，保证 URL 改写跳过脚本正文；`scripts/test-admin-badge.mjs` 按有效封禁不上榜规则校验管理员与普通用户。
