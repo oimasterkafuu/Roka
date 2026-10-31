@@ -148,7 +148,7 @@ async function loadProfile() {
   $('#p-points').text(Number.isFinite(p.points) ? p.points : 0);
   $('#p-level').text(p.ratingGames);
   $('#p-level-label').text(p.level && p.level.level ? p.level.level : 1);
-  $('#p-rating-rank').text(p.ratingDisplayRank || '-');
+  $('#p-rating-rank').text(p.ratingRawRank > 0 ? p.ratingDisplayRank || '-' : '-');
   var level = p.level || { points: 0, currentLevelPoints: 0, nextLevelPoints: 16, progress: 0 };
   $('#p-level-progress').css('width', Math.round((level.progress || 0) * 100) + '%');
   $('#p-level-next').text(
