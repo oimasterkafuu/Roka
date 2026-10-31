@@ -73,7 +73,7 @@ try {
     const body = 'window.fixture="/b.js";';
     const transformed = next.html('<head></head><script>' + body + end + '<img src="/b.js">');
     const calls = [];
-    const scripts = [...transformed.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+    const scripts = [...transformed.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script(?:[\s/][^>]*)?>/gi)];
     vm.runInNewContext(scripts.at(-1)[1], {
       window: { ROKA_ASSETS: { enqueue: (...args) => calls.push(args) } },
     });
