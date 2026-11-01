@@ -440,3 +440,5 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - `src/auth-store.ts` 的 `getRatingCandidates(now)` 是排行榜和个人主页排名的唯一完整候选集：计分局数 > 0、未有效封禁、有效非零 `lastGameAt` 且距今严格小于 7 天；按显示分降序、注册时间升序、用户名升序排列。top10 截取前十，个人排名使用全集并保留原名次分段。无资格时 API `ratingRawRank: null`、`ratingDisplayRank: '-'`；`static/profile.js` 对 null/0 同样显示 `-`，分数、段位、历史与局数不受下榜影响。
 - `src/rating-activity.js` 是运行时与离线脚本共用的纯迁移函数（CommonJS，`tsconfig.json` 的 allowJs 让 tsc 将同一文件复制到 dist）：有效已有时间保留；缺失/非法时间仅从有效 ratingHistory 的有限正数、非未来 t 最大值恢复，无证据持久化为 0；0 是明确的无证据哨兵。`UserStore.ensureReady()` 在载入时修复并持久化，新账号初始化为 0；登录/在线时间不参与，计分结算（含 delta=0）刷新比赛时间。
 - `scripts/migrate-last-game-at.mjs`：无需构建、直接 Node 运行的一次性离线工具。`node scripts/migrate-last-game-at.mjs --data-dir <path>` 默认 dry-run；显式加 `--apply` 才写入，生产必须先停服务。直接读取 v8+Brotli users.bin，仅修改缺失/非法 lastGameAt，保留其他所有字段；有修改时先创建 `users.bin.last-game-at-original-<时间>-<UUID>.bak` 原始字节备份，再用同目录临时文件原子 rename。报告总量/已有效/history 补齐/无证据置 0/修改数/修复后全部有效/Milkcat 安全摘要；二次执行零修改不写盘、不新建备份。
+
+Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/frontline.cjs` 将其用于运输留守，`bot/campaign.cjs` 按局部预算推进；`test/maze-oscillation.test.cjs` 覆盖误报召回、运输关卡与局部攻城。路径均相对 `bot-template/anti-human-bot/`。
