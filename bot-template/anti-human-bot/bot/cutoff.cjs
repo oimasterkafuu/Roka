@@ -348,6 +348,24 @@ function ownStrandedMass(ctx, cut, scanBudget = 120) {
 // 本函数找出「被敌方本 tick 就能打下、且打掉后会让我方 ≥cutoffMinIsolate 兵力断锚」
 // 的我方格子，然后从两侧（后方增援 / 前沿回缩）挑最有力的一路往脖子上补兵。
 // 与 defense.cjs 的分工：defense 守的是「皇冠被端」，这里守的是「连通被切断」。
+// 有限步数内敌堆抵达割点的兵力，扣除途中必须打穿的驻军。
+function mazeApproachThreat(ctx, c, range, count = ctx.count) {
+  const { neighbors, own, hostile } = ctx;
+  let layer = new Map([[c, 0]]);
+  let threat = 0;
+  for (let steps = 1; steps <= range; steps++) {
+    const next = new Map();
+    for (const [u, loss] of layer) for (const v of neighbors[u]) {
+      if (v === c || !ctx.passable(v) || !ctx.knownAt(v)) continue;
+      if (hostile(v)) threat = Math.max(threat, count(v) - 1 - steps - loss);
+      const cost = loss + (own(v) ? count(v) : 0);
+      if (!next.has(v) || cost < next.get(v)) next.set(v, cost);
+    }
+    layer = next;
+  }
+  return threat;
+}
+
 function chooseNeckGuard(state, params = {}) {
   const ctx = createContext(state, params);
   if (!ctx) return null;
@@ -391,18 +409,7 @@ function chooseNeckGuard(state, params = {}) {
       const stranded = strandedMass(c);
       if (stranded === null || stranded < p.cutoffMinIsolate) continue;
       // 从割点沿可通行格 BFS（走廊连通距离），找预警圈内的最强敌堆。
-      const dist = new Int32Array(size).fill(-1);
-      const q = [c]; dist[c] = 0;
-      let threat = 0;
-      for (let h = 0; h < q.length; h++) {
-        const u = q[h];
-        if (dist[u] >= p.mazeNeckWarnRange) continue;
-        for (const v of neighbors[u]) {
-          if (dist[v] >= 0 || !ctx.passable(v) || !ctx.knownAt(v)) continue;
-          dist[v] = dist[u] + 1; q.push(v);
-          if (hostile(v)) threat = Math.max(threat, count(v) - 1 - dist[v]);
-        }
-      }
+      const threat = mazeApproachThreat(ctx, c, p.mazeNeckWarnRange);
       if (threat <= count(c)) continue; // 到达时也打不穿就不预警
       const score = stranded * 1.2 - count(c);
       if (!best || score > best.score) best = { neck: c, threat, stranded, score };
@@ -498,4 +505,4 @@ function chooseNeckGuard(state, params = {}) {
       reason: `脖子${warning ? '预警' : holdable ? '驻守' : '回缩'}：${job.amount}兵补向割点，防${Math.round(threat)}敌兵切断约${Math.round(stranded)}兵` } };
 }
 
-module.exports = { chooseCutoff, chooseNeckGuard, ownStrandedMass };
+module.exports = { chooseCutoff, chooseNeckGuard, ownStrandedMass, mazeApproachThreat };

@@ -9,7 +9,7 @@
 //   5. 不再存在「前沿两格内没有自家建筑就一律不许深入」的 deep 规则。
 const { createContext } = require('./threat.cjs');
 const { resolveParams } = require('./params.cjs');
-const { ownStrandedMass } = require('./cutoff.cjs');
+const { ownStrandedMass, mazeApproachThreat } = require('./cutoff.cjs');
 
 // 斩首锁定（跨回合）：合力推皇冠是多 tick 连续攻击——第一击打残、第二击收割。
 // 锁定期间 choose() 优先继续打同一皇冠，不被别的候选抢走 tick；目标被推掉、
@@ -55,6 +55,20 @@ function createFrontline(state, params = {}) {
       // 己方内部运输：两端 2 跳内都没有敌人时整批运输，否则保留引擎的智能留兵。
       const quiet = ctx.pressure(a, { exclude: b }).total === 0 && ctx.pressure(b, { exclude: a }).total === 0 &&
         !ctx.unknownNear(a) && !ctx.unknownNear(b);
+      if (ctx.mazeLike && ownStrandedMass(ctx, a, p.cutoffScan) >= p.cutoffMinIsolate) {
+        // 运输也必须保住出发关卡；把到达目的地的兵计入屏障，允许向敌方向推进。
+        let reserve = 0;
+        for (const j of ctx.neighbors[a]) if (j !== b && passable(j) && !allied(owners[j], me)) reserve += count(j) - 1;
+        const smart = Math.max(0, Math.min(count(a) - 1, count(a) - reserve - 1));
+        for (const mode of quiet ? [2, 0, 1] : [move.mode ?? 0, 1]) {
+          const sent = mode === 2 ? count(a) - 1 : mode === 1 ? Math.floor(smart / 2) : smart;
+          if (sent <= 0) continue;
+          const projected = i => i === a ? count(a) - sent : i === b ? count(b) + sent : count(i);
+          if (projected(a) >= mazeApproachThreat(ctx, a, p.mazeNeckWarnRange, projected))
+            return { move: { ...move, mode, half: false }, score: -Infinity };
+        }
+        return reject('maze运输：保留关卡驻军', { from: a, to: b });
+      }
       return { move: quiet ? { ...move, mode: 2, half: false } : move, score: -Infinity };
     }
     if (!known[b]) return reject('目标不可见或不可通行', { from: a, to: b });

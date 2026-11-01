@@ -28,12 +28,12 @@ function guaranteedAction(state, ctx, params) {
   const { me, size, grid, count, own, hostile, neighbors, frontDistance } = ctx;
   const blocked = (a, b) => params.blockedEdges?.has(`${a}:${b}`);
   const coord = (i) => ({ x: Math.floor(i / ctx.m), y: i % ctx.m });
-  // 1) 后方建皇冠：不贴敌的安全格，攒够 50 兵就开工（指挥所先升级，其次新建）。
+  // 1) 后方建皇冠：不贴敌的安全格，51 兵建造、101 兵升级（指挥所先升级，其次新建）。
   let foundSite = -1, newSite = -1;
   for (let i = 0; i < size; i++) {
-    if (!own(i) || count(i) < 50) continue;
+    if (!own(i) || count(i) < 51) continue;
     if (neighbors[i].some((j) => hostile(j))) continue;
-    if (grid[i] === me + 50) { foundSite = i; break; }
+    if (grid[i] === me + 50 && count(i) >= 101) { foundSite = i; break; }
     if (newSite < 0 && grid[i] === me) newSite = i;
   }
   const site = foundSite >= 0 ? foundSite : newSite;
@@ -162,7 +162,7 @@ function decide(state, params, guard) {
   // 脖子纪律：我方割点本 tick 就能被敌方大堆打穿（一整段兵力将变孤军）时，
   // 补兵/回缩优先于普通推进与调兵——连通被切和皇冠被端一样是生存问题。
   const neck = chooseNeckGuard(state, constrained);
-  const neckAction = neck ? { kind: 'attack', ...neck.move } : null;
+  const neckAction = neck ? attack(neck.move) : null;
   if (neck && !advanceWinsBuilding && allowed(neckAction)) return take(neckAction, 'neck-guard');
   // 攻城评估提前算一次（下方 campaign 分支复用）：浓缩突击/画圈推进的提议。
   const campaignRaw = chooseCampaign(state, constrained, {

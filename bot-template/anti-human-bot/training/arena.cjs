@@ -99,10 +99,10 @@ function createArena({ mapMode = 'random', seed = 'default', mapSize = 0.5, sync
           builds.push({ player: p, turn: engine.turn, x: op.x, y: op.y, op: op.kind });
         }
       }
-      stats[p].rejected += engine.lstSkip[p];
+      stats[p].rejected += engine.lstMoves[p].length - (op ? 1 : 0);
       engine.update(sids[p], { ...payload, lst_moves: [...engine.lstMoves[p]] });
       engine.lstMove[p] = null;
-      engine.lstSkip[p] = 0;
+      engine.lstMoves[p] = [];
     }
     ended = gameEnd;
   };

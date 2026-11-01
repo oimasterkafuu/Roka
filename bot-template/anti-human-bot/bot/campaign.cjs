@@ -57,7 +57,9 @@ function chooseCampaign(state, params = {}, options = {}) {
       if (grid[i] === os[i] + 100 && pass(i)) crowns.push(i);
     }
   }
-  if (!crowns.length || power <= (Number.isFinite(options.ratio) ? options.ratio : 1.4) * enemyPower) return reset();
+  const maze = createContext(state, params)?.mazeLike;
+  // 迷宫的后方总兵力不决定单条走廊能否推进；仍用下方逐格预算决定出击/集结。
+  if (!crowns.length || (!maze && power <= (Number.isFinite(options.ratio) ? options.ratio : 1.4) * enemyPower)) return reset();
   const mem = { target: null, rally: null };
   // 反向 BFS 同时寻找皇冠路径和最接近的己方前线，每格只访问一次。
   const toward = new Int32Array(size).fill(-1), root = new Int32Array(size).fill(-1);
