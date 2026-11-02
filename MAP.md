@@ -442,3 +442,5 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - `scripts/migrate-last-game-at.mjs`：无需构建、直接 Node 运行的一次性离线工具。`node scripts/migrate-last-game-at.mjs --data-dir <path>` 默认 dry-run；显式加 `--apply` 才写入，生产必须先停服务。直接读取 v8+Brotli users.bin，仅修改缺失/非法 lastGameAt，保留其他所有字段；有修改时先创建 `users.bin.last-game-at-original-<时间>-<UUID>.bak` 原始字节备份，再用同目录临时文件原子 rename。报告总量/已有效/history 补齐/无证据置 0/修改数/修复后全部有效/Milkcat 安全摘要；二次执行零修改不写盘、不新建备份。
 
 Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/frontline.cjs` 将其用于运输留守，`bot/campaign.cjs` 按局部预算推进；`test/maze-oscillation.test.cjs` 覆盖误报召回、运输关卡与局部攻城。路径均相对 `bot-template/anti-human-bot/`。
+
+- `scripts/test-asset-versioning-exit.mjs`：真实运行静态资源测试及临时故障副本，验证成功 exit 0、异常与断言失败 exit 1；纳入 `pnpm test`。SW VM 覆盖脚本版本、运行时配置优先及 window load 延迟注册。

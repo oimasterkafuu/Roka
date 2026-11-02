@@ -75,6 +75,7 @@ function cleanup() {
 function finish(code) {
   if (finished) return;
   finished = true;
+  process.exitCode = code;
   cleanup();
   setTimeout(() => process.exit(code), 200).unref();
 }
@@ -235,23 +236,47 @@ async function main() {
 
   const swRegister = await getText(baseUrl, `/sw-register.js?v=${VERSION}`);
   assert(swRegister.status === 200, '/sw-register.js?v= 返回 200');
-  const registered = [];
-  vm.runInNewContext(swRegister.body, {
-    navigator: {
-      serviceWorker: {
-        register(url) {
-          registered.push(url);
-          return Promise.resolve();
+  for (const scenario of [
+    { label: '脚本 URL', version: VERSION, readyState: 'complete' },
+    { label: '运行时配置优先', version: 'config version/142', readyState: 'complete' },
+    { label: '等待 load', version: VERSION, readyState: 'loading' },
+  ]) {
+    const registered = [];
+    const listeners = [];
+    vm.runInNewContext(swRegister.body, {
+      window: {
+        ROKA_ASSET_CONFIG: scenario.version === VERSION ? undefined : { version: scenario.version },
+        addEventListener(...args) {
+          listeners.push(args);
         },
       },
-    },
-    document: { readyState: 'complete', currentScript: { src: `${baseUrl}/sw-register.js?v=${VERSION}` } },
-    URL,
-  });
-  assert(
-    registered.length === 1 && registered[0] === `/sw.js?v=${VERSION}`,
-    '/sw-register.js 从脚本 URL 派生注册版本号',
-  );
+      navigator: {
+        serviceWorker: {
+          register(url) {
+            registered.push(url);
+            return Promise.resolve();
+          },
+        },
+      },
+      document: {
+        readyState: scenario.readyState,
+        currentScript: { src: `${baseUrl}/sw-register.js?v=${VERSION}` },
+      },
+      URL,
+    });
+    if (scenario.readyState === 'loading') {
+      assert(registered.length === 0, 'load 前不注册 SW');
+      assert(
+        listeners.length === 1 && listeners[0][0] === 'load' && listeners[0][2].once === true,
+        '等待一次性 window load 事件',
+      );
+      listeners[0][1]();
+    }
+    assert(
+      registered.length === 1 && registered[0] === `/sw.js?v=${encodeURIComponent(scenario.version)}`,
+      `/sw-register.js 正确注册：${scenario.label}`,
+    );
+  }
 
   // @fastify/static 直发资源忽略未知 query，内容原样。
   const baseCssRaw = fs.readFileSync(path.join(rootDir, 'static', 'styles', 'base.css'), 'utf8');
