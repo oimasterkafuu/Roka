@@ -112,3 +112,5 @@ node training/long-eval.cjs --help
 回归：`pnpm run test:isolated-reinforcement`（先构建）；原始回放审计：`node scripts/audit-isolated-replay.cjs <只读回放路径>`，分别按历史及修复规则重放原始 ops，输出孤军接兵前后兵力、归属玩家状态与关键 Tick。
 
 维护回归：`pnpm run test:per-file-cdn` 覆盖浏览器接受的 script 结束标签，确保 CDN URL 改写不触及脚本正文；`pnpm run test:admin-badge` 验证有效封禁用户（含管理员）不上排行榜，解封后恢复。文字教程的调兵说明与队友非最后主城自动转属规则保持一致。
+
+静态资源测试：`pnpm run test:asset-versioning` 验证资源版本与 SW 注册；`pnpm run test:asset-versioning-exit` 通过子进程验证正常成功、未处理测试异常及断言失败的退出码（均纳入 `pnpm test`）。
