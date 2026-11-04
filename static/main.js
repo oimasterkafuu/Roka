@@ -254,6 +254,8 @@ function fetchReplayWithProgress(url) {
           buf.set(chunks[i], offset);
           offset += chunks[i].byteLength;
         }
+        // The final read carries no chunk, so explicitly leave a completed, determinate state.
+        updateReplayLoading(loaded, loaded || total);
         return { buffer: buf.buffer, etag: metadata.etag, lastModified: metadata.lastModified };
       }
       chunks.push(result.value);
