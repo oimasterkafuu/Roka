@@ -383,6 +383,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **scripts/test-strategy-logic.mjs** — `pnpm run test:strategy`：策略逻辑单元测试——合成 1×m 走廊棋盘直接驱动 `bot/` 纯函数模块（buildContext + planOffense），回归四类行为：优势即打（触发即攻）、集结期入口不出兵切断（防入口易位致纵队折返）、僵死对峙超时解散 + 重集结闸门 + 改善后开打、爆发期路径敌格自然增兵不误判增援弃打。
 - **scripts/test-leaderboard-activity.mjs** — `pnpm run test:leaderboard`：隔离 v8+Brotli fixture 验证启动与离线迁移、只改 lastGameAt、原始备份、幂等、原子替换失败与损坏输入不破坏原文件；覆盖旧账号登录/重启不续榜、7 天边界、无证据与非法时间、有效/过期/永久封禁、同分稳定排序、top10 与完整个人排名逐项一致、第 11 名、零分差结算回榜，以及执行真实 profile.js 排名渲染表达式验证 null/0 显示 ASCII `-`。需先 `pnpm run build`。
 - **scripts/test-replay-cache.mjs** — `pnpm run test:replay-cache`：Node vm 加载浏览器纯逻辑，断言 ID 键、版本/魔数/长度失效及条数/容量 LRU 淘汰，不依赖浏览器或服务端。
+- **scripts/test-replay-controls.mjs** — `pnpm run test:replay-controls`（纳入 `pnpm test`）：回放控制与加载进度回归——模拟 jQuery 点击事件对象验证后退只推进内部状态且完整重绘、显式静默跳转与首帧边界保持；分块流覆盖已知/未知/不一致总大小在 EOF 后均归一为确定的 100% 进度。
 - **scripts/test-storage.mjs** — `pnpm run test:storage`：存储层回归（issue #67）——临时数据目录驱动 dist 四个 Store：突发连续写入状态完整（合并写不丢状态）、`.bak` 备份生成与主文件损坏自动回退、旧格式（v8+brotli q6 历史写法）文件原样可读、回放索引内存缓存/重启恢复/index.bin 损坏回退/deleteReplay 清理、公告损坏回退；需先 `pnpm run build`。
 - **scripts/test-mentions.mjs** — `pnpm run test:mentions`：@提及回归（issue #74）——`parseMentionTokens` 边界（去重/邮箱/短于 3 位/长于 20 位/`@@`/词内）与 `renderMentionsInHtml` 行为（命中渲染链接、未命中降级文本、code/pre/a 内不替换、邮箱样文本不替换）＋ `renderRichTextWithMentions` 消毒集成；再用临时数据目录驱动 dist `FeedStore` 验证动态/评论 mentions 落库、重启保留，并手写不含 mentions 的旧格式 `feeds.bin` 验证向后兼容；需先 `pnpm run build`。
 

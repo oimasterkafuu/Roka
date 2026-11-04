@@ -1,4 +1,6 @@
 function backTurn(silent = false) {
+  // jQuery click handlers pass an event object; only an explicit true means silent.
+  silent = silent === true;
   if (is_autoplaying) switchAutoplay();
   if (!replay_data || !replay_data.patches || cur_turn <= 0) {
     return false;
