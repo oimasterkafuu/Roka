@@ -19,6 +19,11 @@ const bot = attachStrategy(socket, {
   team: Number(process.env.BOT_TEAM || 1),
   autoReady: process.env.BOT_AUTO_READY !== '0',
   actionDelayMs: Number(process.env.BOT_ACTION_DELAY_MS || 0),
+  decisionBudgetMs:
+    process.env.BOT_DECISION_BUDGET_MS === undefined ||
+    String(process.env.BOT_DECISION_BUDGET_MS).trim() === ''
+      ? undefined
+      : Number(process.env.BOT_DECISION_BUDGET_MS),
   log: (message) => console.log(`[bot-2.0] ${message}`),
 });
 

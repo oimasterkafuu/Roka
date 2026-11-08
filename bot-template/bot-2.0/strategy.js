@@ -76,6 +76,13 @@ function attachStrategy(socket, options = {}) {
   // especially likely to lose its supply line. Decide on the newest frame;
   // callers can still opt into a delay when debugging.
   const actionDelayMs = Math.max(0, Number(options.actionDelayMs ?? 0) || 0);
+  // Hard per-decision wall-clock budget.  Undefined keeps the controller
+  // default (BOT_DECISION_BUDGET_MS or 80 ms, safe under a 125 ms 4x tick).
+  const decisionBudgetMs = Number(options.decisionBudgetMs);
+  const controllerOptions = {
+    decisionBudgetMs: Number.isFinite(decisionBudgetMs) ? decisionBudgetMs : undefined,
+    now,
+  };
   const state = {
     n: 0,
     m: 0,
@@ -128,7 +135,7 @@ function attachStrategy(socket, options = {}) {
     state.dead = false;
     state.ended = false;
     state.inGame = true;
-    controller = createController(state.playerId);
+    controller = createController(state.playerId, controllerOptions);
     lastRoomCommand = '';
   }
 
