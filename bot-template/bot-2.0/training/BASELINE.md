@@ -71,6 +71,14 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 - 交叉测试原版 `bot-template/apex-bot`（新增 `--opponents apex`）：同一 48 局，stock 参数 17 胜，新默认 21 胜，说明提升不依赖 anti 对手。
 - 默认值已写入 `bot/planner.cjs`；环境变量仍可覆盖（`APEX_ECON_GOAL`/`APEX_ECON_DEADLINE`）。
 
+### 2026-11-09：连通性驻军、参数复测与宏计划门控
+
+- `treeGather`/`advanceSupplyTree` 在敌方 2 Tick 可达的己方割点上保留 `threat + 2` 驻军；48 局确定性 anti 对局结果与改动前完全一致（18/30/27），作为连通性安全修复保留。
+- campaign 参数（gather/attack timeout、rebase、strength、readiness、cluster、force margin、multi-crown cap）逐个扫描：无任何值超过默认；唯一进入 48 局验证的 `REBASE_AFTER=10` 对 anti 和 Apex 均 −2 胜，全部拒绝。
+- 经济参数复测：`8/45` 与 `10/45` 相同，`12/45` 更差，`DEADLINE 40/50` 更差；维持 `10/45`。
+- 宏计划分类器 `bot/duel/plan.cjs` 已合入（纯函数，未接线）；把 `classifyPlan().kind === 'defend'` 提前接到 `defense` 的 A/B 门控在 48 局 anti 上胜场不变，但 2 局 draw→loss 且墙钟约翻倍，已回退，不作为默认。
+- 原版 Apex 交叉测试 96 局（seeds 4，10 worker）：tuned 10/45 为 41 胜，stock 6/90 为 37 胜；方向一致但配对 CI 含 0，继续标记为 provisional，后续重大改动前跑 seeds 8。
+
 ## 后续对比约定
 
 1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；
