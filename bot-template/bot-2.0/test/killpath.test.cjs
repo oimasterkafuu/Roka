@@ -117,24 +117,39 @@ test('an isolated own stack is never used as the tap', () => {
 });
 
 test('one-cell corridor cuts are rejected unless risky cuts are allowed', () => {
-  // 0 crown 30 - 1 corridor 30 - 2 plain 5, enemy 40 next to the corridor,
-  // enemy crown 5 behind it.  Cutting cell 1 strands everything advanced.
-  const grid = [101, 1, 1, 200, 2, 102];
-  const army = [30, 30, 5, 0, 40, 5];
-  const b = board(grid, army, { n: 2, m: 3 });
+  // 0 crown 30 - 1 corridor 30 - 2 tap 20, enemy 40 at 5 can cut cell 1
+  // behind the tap, and two enemy crowns (6 and 7) make this a non-decap kill.
+  // Cutting cell 1 disconnects the tap and every captured cell from the anchor.
+  const grid = [101, 1, 1, 200, 200, 2, 102, 102];
+  const army = [30, 30, 20, 0, 0, 40, 5, 5];
+  const b = board(grid, army, { n: 2, m: 4 });
   const rejected = bestKill(b);
   assert.equal(rejected.ok, false);
   assert.equal(rejected.reason, 'cut-risk');
   assert.equal(rejected.cutRisk.level, 'high');
   assert.equal(rejected.cutRisk.risky, true);
   assert.equal(rejected.cutRisk.cells[0].cell, 1);
-  assert.equal(rejected.cutRisk.cells[0].phase, 'behind-stack');
+  assert.equal(rejected.cutRisk.cells[0].phase, 'behind-tap');
 
   const forced = bestKill(b, { allowRiskyCuts: true });
   assert.equal(forced.ok, true);
   assert.equal(forced.reason, 'risky-cut');
   assert.equal(forced.cutRisk.risky, true);
-  assert.equal(forced.eta, 2);
+  assert.equal(forced.eta, 1);
+});
+
+test('capturing the last enemy crown ignores a cut risk behind the stack', () => {
+  // Same corridor, but cell 7 is neutral: crown 6 is the defender's last
+  // crown, so the capture ends the game before a cut can strand anything.
+  const grid = [101, 1, 1, 200, 200, 2, 102, 200];
+  const army = [30, 30, 20, 0, 0, 40, 5, 0];
+  const b = board(grid, army, { n: 2, m: 4 });
+  const result = bestKill(b);
+  assert.equal(result.ok, true);
+  assert.equal(result.decap, true);
+  assert.equal(result.eta, 1);
+  assert.equal(result.cutRisk.risky, false);
+  assert.equal(result.cutRisk.level, 'none');
 });
 
 test('tie-break prefers the lower ETA, then more delivered army, then the lower cell', () => {

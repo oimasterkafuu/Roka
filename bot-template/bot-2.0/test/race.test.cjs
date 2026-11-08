@@ -88,6 +88,18 @@ test('opponent selection is deterministic and configurable', () => {
   assert.equal(explicit.verdict, 'win-race');
 });
 
+test('an owner option cannot override the race side', () => {
+  // `bestKill` accepts `owner`, but `race` must always search from its own
+  // explicit playerId for both sides; a stray owner must not flip the search.
+  const b = board([101, 1, 102, 2, 2, 101], [5, 30, 10, 20, 0, 5]);
+  const normal = race(b);
+  const withOwner = race(b, { owner: 2 });
+  assert.equal(withOwner.playerId, 1);
+  assert.equal(withOwner.ourEta, normal.ourEta);
+  assert.equal(withOwner.theirEta, normal.theirEta);
+  assert.equal(withOwner.weWinRace, normal.weWinRace);
+});
+
 test('no side has a kill returns a stable verdict', () => {
   const b = board([101, 1, 1, 102], [100, 0, 0, 100]);
   const result = race(b);

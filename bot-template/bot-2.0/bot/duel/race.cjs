@@ -53,6 +53,13 @@ function race(board, input = {}) {
   const margin = Number.isFinite(input.margin) ? Math.max(0, input.margin) : DEFAULT_MARGIN;
   const shared = { ...input };
   delete shared.margin;
+  // `bestKill` resolves its side from `owner ?? playerId`; strip the side keys
+  // so the explicit playerId below always wins for both searches.
+  delete shared.owner;
+  delete shared.playerId;
+  delete shared.opponentId;
+  delete shared.goal;
+  delete shared.theirGoal;
 
   const our = playerId > 0
     ? bestKill(board, { ...shared, playerId })

@@ -59,6 +59,19 @@ function foeAt(board, at, owner) {
   return cellOwner > 0 && !board.sameTeam(owner, cellOwner);
 }
 
+// Number of visible crowns still owned by one defender.  Capturing the last
+// one eliminates that player immediately, so a route that may strand the
+// advancing stack afterwards is still a win and must not be rejected by the
+// conservative cut check.
+function visibleCrownsOf(board, defender) {
+  let crowns = 0;
+  for (let at = 0; at < board.size; at += 1) {
+    if (!board.visible[at] || board.owner(at) !== defender) continue;
+    if (board.kind(at) === 'crown') crowns += 1;
+  }
+  return crowns;
+}
+
 const DEFAULTS = Object.freeze({
   maxEta: 240,
   candidateLimit: 24,
@@ -303,6 +316,7 @@ function enemyPressure(board, owner) {
 function routeCutRisk(board, path, eta, pressure, options) {
   const owner = options.owner;
   const cut = cutAnalysis(board, owner);
+  const pathCells = new Set(path);
   const exposures = [];
   let corridor = 0;
   for (let step = 0; step < path.length - 1; step += 1) {
@@ -311,13 +325,34 @@ function routeCutRisk(board, path, eta, pressure, options) {
     if (!cut.points.has(at) || cut.land[at] <= 0) continue;
     corridor += 1;
     const arrival = pressure.distance[at];
-    if (arrival < 0 || arrival > eta - 1 - options.cutSlack) continue;
+    if (arrival < 0 || arrival > eta - options.cutSlack) continue;
     const defender = garrisonAt(board, at, arrival);
     if (pressure.strength[at] <= defender) continue;
     exposures.push({
       cell: at,
       step,
       phase: arrival < step ? 'before-stack' : 'behind-stack',
+      arrival,
+      defender,
+      threat: Math.round(pressure.strength[at]),
+    });
+  }
+  // Articulation cells *behind* the tap are not on the route, but cutting one
+  // disconnects the tap and everything the stack captures from every anchor.
+  // `cut.separates(cell, tap)` answers exactly that question.
+  const tap = path[0];
+  for (const at of cut.points) {
+    if (pathCells.has(at) || cut.land[at] <= 0) continue;
+    if (!cut.separates(at, tap)) continue;
+    corridor += 1;
+    const arrival = pressure.distance[at];
+    if (arrival < 0 || arrival > eta - options.cutSlack) continue;
+    const defender = garrisonAt(board, at, arrival);
+    if (pressure.strength[at] <= defender) continue;
+    exposures.push({
+      cell: at,
+      step: -1,
+      phase: 'behind-tap',
       arrival,
       defender,
       threat: Math.round(pressure.strength[at]),
@@ -357,6 +392,12 @@ function failure(reason, extra = {}) {
 function killToward(board, goal, options, pressure) {
   const owner = options.owner;
   if (relayAt(board, goal, owner)) return failure('goal-owned', { goal });
+  const defender = board.owner(goal);
+  const decap =
+    defender > 0 &&
+    !board.sameTeam(owner, defender) &&
+    board.kind(goal) === 'crown' &&
+    visibleCrownsOf(board, defender) <= 1;
   const { need, steps, next } = backwardRequirements(board, goal, owner, options.relaxLimit);
 
   // Candidate taps are owned, non-isolated cells with a route.  The static
@@ -391,7 +432,9 @@ function killToward(board, goal, options, pressure) {
     if (!path) return;
     const detail = evaluatePath(board, path, owner, options.ignoreGrowth);
     if (!detail.feasible) return;
-    const cutRisk = routeCutRisk(board, path, detail.eta, pressure, options);
+    const cutRisk = decap
+      ? { level: 'none', risky: false, cells: [], corridor: 0, deadline: null, decap: true }
+      : routeCutRisk(board, path, detail.eta, pressure, options);
     const record = {
       ok: true,
       reason: cutRisk.risky ? 'risky-cut' : 'ok',
@@ -403,6 +446,7 @@ function killToward(board, goal, options, pressure) {
       required: detail.required,
       delivered: detail.delivered,
       goal,
+      decap,
       growth: detail.growth,
       cutRisk,
     };
