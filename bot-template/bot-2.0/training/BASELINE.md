@@ -78,6 +78,7 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 - 经济参数复测：`8/45` 与 `10/45` 相同，`12/45` 更差，`DEADLINE 40/50` 更差；维持 `10/45`。
 - 宏计划分类器 `bot/duel/plan.cjs` 已合入（纯函数，未接线）；把 `classifyPlan().kind === 'defend'` 提前接到 `defense` 的 A/B 门控在 48 局 anti 上胜场不变，但 2 局 draw→loss 且墙钟约翻倍，已回退，不作为默认。
 - 原版 Apex 交叉测试 96 局（seeds 4，10 worker）：tuned 10/45 为 41 胜，stock 6/90 为 37 胜；方向一致但配对 CI 含 0，继续标记为 provisional，后续重大改动前跑 seeds 8。
+- anti 96 局（seeds 4，10 worker）：tuned 29 胜 / 58 平 / 9 负，stock 27 / 52 / 17；配对 +2 胜、CI 含 0，0.68 尺寸明显更好（11 vs 7 胜），0.5 持平、1.0 略差，因此与 Apex 结果一致但仍不能称为已验证。
 
 ## 后续对比约定
 
