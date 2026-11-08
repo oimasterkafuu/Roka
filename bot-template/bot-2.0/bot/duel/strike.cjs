@@ -26,11 +26,17 @@
 const { race } = require('./race.cjs');
 const { actionCoordinates, preview } = require('../rules.cjs');
 
-// `maxEta: 4` is a finish radius, not a raid planner.  Anything longer is
-// contested by definition (the opponent grows, our corridor can be cut), so it
-// stays with the normal campaign logic.  `margin: 1` mirrors `race`'s
-// conservative default until the real tick order is calibrated.
-const DEFAULTS = Object.freeze({ maxEta: 4, margin: 1, allowRiskyCuts: false });
+// `maxEta: 1` is an immediate finish, not a raid planner: the first hop must
+// already capture, so the layer never spends a turn walking a corridor the
+// heuristic planner could garrison.  `BOT_DUEL_STRIKE_ETA` can widen it for
+// experiments, but the measured 4-tick version lost games.  `margin: 1`
+// mirrors `race`'s conservative default until the real tick order is calibrated.
+const DEFAULTS = Object.freeze({
+  maxEta: 1,
+  margin: 1,
+  allowRiskyCuts: false,
+  decapOnly: false,
+});
 
 function bound(value, fallback, min) {
   const number = Number(value);
@@ -39,6 +45,21 @@ function bound(value, fallback, min) {
 
 function decline(reason, duel = null) {
   return { ok: false, reason, action: null, plan: null, race: duel, branch: 'duel-strike' };
+}
+
+function hasLocalCrownStrike(board, playerId) {
+  for (let at = 0; at < board.size; at += 1) {
+    if (!board.own(at) || board.isolated[at]) continue;
+    if ((Number(board.army[at]) || 0) <= 1) continue;
+    for (const to of board.neighbors(at)) {
+      if (board.kind(to) !== 'crown') continue;
+      if (!board.enemy(to)) continue;
+      // The full push sends army - 1 and must beat the crown's next-tick
+      // garrison; `preview` remains the final authority.
+      if ((Number(board.army[at]) || 0) - 1 > (Number(board.army[to]) || 0)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -65,9 +86,14 @@ function evaluateStrike(board, input = {}) {
   const margin = bound(input.margin, DEFAULTS.margin, 0);
   const allowRiskyCuts =
     input.allowRiskyCuts === undefined ? DEFAULTS.allowRiskyCuts : Boolean(input.allowRiskyCuts);
+  const decapOnly = input.decapOnly === undefined ? DEFAULTS.decapOnly : Boolean(input.decapOnly);
 
   const playerId = Number(board?.playerId) || 0;
   if (!playerId || !Number.isFinite(Number(board?.size))) return decline('no-owner');
+  // Default radius 1: the finish layer is an immediate tactical move, so a
+  // cheap adjacency scan must gate the full race search.  Without this the
+  // backward search runs every tick even when no crown is in reach.
+  if (maxEta <= 1 && !hasLocalCrownStrike(board, playerId)) return decline('no-local-crown');
 
   // One call, both sides: `race` runs the backward search for us and for the
   // opponent.  Requiring `weWinRace` is what keeps this layer low risk - a
@@ -78,6 +104,7 @@ function evaluateStrike(board, input = {}) {
   if (!our?.ok) return decline(our?.reason ? `our-${our.reason}` : 'our-no-route', duel);
   if (!(Number.isFinite(our.eta) && our.eta <= maxEta)) return decline('eta-cap', duel);
   if (!duel.weWinRace) return decline(duel.verdict === 'draw-race' ? 'draw-race' : 'lose-race', duel);
+  if (decapOnly && !our.decap) return decline('non-decap', duel);
   if (our.cutRisk?.risky) return decline('cut-risk', duel);
 
   const path = our.path;

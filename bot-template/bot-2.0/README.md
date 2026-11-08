@@ -61,6 +61,6 @@ node training/compare.cjs --baseline-json /tmp/before.json --candidate-json /tmp
 - 设置不一致、重复配对键、存在缺对时退出码非零；`--allow-missing` 可只比较交集。`-q/--quiet` 关闭子进程的逐局进度。
 
 服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机；`options.decisionBudgetMs`（或环境变量 `BOT_DECISION_BUDGET_MS`）设置单次决策预算（默认 80 ms，预留 8 ms），超时后回退到一个经 `preview` 校验的合法动作，`controller.stats()` 会额外报告 `budgetExceeded`、`fallbacks`、`lastDecisionMs` 与 `maxDecisionMs`。
-`options.duelStrike`（或环境变量 `BOT_DUEL_STRIKE=0`）控制“终结层”：默认开启时，控制器在规划器之前先跑一次 `bot/duel/strike.cjs` 的 race 门控斩杀判断，若证明 4 Tick 内可斩杀且不会先被对方斩杀，就直接执行该路线首步（mode 2 全推，经 `preview` 复核）；否则完全回落到原有规划器路径。关闭后行为与仅规划器版本一致，便于 A/B 对比。
+`options.duelStrike`（或环境变量 `BOT_DUEL_STRIKE=0`）控制“终结层”：默认开启时，控制器在规划器之前先跑一次 `bot/duel/strike.cjs` 的 race 门控斩杀判断，若证明本 Tick 内可斩杀（`maxEta` 默认 1，可用 `BOT_DUEL_STRIKE_ETA` 放宽）且不会先被对方斩杀，就直接执行该路线首步（mode 2 全推，经 `preview` 复核）；否则完全回落到原有规划器路径。关闭后行为与仅规划器版本一致，便于 A/B 对比。`BOT_DUEL_STRIKE_DECAP=1` 进一步只接受“最后一座皇冠”的必杀。
 Bot 加入房间后默认自动切换到配置队伍并发送准备；只有设置 `BOT_AUTO_READY=0` 或传入 `autoReady: false` 才会关闭自动准备。
 服务端运行时会按对手用户名累计胜负、平局和连续失败次数（仅作日志记录，不影响自动准备——无论连败多少局都会照常准备开局）。

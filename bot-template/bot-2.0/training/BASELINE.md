@@ -51,6 +51,20 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 按地图：random 2/6、maze 2/6、archipelago 2/6、mediterranean 1/6。
 按尺寸组：standard（0.5）5/8，large（0.68、1）2/16。
 
+## 迭代记录
+
+### 2026-11-08：基础设施 + 终结层
+
+- 新增 `bot/duel/killpath.cjs` / `race.cjs`（反向 need 搜索、成长/ETA、孤军与割点风险）与 `training/compare.cjs`（配对 bootstrap）。
+- 新增 `bot/deadline.cjs`（默认 80ms + 合法兜底）；12 worker 大地图下出现约 250 次超预算/14 次兜底，但 24 局结果与基线完全一致（7/13/4）。
+- 终结层实测（`--profile large --seeds 1/2 --turns 1200 --opponents anti --seat both`，12 worker）：
+  - `maxEta: 4`：seeds 1 为 6 胜（基线 7），出现 3 局结果变化，回退；
+  - 仅最后皇冠（`decapOnly`，`maxEta: 4`）：7 胜，2 次触发，无变化；
+  - `maxEta: 2`：6 胜；
+  - `maxEta: 1`（本 Tick 可斩杀）：seeds 1 为 **9 胜 / 15 负 / 12 平**，seeds 2 为 **16 胜 / 32 负 / 25 平**（基线 14/34/27）；默认 80ms 下同为 9/16 胜。
+- 结论：终结层只做“本 Tick 立即斩杀”，不接管多 Tick 走廊；默认 `maxEta: 1`，并用相邻皇冠的 O(N·4) 预检避免每 Tick 跑完整搜索。
+- 样本仍小（24/48 局），配对 CI 含 0；后续改动继续用 seeds 2 以上的配对报告验证。
+
 ## 后续对比约定
 
 1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；

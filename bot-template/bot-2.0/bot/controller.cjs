@@ -19,6 +19,27 @@ function resolveDecisionBudget(options) {
   return envDecisionBudget() ?? DEFAULT_BUDGET_MS;
 }
 
+function envDuelStrike() {
+  const raw = process.env.BOT_DUEL_STRIKE;
+  if (raw === undefined || String(raw).trim() === '') return true;
+  return String(raw).trim() !== '0';
+}
+
+function resolveDuelStrike(options) {
+  if (options?.duelStrike !== undefined) return options.duelStrike !== false;
+  return envDuelStrike();
+}
+
+function envStrikeMaxEta() {
+  const value = Number(process.env.BOT_DUEL_STRIKE_ETA);
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(12, Math.floor(value)));
+}
+
+function envStrikeDecapOnly() {
+  return String(process.env.BOT_DUEL_STRIKE_DECAP || '') === '1';
+}
+
 function ownFrontierCells(board) {
   const cells = [];
   for (let at = 0; at < board.size; at += 1) if (board.own(at) && !board.isolated[at]) cells.push(at);
@@ -99,7 +120,12 @@ function createController(playerId, options = {}) {
   const decisionBudgetMs = resolveDecisionBudget(options);
   // Finish layer, on by default.  `duelStrike:false` (BOT_DUEL_STRIKE=0) keeps
   // the controller byte-identical to the planner-only behaviour for A/B runs.
-  const duelStrike = options.duelStrike !== false;
+  const duelStrike = resolveDuelStrike(options);
+  const duelStrikeOptions = {
+    maxEta: envStrikeMaxEta(),
+    decapOnly: envStrikeDecapOnly(),
+    ...(options.duelStrikeOptions || {}),
+  };
   const memory = {
     budgetExceeded: 0,
     fallbacks: 0,
@@ -193,7 +219,9 @@ function createController(playerId, options = {}) {
       // The maze reroute guard is bypassed on purpose: a proven kill must not
       // be replaced by a lane change, and the strike is re-derived next turn
       // anyway.
-      const strike = duelStrike && !deadline.check() ? chooseKillStrike(board) : null;
+      const strike = duelStrike && !deadline.check()
+        ? chooseKillStrike(board, duelStrikeOptions)
+        : null;
       // Do not preempt the planner's own campaign on the very same crown and
       // stack.  There the planner is already marching, and its build/supply
       // phases are what keeps that stack alive; re-deciding the same march one

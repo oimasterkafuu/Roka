@@ -48,7 +48,7 @@ function frame(grid, army, n, m, turn = 60) {
 }
 
 test('the finish layer is on by default and short-ranged', () => {
-  assert.deepEqual({ ...DEFAULTS }, { maxEta: 4, margin: 1, allowRiskyCuts: false });
+  assert.deepEqual({ ...DEFAULTS }, { maxEta: 1, margin: 1, allowRiskyCuts: false, decapOnly: false });
 });
 
 test('an adjacent last-crown kill becomes one mode-2 strike that preview confirms', () => {
@@ -75,8 +75,8 @@ test('a clean kill that arrives after the opponent counter-kill is declined', ()
   // already next to our last crown and kills in one tick, so the capture is
   // real but worthless.
   const b = board([101, 2, 200, 200, 1, 200, 102], [30, 40, 0, 0, 25, 0, 4]);
-  assert.equal(evaluateStrike(b).reason, 'lose-race');
-  assert.equal(chooseKillStrike(b), null);
+  assert.equal(evaluateStrike(b, { maxEta: 2 }).reason, 'lose-race');
+  assert.equal(chooseKillStrike(b, { maxEta: 2 }), null);
 });
 
 test('maxEta caps the finish radius', () => {
@@ -120,21 +120,25 @@ test('the first hop must capture, so a relay-first route is left to the planner'
   // A friendly transfer is not a "finish" move: the layer refuses and the
   // muster logic of the planner keeps ownership of that route.
   const b = board([101, 1, 1, 102], [7, 0, 12, 12]);
-  const verdict = evaluateStrike(b);
+  const verdict = evaluateStrike(b, { maxEta: 4 });
   assert.equal(verdict.ok, false);
   assert.equal(verdict.reason, 'no-capture');
   assert.equal(verdict.race.weWinRace, true);
-  assert.equal(chooseKillStrike(b), null);
+  assert.equal(chooseKillStrike(b, { maxEta: 4 }), null);
 });
 
 test('a multi-crown capture is only taken when the race is won', () => {
   // Two enemy crowns: taking one is not a decapitation, so it is treated as an
   // ordinary raid and must win the race.  Here the enemy cannot counter-kill.
-  const win = chooseKillStrike(board([101, 200, 102, 102], [30, 0, 5, 5]));
+  const win = chooseKillStrike(board([101, 200, 102, 102], [30, 0, 5, 5]), { maxEta: 4 });
   assert.ok(win);
   assert.equal(win.plan.decap, false);
   assert.equal(win.race.weWinRace, true);
   assert.equal(preview(board([101, 200, 102, 102], [30, 0, 5, 5]), win.action).captured, true);
+  const guarded = evaluateStrike(board([101, 200, 102, 102], [30, 0, 5, 5]), { maxEta: 4, decapOnly: true });
+  assert.equal(guarded.ok, false);
+  assert.equal(guarded.reason, 'non-decap');
+  assert.equal(chooseKillStrike(board([101, 200, 102, 102], [30, 0, 5, 5]), { maxEta: 4, decapOnly: true }), null);
 
   // Identical plan, but the enemy plain at 1 kills our last crown in one tick.
   const lose = board([101, 2, 1, 200, 200, 102, 200, 200, 102], [30, 60, 25, 0, 0, 5, 0, 0, 5], {
@@ -154,7 +158,7 @@ test('no legal kill returns null', () => {
   const verdict = evaluateStrike(b);
   assert.equal(verdict.ok, false);
   assert.equal(verdict.action, null);
-  assert.equal(verdict.reason, 'our-no-route');
+  assert.equal(verdict.reason, 'no-local-crown');
 });
 
 test('the controller takes the strike by default and keeps the planner path when disabled', () => {
@@ -168,7 +172,7 @@ test('the controller takes the strike by default and keeps the planner path when
       5,
     );
 
-  const off = createController(1, { duelStrike: false });
+  const off = createController(1, { duelStrike: false, duelStrikeOptions: { maxEta: 4 } });
   const offAction = off.choose(strikeable());
   assert.ok(offAction);
   assert.equal(preview(makeBoard(strikeable(), 1), offAction).ok, true);
@@ -179,10 +183,10 @@ test('the controller takes the strike by default and keeps the planner path when
   assert.equal(off.stats().byBranch['duel-strike'], undefined);
 
   // The planner-only decision is deterministic on this fixture.
-  const offAgain = createController(1, { duelStrike: false }).choose(strikeable());
+  const offAgain = createController(1, { duelStrike: false, duelStrikeOptions: { maxEta: 4 } }).choose(strikeable());
   assert.deepEqual(offAgain, offAction);
 
-  const on = createController(1);
+  const on = createController(1, { duelStrikeOptions: { maxEta: 4 } });
   const onAction = on.choose(strikeable());
   assert.equal(on.stats().branch, 'duel-strike');
   assert.equal(on.stats().strikes, 1);
@@ -191,4 +195,26 @@ test('the controller takes the strike by default and keeps the planner path when
   assert.equal(on.stats().lastStrike.decap, true);
   assert.deepEqual(onAction, { kind: 'attack', x: 0, y: 2, dx: 0, dy: 3, mode: 2, half: false });
   assert.notDeepEqual(onAction, offAction);
+});
+
+test('BOT_DUEL_STRIKE=0 disables the layer when no option is passed', () => {
+  const grid = [101, 1, 1, 2, 102, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200];
+  const army = [60, 20, 20, 1, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const previous = process.env.BOT_DUEL_STRIKE;
+  try {
+    process.env.BOT_DUEL_STRIKE = '0';
+    const off = createController(1, { duelStrikeOptions: { maxEta: 4 } });
+    off.choose(frame(grid, army, 3, 5));
+    assert.equal(off.stats().strikes, 0);
+    assert.notEqual(off.stats().branch, 'duel-strike');
+
+    process.env.BOT_DUEL_STRIKE = '1';
+    const on = createController(1, { duelStrikeOptions: { maxEta: 4 } });
+    on.choose(frame(grid, army, 3, 5));
+    assert.equal(on.stats().strikes, 1);
+    assert.equal(on.stats().branch, 'duel-strike');
+  } finally {
+    if (previous === undefined) delete process.env.BOT_DUEL_STRIKE;
+    else process.env.BOT_DUEL_STRIKE = previous;
+  }
 });
