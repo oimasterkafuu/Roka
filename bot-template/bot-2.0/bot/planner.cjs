@@ -2020,7 +2020,7 @@ function recover(b, m, own) {
   return reposition(b, own) || emergencyProbe(b, own);
 }
 
-function plan(b,m) {
+function plan(b,m,deadline) {
   const own=[]; const enemies=[];
   let campaignPaused = false;
   for(let i=0;i<b.size;i++){if(b.own(i)&&!b.isolated[i])own.push(i);if(b.enemy(i)&&!b.isolated[i])enemies.push(i);}
@@ -2070,6 +2070,10 @@ function plan(b,m) {
       m.musterWaitTurns = 0;
     }
   }
+  // Optional per-decision budget.  Bail out at a phase boundary with no
+  // action so the controller can emit a cheap legal fallback instead of
+  // overrunning the next tick.  Without a deadline this is a no-op.
+  if (deadline && deadline.check()) return { action: null, branch: 'deadline' };
   const anchorGuard = anchorDefense(b);
   if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
@@ -2115,6 +2119,7 @@ function plan(b,m) {
   const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
   const enemyTotal = enemies.reduce((sum, at) => sum + b.army[at], 0);
   const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+  if (deadline && deadline.check()) return { action: null, branch: 'deadline' };
   const defend=defense(b,m,own);
   if(defend)return defend;
   if (rushBuildHold) {
@@ -2222,6 +2227,7 @@ function plan(b,m) {
     return { action: null, branch: 'muster-wait' };
   }
   m.musterWaitTurns = 0;
+  if (deadline && deadline.check()) return { action: null, branch: 'deadline' };
   const investment=rushBuildHold ? null : economy(b,m,own,ed,mazeGoal);
   // On a maze, an active campaign and the construction plan share the same
   // narrow corridor.  Allow the compact plan to take a bounded turn after the

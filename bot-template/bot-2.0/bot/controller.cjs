@@ -3,9 +3,104 @@
 const { makeBoard } = require('./board.cjs');
 const { plan, recover, secureDecision, growth, isMazeBoard, mazeActionGuard } = require('./planner.cjs');
 const { preview } = require('./rules.cjs');
+const { createDeadline, DEFAULT_BUDGET_MS } = require('./deadline.cjs');
 
-function createController(playerId) {
+function envDecisionBudget() {
+  const raw = process.env.BOT_DECISION_BUDGET_MS;
+  if (raw === undefined || String(raw).trim() === '') return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(0, value) : undefined;
+}
+
+function resolveDecisionBudget(options) {
+  const fromOptions = Number(options?.decisionBudgetMs);
+  if (Number.isFinite(fromOptions)) return Math.max(0, fromOptions);
+  return envDecisionBudget() ?? DEFAULT_BUDGET_MS;
+}
+
+function ownFrontierCells(board) {
+  const cells = [];
+  for (let at = 0; at < board.size; at += 1) if (board.own(at) && !board.isolated[at]) cells.push(at);
+  return cells;
+}
+
+function attackAction(board, from, to, mode) {
+  const source = board.xy(from);
+  const target = board.xy(to);
+  return {
+    kind: 'attack',
+    x: source.x,
+    y: source.y,
+    dx: target.x,
+    dy: target.y,
+    mode,
+    half: mode === 1,
+  };
+}
+
+// Cheapest legal capture/expansion step.  Friendly transfers are skipped: a
+// timeout fallback should take ground, not shuffle supply.
+function cheapestLegalMove(board) {
+  let best = null;
+  for (let at = 0; at < board.size; at += 1) {
+    if (!board.own(at) || board.isolated[at]) continue;
+    for (const to of board.neighbors(at)) {
+      if (!board.passable(to)) continue;
+      const owner = board.owner(to);
+      if (owner > 0 && board.sameTeam(owner, board.playerId)) continue;
+      const action = attackAction(board, at, to, 0);
+      const result = preview(board, action);
+      if (!result.ok || !result.captured) continue;
+      if (!best || result.send < best.send) best = { action, send: result.send };
+    }
+  }
+  return best?.action || null;
+}
+
+// A timeout should still decapitate when the killing blow is already adjacent.
+function lethalCrownAttack(board) {
+  let best = null;
+  for (let at = 0; at < board.size; at += 1) {
+    if (!board.own(at) || board.isolated[at]) continue;
+    for (const to of board.neighbors(at)) {
+      if (!board.enemy(to) || board.kind(to) !== 'crown') continue;
+      const action = attackAction(board, at, to, 2);
+      const result = preview(board, action);
+      if (!result.ok || !result.captured || !result.decap) continue;
+      if (!best || result.send < best.send) best = { action, send: result.send };
+    }
+  }
+  return best?.action || null;
+}
+
+// Cheap, always-legal last resort for an expired decision budget.  Ranking:
+// lethal crown strike, planner `recover` suggestion, cheapest legal capture.
+// Every candidate is validated with `preview` before it is returned.  `recover`
+// runs against a scratch copy so a timeout cannot corrupt campaign state.
+function legalFallback(board, memory) {
+  const crown = lethalCrownAttack(board);
+  if (crown && preview(board, crown).ok) return crown;
+  const own = ownFrontierCells(board);
+  if (own.length) {
+    const scratch = { ...memory };
+    if (memory.campaign) scratch.campaign = { ...memory.campaign };
+    if (memory.delivery) scratch.delivery = { ...memory.delivery };
+    if (memory.blocked) scratch.blocked = { ...memory.blocked };
+    const recovered = recover(board, scratch, own);
+    const secured = recovered ? secureDecision(board, recovered) : null;
+    if (secured?.action && preview(board, secured.action).ok) return secured.action;
+  }
+  return cheapestLegalMove(board);
+}
+
+function createController(playerId, options = {}) {
+  const clock = typeof options.now === 'function' ? options.now : Date.now;
+  const decisionBudgetMs = resolveDecisionBudget(options);
   const memory = {
+    budgetExceeded: 0,
+    fallbacks: 0,
+    lastDecisionMs: 0,
+    maxDecisionMs: 0,
     playerId: Number(playerId) || 0,
     lastTurn: -1,
     target: null,
@@ -71,9 +166,23 @@ function createController(playerId) {
         }
       }
     }
-    let decision = secureDecision(board, plan(board, memory));
-    decision = mazeActionGuard(board, memory, decision);
-    if (!decision.action) {
+    const startedAt = clock();
+    // One budget per decision, not per game: a slow tick must never bleed into
+    // the next one.  `expired()` probes the clock, `check()` is amortized.
+    const deadline = createDeadline({
+      budgetMs: decisionBudgetMs,
+      now: clock,
+      marginMs: options.marginMs,
+      checkInterval: options.checkInterval,
+    });
+    let decision;
+    if (deadline.expired()) {
+      decision = { action: null, branch: 'deadline' };
+    } else {
+      decision = secureDecision(board, plan(board, memory, deadline));
+      decision = mazeActionGuard(board, memory, decision);
+    }
+    if (!decision.action && !deadline.expired()) {
       memory.noActionTurns += 1;
       // A short no-op is intentional during muster.  A longer one means the
       // selected corridor or logistics cursor is stale; recover locally
@@ -91,21 +200,35 @@ function createController(playerId) {
         }
       }
       memory.maxNoActionStreak = Math.max(memory.maxNoActionStreak, memory.noActionTurns);
-    } else {
+    } else if (decision.action) {
       memory.noActionTurns = 0;
     }
+    const timedOut = deadline.expired();
+    if (timedOut) memory.budgetExceeded += 1;
+    let action = decision.action;
+    if (timedOut && (!action || !preview(board, action).ok)) {
+      const cheap = legalFallback(board, memory);
+      if (cheap) {
+        action = cheap;
+        decision = { action: cheap, branch: 'deadline-fallback' };
+        memory.fallbacks += 1;
+      }
+    }
     memory.branch = decision.branch;
-
     memory.byBranch[decision.branch] = (memory.byBranch[decision.branch] || 0) + 1;
-    if (!decision.action) return null;
-    const result = preview(board, decision.action);
+    // Wall-clock accounting is reported through stats() for imbalance hunting.
+    const elapsed = Math.max(0, clock() - startedAt);
+    memory.lastDecisionMs = elapsed;
+    if (elapsed > memory.maxDecisionMs) memory.maxDecisionMs = elapsed;
+    if (!action) return null;
+    const result = preview(board, action);
     if (!result.ok) {
       memory.rejected += 1;
       return null;
     }
-    if (decision.action.kind === 'attack' && memory.campaign) {
-      const source = board.idx(decision.action.x, decision.action.y);
-      const target = board.idx(decision.action.dx, decision.action.dy);
+    if (action.kind === 'attack' && memory.campaign) {
+      const source = board.idx(action.x, action.y);
+      const target = board.idx(action.dx, action.dy);
       if (source === memory.campaign.at) {
         // `preview` is authoritative for the local frame.  Advancing the
         // campaign cursor merely because an attack was emitted used to leave
@@ -130,9 +253,9 @@ function createController(playerId) {
         }
       }
     }
-    recordMazeAction(board, decision.action);
+    recordMazeAction(board, action);
     memory.actions += 1;
-    return decision.action;
+    return action;
   }
 
   function reset() {
@@ -144,6 +267,10 @@ function createController(playerId) {
     memory.rejected = 0;
     memory.noActionTurns = 0;
     memory.maxNoActionStreak = 0;
+    memory.budgetExceeded = 0;
+    memory.fallbacks = 0;
+    memory.lastDecisionMs = 0;
+    memory.maxDecisionMs = 0;
     memory.byBranch = Object.create(null);
     memory.threatDistance = Object.create(null);
     memory.enemyHome = undefined;
@@ -184,4 +311,4 @@ function chooseAction(raw, playerId) {
   return createController(playerId || raw?.playerId).choose(raw);
 }
 
-module.exports = { createController, chooseAction };
+module.exports = { createController, chooseAction, legalFallback };

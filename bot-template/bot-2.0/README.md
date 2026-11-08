@@ -43,6 +43,6 @@ node training/long-eval.cjs --help
 
 评测结果默认打印为 JSON；传入 `--output FILE` 或设置 `APEX_EVAL_OUTPUT` 可保存报告。`--profile large` 会固定覆盖 0.5、0.68、1 三档地图尺寸，建议配合 1200 Tick 观察完整长距离战役。报告包括每局地图、种子、胜负、Tick、决策延迟直方图、失败回放，以及按尺寸和尺寸组汇总的 120/300/600/900/1200 Tick 皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的兵力/领土/皇冠比；`losses`/`effectiveLosses` 会把未结束对局也计为失败。
 
-服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机。
+服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机；`options.decisionBudgetMs`（或环境变量 `BOT_DECISION_BUDGET_MS`）设置单次决策预算（默认 80 ms，预留 8 ms），超时后回退到一个经 `preview` 校验的合法动作，`controller.stats()` 会额外报告 `budgetExceeded`、`fallbacks`、`lastDecisionMs` 与 `maxDecisionMs`。
 Bot 加入房间后默认自动切换到配置队伍并发送准备；只有设置 `BOT_AUTO_READY=0` 或传入 `autoReady: false` 才会关闭自动准备。
 服务端运行时会按对手用户名累计胜负、平局和连续失败次数（仅作日志记录，不影响自动准备——无论连败多少局都会照常准备开局）。
