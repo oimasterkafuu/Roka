@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates, preview } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, defensiveCut, emergencyDefensiveCut } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, advanceSupplyTree, defensiveCut, emergencyDefensiveCut } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -469,4 +469,52 @@ test('tree gathering drains tributaries before their shared trunk', () => {
   assert.equal(decision.action.y, 8);
   assert.equal(decision.action.dy, 7);
   assert.equal(memory.delivery.edges[0][0], 8);
+});
+
+// A three-tributary tree whose trunk runs over one exposed bridge cell (7):
+// an enemy stack sits next to it, so the bridge must keep a real garrison while
+// the non-cut tributaries are still allowed to supply.
+function cutTree() {
+  const grid = [201, 1, 1, 201, 201, 201, 101, 1, 1, 201, 201, 201, 201, 2, 1, 201, 201, 201];
+  const army = [0, 30, 30, 0, 0, 0, 0, 60, 30, 0, 0, 0, 0, 5, 30, 0, 0, 0];
+  return makeBoard({
+    n: 3, m: 6, grid, army,
+    isolated: Array(18).fill(0), fog: Array(18).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('tree gathering keeps a garrison on a threatened cut bridge', () => {
+  const b = cutTree();
+  const canEnter = (at) => b.own(at) && !b.isolated[at];
+  const memory = { delivery: { mode: 'tree', root: 6, at: 7, edges: [[7, 6]], branches: 1, movedTurn: -1 } };
+  const decision = advanceSupplyTree(b, memory, 'muster', canEnter);
+  assert.equal(decision.branch, 'muster-tree');
+  // A full push would leave pressure + 1 (5); the guard keeps pressure + 2.
+  assert.equal(b.army[7], 60);
+  assert.ok(preview(b, decision.action).army[7] >= 4 + 2);
+  assert.equal(memory.delivery.at, 6);
+});
+
+test('tree gathering still lets non-cut tributaries supply the cut trunk', () => {
+  const b = cutTree();
+  const canEnter = (at) => b.own(at) && !b.isolated[at];
+  const field = distanceField(b, [6], canEnter);
+  const memory = { delivery: null };
+  const sources = [
+    { at: 8, p: [8, 7, 6] },
+    { at: 1, p: [1, 7, 6] },
+    { at: 14, p: [14, 8, 7, 6] },
+    { at: 2, p: [2, 8, 7, 6] },
+  ];
+  const decision = treeGather(b, memory, 6, 400, 'muster', canEnter, field, sources);
+  assert.equal(decision.branch, 'muster-tree');
+  // The first edge is the leaf at index 2, which is not a cut point.
+  assert.equal(decision.action.x, 0);
+  assert.equal(decision.action.y, 2);
+  assert.equal(decision.action.mode, 0);
+  // Non-cut leaves still hand over everything but one soldier.
+  assert.equal(preview(b, decision.action).army[2], 1);
+  assert.equal(memory.delivery.branches, 3);
+  assert.ok(memory.delivery.edges.some(([from, to]) => from === 7 && to === 6));
 });

@@ -120,6 +120,75 @@ function pressure(b, at, omit = -1) {
   return value;
 }
 
+// `pressure` only sees stacks that are already adjacent, so a column two ticks
+// out is invisible to every one-tick guard. Roka punishes exactly that gap: a
+// one-cell bridge left with a single soldier can be tapped by a stack it never
+// saw, and the whole delivered column becomes isolated and immobile. Build a
+// bounded multi-source arrival field instead. Sources are enemy stacks that can
+// still push, the walk is over passable cells, one step per tick, and `strength`
+// is the force that lands on the cell: every hop leaves one soldier behind and
+// has to beat the garrison of the cell it crosses, so a stack does not "walk
+// through" a friendly cell it could never capture. The field is cached per
+// board because the guards below run once per candidate action.
+const ETA_HORIZON = 2;
+const etaCache = new WeakMap();
+
+function enemyEta(b) {
+  const cached = etaCache.get(b);
+  if (cached) return cached;
+  const distance = new Int8Array(b.size).fill(-1);
+  const strength = new Float64Array(b.size);
+  let frontier = [];
+  for (let at = 0; at < b.size; at += 1) {
+    if (!b.enemy(at) || b.isolated[at] || !b.passable(at)) continue;
+    const army = Math.max(0, Number(b.army[at]) || 0);
+    if (army <= 1) continue;
+    distance[at] = 0;
+    strength[at] = army;
+    frontier.push(at);
+  }
+  // Level by level, so the strongest stack arriving at a cell wins every tie
+  // and the field stays deterministic (sources and frontier are index-ordered).
+  // A cell is recorded even when the arriving force is too small to take it:
+  // the guards compare that force against the garrison the move leaves behind,
+  // not against the garrison standing there now. Only a cell the stack can
+  // actually capture becomes a stepping stone, so it never walks through a
+  // strong friendly cell and invents a threat.
+  for (let step = 0; step < ETA_HORIZON && frontier.length; step += 1) {
+    const next = [];
+    const queued = new Set();
+    for (const at of frontier) {
+      const garrison = b.own(at) ? Math.max(0, Number(b.army[at]) || 0) : 0;
+      const send = strength[at] - garrison - 1;
+      if (send < 1) continue;
+      for (const j of b.neighbors(at)) {
+        if (!b.passable(j)) continue;
+        const held = b.own(j) ? Math.max(0, Number(b.army[j]) || 0) : 0;
+        if (distance[j] < 0) {
+          distance[j] = step + 1;
+          strength[j] = send;
+        } else if (distance[j] === step + 1 && strength[j] < send) {
+          strength[j] = send;
+        } else if (distance[j] !== step + 1) {
+          continue;
+        }
+        if (send > held && !queued.has(j)) { queued.add(j); next.push(j); }
+      }
+    }
+    frontier = next;
+  }
+  const result = { distance, strength };
+  etaCache.set(b, result);
+  return result;
+}
+
+// Beware: distance 1 of the arrival field is the pre-move neighbourhood, which
+// the pushed column may just have captured. Only the two-tick ring carries
+// information that `pressure` cannot already see on the resulting board.
+function etaArrival(eta, at) {
+  return at >= 0 && eta.distance[at] === 2 ? eta.strength[at] : 0;
+}
+
 function routeArrival(b, f, at) {
   const path = route(f, at);
   let arrival = b.army[at] - 1;
@@ -757,6 +826,35 @@ function supplyReservations(m) {
   return reserved;
 }
 
+// A cell that is the only path between an anchor and the army behind it must
+// keep a real garrison, otherwise the column it just supplied is cut for free.
+// One soldier above the strongest stack that can reach the cell is enough to
+// survive the tap that would otherwise strand the whole delivered column. Cells
+// that no enemy can reach inside the horizon keep the original single-soldier
+// tail: reserving a garrison on every interior cell of a long corridor would
+// halve each hop (only the coarse 0/1/2 push modes exist) and starve the very
+// campaigns this tree exists to serve.
+function bridgeGarrison(b, at) {
+  if (at < 0 || !b.own(at) || b.isolated[at]) return 1;
+  const cuts = cutAnalysis(b, b.playerId);
+  if (!cuts.points.has(at) || !(cuts.land[at] > 0)) return 1;
+  const threat = Math.max(pressure(b, at), etaArrival(enemyEta(b), at));
+  return threat > 0 ? threat + 2 : 1;
+}
+
+// Only the coarse push modes are available, so pick the first one that keeps
+// the required garrison home instead of the largest send that fits.
+function guardedTreeMove(b, from, to) {
+  const required = bridgeGarrison(b, from);
+  if (required <= 1) return safeMove(b, from, to, 'gather');
+  for (const mode of [1, 0, 2]) {
+    const action = safeMove(b, from, to, 'gather', [mode]);
+    if (!action) continue;
+    if (b.army[from] - computePush(b, from, to, mode) >= required) return action;
+  }
+  return null;
+}
+
 function advanceSupplyTree(b, m, reason, canEnter) {
   const state = m.delivery;
   // Invalidate the whole route when ownership or a safety constraint changes.
@@ -776,8 +874,12 @@ function advanceSupplyTree(b, m, reason, canEnter) {
     }
     const [from, to] = state.edges[0];
     if (!movable(b, from)) { state.edges.shift(); continue; }
-    const action = safeMove(b, from, to, 'gather');
-    if (!action || routeGuard(b, action).blocked) { m.delivery = null; return null; }
+    // A guarded bridge that cannot afford to donate must not be skipped:
+    // dropping the edge would make the remaining edge list non-contiguous and
+    // deliver around the bridge. Wait for the tributaries to top it up.
+    const action = guardedTreeMove(b, from, to);
+    if (!action) return null;
+    if (routeGuard(b, action).blocked) { m.delivery = null; return null; }
     state.pending = { army: b.army[from] };
     state.at = to;
     state.movedTurn = b.turn;
@@ -794,7 +896,10 @@ function advanceSupplyTree(b, m, reason, canEnter) {
 function treeGather(b, m, root, need, reason, canEnter, f, sources) {
   const trunk = sources[0].p;
   const nodes = new Set(trunk);
-  const spare = (at) => at === root ? 0 : Math.max(0, b.army[at] - Math.max(1, pressure(b, at)));
+  // Count only what a cell can actually give away. A cut cell that is inside an
+  // enemy's arrival horizon keeps its garrison, so promising that army to the
+  // delivery would over-fund the tree and drain the bridge it needs.
+  const spare = (at) => at === root ? 0 : Math.max(0, b.army[at] - Math.max(1, bridgeGarrison(b, at)));
   let funds = trunk.reduce((sum, at) => sum + spare(at), 0);
   const deficit = need - b.army[root];
   let branches = 0;
@@ -2245,4 +2350,4 @@ function plan(b,m,deadline) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut};
