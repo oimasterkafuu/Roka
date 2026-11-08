@@ -41,6 +41,8 @@ node training/long-eval.cjs --seeds 24 --workers 8 --turns 600 --opponents anti 
 node training/long-eval.cjs --help
 ```
 
+评测对手可选 `anti`、`simple` 或 `apex`（原版 `bot-template/apex-bot`，用于交叉测试防过拟合）。
+
 评测结果默认打印为 JSON；传入 `--output FILE` 或设置 `APEX_EVAL_OUTPUT` 可保存报告。`--profile large` 会固定覆盖 0.5、0.68、1 三档地图尺寸，建议配合 1200 Tick 观察完整长距离战役。报告包括每局地图、种子、胜负、Tick、决策延迟直方图、失败回放，以及按尺寸和尺寸组汇总的 120/300/600/900/1200 Tick 皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的兵力/领土/皇冠比；`losses`/`effectiveLosses` 会把未结束对局也计为失败。
 
 ## 成对 A/B 对比

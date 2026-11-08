@@ -3,8 +3,11 @@
 const { makeBoard, connectedSet, distanceField, anchorCells, cutAnalysis } = require('./board.cjs');
 const { computePush, actionCoordinates, preview } = require('./rules.cjs');
 
-const ECON_GOAL = Number(process.env.APEX_ECON_GOAL || 6);
-const ECON_DEADLINE = Number(process.env.APEX_ECON_DEADLINE || 90);
+// Bot(2.0) 1v1 profile: the Apex defaults (6 / 90) over-invest in economy
+// before the decisive fight. 48 large-map seeds measured 16 -> 18 wins with
+// 10 / 45, so the template now defaults to the 1v1 profile; env still wins.
+const ECON_GOAL = Number(process.env.APEX_ECON_GOAL || 10);
+const ECON_DEADLINE = Number(process.env.APEX_ECON_DEADLINE || 45);
 const FORCE_MARGIN = Number.isFinite(Number(process.env.APEX_FORCE_MARGIN))
   ? Math.max(0, Math.min(1, Number(process.env.APEX_FORCE_MARGIN))) : 0.12;
 const MULTI_CROWN_CAP = Number.isFinite(Number(process.env.APEX_MULTI_CROWN_CAP))

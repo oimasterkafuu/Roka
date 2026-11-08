@@ -2,6 +2,7 @@
 const { parentPort } = require('node:worker_threads');
 const { runMatch, makeSimpleAdapter } = require('./engine.cjs');
 const { chooseAction: antiAction } = require('../../anti-human-bot/bot/policy.cjs');
+const { createController: createApexBaseline } = require('../../apex-bot/bot/controller.cjs');
 const { createController } = require('../bot/controller.cjs');
 
 function run(job) {
@@ -20,6 +21,9 @@ function run(job) {
     adapters.push(makeSimpleAdapter({ seat: 1 - ownSeat, decisionTimeoutMs: job.decisionTimeoutMs || 40 }));
   } else if (opponent === 'anti') {
     policies[1 - ownSeat] = (state) => antiAction(state);
+  } else if (opponent === 'apex') {
+    const baseline = createApexBaseline(2 - ownSeat);
+    policies[1 - ownSeat] = (state) => baseline.choose(state);
   } else {
     throw new Error(`unsupported opponent: ${opponent}`);
   }

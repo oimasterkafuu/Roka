@@ -42,8 +42,8 @@ function config(options = {}) {
     options.opponents ?? options.opponent ?? env.APEX_EVAL_OPPONENTS ?? env.APEX_EVAL_OPPONENT,
     'anti',
   );
-  if (!opponents.length || opponents.some((opponent) => !['anti', 'simple'].includes(opponent)))
-    throw new Error('opponents must be anti and/or simple');
+  if (!opponents.length || opponents.some((opponent) => !['anti', 'simple', 'apex'].includes(opponent)))
+    throw new Error('opponents must be anti, simple and/or apex');
   const fogOption = options.fog ?? env.APEX_EVAL_FOG ?? 'false';
   const fogs =
     fogOption === 'both'
@@ -202,6 +202,7 @@ function sourceFingerprint() {
     'bot-template/bot-2.0/training',
     'bot-template/bot-2.0/strategy.js',
     'bot-template/anti-human-bot/bot',
+    'bot-template/apex-bot/bot',
     'bot-template/simple-strategy-bot/strategy.js',
     'bot-template/simple-strategy-bot/bot',
     'package.json',
@@ -460,7 +461,7 @@ CLI values override APEX_EVAL_* environment variables.
   --modes CSV        random,maze,archipelago,mediterranean (APEX_EVAL_MODES)
   --sizes CSV        Map size ratios, 0.2..3 (default 0.5; APEX_EVAL_SIZES)
   --profile NAME     standard (0.5) or large (0.5,0.68,1) size suite
-  --opponents CSV    anti,simple (default anti; APEX_EVAL_OPPONENTS)
+  --opponents CSV    anti,simple,apex (default anti; APEX_EVAL_OPPONENTS)
   --fog VALUE        false, true, or both (default false; APEX_EVAL_FOG)
   --seat VALUE       Apex seat: 0, 1, or both (default both; APEX_EVAL_SEAT=0|1)
   --trace N          Recent tick records per retained failure; 0 disables replay

@@ -65,6 +65,12 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 - 结论：终结层只做“本 Tick 立即斩杀”，不接管多 Tick 走廊；默认 `maxEta: 1`，并用相邻皇冠的 O(N·4) 预检避免每 Tick 跑完整搜索。
 - 样本仍小（24/48 局），配对 CI 含 0；后续改动继续用 seeds 2 以上的配对报告验证。
 
+### 2026-11-09：1v1 经济参数 + 原版 Apex 交叉测试
+
+- 在固定 seeds 2 大地图（48 局）上扫描 Apex 经济参数：`APEX_ECON_DEADLINE` 90 -> 45、`APEX_ECON_GOAL` 6 -> 10 后，对 anti 胜场 16 -> 18。
+- 交叉测试原版 `bot-template/apex-bot`（新增 `--opponents apex`）：同一 48 局，stock 参数 17 胜，新默认 21 胜，说明提升不依赖 anti 对手。
+- 默认值已写入 `bot/planner.cjs`；环境变量仍可覆盖（`APEX_ECON_GOAL`/`APEX_ECON_DEADLINE`）。
+
 ## 后续对比约定
 
 1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；
