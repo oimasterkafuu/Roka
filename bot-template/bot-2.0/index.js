@@ -24,6 +24,11 @@ const bot = attachStrategy(socket, {
     String(process.env.BOT_DECISION_BUDGET_MS).trim() === ''
       ? undefined
       : Number(process.env.BOT_DECISION_BUDGET_MS),
+  // Finish layer is on unless BOT_DUEL_STRIKE is set to 0.
+  duelStrike:
+    process.env.BOT_DUEL_STRIKE === undefined || String(process.env.BOT_DUEL_STRIKE).trim() === ''
+      ? undefined
+      : String(process.env.BOT_DUEL_STRIKE).trim() !== '0',
   log: (message) => console.log(`[bot-2.0] ${message}`),
 });
 

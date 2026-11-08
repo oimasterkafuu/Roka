@@ -46,6 +46,12 @@ function createOpponentStats() {
   };
 }
 
+function envDuelStrike() {
+  const raw = process.env.BOT_DUEL_STRIKE;
+  if (raw === undefined || String(raw).trim() === '') return undefined;
+  return String(raw).trim() !== '0';
+}
+
 function validFrameArray(value, size) {
   return Array.isArray(value) && value.length === size && value.every(Number.isFinite);
 }
@@ -79,8 +85,12 @@ function attachStrategy(socket, options = {}) {
   // Hard per-decision wall-clock budget.  Undefined keeps the controller
   // default (BOT_DECISION_BUDGET_MS or 80 ms, safe under a 125 ms 4x tick).
   const decisionBudgetMs = Number(options.decisionBudgetMs);
+  // Finish layer (race-gated kill-path strike).  Default on; BOT_DUEL_STRIKE=0
+  // disables it, which reproduces the planner-only behaviour exactly.
+  const duelStrike = options.duelStrike === undefined ? envDuelStrike() : options.duelStrike !== false;
   const controllerOptions = {
     decisionBudgetMs: Number.isFinite(decisionBudgetMs) ? decisionBudgetMs : undefined,
+    duelStrike,
     now,
   };
   const state = {

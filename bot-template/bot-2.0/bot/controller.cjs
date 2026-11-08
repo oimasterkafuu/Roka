@@ -4,6 +4,7 @@ const { makeBoard } = require('./board.cjs');
 const { plan, recover, secureDecision, growth, isMazeBoard, mazeActionGuard } = require('./planner.cjs');
 const { preview } = require('./rules.cjs');
 const { createDeadline, DEFAULT_BUDGET_MS } = require('./deadline.cjs');
+const { chooseKillStrike } = require('./duel/strike.cjs');
 
 function envDecisionBudget() {
   const raw = process.env.BOT_DECISION_BUDGET_MS;
@@ -96,6 +97,9 @@ function legalFallback(board, memory) {
 function createController(playerId, options = {}) {
   const clock = typeof options.now === 'function' ? options.now : Date.now;
   const decisionBudgetMs = resolveDecisionBudget(options);
+  // Finish layer, on by default.  `duelStrike:false` (BOT_DUEL_STRIKE=0) keeps
+  // the controller byte-identical to the planner-only behaviour for A/B runs.
+  const duelStrike = options.duelStrike !== false;
   const memory = {
     budgetExceeded: 0,
     fallbacks: 0,
@@ -106,6 +110,8 @@ function createController(playerId, options = {}) {
     target: null,
     staging: null,
     branch: 'none',
+    strikes: 0,
+    lastStrike: null,
     actions: 0,
     rejected: 0,
     noActionTurns: 0,
@@ -179,8 +185,39 @@ function createController(playerId, options = {}) {
     if (deadline.expired()) {
       decision = { action: null, branch: 'deadline' };
     } else {
-      decision = secureDecision(board, plan(board, memory, deadline));
-      decision = mazeActionGuard(board, memory, decision);
+      // Finish layer: when the race-gated kill-path search proves a crown
+      // strike we can land first, take its first step instead of letting the
+      // heuristic planner miss the window.  The strike is skipped once the
+      // budget is spent; if the search itself is slow, the timeout fallback
+      // below still applies because `preview` re-validates the action.
+      // The maze reroute guard is bypassed on purpose: a proven kill must not
+      // be replaced by a lane change, and the strike is re-derived next turn
+      // anyway.
+      const strike = duelStrike && !deadline.check() ? chooseKillStrike(board) : null;
+      // Do not preempt the planner's own campaign on the very same crown and
+      // stack.  There the planner is already marching, and its build/supply
+      // phases are what keeps that stack alive; re-deciding the same march one
+      // tick earlier measurably throws games (replay regression).  The layer is
+      // for windows the planner does not cover, not for racing it.
+      const ownedByCampaign =
+        Boolean(strike) &&
+        Boolean(memory.campaign) &&
+        memory.campaign.crown === strike.plan.goal &&
+        memory.campaign.at === strike.plan.tap;
+      if (strike && !ownedByCampaign) {
+        decision = { action: strike.action, branch: strike.branch };
+        memory.strikes += 1;
+        memory.lastStrike = {
+          eta: strike.plan.eta,
+          goal: strike.plan.goal,
+          tap: strike.plan.tap,
+          decap: strike.plan.decap,
+          theirEta: strike.race.theirEta,
+        };
+      } else {
+        decision = secureDecision(board, plan(board, memory, deadline));
+        decision = mazeActionGuard(board, memory, decision);
+      }
     }
     if (!decision.action && !deadline.expired()) {
       memory.noActionTurns += 1;
@@ -263,6 +300,8 @@ function createController(playerId, options = {}) {
     memory.target = null;
     memory.staging = null;
     memory.branch = 'none';
+    memory.strikes = 0;
+    memory.lastStrike = null;
     memory.actions = 0;
     memory.rejected = 0;
     memory.noActionTurns = 0;
