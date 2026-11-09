@@ -220,6 +220,15 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - 被否定的变体（同尺寸 32 局）：先按「兵力领先 1.15×」入门（0.68 anti 12/12/8，入口在长局里几乎不触发：长局从头到尾没有兵力领先）；禁用敌薄边格抢地（11/15/6，丢掉 1 胜）；涂地预算 400 + 跨度 1400（12/14/6，与 140/700 完全相同 —— 真正的出口是「兵力 < 0.45×」，说明后期抢地会喂掉军团）。
 - 结论：与皇冠锚定组合后，默认只作用于 `mediterranean`（`APEX_CITY_SNOWBALL_MODES` 可覆盖），组合结果为 anti 37/12/15、apex 46/1/17，0.34 不变；已默认开启（`APEX_CITY_SNOWBALL=0` 关闭）。变化幅度是 anti +1 胜、apex +1 胜，属于 sign-positive / unproven；机制本身（地盘、landRatio、cityDelta、兵力比）方向明确。下一步：把 `paint` 的后期形态从「抢中性格」换成「守已得地盘」（长局 t1200 后领地 251 → 145 的二次塔陷没有被这个阶段覆盖），再考虑并入默认。
 
+### 2026-11-10：合并后的官方基线（seeds 8）
+
+- 合并 opening 到达门控、last-mile reseat、皇冠预算锚定土地（random/archipelago）与 mediterranean 雪球后，默认跑分：
+  - anti **62W / 26D / 40L**（128 局，48.4%）；0.34 42/0/22，0.68 20/26/18。
+  - apex **86W / 5D / 37L**（67.2%）；0.34 46/0/18，0.68 40/5/19。
+  - 对照原始基线（seeds 8）：anti 55/28/45、apex 73/7/48。
+- 分模式（seeds 8）：anti random 9/11/12、med 14/9/9、arch 18/0/14、maze 21/6/5；apex random 25/0/7、med 17/4/11、arch 20/0/12、maze 24/1/7。
+- 结论：apex 已接近 70%，anti 的 random/mediterranean 大图仍是主缺口；early tempo 与 mediterranean 专项实验继续进行。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；
