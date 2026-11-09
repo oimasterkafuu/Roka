@@ -112,6 +112,12 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 - scale 0.25：96 局 seeds 0-3 anti 32 胜（1 局 loss→draw）、apex 47 胜（1 局 draw→win），看似正收益；但独立 offset 4 上 anti 15 持平、apex 20 vs 21（−1），不复现，回退默认 1。
 - scale 0：anti 29、apex 39，明显更差，说明原始核心偏向仍有价值；不应直接移除，只能在特定局面下小幅降低。
 
+### 2026-11-09：官服日志与 1200 Tick 上限的偏差
+
+- 官服 4 局大地图日志：`queueResets=0`、`budgetExceeded=0`、`fallbacks=0`，说明网络确认与 80ms 预算不是主因；但 `march` 占 806/894/1633 Tick，`muster-wait` 71/43/282、`supply-hold` 238/296、`emergency-defense-cut` 97/190/354，`campaign-reset` 2/20，`broad-expansion` 仅 22~93；`maxNoActionStreak` 16/37/27。结论：长局是 campaign/muster/防守循环，不是挂机或网络。
+- 基线 `--turns 1200` 会把 900~1900 Tick 的败局记为平局，掩盖真实弱点。0.68 尺寸 anti：1200 Tick 为 10W/19D/3L；延长到 2400 Tick 为 **10W/13D/9L**（6 个平局转为失败，无新增胜局）。
+- 后续大地图评测应至少用 `--turns 2400`（或 3000）；1200 Tick 的平局只能视为未决，不能当作防守成功。
+
 ## 后续对比约定
 
 1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；
