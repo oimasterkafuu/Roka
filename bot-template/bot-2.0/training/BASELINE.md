@@ -194,6 +194,16 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - 结论：**只采纳设计 4**，已默认开启（`APEX_LAST_MILE=0` 可关闭）：两个对手都不退化，0.34 完全不变，收益全在 0.68（anti +2 胜、apex +1 胜），但 CI 下界贴着 0，按 sign-positive / unproven 记录。设计 1/2 留在 flag 后面（`APEX_LAST_MILE_MODE=full`），仅用于复现 A/B。
 - 下一步：把账本从「死亡后补救」扩展到「持续推进」——在进攻期就持续把 campaign 根保持在 `bestDist+reseatSlack` 以内的前向补给格（滚动落座），并在 0.68 单尺寸上用 seeds 8 复核，目标是让 CI 离开 0；不要在 0.34 上再调门槛。
 
+### 2026-11-10：大图「皇冠预算锚定土地」相位（`APEX_CROWN_LAND_ANCHOR`，默认开）
+
+- 诊断（官方尺寸 seeds 4、2400 Tick、10 worker，逐局时序）：0.68 上失利的共同形态是**土地在 t300 左右冻结**——bot 从 t150 起 40~50% 的 Tick 花在 `march`（长征），land 卡在 65~95，而 anti 一路铺到 500~750；到 t1200 双方皇冠数接近（bot 21~38、anti 12~30），但 bot 自己每座皇冠要花 100 兵、并且用 `enemyCrowns + 2`（上限 24~36）无限追赶对手的皇冠数，等于把本该用去打穿对手的兵反复铸成皇冠。0.34 没有这个形态（t600 前就结束）。
+- 机制：`sustainEconomy` 的目标皇冠数在「自方土地 < 对手土地」时改为 `max(econ.goal, floor(land / 12))`——生产能力只能随实控土地增长，土地追平即恢复原来的 `enemyCrowns + 2` 追赶。只作用于 `random` / `archipelago`（开放铺地图）；`maze`（走廊天然限制对手铺地）与 `mediterranean`（对 Apex 是镜像皇冠竞赛）保持原逻辑。`APEX_CROWN_LAND_ANCHOR=0` 关闭，`APEX_CROWN_LAND_RATIO`（默认 1）与 `APEX_CROWN_LAND_TILES`（默认 12）为 A/B 旋钮。
+- 结果（`--profile large --seeds 4 --workers 10 --turns 2400 --seat both`）：
+  - anti **37W / 12D / 15L**（基线 35 / 13 / 16；配对 +3.1pp，CI [+0.000,+0.125]）：0.68 由 12W 升到 14W（+6.3pp，CI [+0.000,+0.250]），0.34 逐局完全一致（23W）。收益全在 archipelago（7W/0D/9L → 9W/0D/7L，+12.5pp，CI [+0.000,+0.500]），random/maze/med 逐局不变。变化的 3 局都是「0.68 archipelago：long 0 先手 L→W、long 0 后手 L→W、long 2 先手 D→W」，这些局基线是 8~26 地对 558~738 地，改后早期就打完。
+  - apex **45W / 3D / 16L**，与基线逐局完全一致（0 差异）。
+- 已拒绝的同批机制：**持续铺地层**（`landPhaseActive`/`landGrowth`，在大图非迷宫、土地落后时每 3 Tick 抢一次中立格，campaign 让位）在机制上有效（同一局 land 79→270、t1200 兵力 7k→30k、对手土地 768→572），但**不转化为胜局**：anti 31W/16D/17L（基线 35/13/16），0.68 12W→8W，把 4 局基线胜局拖成平/负。原因是这些对局在 t600 后已被对手完全包围，中立格已不存在，只能靠打穿敌土；抢 Tick 等于把唯一一次早期收官窗口让掉。`APEX_LAND_PHASE` 相关代码未保留。
+- 归因结论：大图 0.68 的胜负在 t600 前就被决定（胜局 t87~498 结束，之后对手皇冠数 20+ 基本无法清空），因此**任何以土地/经济为目标的改动只有在它同时释放早期突击兵力时才有效**；单纯铺地不行。下一步应针对「早期突击吞吐」（一次 Tick 一条指令下的 march 占用）而不是继续加土地层。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；

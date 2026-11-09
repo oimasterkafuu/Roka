@@ -38,6 +38,43 @@ const CAMPAIGN_READINESS = Number.isFinite(Number(process.env.APEX_CAMPAIGN_READ
   ? Math.max(0, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_READINESS))) : 0;
 const CAMPAIGN_STRENGTH_DEFAULT = Number.isFinite(Number(process.env.APEX_CAMPAIGN_STRENGTH))
   ? Math.max(0.05, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_STRENGTH))) : 0.25;
+// Flag and knob readers stay functions so unit tests can flip them in-process
+// (the evaluation harness only ever sets them before launching a worker).
+// Crown budget anchored to the ground actually held.  On the official 0.68 anti
+// pair the opponent's crown count is copied back at +2 forever
+// (`enemyCrowns + 2`, capped at 24-36), so the bot spends one hundred army per
+// crown, over and over, while owning barely a hundred cells.  Each of those
+// crowns is a hundred army that the crown campaign needed.  While land is
+// behind, production may therefore only grow with the land base (one crown per
+// `crownLandTiles()` cells); the phase ends the moment land reaches parity.
+// On by default: the flag exists so an A/B run can restore the old crown chase.
+function crownLandAnchorEnabled() {
+  return String(process.env.APEX_CROWN_LAND_ANCHOR ?? '1').trim() !== '0';
+}
+function crownLandTiles() {
+  const value = Number(process.env.APEX_CROWN_LAND_TILES);
+  return Number.isFinite(value) ? Math.max(4, Math.min(40, Math.floor(value))) : 12;
+}
+// The anchor releases once the land gap stops being structural, so the original
+// crown chase returns for boards where the empire is already comparable.
+function crownLandRatio() {
+  const value = Number(process.env.APEX_CROWN_LAND_RATIO);
+  return Number.isFinite(value) ? Math.max(0.3, Math.min(1.5, value)) : 1;
+}
+
+// The anchor is about an opponent that wins by painting ground, so it is scoped
+// to the open-paint modes.  On a maze the corridors already bound how much the
+// opponent can take, and on the mirrored crown race (Apex baseline) copying its
+// crown count is the correct response: applying the anchor there measured -2
+// wins for apex (maze 12 -> 11, mediterranean 9 -> 8) with no offsetting gain.
+// The mode arrives with the room snapshot; direct controller calls default to
+// random, matching econProfile.
+function crownLandAnchor(m, own, enemies) {
+  if (!crownLandAnchorEnabled()) return false;
+  const mode = String(m?.mapMode || 'random');
+  if (mode !== 'random' && mode !== 'archipelago') return false;
+  return own.length < enemies.length * crownLandRatio();
+}
 const BUILD_CLUSTER_SIZE = Number.isFinite(Number(process.env.APEX_BUILD_CLUSTER_SIZE))
   ? Math.max(2, Math.min(8, Number(process.env.APEX_BUILD_CLUSTER_SIZE))) : 4;
 const BUILD_COST = 50;
@@ -1545,7 +1582,10 @@ function sustainEconomy(b, m, own, ed, enemies) {
   }
   const crowns = own.filter((at) => b.kind(at) === 'crown').length;
   const infrastructureCap = b.size >= 1600 ? 36 : b.size >= 800 ? 28 : 24;
-  const goal = Math.min(infrastructureCap, Math.max(econ.goal, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
+  let goal = Math.min(infrastructureCap, Math.max(econ.goal, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
+  if (crownLandAnchor(m, own, enemies)) {
+    goal = Math.min(goal, Math.max(econ.goal, Math.floor(own.length / crownLandTiles())));
+  }
   const state = m.rearEconomy || (m.rearEconomy = { site: -1, delivery: null, spent: 0, nextWindow: 0 });
   const mazeBoard = m.maze ?? isMazeBoard(b);
   if (b.turn < state.nextWindow) return null;
@@ -2498,4 +2538,4 @@ function plan(b,m,deadline) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut,econProfile};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,crownLandAnchor,defense,defensiveCut,emergencyDefensiveCut,econProfile};
