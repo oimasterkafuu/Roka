@@ -98,6 +98,14 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 - H3 把 `frontierStrike` 从 `cut` intent 改为 `front` 以启用 arrive/pressure 守卫：anti 29 胜，回退。
 - 结论：三个“从失败样本直接推导”的改动都未转化为胜场；当前保留模式门控经济档（32/96 anti、46/96 apex）与 eta1 斩杀层。下一步应优先做独立 seeds 6-7 的模式档确认，或重新设计终局目标选择（而不是只放宽上限）。
 
+### 2026-11-09：独立 offset 6 复核与终局/早期防守实验
+
+- 模式门控第二次独立 holdout（offset 6，48 局）：gated vs stock，anti 11 vs 9 胜、apex 22 vs 21 胜；CI 仍含 0，收益仍只在 random/maze，未门控模式逐局一致。累计 offset 4+6：anti 26 vs 21、apex 43 vs 40，保持 sign-positive / unproven。
+- 早期防守 `compactRushHold`（0.5 棋盘、homeReserve≥150、皇冠低于 floor 或敌堆≤3）：16 局目标套件 7→8 胜、早死 4→3，但 96 局 anti 32→29（3 局 arch 0.5 胜→负）、apex 46→47；净负，回退。
+- 终局经济让位（turn≥900、敌冠≤2、兵力>1.35x 时 `sustainEconomy` 返回 null）：anti 31 vs 32、apex 46，回退。
+- campaign 交付进度刷新（任意 delivery 模式 movedTurn 刷新 `lastProgress`，不再仅 tree）：anti 32（持平，2 局变化），apex 46（mean −0.031），回退。
+- 终局诊断：1.0 尺寸非胜主要是 campaign 在 28 Tick gather timeout 处被整体重置（非 tree 交付不刷新进度），以及 `coreBias` 让 bot 跨图打原始敌冠、`desired` 按目标当前兵力每 Tick 抬价。下一步应针对“convoy 存活 + 目标选择”做独立实验，而不是继续改终局阈值。
+
 ## 后续对比约定
 
 1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；
