@@ -51,6 +51,29 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 按地图：random 2/6、maze 2/6、archipelago 2/6、mediterranean 1/6。
 按尺寸组：standard（0.5）5/8，large（0.68、1）2/16。
 
+## 官方尺寸基线（2026-11-09 起）
+
+评测默认尺寸改为官服实际可达的两档：
+
+- `standard`：`0.34`（1v1 普通房）
+- `large`：`0.34 + 0.68`（普通房 + 大图房）
+- 不再使用 `1.0`；官服无法创建，且它主导了旧基线的平局。大地图统一用 2400 Tick；1200 Tick 的平局只表示未决。
+
+当前代码（`517a759` 后）64 局 seeds 4：
+
+| 对手 | 总计 | 0.34 | 0.68 |
+| --- | --- | --- | --- |
+| anti | 31W / 13D / 20L | 21W / 0D / 11L | 10W / 13D / 9L |
+| apex | 39W / 3D / 22L | 19W / 0D / 13L | 20W / 3D / 9L |
+
+命令：
+
+```sh
+node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2400 --opponents anti --seat both
+```
+
+以下旧记录保留作历史对照，尺寸/回合数按当时标注理解。
+
 ## 迭代记录
 
 ### 2026-11-08：基础设施 + 终结层
@@ -120,7 +143,7 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 
 ## 后续对比约定
 
-1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；
+1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；
 2. 优先看 `effectiveLosses`（平局即失败）与尺寸组胜率，避免“拖平”掩盖退化；
 3. 策略改动后同时重跑单元测试与回放回归（`test/replay-regression.test.cjs`）；
 4. 结果 JSON 不提交仓库，只把汇总与异常写入本文件或 PR 说明。

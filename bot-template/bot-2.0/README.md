@@ -43,7 +43,7 @@ node training/long-eval.cjs --help
 
 评测对手可选 `anti`、`simple` 或 `apex`（原版 `bot-template/apex-bot`，用于交叉测试防过拟合）。
 
-评测结果默认打印为 JSON；传入 `--output FILE` 或设置 `APEX_EVAL_OUTPUT` 可保存报告。`--profile large` 会固定覆盖 0.5、0.68、1 三档地图尺寸，建议配合 1200 Tick 观察完整长距离战役。报告包括每局地图、种子、胜负、Tick、决策延迟直方图、失败回放，以及按尺寸和尺寸组汇总的 120/300/600/900/1200 Tick 皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的兵力/领土/皇冠比；`losses`/`effectiveLosses` 会把未结束对局也计为失败。
+评测结果默认打印为 JSON；传入 `--output FILE` 或设置 `APEX_EVAL_OUTPUT` 可保存报告。评测尺寸只覆盖官服可用的两档：`standard=0.34`、`large=0.34,0.68`（1v1 普通/大地图）；不再使用 1.0 等官服不可达的超大地图。大地图建议配合 2400 Tick，1200 Tick 的平局只能视为未决。报告包括每局地图、种子、胜负、Tick、决策延迟直方图、失败回放，以及按尺寸和尺寸组汇总的 120/300/600/900/1200 Tick 皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的兵力/领土/皇冠比；`losses`/`effectiveLosses` 会把未结束对局也计为失败。
 
 ## 成对 A/B 对比
 
@@ -58,7 +58,7 @@ node training/compare.cjs --baseline-json /tmp/before.json --candidate-json /tmp
 ```
 
 - 配对键：`(mode, mapSize, seed, swap, opponent, fog)`；每对记 `+1` 胜 / `0` 平 / `-1` 负（`error` 按负计）。
-- 若不传任何评测参数，默认跑一个小而安全的套件：`--seeds 1 --turns 120 --workers 1 --modes random --sizes 0.5`；`--workers` 上限为 `2`，拒绝 `--profile large`。
+- 若不传任何评测参数，默认跑一个小而安全的套件：`--seeds 1 --turns 120 --workers 1 --modes random --sizes 0.34`；`--workers` 上限为 `2`，拒绝 `--profile large`。
 - 报告给出胜率/平局率/`effectiveLosses` 差值（`draws` 仍计入有效失败，另附 `halfDrawWinRate` 把平局记 0.5）与固定种子的成对 bootstrap 95% 置信区间（默认 `2000` 次、种子 `20240601`，可用 `--iterations`/`--seed` 调整），并按地图、尺寸、尺寸组、座位、对手、迷雾分解。
 - 设置不一致、重复配对键、存在缺对时退出码非零；`--allow-missing` 可只比较交集。`-q/--quiet` 关闭子进程的逐局进度。
 

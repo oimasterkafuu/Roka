@@ -41,7 +41,7 @@ const DEFAULT_EVAL_ARGS = [
   '--modes',
   'random',
   '--sizes',
-  '0.5',
+  '0.34',
 ];
 
 const MAX_WORKERS = 2;
