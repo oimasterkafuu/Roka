@@ -148,6 +148,12 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - **long campaign timeout**：gather 时限按剩余冠距最多 +60 Tick。0.68/2400 anti 10/13/9（持平），apex 18/2/12（基线 20/3/9，−2 胜）。回退。
 - **测量教训**：8 worker 下 ±1 局会因调度抖动翻转，单尺寸 32 局不足以判定；至少用完整官方尺寸、10 worker、2400 Tick，并优先看同一 run 内的配对结果。
 
+### 2026-11-09：campaign 无冠进展重置（拒绝）
+
+- 在 campaign 连续 `180 Tick` 未减少敌冠时，把当前目标加入 blocked 并清空 campaign，迫使重新选冠或转入扩张（`APEX_CAMPAIGN_NOGAIN` 可调/关闭）。
+- 0.68/2400：anti 10/14/8（基线 10/13/9，1 局 loss→draw），apex 20/2/10（基线 20/3/9，1 局 draw→loss）；无净收益，回退。
+- 说明 900+ Tick 的 march 并不是“选错目标”这么简单；即使强制换冠也没有提高胜率。下一步需要重写 campaign 执行状态机（进展度量、动作预算与扩张切换），而不是继续加单个超时/阈值。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；
