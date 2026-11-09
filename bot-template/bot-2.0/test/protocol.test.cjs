@@ -172,6 +172,23 @@ test('default auto-ready survives an empty room, deployment, and readiness reset
   bot.stop();
 });
 
+test('logs per-game queue and controller telemetry at game end', () => {
+  const socket = new FakeSocket();
+  const logs = [];
+  const bot = attachStrategy(socket, {
+    room: 'r',
+    autoReady: false,
+    heartbeatIntervalMs: 0,
+    actionDelayMs: 0,
+    log: (message) => logs.push(message),
+  });
+  init(socket);
+  socket.receive('update', frame(2, { game_end: true }));
+  assert.equal(logs.some((line) => line.includes('game stats')), true);
+  assert.equal(logs.some((line) => line.includes('queueResets')), true);
+  bot.stop();
+});
+
 test('rejoin init followed by a full frame establishes a fresh diff baseline', () => {
   const socket = new FakeSocket();
   const bot = attachStrategy(socket, {
@@ -207,16 +224,27 @@ test('replaces an unacknowledged queued action before planning from a newer fram
   const first = socket.outbound.findLast((item) => item.event === 'attack' || item.event === 'build');
   assert.ok(first);
 
-  // No acknowledgement: the next update is a newer board but the old action
-  // is still pending on the server. It must be removed before the replacement.
+  // No acknowledgement on the immediately next frame: this is normal on a
+  // public server, so keep the action and wait one more tick instead of
+  // cancelling it and resending a fresh move.
   socket.receive('update', frame(2, { lst_moves: [] }));
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.equal(socket.sent('clear_queue').length, 0);
+  assert.equal(bot.state.queueResets, 0);
+  assert.equal(bot.state.queueGraceWaits, 1);
+  assert.equal(bot.state.actionPending, true);
+
+  // A second missed frame means the queue is genuinely stale: clear it and
+  // send the replacement.
+  socket.receive('update', frame(3, { lst_moves: [] }));
   await new Promise((resolve) => setTimeout(resolve, 2));
   assert.equal(socket.sent('clear_queue').length, 1);
   assert.equal(bot.state.queueResets, 1);
-
   const replacement = socket.outbound.findLast((item) => item.event === 'attack' || item.event === 'build');
   assert.ok(replacement);
-  socket.receive('update', frame(3, { lst_moves: [2] }));
+  const replacementSeq = bot.state.pendingAction.seq;
+
+  socket.receive('update', frame(4, { lst_moves: [replacementSeq] }));
   await new Promise((resolve) => setTimeout(resolve, 2));
   assert.equal(socket.sent('clear_queue').length, 1);
   bot.stop();

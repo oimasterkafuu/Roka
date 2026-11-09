@@ -62,6 +62,8 @@ node training/compare.cjs --baseline-json /tmp/before.json --candidate-json /tmp
 - 报告给出胜率/平局率/`effectiveLosses` 差值（`draws` 仍计入有效失败，另附 `halfDrawWinRate` 把平局记 0.5）与固定种子的成对 bootstrap 95% 置信区间（默认 `2000` 次、种子 `20240601`，可用 `--iterations`/`--seed` 调整），并按地图、尺寸、尺寸组、座位、对手、迷雾分解。
 - 设置不一致、重复配对键、存在缺对时退出码非零；`--allow-missing` 可只比较交集。`-q/--quiet` 关闭子进程的逐局进度。
 
+公网对局中动作确认可能晚到一帧：`strategy.js` 允许一个 Tick 的确认宽限，只有连续两帧未确认才清队列重发，避免官服 RTT 造成动作反复取消；每局结束会打印一行 `game stats`（`queueResets`、`queueGraceWaits`、`budgetExceeded`、`fallbacks`、`maxNoActionStreak`、`strikes`、`byBranch`），用于区分网络时序与策略问题。
+
 经济档位按 `room_update.map_mode` 选择：random/maze 使用 1v1 tuned（`APEX_ECON_GOAL=10`、`APEX_ECON_DEADLINE=45`），archipelago/mediterranean 保持 stock（6/90）；`APEX_ECON_MODE_GATE=0` 可强制所有模式用 tuned。
 
 服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机；`options.decisionBudgetMs`（或环境变量 `BOT_DECISION_BUDGET_MS`）设置单次决策预算（默认 80 ms，预留 8 ms），超时后回退到一个经 `preview` 校验的合法动作，`controller.stats()` 会额外报告 `budgetExceeded`、`fallbacks`、`lastDecisionMs` 与 `maxDecisionMs`。

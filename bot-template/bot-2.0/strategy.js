@@ -113,6 +113,8 @@ function attachStrategy(socket, options = {}) {
     queued: 0,
     actionPending: false,
     pendingAction: null,
+    pendingTurn: -1,
+    queueGraceWaits: 0,
     lastActionTurn: -1,
     queueResets: 0,
   };
@@ -140,6 +142,8 @@ function attachStrategy(socket, options = {}) {
     state.queued = 0;
     state.actionPending = false;
     state.pendingAction = null;
+    state.pendingTurn = -1;
+    state.queueGraceWaits = 0;
     state.lastActionTurn = -1;
     state.queueResets = 0;
     state.playerId = ids.indexOf(state.clientId) + 1;
@@ -187,14 +191,26 @@ function attachStrategy(socket, options = {}) {
     // acknowledges the previous operation through lst_moves; only clear
     // when that acknowledgement did not arrive, then append the fresh action.
     if (state.actionPending) {
+      // A public-server round trip can miss the next update even when the
+      // operation is already executing.  Clearing immediately then cancels
+      // the queued move and resends it, which looks like back-and-forth
+      // movement or an idle tick.  Give the acknowledgement one tick of
+      // grace; only a second missed frame means the queue is genuinely stale.
+      const age = state.pendingTurn >= 0 ? state.turn - state.pendingTurn : Infinity;
+      if (age <= 1) {
+        state.queueGraceWaits += 1;
+        return;
+      }
       socket.emit('clear_queue');
       state.queueResets += 1;
       state.actionPending = false;
       state.pendingAction = null;
+      state.pendingTurn = -1;
     }
     state.queued += 1;
     state.lastActionTurn = state.turn;
     state.actionPending = true;
+    state.pendingTurn = state.turn;
     state.pendingAction = { ...action, seq: state.nextSeq++ };
     const { half, ...payload } = action;
     socket.emit(action.kind === 'build' ? 'build' : 'attack', payload);
@@ -250,6 +266,7 @@ function attachStrategy(socket, options = {}) {
     if (state.actionPending && payload.lst_moves.includes(state.pendingAction.seq)) {
       state.actionPending = false;
       state.pendingAction = null;
+      state.pendingTurn = -1;
     }
     state.turn = payload.turn;
     state.ended = Boolean(payload.game_end);
@@ -262,7 +279,21 @@ function attachStrategy(socket, options = {}) {
       state.inGame = false;
       state.actionPending = false;
       state.pendingAction = null;
+      state.pendingTurn = -1;
       if (decisionTimer) clearTimeout(decisionTimer);
+      // Live-server telemetry: network queue churn and budget fallbacks are
+      // invisible in the offline engine, so log them once per game.
+      const summary = controller?.stats?.() || {};
+      log(`game stats ${JSON.stringify({
+        queueResets: state.queueResets,
+        queueGraceWaits: state.queueGraceWaits,
+        budgetExceeded: summary.budgetExceeded || 0,
+        fallbacks: summary.fallbacks || 0,
+        noActionTurns: summary.noActionTurns || 0,
+        maxNoActionStreak: summary.maxNoActionStreak || 0,
+        strikes: summary.strikes || 0,
+        byBranch: summary.byBranch || {},
+      })}`);
       controller?.reset();
       return;
     }
@@ -319,6 +350,8 @@ function attachStrategy(socket, options = {}) {
     state.inGame = false;
     state.actionPending = false;
     state.pendingAction = null;
+    state.pendingTurn = -1;
+    state.queueGraceWaits = 0;
     state.lastActionTurn = -1;
     lastRoomCommand = '';
     if (decisionTimer) clearTimeout(decisionTimer);
