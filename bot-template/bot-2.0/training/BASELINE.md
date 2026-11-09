@@ -161,6 +161,16 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - burst 窗口强制 `broadExpansion`：0.34 21/19 不变，0.68 anti 10/13/9 不变，回退。
 - 结论：官服 0.34/0.68 的胜负对现有单参数已不敏感；继续提升需要重写 campaign 执行状态机（进展度量、动作预算、扩张切换），而不是继续扫参。
 
+### 2026-11-09：常规地图出现 maze 分支的排查（保留启发式）
+
+- 原因：`isMazeBoard` 以“山脉占比 >12%”判断迷宫；官服 random 生成器的目标正是 12%（0.24×0.5），所以约一半常规图被标记为 maze，触发 `maze-opening`/`maze-reroute` 等分支。
+- 尝试过的替代：直接用 `room_update.map_mode`（random 即非 maze）、random 阈值提高到 0.18、只关闭 random 的 `mazeOpening`、按最大连通山墙组件识别迷宫。完整官方尺寸 2400 Tick：
+  - map_mode 信任：anti 30/14/20、apex 37/3/24；
+  - 阈值 0.18：32/13/19、37/3/24；
+  - 仅 opening：31/14/19、39/3/22（apex 持平、anti 未增）；
+  - 拓扑分类：30/14/20、37/3/24。
+- 结论：这些“修正”都没有超过基线 31/13/20、39/3/22；迷宫走廊/滞回逻辑在部分高墙 random 图上实际有益。保留 12% 启发式，不按 map_mode 硬切；若后续重做，需要以胜率为准，而不是分支名称。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；
