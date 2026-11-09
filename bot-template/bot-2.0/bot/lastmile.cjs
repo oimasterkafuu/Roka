@@ -36,9 +36,9 @@
 // or cut column from the best forward supply cell instead of letting the
 // campaign restart at distance 40+.
 //
-// Everything is gated behind APEX_LAST_MILE=1 and defaults to off. When the flag
-// is off this module is never consulted and the planner is byte-identical to
-// the previous behaviour.
+// The reseat layer is on by default; set APEX_LAST_MILE=0 to restore the old
+// behaviour for A/B runs. When disabled this module is never consulted and the
+// planner is byte-identical to the previous behaviour.
 
 const DEFAULT_RANGE = 6;
 const DEFAULT_MARGIN = 0.15;
@@ -66,7 +66,7 @@ function flag(raw, fallback = false) {
 // calls per campaign decision.
 function lastMileConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.APEX_LAST_MILE, false),
+    enabled: overrides.enabled ?? flag(env.APEX_LAST_MILE, true),
     range: overrides.range ?? number(env.APEX_LAST_MILE_RANGE, DEFAULT_RANGE, 2, 12),
     margin: overrides.margin ?? number(env.APEX_LAST_MILE_MARGIN, DEFAULT_MARGIN, 0, 1),
     minMargin: overrides.minMargin ?? DEFAULT_MIN_MARGIN,

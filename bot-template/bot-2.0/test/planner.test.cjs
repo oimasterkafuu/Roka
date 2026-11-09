@@ -73,7 +73,7 @@ test('protects a low crown before letting a saved home reserve trigger a raid', 
   const own = [...Array(19).keys()];
   const enemies = [...Array(6).keys()].map((at) => at + 19);
   assert.equal(earlyRushThreat(b, own, enemies), true);
-  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  const decision = withOpeningSmall('0', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
   assert.equal(decision.branch, 'delayed-rush-guard');
   assert.equal(decision.action.x, 0);
   assert.equal(decision.action.y, 1);
@@ -120,7 +120,7 @@ test('guards the nearest weak crown when a saved reserve can choose a second cro
   const own = [...Array(30).keys()];
   const enemies = [...Array(10).keys()].map((at) => at + 30);
   assert.equal(earlyRushThreat(b, own, enemies), true);
-  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  const decision = withOpeningSmall('0', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
   assert.equal(decision.branch, 'delayed-rush-guard');
   assert.equal(decision.action.dy, 25);
 });
@@ -169,7 +169,7 @@ test('a held reserve that cannot reach the crown no longer freezes the opening',
   const own = [...Array(30).keys()];
   const enemies = [...Array(10).keys()].map((at) => at + 30);
   assert.equal(earlyRushThreat(b, own, enemies), true);
-  const held = withOpeningSmall(undefined, () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  const held = withOpeningSmall('0', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
   assert.equal(held.branch, 'delayed-rush-guard');
   const gated = withOpeningSmall('1', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
   assert.doesNotMatch(String(gated.branch), /delayed-rush/);

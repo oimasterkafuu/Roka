@@ -64,16 +64,23 @@ function step(state, turn, dist, army) {
   });
 }
 
-test('the last-mile layer is off unless APEX_LAST_MILE enables it', () => {
+test('the last-mile reseat layer is on by default and APEX_LAST_MILE=0 disables it', () => {
   const restore = setEnv({ APEX_LAST_MILE: undefined, APEX_LAST_MILE_RANGE: undefined });
   try {
-    assert.equal(lastMileConfig().enabled, false);
-    assert.equal(lastMileState({
-      board: { turn: 10 }, campaign: { crown: 7, at: 1 }, dist: 3, army: 400,
-      firstNeed: 30, pathNeed: 100, config: lastMileConfig(),
-    }).state, 'approach');
+    assert.equal(lastMileConfig().enabled, true);
   } finally {
     restore();
+  }
+  const restoreOff = setEnv({ APEX_LAST_MILE: '0' });
+  try {
+    const disabled = lastMileConfig();
+    assert.equal(disabled.enabled, false);
+    assert.equal(lastMileState({
+      board: { turn: 10 }, campaign: { crown: 7, at: 1 }, dist: 3, army: 400,
+      firstNeed: 30, pathNeed: 100, config: disabled,
+    }).state, 'approach');
+  } finally {
+    restoreOff();
   }
   const restoreOn = setEnv({ APEX_LAST_MILE: '1', APEX_LAST_MILE_RANGE: '5' });
   try {

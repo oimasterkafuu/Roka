@@ -2049,7 +2049,7 @@ function chooseCampaign(b,m,own) {
   const forcedMazeBreak = mazeBoard && musterTurns >= 36 &&
     b.army[c.at] >= Math.max(24, firstContactNeed);
   let breakthroughReady = b.army[c.at] >= breakthroughThreshold && musterTurns >= 2 || forcedMazeBreak;
-  // Last-mile ledger (APEX_LAST_MILE=1, default off).  In its default `reseat`
+  // Last-mile ledger (APEX_LAST_MILE=1, on by default; =0 disables).  In its default `reseat`
   // mode it only records distance/army progress for the forward-recovery branch
   // below and leaves this decision to the existing planner.  The optional
   // `full` mode also owns the attack-phase decision here: stage until the next
@@ -2279,7 +2279,7 @@ function plan(b,m,deadline) {
   // opponent paints ninety.  Require a projected arrival that beats the local
   // guard before paying for the hold.  Scoped below the existing large-map
   // threshold so 0.68+ behaviour is untouched, and env-gated for ablation.
-  const openingSmall = process.env.APEX_OPENING_SMALL === '1';
+  const openingSmall = process.env.APEX_OPENING_SMALL !== '0';
   const rushArrival = openingSmall && b.size < 800 && rushProfile
     ? projectedArrival(b, rushProfile.crown, enemies, rushProfile.distance || CROWN_WINDOW)
     : null;
