@@ -3,6 +3,10 @@
 const { makeBoard, connectedSet, distanceField, anchorCells, cutAnalysis } = require('./board.cjs');
 const { computePush, actionCoordinates, preview } = require('./rules.cjs');
 const { lastMileConfig, lastMileState, reseatRoot } = require('./lastmile.cjs');
+const {
+  snowballConfig, snowballEntry, snowballExit, snowballTurn, snowballTakesTick,
+  anchorScore, paintScore, captureScore, freshSnowball,
+} = require('./snowball.cjs');
 
 // Bot(2.0) 1v1 profile: the Apex defaults (6 / 90) over-invest in economy
 // before the decisive fight. 48 large-map seeds measured 16 -> 18 wins with
@@ -1820,6 +1824,187 @@ function rearExpansion(b, m, own, ed, enemies) {
   return action ? { ...action, branch: 'rear-expansion' } : null;
 }
 
+// City/economy snowball phase for large non-maze rooms (see bot/snowball.cjs).
+// It owns a bounded share of the ticks that would otherwise be spent marching a
+// 40+ cell convoy: first forward city anchors (cheap crown sites that also keep
+// the surrounding land connected), then land around those anchors.  It never
+// outranks defence, the kill layer or the last mile, and it is latched off for
+// the rest of the game once land parity, its budgets or the army that pays for
+// it are gone.
+function snowballAnchorSite(b, m, own, enemies, state, config, reserved) {
+  const canEnter = (at) => b.own(at) && !b.isolated[at] && !reserved.has(at);
+  const usable = (at) => Number.isInteger(at) && at >= 0 && at < b.size &&
+    b.own(at) && !b.isolated[at] && (b.kind(at) === 'plain' || b.kind(at) === 'city');
+  if (state.site >= 0 && (!usable(state.site) || reserved.has(state.site))) state.site = -1;
+  if (state.site >= 0) return state.site;
+  const ed = field(b, enemies);
+  const homeField = Number.isInteger(m.home)
+    ? field(b, [m.home], (at) => b.own(at) && !b.isolated[at]) : null;
+  const frontField = m.campaign && Number.isInteger(m.campaign.at) && b.own(m.campaign.at)
+    ? field(b, [m.campaign.at], (at) => b.own(at) && !b.isolated[at]) : null;
+  let best = -1;
+  let bestScore = -Infinity;
+  for (const at of own) {
+    if (reserved.has(at) || !usable(at)) continue;
+    if (!(ed.distance[at] >= config.minEnemyDistance)) continue;
+    const kind = b.kind(at);
+    const need = BUILD_COST + 1;
+    // Bounded surplus: only funds that already sit within four steps of the
+    // site are offered, so an anchor can never drain the marching column, and
+    // the pool has to be genuinely spare (`anchorSurplus`) rather than exactly
+    // the build price - in a losing game the land step is the better buyer.
+    let funds = b.army[at];
+    if (funds < need) {
+      const local = field(b, [at], canEnter);
+      for (const cell of own) {
+        if (cell === at) continue;
+        if (!Number.isFinite(local.distance[cell]) || local.distance[cell] > 4) continue;
+        funds += Math.max(0, b.army[cell] - Math.max(1, pressure(b, cell)));
+      }
+    }
+    if (funds < Math.max(need, config.anchorSurplus)) continue;
+    const score = anchorScore({
+      kind,
+      army: b.army[at],
+      enemyDistance: ed.distance[at],
+      frontDistance: frontField ? frontField.distance[at] : Infinity,
+      homeDistance: homeField ? homeField.distance[at] : Infinity,
+      pressure: pressure(b, at),
+      funds,
+      need,
+    }, config);
+    if (score === null) continue;
+    if (score > bestScore) {
+      bestScore = score;
+      best = at;
+    }
+  }
+  state.site = best;
+  return best;
+}
+
+function snowballPaint(b, m, own, enemies, state, config, reserved) {
+  if (state.paints >= config.paintBudget) return null;
+  const anchors = own.filter((at) => b.kind(at) === 'city' || b.kind(at) === 'crown');
+  if (!anchors.length) return null;
+  // Distance measured through our own land and empty land, so the neutral
+  // frontier ring next to the anchors is reachable instead of infinite.
+  const anchorField = field(b, anchors, (at) =>
+    b.passable(at) && (b.own(at) || b.owner(at) === 0));
+  const ed = field(b, enemies);
+  const options = [];
+  for (const from of own) {
+    if (reserved.has(from) || !movable(b, from)) continue;
+    for (const to of b.neighbors(from)) {
+      if (!b.passable(to) || b.kind(to) === 'swamp') continue;
+      const owner = b.owner(to);
+      if (owner !== 0 && !b.enemy(to)) continue;
+      if (owner === 0) {
+        const score = paintScore({
+          owner,
+          kind: b.kind(to),
+          isolated: Boolean(b.isolated[to]),
+          enemyDistance: ed.distance[to],
+          anchorDistance: anchorField.distance[to],
+          room: b.neighbors(to).filter((next) => b.passable(next) && b.owner(next) === 0).length,
+          enemyNeighbours: b.neighbors(to).filter((next) => b.enemy(next) && !b.isolated[next]).length,
+          army: b.army[from],
+        }, config);
+        if (score === null) continue;
+        options.push({ from, to, score });
+        continue;
+      }
+      // Thin enemy cells are the other half of the land race: taking them
+      // removes the opponent's compounding income instead of only adding ours.
+      const score = captureScore({
+        kind: b.kind(to),
+        garrison: b.army[to],
+        army: b.army[from],
+      }, config);
+      if (score === null) continue;
+      options.push({ from, to, score: score + 40 });
+    }
+  }
+  if (!options.length) return null;
+  options.sort((a, z) => z.score - a.score);
+  // Connectivity and cut checks are the expensive part; only the strongest few
+  // candidates are verified, which keeps the decision inside its budget.
+  for (const option of options.slice(0, 8)) {
+    const action = safeMove(b, option.from, option.to, 'gather');
+    if (!action || routeGuard(b, action).blocked) continue;
+    state.paints += 1;
+    return { action, branch: 'snowball-paint' };
+  }
+  return null;
+}
+
+function citySnowball(b, m, own, enemies, totals, config = snowballConfig()) {
+  if (!config.enabled) return null;
+  const state0 = m.snowball;
+  if (state0 && state0.phase === 'done') return null;
+  const ownArmy = Number(totals?.own) || 0;
+  const enemyArmy = Number(totals?.enemy) || 0;
+  const maze = m.maze ?? isMazeBoard(b);
+  const base = {
+    turn: b.turn, size: b.size, maze,
+    ownArmy, enemyArmy, ownLand: own.length, enemyLand: enemies.length,
+  };
+  let state = state0;
+  if (!state) {
+    if (!snowballEntry(base, config)) return null;
+    state = m.snowball = { ...freshSnowball(), startedTurn: b.turn };
+  } else {
+    const stop = snowballExit({
+      ...base, startedTurn: state.startedTurn, anchors: state.anchors, paints: state.paints,
+    }, config);
+    if (stop) {
+      state.phase = 'done';
+      state.reason = stop;
+      return null;
+    }
+  }
+  // A column inside the last mile must never be paused for economy work.
+  if (!snowballTakesTick(totals?.campaign ?? null, config)) return null;
+  if (!snowballTurn(b.turn, config)) return null;
+  const reserved = supplyReservations(m);
+  if (state.phase === 'anchor') {
+    const site = snowballAnchorSite(b, m, own, enemies, state, config, reserved);
+    if (site >= 0) {
+      const kind = b.kind(site);
+      const need = BUILD_COST + 1;
+      if (b.army[site] >= need) {
+        if (kind === 'city') {
+          state.anchors += 1;
+          state.site = -1;
+          // The anchor step is deliberately short: two forward crowns pay back
+          // in a hundred ticks, but every further crown costs army that the
+          // land step is a better buyer for.
+          if (state.anchors >= config.anchors) state.phase = 'paint';
+          return { action: build(b, site, 'c'), branch: 'snowball-upgrade' };
+        }
+        return { action: build(b, site, 'b'), branch: 'snowball-foundation' };
+      }
+      const canEnter = (at) => b.own(at) && !b.isolated[at] && !reserved.has(at);
+      const funding = gather(b, state, site, need, 'snowball-fund', canEnter, 4);
+      if (funding) return funding;
+      state.site = -1;
+      state.misses += 1;
+      return null;
+    }
+    // No forward site can be paid from local surplus: use the surplus on land
+    // instead of falling back to another rear crown.
+    state.misses += 1;
+    state.phase = 'paint';
+  }
+  if (state.phase === 'paint') {
+    const decision = snowballPaint(b, m, own, enemies, state, config, reserved);
+    if (decision) return decision;
+    state.phase = 'done';
+    state.reason = state.reason || 'exhausted';
+  }
+  return null;
+}
+
 function chooseCampaign(b,m,own) {
   const crowns=[];
   for(let i=0;i<b.size;i++)if(b.enemy(i)&&b.kind(i)==='crown')crowns.push(i);
@@ -2300,6 +2485,7 @@ function recover(b, m, own) {
 function plan(b,m,deadline) {
   const own=[]; const enemies=[];
   let campaignPaused = false;
+  let snowballDecision = null;
   for(let i=0;i<b.size;i++){if(b.own(i)&&!b.isolated[i])own.push(i);if(b.enemy(i)&&!b.isolated[i])enemies.push(i);}
   if(!Number.isInteger(m.home)||!b.own(m.home))m.home=own.find(i=>b.kind(i)==='crown');
   if(!own.length)return {action:null,branch:'idle'};
@@ -2408,7 +2594,14 @@ function plan(b,m,deadline) {
         b.turn % economyCadence === 0;
       const allowEconomyWindow = economyWindow;
       const latentCrownMove = rushBuildHold && rushOutwardMove(b, campaign.action, rushProfile);
-      if (!campaignPaused && !allowEconomyWindow && !latentCrownMove) return campaign;
+      if (!campaignPaused && !allowEconomyWindow && !latentCrownMove) {
+        // A long march is the snowball phase's only budget source. When it owns
+        // this tick the campaign is held here; the phase action is returned
+        // below, after the defence pass, so nothing defensive is displaced.
+        snowballDecision = citySnowball(b, m, own, enemies,
+          { own: ownTotal, enemy: enemyTotal, campaign: m.campaign });
+        if (!snowballDecision) return campaign;
+      }
       campaignPaused = true;
     }
   }
@@ -2418,6 +2611,17 @@ function plan(b,m,deadline) {
   if (deadline && deadline.check()) return { action: null, branch: 'deadline' };
   const defend=defense(b,m,own);
   if(defend)return defend;
+  if (!snowballDecision) {
+    // No campaign owns the budget this tick (muster wait, maze hold or a reset),
+    // so the phase may use the window directly instead of idling.
+    const campaignFree = !(m.campaign && Number.isInteger(m.campaign.at) &&
+      b.own(m.campaign.at) && !b.isolated[m.campaign.at]);
+    if (campaignFree) {
+      snowballDecision = citySnowball(b, m, own, enemies,
+        { own: ownTotal, enemy: enemyTotal, campaign: m.campaign });
+    }
+  }
+  if (snowballDecision) return snowballDecision;
   if (rushBuildHold) {
     const guard = delayedRushGuard(b, m, own, enemies, rushProfile);
     if (guard) return guard;
@@ -2538,4 +2742,4 @@ function plan(b,m,deadline) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,crownLandAnchor,defense,defensiveCut,emergencyDefensiveCut,econProfile};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,crownLandAnchor,defense,defensiveCut,emergencyDefensiveCut,econProfile,citySnowball};

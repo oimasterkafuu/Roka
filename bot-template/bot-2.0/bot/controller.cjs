@@ -349,6 +349,7 @@ function createController(playerId, options = {}) {
     memory.swampRatio = undefined;
     memory.site = undefined;
     memory.buildPlan = null;
+    memory.snowball = null;
     memory.rearEconomy = null;
     memory.rearGrowthNext = undefined;
     memory.forwardGrowthNext = undefined;
