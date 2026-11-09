@@ -141,6 +141,13 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - 基线 `--turns 1200` 会把 900~1900 Tick 的败局记为平局，掩盖真实弱点。0.68 尺寸 anti：1200 Tick 为 10W/19D/3L；延长到 2400 Tick 为 **10W/13D/9L**（6 个平局转为失败，无新增胜局）。
 - 后续大地图评测应至少用 `--turns 2400`（或 3000）；1200 Tick 的平局只能视为未决，不能当作防守成功。
 
+### 2026-11-09：官服尺寸下的终局目标/突破实验（均拒绝）
+
+- **dominant core bias**：敌冠≥6 且兵力>1.5E 时把原始核心 bias 降到 0.2。完整官方尺寸 2400 Tick 与基线逐局一致（anti 31/14/19、apex 39/3/22）；0.68 单尺寸的 ±1 变化在相同代码重复运行中同样出现，属于 worker 调度噪声。回退。
+- **dominant breakthrough**：dominant 时把突破门槛降到 `firstContactNeed+8`。0.68/2400 anti 10/12/10（基线 10/13/9，1 局 draw→loss），apex 20/3/9 持平。回退。
+- **long campaign timeout**：gather 时限按剩余冠距最多 +60 Tick。0.68/2400 anti 10/13/9（持平），apex 18/2/12（基线 20/3/9，−2 胜）。回退。
+- **测量教训**：8 worker 下 ±1 局会因调度抖动翻转，单尺寸 32 局不足以判定；至少用完整官方尺寸、10 worker、2400 Tick，并优先看同一 run 内的配对结果。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；
