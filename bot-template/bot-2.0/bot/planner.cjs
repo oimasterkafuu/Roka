@@ -428,6 +428,27 @@ function latentReserveMove(b, profile) {
   return sources[0] ? { ...sources[0], branch: 'delayed-rush-rally' } : null;
 }
 
+// A saved home reserve is not a rush by itself: the opponent also has to be
+// able to land it.  Project the strongest force that can actually arrive at a
+// crown (`routeArrival` pays for every garrison the column has to cross on the
+// way) so the opening can tell a real rush from an army that is merely parked.
+const CROWN_WINDOW = 8;
+const CROWN_RESERVE_MARGIN = 12;
+
+function projectedArrival(b, crown, enemies, horizon) {
+  if (!Number.isInteger(crown) || crown < 0) return null;
+  const f = field(b, [crown]);
+  let worst = null;
+  for (const at of enemies) {
+    const distance = f.distance[at];
+    if (!Number.isFinite(distance) || distance > horizon) continue;
+    const { arrival } = routeArrival(b, f, at);
+    const force = Math.max(0, arrival);
+    if (!worst || force > worst.force) worst = { at, distance, force };
+  }
+  return worst;
+}
+
 function asPlayer(b, playerId) {
   return makeBoard({
     n: b.n,
@@ -2156,6 +2177,24 @@ function plan(b,m,deadline) {
   const explore = !fogged || b.turn < 120 || own.length < 40 || (fogged && b.turn % 5 === 0);
   const ed=field(b,enemies);
   const rushProfile = earlyRushProfile(b, own, enemies);
+  // A saved home reserve is not a rush by itself: the opponent also has to be
+  // able to land it.  The composition test kept firing on slow opponents that
+  // hoard an army at home and paint the map, and the resulting hold stole the
+  // action budget on alternate ticks, so `cluster-fund` never reached fifty
+  // units: those games end with zero cities, land frozen at ~25 cells while the
+  // opponent paints ninety.  Require a projected arrival that beats the local
+  // guard before paying for the hold.  Scoped below the existing large-map
+  // threshold so 0.68+ behaviour is untouched, and env-gated for ablation.
+  const openingSmall = process.env.APEX_OPENING_SMALL === '1';
+  const rushArrival = openingSmall && b.size < 800 && rushProfile
+    ? projectedArrival(b, rushProfile.crown, enemies, rushProfile.distance || CROWN_WINDOW)
+    : null;
+  // The tower cell alone understates the defence: a pooled army one step away
+  // still holds the crown, so compare against the connected local guard too.
+  const rushGuard = rushArrival
+    ? Math.max(Number(b.army[rushProfile.crown]) || 0, localGuard(b, rushProfile.crown))
+    : 0;
+  const rushLethal = !rushArrival || rushArrival.force >= rushGuard + CROWN_RESERVE_MARGIN;
   const mazeBoard = m.maze ?? isMazeBoard(b);
   const econ = econProfile(m);
   const mazeGoal = mazeBoard ? mazeEconomyGoal(b, own, enemies) : econ.goal;
@@ -2165,7 +2204,7 @@ function plan(b,m,deadline) {
   // site plus the travel margin of the saved home column.
   const immediateRushHold = rushProfile && !rushProfile.maritime && b.turn < 42 && rushProfile.homeReserve >= 150 &&
     b.army[rushProfile.crown] < rushCrownFloor(rushProfile);
-  const rushBuildHold = rushProfile && (immediateRushHold ||
+  const rushBuildHold = rushProfile && rushLethal && (immediateRushHold ||
     (!rushProfile.maritime && (rushProfile.maze || rushProfile.distance <= 24) &&
       b.turn >= 42 && rushProfile.homeReserve >= 80 &&
       b.army[rushProfile.crown] < rushCrownFloor(rushProfile)));
@@ -2365,4 +2404,4 @@ function plan(b,m,deadline) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut,econProfile};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut,econProfile};

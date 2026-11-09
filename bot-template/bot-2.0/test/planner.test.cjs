@@ -4,7 +4,19 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates, preview } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, advanceSupplyTree, defensiveCut, emergencyDefensiveCut, econProfile } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, projectedArrival, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, advanceSupplyTree, defensiveCut, emergencyDefensiveCut, econProfile } = require('../bot/planner.cjs');
+
+function withOpeningSmall(value, body) {
+  const previous = process.env.APEX_OPENING_SMALL;
+  try {
+    if (value === undefined) delete process.env.APEX_OPENING_SMALL;
+    else process.env.APEX_OPENING_SMALL = value;
+    return body();
+  } finally {
+    if (previous === undefined) delete process.env.APEX_OPENING_SMALL;
+    else process.env.APEX_OPENING_SMALL = previous;
+  }
+}
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -111,6 +123,86 @@ test('guards the nearest weak crown when a saved reserve can choose a second cro
   const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
   assert.equal(decision.branch, 'delayed-rush-guard');
   assert.equal(decision.action.dy, 25);
+});
+
+test('projected arrival measures the force that can land, not the stack size', () => {
+  const shape = (garrisons) => makeBoard({
+    n: 1, m: 12,
+    grid: [101, ...Array(7).fill(1), ...Array(4).fill(2)],
+    army: [10, ...garrisons, 200, 20, 20, 20],
+    isolated: Array(12).fill(0), fog: Array(12).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const enemies = [8];
+  // Three sixty-unit garrisons stand between the reserve and the crown, so a
+  // two-hundred stack can only land the handful of soldiers that survives them.
+  const guarded = shape([60, 60, 60, 1, 1, 1, 1]);
+  assert.ok(projectedArrival(guarded, 0, enemies, 12).force < 20);
+  // The same reserve next to an empty corridor lands almost everything.
+  const open = shape([1, 1, 1, 1, 1, 1, 1]);
+  assert.ok(projectedArrival(open, 0, enemies, 12).force > 150);
+  // Nothing outside the warning horizon counts.
+  assert.equal(projectedArrival(open, 0, enemies, 4), null);
+});
+
+test('a held reserve that cannot reach the crown no longer freezes the opening', () => {
+  // Eighteen of our own twenty-unit garrisons sit between the saved reserve and
+  // the crown: the reserve is real, the rush is not.  The hold used to fire on
+  // the composition alone and starve the economy pass.
+  const grid = Array(40).fill(1);
+  const army = Array(40).fill(20);
+  grid[0] = 101;
+  grid[25] = 101;
+  army[0] = 200;
+  army[25] = 5;
+  for (let at = 30; at < 39; at += 1) {
+    grid[at] = 2;
+    army[at] = 25;
+  }
+  grid[39] = 102;
+  army[39] = 25;
+  const b = makeBoard({
+    n: 1, m: 40, grid, army,
+    isolated: Array(40).fill(0), fog: Array(40).fill(0), turn: 70,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [...Array(30).keys()];
+  const enemies = [...Array(10).keys()].map((at) => at + 30);
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+  const held = withOpeningSmall(undefined, () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.equal(held.branch, 'delayed-rush-guard');
+  const gated = withOpeningSmall('1', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.doesNotMatch(String(gated.branch), /delayed-rush/);
+});
+
+function reachableRushBoard(cells) {
+  const grid = [101, ...Array(cells - 1).fill(2)];
+  grid[1] = 102;
+  return makeBoard({
+    n: 1, m: cells,
+    grid,
+    army: [60, ...Array(cells - 1).fill(200)],
+    isolated: Array(cells).fill(0), fog: Array(cells).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('a reachable rush still takes the opening action budget', () => {
+  // The reserve is adjacent with two hundred soldiers against a sixty-unit
+  // crown: the projected arrival really can break it, so the hold stands.
+  const b = reachableRushBoard(12);
+  const gated = withOpeningSmall('1', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.match(String(gated.branch), /delayed-rush/);
+});
+
+test('the compact opening gate leaves large maps on the old rush path', () => {
+  // Same geometry above the eight-hundred-cell large-map threshold: the gate
+  // must not fire, so 0.68+ behaviour stays identical.
+  const b = reachableRushBoard(900);
+  const gated = withOpeningSmall('1', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  const plain = withOpeningSmall(undefined, () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.match(String(gated.branch), /delayed-rush/);
+  assert.deepEqual(gated, plain);
 });
 
 test('campaign refuses a safe head move when an older bridge can strand it', () => {

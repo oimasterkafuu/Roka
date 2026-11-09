@@ -66,6 +66,8 @@ node training/compare.cjs --baseline-json /tmp/before.json --candidate-json /tmp
 
 经济档位按 `room_update.map_mode` 选择：random/maze 使用 1v1 tuned（`APEX_ECON_GOAL=10`、`APEX_ECON_DEADLINE=45`），archipelago/mediterranean 保持 stock（6/90）；`APEX_ECON_MODE_GATE=0` 可强制所有模式用 tuned。
 
+早期防守：`earlyRushProfile` 判断“对手在囤兵”后会把行动预算投入 `delayed-rush-guard`（守住皇冠），但它只看对手兵种构成，容易被“把大军留在家里、同时铺地图”的对手误触发，导致首个建设永远凑不满 50 兵。`APEX_OPENING_SMALL=1` 时改为按“可落地的兵力”判定：用 `projectedArrival` 计算对手沿最短路线真正能到达皇冠的兵力（沿途每格都要付出驻军代价），只有该兵力能击穿皇冠周边的连通驻军（`localGuard`）时才进入 hold。该门控只作用于 `b.size < 800` 的紧凑棋盘（0.34 官服普通房 221–255 格），0.68 及以上大地图行为完全不变；默认关闭，便于 A/B。
+
 服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机；`options.decisionBudgetMs`（或环境变量 `BOT_DECISION_BUDGET_MS`）设置单次决策预算（默认 80 ms，预留 8 ms），超时后回退到一个经 `preview` 校验的合法动作，`controller.stats()` 会额外报告 `budgetExceeded`、`fallbacks`、`lastDecisionMs` 与 `maxDecisionMs`。
 `options.duelStrike`（或环境变量 `BOT_DUEL_STRIKE=0`）控制“终结层”：默认开启时，控制器在规划器之前先跑一次 `bot/duel/strike.cjs` 的 race 门控斩杀判断，若证明本 Tick 内可斩杀（`maxEta` 默认 1，可用 `BOT_DUEL_STRIKE_ETA` 放宽）且不会先被对方斩杀，就直接执行该路线首步（mode 2 全推，经 `preview` 复核）；否则完全回落到原有规划器路径。关闭后行为与仅规划器版本一致，便于 A/B 对比。`BOT_DUEL_STRIKE_DECAP=1` 进一步只接受“最后一座皇冠”的必杀。
 Bot 加入房间后默认自动切换到配置队伍并发送准备；只有设置 `BOT_AUTO_READY=0` 或传入 `autoReady: false` 才会关闭自动准备。

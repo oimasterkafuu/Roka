@@ -171,6 +171,18 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
   - 拓扑分类：30/14/20、37/3/24。
 - 结论：这些“修正”都没有超过基线 31/13/20、39/3/22；迷宫走廊/滞回逻辑在部分高墙 random 图上实际有益。保留 12% 启发式，不按 map_mode 硬切；若后续重做，需要以胜率为准，而不是分支名称。
 
+### 2026-11-10：早期 rush hold 的可落地兵力门控（`APEX_OPENING_SMALL=1`）
+
+- 0.34 逐局诊断（seeds 4，seeds 做 4 局时序 dump）：24 局失利的共同形态是「地图控制先输」。典型局如 `apex-long-0-archipelago/anti/s0`：t40–t124 在 `cluster-fund` 与 `delayed-rush-guard` 之间逐 Tick 交替，`cluster-fund` 永远凑不满 50 兵，全局 `city=0`；自身领土从 t36 的 30 格冻结在 34 格，对手同期从 33 格铺到 90+ 格。终局形态一致：最后一座皇冠驻军只有 2~30，而 3~8 格外有 44~290 的对手堆，其余兵力仍在 `march`/`muster`。
+- 直接消融：`rushProfile=null`（完全关掉 hold）0.34 为 anti 24W、apex 23W（基线 21/19），配对 +10.9pp，说明该 hold 在紧凑棋盘上是净负。
+- 保留防守语义的改法：`earlyRushProfile` 只判定“对手在囤兵”，新增 `projectedArrival` 用 `routeArrival` 计算沿最短路线真正能落地的兵力（沿途要付出驻军代价），只有该兵力 ≥ 皇冠连通驻军（`localGuard`）+12 时才进入 hold。仅作用于 `b.size < 800`（0.34 为 221–255 格，0.68 为 891–957 格，按现有大地图阈值切分），默认关闭。
+- 结果（10 worker、2400 Tick、seeds 4）：
+  - 0.34：anti **23W/0D/9L**（基线 21/0/11）、apex **24W/0D/8L**（基线 19/0/13），合计 **47W/0D/17L = 73.4%**（基线 40W/24L = 62.5%），配对 +10.9pp，CI [-0.031,+0.469]。
+  - 完整官方尺寸（0.34+0.68）：anti 33W/14D/17L（基线 31/13/20）、apex 44W/3D/17L（基线 39/3/22）；0.68 分组胜场与基线逐局一致（anti 0.68 出现 1 局 D/L 翻转，同参数重复运行同样出现，属调度抖动）。
+  - 0.68 单独复跑：flag on/off 同为 30W/16D/18L（1 局抖动），确认大地图逻辑未被改动。
+- 仍标记 sign-positive / unproven：CI 含 0，需 seeds 8 与大地图交叉确认；`APEX_OPENING_SMALL` 默认关闭，便于继续 A/B。
+- 已拒绝的相邻想法（同批测试）：终局单皇冠按 arrival 补驻军（0.34 21/18）、首个建设优先于 hold（19/18）、hold 只守皇冠不冻结经济（21/19）、hold 的到达判定改用单格驻军（21/23）。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；
