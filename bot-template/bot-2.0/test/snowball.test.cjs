@@ -104,8 +104,8 @@ function totals(board, campaign = null) {
   return { own, enemy, campaign };
 }
 
-test('the city/economy snowball phase is off unless APEX_CITY_SNOWBALL=1', () => {
-  assert.equal(snowballConfig({}, {}).enabled, false);
+test('the city/economy snowball phase is on by default and APEX_CITY_SNOWBALL=0 disables it', () => {
+  assert.equal(snowballConfig({}, {}).enabled, true);
   assert.equal(snowballConfig({}, { APEX_CITY_SNOWBALL: '0' }).enabled, false);
   assert.equal(snowballConfig({}, { APEX_CITY_SNOWBALL: '1' }).enabled, true);
   const tuned = snowballConfig({}, {
@@ -138,7 +138,7 @@ test('entry needs a large non-maze room, a land deficit and a playable army', ()
   assert.equal(snowballEntry({ ...base, enemyLand: 0 }, config), false);
   // The phase is not a last stand: a collapsing army keeps the campaign budget.
   assert.equal(snowballEntry({ ...base, ownArmy: 500 }, config), false);
-  assert.equal(snowballEntry(base, snowballConfig({})), false);
+  assert.equal(snowballEntry(base, snowballConfig({ enabled: false })), false);
 });
 
 test('the phase exits on land parity, on army collapse, on the paint budget and on its span', () => {
@@ -288,7 +288,7 @@ test('the phase stays silent on maze rooms and without a land deficit', () => {
 });
 
 test('the planner never emits a snowball branch while the flag is off', () => {
-  withEnv({ APEX_CITY_SNOWBALL: undefined }, () => {
+  withEnv({ APEX_CITY_SNOWBALL: '0' }, () => {
     const board = largeRoom({ cells: [[8, 15, 1, 140]] });
     const state = memory();
     for (let tick = 0; tick < 6; tick += 1) {

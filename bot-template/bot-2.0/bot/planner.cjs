@@ -1946,7 +1946,7 @@ function citySnowball(b, m, own, enemies, totals, config = snowballConfig()) {
   const enemyArmy = Number(totals?.enemy) || 0;
   const maze = m.maze ?? isMazeBoard(b);
   const base = {
-    turn: b.turn, size: b.size, maze,
+    turn: b.turn, size: b.size, maze, mode: String(m.mapMode || ''),
     ownArmy, enemyArmy, ownLand: own.length, enemyLand: enemies.length,
   };
   let state = state0;

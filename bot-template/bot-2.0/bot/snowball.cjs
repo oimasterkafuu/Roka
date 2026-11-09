@@ -1,6 +1,7 @@
 'use strict';
 
-// City/economy snowball phase for large, non-maze rooms.
+// City/economy snowball phase for large mediterranean rooms; on by default
+// (APEX_CITY_SNOWBALL=0 disables, APEX_CITY_SNOWBALL_MODES overrides scope).
 //
 // Measurement (seeds 4, 2400 ticks, 0.68 rooms against Anti-Human) shows the
 // bot wins the opening army race and then stops converting it: turn 900 is
@@ -76,7 +77,12 @@ function flag(raw, fallback = false) {
 // phase without reloading the planner.
 function snowballConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.APEX_CITY_SNOWBALL, false),
+    enabled: overrides.enabled ?? flag(env.APEX_CITY_SNOWBALL, true),
+    // The phase paid off on mediterranean (mirrored crown race) and lost a
+    // win on anti archipelago when combined with the crown/land anchor, so
+    // the default scope is mediterranean only. Comma-separated A/B override.
+    modes: overrides.modes ??
+      String(env.APEX_CITY_SNOWBALL_MODES || 'mediterranean').split(',').map((v) => v.trim()).filter(Boolean),
     minBoard: overrides.minBoard ??
       number(env.APEX_CITY_SNOWBALL_MIN_BOARD, DEFAULT_MIN_BOARD, 1, 100000),
     startTurn: overrides.startTurn ??
@@ -118,6 +124,7 @@ function snowballConfig(overrides = {}, env = process.env) {
 function snowballEntry(input, config) {
   if (!config.enabled) return false;
   if (!input || input.maze) return false;
+  if (input.mode && Array.isArray(config.modes) && !config.modes.includes(input.mode)) return false;
   if (!(Number(input.size) >= config.minBoard)) return false;
   if (!(Number(input.turn) >= config.startTurn)) return false;
   const ownArmy = Number(input.ownArmy) || 0;
