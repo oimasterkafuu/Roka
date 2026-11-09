@@ -2,6 +2,7 @@
 
 const { makeBoard, connectedSet, distanceField, anchorCells, cutAnalysis } = require('./board.cjs');
 const { computePush, actionCoordinates, preview } = require('./rules.cjs');
+const { lastMileConfig, lastMileState, reseatRoot } = require('./lastmile.cjs');
 
 // Bot(2.0) 1v1 profile: the Apex defaults (6 / 90) over-invest in economy
 // before the decisive fight. 48 large-map seeds measured 16 -> 18 wins with
@@ -426,6 +427,27 @@ function latentReserveMove(b, profile) {
   }
   sources.sort((a, z) => z.score - a.score);
   return sources[0] ? { ...sources[0], branch: 'delayed-rush-rally' } : null;
+}
+
+// A saved home reserve is not a rush by itself: the opponent also has to be
+// able to land it.  Project the strongest force that can actually arrive at a
+// crown (`routeArrival` pays for every garrison the column has to cross on the
+// way) so the opening can tell a real rush from an army that is merely parked.
+const CROWN_WINDOW = 8;
+const CROWN_RESERVE_MARGIN = 12;
+
+function projectedArrival(b, crown, enemies, horizon) {
+  if (!Number.isInteger(crown) || crown < 0) return null;
+  const f = field(b, [crown]);
+  let worst = null;
+  for (const at of enemies) {
+    const distance = f.distance[at];
+    if (!Number.isFinite(distance) || distance > horizon) continue;
+    const { arrival } = routeArrival(b, f, at);
+    const force = Math.max(0, arrival);
+    if (!worst || force > worst.force) worst = { at, distance, force };
+  }
+  return worst;
 }
 
 function asPlayer(b, playerId) {
@@ -1816,6 +1838,38 @@ function chooseCampaign(b,m,own) {
         if (rescue) return { action: rescue, branch: 'rescue' };
       }
     }
+    // Last-mile reseat (APEX_LAST_MILE=1): a column that died or was cut
+    // inside the last mile must not send the campaign back to distance 40+ and
+    // pay for the whole approach again. Keep the same crown and resume from the
+    // best self-supporting forward supply cell instead.
+    const reseatCfg = lastMileConfig();
+    if (reseatCfg.enabled) {
+      const lostCampaign = m.campaign;
+      const ledger = lostCampaign?.lastMile;
+      const crown = Number.isInteger(lostCampaign?.crown) ? lostCampaign.crown : -1;
+      if (crown >= 0 && b.enemy(crown) && b.kind(crown) === 'crown' &&
+          Number.isFinite(ledger?.bestDist) && ledger.bestDist <= reseatCfg.range + 2) {
+        const reseatField = field(b, [crown]);
+        const at = reseatRoot(b, own, reseatField.distance, ledger.bestDist, reseatCfg);
+        if (at >= 0 && at !== lostAt) {
+          ledger.reseats = (ledger.reseats || 0) + 1;
+          m.campaign = {
+            ...lostCampaign,
+            at,
+            phase: 'gather',
+            started: b.turn,
+            lastAt: at,
+            lastProgress: b.turn,
+            deliveryBestDistance: Infinity,
+            bestCrownDistance: Math.min(ledger.bestDist, reseatField.distance[at]),
+            recoveryRebases: (lostCampaign.recoveryRebases || 0) + 1,
+            lastMile: { ...ledger, committed: false, prevArmy: b.army[at], lastProgress: b.turn },
+          };
+          m.delivery = null;
+          return chooseCampaign(b, m, own);
+        }
+      }
+    }
     // Keep a successful breach together.  When a crown is captured the old
     // campaign becomes invalid, but its active stack is still the best launch
     // point for the next crown in the same core.  The same hint also guides a
@@ -1994,7 +2048,57 @@ function chooseCampaign(b,m,own) {
     );
   const forcedMazeBreak = mazeBoard && musterTurns >= 36 &&
     b.army[c.at] >= Math.max(24, firstContactNeed);
-  const breakthroughReady = b.army[c.at] >= breakthroughThreshold && musterTurns >= 2 || forcedMazeBreak;
+  let breakthroughReady = b.army[c.at] >= breakthroughThreshold && musterTurns >= 2 || forcedMazeBreak;
+  // Last-mile ledger (APEX_LAST_MILE=1, on by default; =0 disables).  In its default `reseat`
+  // mode it only records distance/army progress for the forward-recovery branch
+  // below and leaves this decision to the existing planner.  The optional
+  // `full` mode also owns the attack-phase decision here: stage until the next
+  // hostile cell is payable, commit the push, and reroute a stalled corridor.
+  // Both staging profiles measured negative on the official profile, so they
+  // stay behind the flag and out of the default behaviour.
+  const lastMileCfg = lastMileConfig();
+  const lastMile = lastMileState({
+    board: b,
+    campaign: c,
+    dist: f.distance[c.at],
+    army: b.army[c.at],
+    firstNeed: firstContactNeed,
+    pathNeed: resistance,
+    cap: urgencyCap,
+    config: lastMileCfg,
+  });
+  if (lastMile.state === 'reroute') {
+    // Staging stopped paying: the corridor cannot be walked at this strength.
+    // Release the crown to the selector for a cooldown instead of holding the
+    // same stack in the last mile until the campaign timeout fires.
+    c.lastMile.reroutes = (c.lastMile.reroutes || 0) + 1;
+    const blockCooldown = mazeBoard ? Math.max(48, CAMPAIGN_BLOCK_COOLDOWN * 3) : CAMPAIGN_BLOCK_COOLDOWN;
+    m.blocked = { crown: c.crown, until: b.turn + blockCooldown };
+    m.campaign = null;
+    m.delivery = null;
+    return chooseCampaign(b, m, own);
+  }
+  if (lastMile.state === 'commit') {
+    // The first hostile cell is payable: start (or keep) the push. The ledger
+    // keeps the commitment across hops so a thinner column does not fall back
+    // into a fresh full muster in the middle of the last mile.
+    breakthroughReady = true;
+    c.phase = 'attack';
+  } else if (lastMile.state === 'stage') {
+    // The next hostile cell is not payable yet: gather only up to the bounded
+    // first-contact requirement, and never march a partial push even if an
+    // earlier tick already flipped the campaign into `attack`.
+    breakthroughReady = false;
+    c.phase = 'gather';
+  }
+  // Inside the last mile the gather target is the bounded first-contact
+  // requirement, not the generic (120 floor, 65%-of-desired) threshold that
+  // made the column commit a half stack and lose it on the second hostile cell.
+  // Outside the last mile the ledger must not touch the muster strength: a
+  // first-contact target applied to a 40-cell approach starves every convoy.
+  const desiredEff = lastMile.enabled && lastMile.state !== 'approach'
+    ? Math.min(desired, lastMile.target)
+    : desired;
   if (c.phase === 'gather') {
     c.musterTurns = musterTurns + 1;
     if (breakthroughReady) {
@@ -2004,7 +2108,7 @@ function chooseCampaign(b,m,own) {
       c.musterTurns = 0;
     }
   }
-  if(c.phase==='gather'&&b.army[c.at]<desired) {
+  if(c.phase==='gather'&&b.army[c.at]<desiredEff) {
     // A narrow campaign that has already reached the final approach should
     // change the enemy graph before paying for another long convoy.  When the
     // next head move is unavailable, a strategic cut of the opponent's
@@ -2015,7 +2119,7 @@ function chooseCampaign(b,m,own) {
       const escapeCut = strategicCut(b, own) || frontierStrike(b, own);
       if (escapeCut) return { ...escapeCut, branch: 'campaign-cut' };
     }
-    const delivery = gather(b, m, c.at, desired, 'muster');
+    const delivery = gather(b, m, c.at, desiredEff, 'muster');
     if(delivery)return delivery;
     // A severed spearhead can remain technically connected while no source
     // can safely reach it.  Waiting for the normal campaign timeout here
@@ -2049,10 +2153,21 @@ function chooseCampaign(b,m,own) {
   // the opponent cuts it immediately and the controller keeps reselecting the
   // same corridor.  Keep gathering (or let the recovery path rebase it) until
   // the root has a meaningful column.
-  if (c.phase === 'gather' && b.army[c.at] < Math.min(desired, 18)) return null;
+  if (c.phase === 'gather' && b.army[c.at] < Math.min(desiredEff, 18)) return null;
+  // Inside the last mile, never march a column that cannot even take the
+  // first hostile cell: hold it at the forward supply cell (the gather above
+  // already tried to reinforce it) instead of feeding a partial push.
+  if (lastMile.state === 'stage' && firstHostile >= 0 && b.army[c.at] < firstContactNeed) {
+    return { action: null, branch: 'lastmile-stage' };
+  }
   c.phase='attack';
   const to=p[1];
-  const a=safeMove(b,c.at,to,'campaign');
+  // A committed last mile may land a column below the generic 18-unit
+  // arrival floor: the ledger already proved the next hostile cell is
+  // payable, and requiring a full column per hop is what stalled (or
+  // re-mustered) a push that was one cell from the crown. `safeMove` still
+  // applies its own pressure/stranding guards for every mode.
+  const a=safeMove(b,c.at,to, lastMile.state === 'commit' ? 'lastmile' : 'campaign');
   if(a){
     const guard = routeGuard(b, a);
     if (guard.anchor >= 0) {
@@ -2080,7 +2195,7 @@ function chooseCampaign(b,m,own) {
     const escapeCut = strategicCut(b, own) || frontierStrike(b, own);
     if (escapeCut) return { ...escapeCut, branch: 'campaign-cut' };
   }
-  const target = Math.max(desired, b.army[to] * 1.3 + 30);
+  const target = Math.max(desiredEff, b.army[to] * 1.3 + 30);
   const delivery = gather(b, m, c.at, target, 'muster');
   if(delivery)return delivery;
   if (mazeBoard && Number.isFinite(c.bestCrownDistance) && c.bestCrownDistance > 10 && c.bestCrownDistance <= 18) {
@@ -2156,6 +2271,24 @@ function plan(b,m,deadline) {
   const explore = !fogged || b.turn < 120 || own.length < 40 || (fogged && b.turn % 5 === 0);
   const ed=field(b,enemies);
   const rushProfile = earlyRushProfile(b, own, enemies);
+  // A saved home reserve is not a rush by itself: the opponent also has to be
+  // able to land it.  The composition test kept firing on slow opponents that
+  // hoard an army at home and paint the map, and the resulting hold stole the
+  // action budget on alternate ticks, so `cluster-fund` never reached fifty
+  // units: those games end with zero cities, land frozen at ~25 cells while the
+  // opponent paints ninety.  Require a projected arrival that beats the local
+  // guard before paying for the hold.  Scoped below the existing large-map
+  // threshold so 0.68+ behaviour is untouched, and env-gated for ablation.
+  const openingSmall = process.env.APEX_OPENING_SMALL !== '0';
+  const rushArrival = openingSmall && b.size < 800 && rushProfile
+    ? projectedArrival(b, rushProfile.crown, enemies, rushProfile.distance || CROWN_WINDOW)
+    : null;
+  // The tower cell alone understates the defence: a pooled army one step away
+  // still holds the crown, so compare against the connected local guard too.
+  const rushGuard = rushArrival
+    ? Math.max(Number(b.army[rushProfile.crown]) || 0, localGuard(b, rushProfile.crown))
+    : 0;
+  const rushLethal = !rushArrival || rushArrival.force >= rushGuard + CROWN_RESERVE_MARGIN;
   const mazeBoard = m.maze ?? isMazeBoard(b);
   const econ = econProfile(m);
   const mazeGoal = mazeBoard ? mazeEconomyGoal(b, own, enemies) : econ.goal;
@@ -2165,7 +2298,7 @@ function plan(b,m,deadline) {
   // site plus the travel margin of the saved home column.
   const immediateRushHold = rushProfile && !rushProfile.maritime && b.turn < 42 && rushProfile.homeReserve >= 150 &&
     b.army[rushProfile.crown] < rushCrownFloor(rushProfile);
-  const rushBuildHold = rushProfile && (immediateRushHold ||
+  const rushBuildHold = rushProfile && rushLethal && (immediateRushHold ||
     (!rushProfile.maritime && (rushProfile.maze || rushProfile.distance <= 24) &&
       b.turn >= 42 && rushProfile.homeReserve >= 80 &&
       b.army[rushProfile.crown] < rushCrownFloor(rushProfile)));
@@ -2365,4 +2498,4 @@ function plan(b,m,deadline) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut,econProfile};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut,econProfile};
