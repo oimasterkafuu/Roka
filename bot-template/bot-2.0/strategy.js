@@ -98,6 +98,7 @@ function attachStrategy(socket, options = {}) {
     m: 0,
     size: 0,
     playerId: 0,
+    mapMode: 'random',
     clientId: '',
     turn: -1,
     grid: [],
@@ -145,7 +146,7 @@ function attachStrategy(socket, options = {}) {
     state.dead = false;
     state.ended = false;
     state.inGame = true;
-    controller = createController(state.playerId, controllerOptions);
+    controller = createController(state.playerId, { ...controllerOptions, mapMode: state.mapMode });
     lastRoomCommand = '';
   }
 
@@ -270,6 +271,7 @@ function attachStrategy(socket, options = {}) {
   }
 
   function onRoomUpdate(payload = {}) {
+    if (typeof payload.map_mode === 'string' && payload.map_mode) state.mapMode = payload.map_mode;
     if (state.inGame) return;
     if (payload.in_game === true) return;
     const players = Array.isArray(payload.players) ? payload.players : [];

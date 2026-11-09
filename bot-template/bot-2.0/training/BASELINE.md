@@ -80,6 +80,16 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 - 原版 Apex 交叉测试 96 局（seeds 4，10 worker）：tuned 10/45 为 41 胜，stock 6/90 为 37 胜；方向一致但配对 CI 含 0，继续标记为 provisional，后续重大改动前跑 seeds 8。
 - anti 96 局（seeds 4，10 worker）：tuned 29 胜 / 58 平 / 9 负，stock 27 / 52 / 17；配对 +2 胜、CI 含 0，0.68 尺寸明显更好（11 vs 7 胜），0.5 持平、1.0 略差，因此与 Apex 结果一致但仍不能称为已验证。
 
+### 2026-11-09：按地图模式门控经济档
+
+- 观察：seeds 4 的 96 局中，tuned 10/45 在 random/maze 上是正收益，在 archipelago/mediterranean 上是负收益。`room_update.map_mode` 已可用，因此按模式选择经济档：random/maze 用 10/45，其余用 stock 6/90。
+- 96 局 seeds 4（10 worker，默认 80ms）：
+  - anti：gated **32 胜 / 54 平 / 10 负**；tuned 29 / 58 / 9；stock 27 / 52 / 17。
+  - apex：gated **46 胜 / 50 负 / 25 平**；tuned 41 / 55 / 25；stock 37 / 59 / 27。
+  - gated vs stock 配对：anti +5.2pp（CI [+0.021,+0.250]），apex +9.4pp（CI [+0.031,+0.313]），均不含 0；gated vs tuned 同向但 CI 含 0。
+- `APEX_ECON_MODE_GATE=0` 可恢复“所有模式都用 tuned”用于 A/B；模式未知时回退 random。
+- 仍需独立种子的 holdout 验证（seeds offset 4），避免模式档在同一批种子上过拟合。
+
 ## 后续对比约定
 
 1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；

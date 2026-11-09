@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates, preview } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, advanceSupplyTree, defensiveCut, emergencyDefensiveCut } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, advanceSupplyTree, defensiveCut, emergencyDefensiveCut, econProfile } = require('../bot/planner.cjs');
 
 function corridor(sourceArmy, enemyArmy) {
   return makeBoard({
@@ -15,6 +15,25 @@ function corridor(sourceArmy, enemyArmy) {
     leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
   }, 1);
 }
+
+test('the tuned economy profile is gated to random and maze maps', () => {
+  assert.deepEqual(econProfile({ mapMode: 'random' }), { goal: 10, deadline: 45 });
+  assert.deepEqual(econProfile({ mapMode: 'maze' }), { goal: 10, deadline: 45 });
+  assert.deepEqual(econProfile({ mapMode: 'archipelago' }), { goal: 6, deadline: 90 });
+  assert.deepEqual(econProfile({ mapMode: 'mediterranean' }), { goal: 6, deadline: 90 });
+  // The room snapshot may be missing in a direct controller test; random is
+  // the historical default and keeps the tuned profile.
+  assert.deepEqual(econProfile({}), { goal: 10, deadline: 45 });
+
+  const previous = process.env.APEX_ECON_MODE_GATE;
+  try {
+    process.env.APEX_ECON_MODE_GATE = '0';
+    assert.deepEqual(econProfile({ mapMode: 'mediterranean' }), { goal: 10, deadline: 45 });
+  } finally {
+    if (previous === undefined) delete process.env.APEX_ECON_MODE_GATE;
+    else process.env.APEX_ECON_MODE_GATE = previous;
+  }
+});
 
 test('recognizes a saved no-build home reserve before it reaches the front', () => {
   const b = makeBoard({

@@ -132,6 +132,7 @@ function createController(playerId, options = {}) {
     lastDecisionMs: 0,
     maxDecisionMs: 0,
     playerId: Number(playerId) || 0,
+    mapMode: String(options.mapMode || 'random'),
     lastTurn: -1,
     target: null,
     staging: null,

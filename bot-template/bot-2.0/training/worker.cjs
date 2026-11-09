@@ -12,7 +12,7 @@ function run(job) {
   const policies = [null, null];
   const adapters = [];
   function apexPolicy(seat) {
-    const controller = createController(seat + 1);
+    const controller = createController(seat + 1, { mapMode: job.mode || 'random' });
     controllers[seat] = controller;
     return (state) => controller.choose(state);
   }

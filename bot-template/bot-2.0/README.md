@@ -62,6 +62,8 @@ node training/compare.cjs --baseline-json /tmp/before.json --candidate-json /tmp
 - 报告给出胜率/平局率/`effectiveLosses` 差值（`draws` 仍计入有效失败，另附 `halfDrawWinRate` 把平局记 0.5）与固定种子的成对 bootstrap 95% 置信区间（默认 `2000` 次、种子 `20240601`，可用 `--iterations`/`--seed` 调整），并按地图、尺寸、尺寸组、座位、对手、迷雾分解。
 - 设置不一致、重复配对键、存在缺对时退出码非零；`--allow-missing` 可只比较交集。`-q/--quiet` 关闭子进程的逐局进度。
 
+经济档位按 `room_update.map_mode` 选择：random/maze 使用 1v1 tuned（`APEX_ECON_GOAL=10`、`APEX_ECON_DEADLINE=45`），archipelago/mediterranean 保持 stock（6/90）；`APEX_ECON_MODE_GATE=0` 可强制所有模式用 tuned。
+
 服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机；`options.decisionBudgetMs`（或环境变量 `BOT_DECISION_BUDGET_MS`）设置单次决策预算（默认 80 ms，预留 8 ms），超时后回退到一个经 `preview` 校验的合法动作，`controller.stats()` 会额外报告 `budgetExceeded`、`fallbacks`、`lastDecisionMs` 与 `maxDecisionMs`。
 `options.duelStrike`（或环境变量 `BOT_DUEL_STRIKE=0`）控制“终结层”：默认开启时，控制器在规划器之前先跑一次 `bot/duel/strike.cjs` 的 race 门控斩杀判断，若证明本 Tick 内可斩杀（`maxEta` 默认 1，可用 `BOT_DUEL_STRIKE_ETA` 放宽）且不会先被对方斩杀，就直接执行该路线首步（mode 2 全推，经 `preview` 复核）；否则完全回落到原有规划器路径。关闭后行为与仅规划器版本一致，便于 A/B 对比。`BOT_DUEL_STRIKE_DECAP=1` 进一步只接受“最后一座皇冠”的必杀。
 Bot 加入房间后默认自动切换到配置队伍并发送准备；只有设置 `BOT_AUTO_READY=0` 或传入 `autoReady: false` 才会关闭自动准备。

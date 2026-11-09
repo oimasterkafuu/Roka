@@ -8,6 +8,19 @@ const { computePush, actionCoordinates, preview } = require('./rules.cjs');
 // 10 / 45, so the template now defaults to the 1v1 profile; env still wins.
 const ECON_GOAL = Number(process.env.APEX_ECON_GOAL || 10);
 const ECON_DEADLINE = Number(process.env.APEX_ECON_DEADLINE || 45);
+const ECON_STOCK_GOAL = 6;
+const ECON_STOCK_DEADLINE = 90;
+// Random/maze 1v1 games measured better with the earlier, larger economy
+// window; archipelago/mediterranean regressed, so those keep the Apex stock
+// profile.  The map mode arrives with the room snapshot.  Set
+// APEX_ECON_MODE_GATE=0 to apply the tuned profile everywhere (A/B runs).
+function econProfile(m) {
+  const mode = String(m?.mapMode || 'random');
+  if (process.env.APEX_ECON_MODE_GATE === '0' || mode === 'random' || mode === 'maze') {
+    return { goal: ECON_GOAL, deadline: ECON_DEADLINE };
+  }
+  return { goal: ECON_STOCK_GOAL, deadline: ECON_STOCK_DEADLINE };
+}
 const FORCE_MARGIN = Number.isFinite(Number(process.env.APEX_FORCE_MARGIN))
   ? Math.max(0, Math.min(1, Number(process.env.APEX_FORCE_MARGIN))) : 0.12;
 const MULTI_CROWN_CAP = Number.isFinite(Number(process.env.APEX_MULTI_CROWN_CAP))
@@ -1483,7 +1496,8 @@ function mazeEconomyGoal(b, own, enemies) {
 // Long travel is an investment window. Use only nearby rear troops, with a
 // separate delivery cursor, so construction cannot reverse a military convoy.
 function sustainEconomy(b, m, own, ed, enemies) {
-  if (b.turn < ECON_DEADLINE) return null;
+  const econ = econProfile(m);
+  if (b.turn < econ.deadline) return null;
   const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown');
   if (!enemyCrowns.length) return null;
   if (constructionThreat(b, own, enemies)) return null;
@@ -1509,7 +1523,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
   }
   const crowns = own.filter((at) => b.kind(at) === 'crown').length;
   const infrastructureCap = b.size >= 1600 ? 36 : b.size >= 800 ? 28 : 24;
-  const goal = Math.min(infrastructureCap, Math.max(ECON_GOAL, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
+  const goal = Math.min(infrastructureCap, Math.max(econ.goal, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
   const state = m.rearEconomy || (m.rearEconomy = { site: -1, delivery: null, spent: 0, nextWindow: 0 });
   const mazeBoard = m.maze ?? isMazeBoard(b);
   if (b.turn < state.nextWindow) return null;
@@ -2143,7 +2157,8 @@ function plan(b,m,deadline) {
   const ed=field(b,enemies);
   const rushProfile = earlyRushProfile(b, own, enemies);
   const mazeBoard = m.maze ?? isMazeBoard(b);
-  const mazeGoal = mazeBoard ? mazeEconomyGoal(b, own, enemies) : ECON_GOAL;
+  const econ = econProfile(m);
+  const mazeGoal = mazeBoard ? mazeEconomyGoal(b, own, enemies) : econ.goal;
   // Do not let a harmlessly distant reserve freeze the whole economy once
   // the sole crown already has enough local guard.  The hold specifically
   // covers the post-build exposure window: fifty units spent on a nearby
@@ -2309,7 +2324,7 @@ function plan(b,m,deadline) {
   // has turned into infrastructure.  Start the prepared strike immediately;
   // postponing it behind another economy cycle gives the opponent a free
   // window to multiply its core.
-  if (!rushBuildHold && b.turn < ECON_DEADLINE &&
+  if (!rushBuildHold && b.turn < econ.deadline &&
       (!earlyStrike || mazeBoard || process.env.APEX_EARLY_MAZE === '0')) {
     const invest=economy(b,m,own,ed,mazeGoal);
     if(invest)return invest;
@@ -2350,4 +2365,4 @@ function plan(b,m,deadline) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut};
+module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut,econProfile};
