@@ -106,6 +106,12 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 - campaign 交付进度刷新（任意 delivery 模式 movedTurn 刷新 `lastProgress`，不再仅 tree）：anti 32（持平，2 局变化），apex 46（mean −0.031），回退。
 - 终局诊断：1.0 尺寸非胜主要是 campaign 在 28 Tick gather timeout 处被整体重置（非 tree 交付不刷新进度），以及 `coreBias` 让 bot 跨图打原始敌冠、`desired` 按目标当前兵力每 Tick 抬价。下一步应针对“convoy 存活 + 目标选择”做独立实验，而不是继续改终局阈值。
 
+### 2026-11-09：coreBias 目标选择实验
+
+- `chooseCampaign` 的原始敌冠 `coreBias`（maze 1800 / 普通 450）可缩放，`APEX_CORE_BIAS_SCALE` 默认 1。
+- scale 0.25：96 局 seeds 0-3 anti 32 胜（1 局 loss→draw）、apex 47 胜（1 局 draw→win），看似正收益；但独立 offset 4 上 anti 15 持平、apex 20 vs 21（−1），不复现，回退默认 1。
+- scale 0：anti 29、apex 39，明显更差，说明原始核心偏向仍有价值；不应直接移除，只能在特定局面下小幅降低。
+
 ## 后续对比约定
 
 1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；
