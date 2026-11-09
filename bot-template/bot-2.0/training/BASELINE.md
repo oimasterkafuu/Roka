@@ -90,6 +90,14 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
 - `APEX_ECON_MODE_GATE=0` 可恢复“所有模式都用 tuned”用于 A/B；模式未知时回退 random。
 - 独立 holdout（offset 4，48 局）：gated vs stock，anti 15 vs 12 胜、apex 21 vs 19 胜；tuned-everywhere apex 20 胜。配对 CI 仍含 0，但方向在 anti/apex 都为正，且收益集中在 random/maze 与 0.5 尺寸；gated 模式在 archipelago/mediterranean 与 stock 逐局一致，未见过拟合信号。结论：保持模式门控，仍标记 sign-positive / unproven，继续用独立 offset 累积证据。
 
+### 2026-11-09：96 局失败归因与三个针对性实验
+
+- 失败集中在 1.0 尺寸的 1200 Tick 未结束局（anti 30/32、apex 22/32 非胜），其中多局是 1.5~5 倍兵力领先但只拿到 1~2 座敌冠；0.5 尺寸对 apex 有 9 局 <200 Tick 的早期死亡（arch/med）。
+- H1 提高终局冠数上限（`FINISH_LEAD_CAP=12`，ratio 1.6/2.5/3.0）与单独提高 `DECISIVE_CROWN_CAP=12`：96 局 anti 最好 31 胜，低于基线 32，回退。
+- H2 在 26–50 爆发期、领地落后 30% 时暂停首个经济窗：anti 逐局不变，apex 45 vs 46，回退。
+- H3 把 `frontierStrike` 从 `cut` intent 改为 `front` 以启用 arrive/pressure 守卫：anti 29 胜，回退。
+- 结论：三个“从失败样本直接推导”的改动都未转化为胜场；当前保留模式门控经济档（32/96 anti、46/96 apex）与 eta1 斩杀层。下一步应优先做独立 seeds 6-7 的模式档确认，或重新设计终局目标选择（而不是只放宽上限）。
+
 ## 后续对比约定
 
 1. 保持 `--seeds`、`--turns`、`--profile`、`--seat`、`--opponents` 与本文一致；
