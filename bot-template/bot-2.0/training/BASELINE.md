@@ -154,6 +154,13 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - 0.68/2400：anti 10/14/8（基线 10/13/9，1 局 loss→draw），apex 20/2/10（基线 20/3/9，1 局 draw→loss）；无净收益，回退。
 - 说明 900+ Tick 的 march 并不是“选错目标”这么简单；即使强制换冠也没有提高胜率。下一步需要重写 campaign 执行状态机（进展度量、动作预算与扩张切换），而不是继续加单个超时/阈值。
 
+### 2026-11-09：官服尺寸参数复测（无提升）
+
+- 0.34 / seeds 4 / 2400：基线 anti 21W/0D/11L、apex 19W/0D/13L。全 stock 经济 22/18，`CAMPAIGN_STRENGTH=0.30` 22/19；完整官方尺寸下 stock 29/34、strength 31/35（apex −4），均不采纳。
+- 0.34 上 `FORCE_MARGIN`、`BUILD_CLUSTER_SIZE`、`GATHER_TIMEOUT`、`STRIKE_ETA=2` 均无变化或更差。
+- burst 窗口强制 `broadExpansion`：0.34 21/19 不变，0.68 anti 10/13/9 不变，回退。
+- 结论：官服 0.34/0.68 的胜负对现有单参数已不敏感；继续提升需要重写 campaign 执行状态机（进展度量、动作预算、扩张切换），而不是继续扫参。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；
