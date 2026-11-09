@@ -88,7 +88,7 @@ node training/long-eval.cjs --profile large --seeds 1 --workers 8 \
   - apex：gated **46 胜 / 50 负 / 25 平**；tuned 41 / 55 / 25；stock 37 / 59 / 27。
   - gated vs stock 配对：anti +5.2pp（CI [+0.021,+0.250]），apex +9.4pp（CI [+0.031,+0.313]），均不含 0；gated vs tuned 同向但 CI 含 0。
 - `APEX_ECON_MODE_GATE=0` 可恢复“所有模式都用 tuned”用于 A/B；模式未知时回退 random。
-- 仍需独立种子的 holdout 验证（seeds offset 4），避免模式档在同一批种子上过拟合。
+- 独立 holdout（offset 4，48 局）：gated vs stock，anti 15 vs 12 胜、apex 21 vs 19 胜；tuned-everywhere apex 20 胜。配对 CI 仍含 0，但方向在 anti/apex 都为正，且收益集中在 random/maze 与 0.5 尺寸；gated 模式在 archipelago/mediterranean 与 stock 逐局一致，未见过拟合信号。结论：保持模式门控，仍标记 sign-positive / unproven，继续用独立 offset 累积证据。
 
 ## 后续对比约定
 
