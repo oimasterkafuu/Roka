@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { distanceField, makeBoard } = require('../bot/board.cjs');
 const { actionCoordinates, preview } = require('../bot/rules.cjs');
-const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, projectedArrival, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, advanceSupplyTree, defensiveCut, emergencyDefensiveCut, econProfile } = require('../bot/planner.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, projectedArrival, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, advanceSupplyTree, defensiveCut, emergencyDefensiveCut, econProfile, crownLandAnchor } = require('../bot/planner.cjs');
 
 function withOpeningSmall(value, body) {
   const previous = process.env.APEX_OPENING_SMALL;
@@ -628,4 +628,95 @@ test('tree gathering still lets non-cut tributaries supply the cut trunk', () =>
   assert.equal(preview(b, decision.action).army[2], 1);
   assert.equal(memory.delivery.branches, 3);
   assert.ok(memory.delivery.edges.some(([from, to]) => from === 7 && to === 6));
+});
+
+function withEnv(values, body) {
+  const previous = new Map();
+  for (const [key, value] of Object.entries(values)) {
+    previous.set(key, process.env[key]);
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return body();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+// A 30x30 open board: our rear in the top rows, the opponent in the bottom rows.
+function openLargeBoard({ own = 40, enemy = 40, turn = 400, army = 6 } = {}) {
+  const n = 30, m = 30, size = n * m;
+  const grid = Array(size).fill(200);
+  const troops = Array(size).fill(0);
+  for (let at = 0; at < own; at += 1) {
+    grid[at] = 1;
+    troops[at] = army;
+  }
+  for (let at = size - 1; at > size - 1 - enemy; at -= 1) {
+    grid[at] = 2;
+    troops[at] = army;
+  }
+  grid[0] = 101;
+  grid[size - 1] = 102;
+  return makeBoard({
+    n, m, grid, army: troops,
+    isolated: Array(size).fill(0), fog: Array(size).fill(0), turn,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('the crown budget is anchored to held land on open-paint modes only', () => {
+  const board = openLargeBoard({ own: 40, enemy: 220, turn: 400 });
+  const own = [...Array(40).keys()];
+  const enemies = [...Array(220).keys()].map((i) => 900 - 1 - i);
+  // Default on, `=0` restores the old crown chase for A/B runs.
+  assert.equal(crownLandAnchor({ mapMode: 'random' }, own, enemies), true);
+  withEnv({ APEX_CROWN_LAND_ANCHOR: '0' }, () => {
+    assert.equal(crownLandAnchor({ mapMode: 'random' }, own, enemies), false);
+  });
+  assert.equal(crownLandAnchor({ mapMode: 'archipelago' }, own, enemies), true);
+  // A mirrored crown race (Apex baseline) keeps the original chase.
+  assert.equal(crownLandAnchor({ mapMode: 'maze' }, own, enemies), false);
+  assert.equal(crownLandAnchor({ mapMode: 'mediterranean' }, own, enemies), false);
+  // Parity releases the anchor.
+  assert.equal(crownLandAnchor({ mapMode: 'random' }, own, own), false);
+  // The ratio knob keeps the phase open only while the gap is structural.
+  withEnv({ APEX_CROWN_LAND_RATIO: '0.5' }, () => {
+    assert.equal(crownLandAnchor({ mapMode: 'random' }, [...Array(40).keys()], [...Array(60).keys()]), false);
+  });
+
+  // Anchored build budget: eight crowns on forty cells already exceed one
+  // crown per twelve cells, so no further construction project opens.  The
+  // unanchored mediterranean profile still chases the opponent's crowns.
+  const n = 30, m = 30, size = n * m;
+  const grid = Array(size).fill(200);
+  const troops = Array(size).fill(0);
+  for (let at = 0; at < 40; at += 1) {
+    grid[at] = at < 8 ? 101 : 1;
+    troops[at] = 120;
+  }
+  // Rows 24-29 belong to the opponent: the nearest hostile crown is 24 steps
+  // from our rear, the distance at which sustainEconomy() stops abandoning rear
+  // projects for an assault that is already close to the enemy core.
+  for (let at = size - 180; at < size; at += 1) {
+    grid[at] = 102;
+    troops[at] = 4;
+  }
+  const crowded = makeBoard({
+    n, m, grid, army: troops,
+    isolated: Array(size).fill(0), fog: Array(size).fill(0), turn: 400,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const ownCells = [...Array(40).keys()];
+  const enemyCells = [...Array(180).keys()].map((i) => size - 1 - i);
+  const ed = distanceField(crowded, enemyCells);
+  const memory = () => ({ playerId: 1, campaign: { at: 0 }, delivery: null, rearEconomy: null });
+  const anchored = sustainEconomy(crowded, { ...memory(), mapMode: 'archipelago' }, ownCells, ed, enemyCells);
+  const stock = sustainEconomy(crowded, { ...memory(), mapMode: 'mediterranean' }, ownCells, ed, enemyCells);
+  assert.equal(anchored, null);
+  assert.notEqual(stock, null);
 });
