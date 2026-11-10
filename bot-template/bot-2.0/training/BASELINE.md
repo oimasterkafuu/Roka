@@ -348,3 +348,37 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 2. 优先看 `effectiveLosses`（平局即失败）与尺寸组胜率，避免“拖平”掩盖退化；
 3. 策略改动后同时重跑单元测试与回放回归（`test/replay-regression.test.cjs`）；
 4. 结果 JSON 不提交仓库，只把汇总与异常写入本文件或 PR 说明。
+
+### 2026-11-11：迷宫 blitz 第三轮校正（爆发即集结、全军入波、死岔整推、冻结清零，`APEX_MAZE_BLITZ` 仍默认关）
+
+- 用户复核 v3 回放后给出四条规则（全部相对 v2 是回归）：
+  1. **爆发结束下一 Tick 就开始集结**：不再继续铺地，也不等后面的门槛；只有在「真的没有东西可集结且连一波都不可能」时才允许扩张。
+  2. **集结阶段不留任何守备**：皇冠/城市的兵全部进波，只留引擎最低的 1 兵；不再有 home/crown reserve，也不再让 `army[root] >= need` 提前返回而把皇冠那堆兵漏掉。这是该战术明确的全押交换。
+  3. **岔路不要畏缩**：死支线（连通性判定）不派分队、也不花半兵 Tick 守；只有真正有威胁的活支线才守。波一达到地板就发射，没有额外保守门槛。
+  4. **不许冻结**：被切断时最多安静一 Tick，随后必须修连通、换前方连通格、或让波身向前推进；t34.5–44.5 那种 10+ Tick 不动绝不允许。
+- 实现（`bot/mazeblitz.cjs`）：
+  - `blitzGather` 改为纯本实现：沿我方连通格一 Tick 一堆、**mode 2 全推**（源点只留 1），按「到集结点的链上总兵力 / 链长」选源，让整列向前滚动而不是从远处搬一堆；集结点只在它自己拿不动（兵 ≤ 8 或丢失）时才向前重设，已聚起来的波不会被一格格往前挪散；已经在集结点前方的堆绝不往回抽。
+  - `musterDecision`：爆发后同 Tick 直接集结；`wave >= 地板` 即发射（删掉 `latestLaunch`/`exhausted` 门槛与暴露否决，暴露由 `defense`（在 plan 之上）处理）；没东西可集结就用手上的波开打，只有波 ≤ 1 才继续铺地。
+  - 活支线判定收紧：只统计**该侧**、且能在两 Tick 内到达路口的敌兵（`threat`）；路过的前方格与没有敌兵的中性走廊都不算威胁，死岔整推（mode 2），不再在死岔花半兵 Tick。`branchWorthClearing` 也只对活支线成立。
+  - 切断处理：`rescue` 优先；否者最多 `blitz-hold` 一 Tick，之后必须换前方连通堆（要求 `>= max(100, floor*0.4)`）或 `advanceBody` 让波身向前推进，再不行就交回默认 planner；新增 `waitOne` 保证同一战术不会连续两 Tick 无动作（第二 Tick 强制 `advanceBody` / 扩张 / 交回）。
+  - 旋钮删除：`APEX_MAZE_BLITZ_ANCHOR_RESERVE`、`APEX_MAZE_BLITZ_LATEST`、`APEX_MAZE_BLITZ_GATE_CAP`（对应行为已不存在）。
+- 用户点名的五局（单种子单 worker、2400 Tick、flag on、anti；v2 = `c8597d0`，v3 = `4041f84`，v4 = 本轮）：
+
+  | 局（种子 / 尺寸 / 座位） | v2 | v3 | v4 |
+  | --- | --- | --- | --- |
+  | `apex-long-7-maze` 0.68 seat 1（FqBS） | W 229 | L 1300 | **W 254** |
+  | `apex-long-3-maze` 0.68 seat 0（wgeA） | W 945 | L 1089 | **W 1241** |
+  | `apex-long-1-maze` 0.34 seat 1（RpCq） | W 99 | W 125 | **W 128** |
+  | `apex-long-1-maze` 0.34 seat 0（eCz） | W 91 | W 94 | **W 90** |
+  | `apex-long-0-maze` 0.34 seat 0（6IT4） | W 99 | W 200（含 21 Tick 无动作） | **W 215（最长无动作 1 Tick）** |
+
+  `Gazydz`（v1，`apex-long-1-maze` 0.34 seat 0）与 `47Eed`（v1，`apex-long-0-maze` 0.34 seat 0）与表中后两局同一棋盘，v4 分别为 W 90 / W 215。
+- maze 16 局子集（seeds 2、0.34+0.68、双座位、anti+apex、2400 Tick、6 worker，同一命令跑 v3 与 v4）：
+
+  | 版本 | 总 | 0.34 | 0.68 | vs anti | vs apex |
+  | --- | --- | --- | --- | --- | --- |
+  | v3（`4041f84`） | 8W / 0D / 8L | 7W / 1L | 1W / 7L | 4W / 4L | 4W / 4L |
+  | v4（本轮） | **12W / 0D / 4L** | 7W / 1L | **5W / 3L** | 7W / 1L | 5W / 3L |
+
+- 单测：`test/mazeblitz.test.cjs` 新增/改写 5 项——爆发后下一 Tick 直接集结且不再铺地、皇冠全兵入波（只留 1，无守备）、中性侧廊不算活支线（整推、不分队、不半兵）、切断最多安静一 Tick 且随后必有向前动作（连续无动作 ≤ 1）、波正好等于地板即发射；bot-2.0 全部 184 项单测通过。
+- 结论：仍为默认关的实验层（`APEX_MAZE_BLITZ=1` 开启），flag off 逐局不变；本轮未合并到 main。

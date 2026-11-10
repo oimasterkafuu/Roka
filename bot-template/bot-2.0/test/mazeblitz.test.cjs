@@ -15,7 +15,6 @@ const {
   branchWorthClearing,
   waveFloor,
   enemyGuard,
-  anchorReserve,
   launchCell,
   homeCrownExposed,
   routeNeed,
@@ -440,20 +439,54 @@ test('forward gathering never walks a forward stack back toward the rally', () =
   }
 });
 
-test('a home crown above its reserve joins the gathering', () => {
+test('the crown stack joins the wave with no defensive reserve', () => {
+  // The blitz is an all-in trade: a crown garrison contributes everything
+  // except the single soldier the engine needs to keep the source legal.
   const b = corridorBoard({ length: 9, crownArmy: 10, homeArmy: 400, stacks: { 5: 150 } });
   const crown = at(0, 4);
   const store = memory(b, { phase: 'muster', crown, root: at(5, 4) });
-  const reserve = anchorReserve(b, BLITZ_HELPERS, at(10, 4), enabledCfg().anchorReserve);
-  assert.ok(reserve >= 1 && reserve < 400);
   const decision = run(b, store, enabledCfg());
   assert.ok(decision);
-  // The crown stack is the gather source: it sends its surplus forward.
+  assert.equal(decision.branch, 'blitz-muster');
+  // The crown stack is a gather source, not a reserved garrison.
   assert.equal(decision.action.x, 10);
   assert.deepEqual([decision.action.dx, decision.action.dy], [9, 4]);
   apply(b, decision.action);
-  assert.ok(b.army[at(10, 4)] >= reserve, 'the crown keeps its defensive reserve');
-  assert.ok(b.army[at(9, 4)] > 1, 'the surplus reached the forward cell');
+  assert.equal(b.army[at(10, 4)], 1, 'the crown keeps only the engine minimum');
+  assert.equal(b.army[at(9, 4)], 400 + 1 - 1, 'the whole crown stack went forward');
+});
+
+test('the burst ends and gathering starts on the very next tick', () => {
+  const b = corridorBoard({ length: 9, crownArmy: 10, homeArmy: 400, stacks: { 5: 60 } });
+  b.turn = BURST_END_TURN + 1;
+  const store = memory(b);
+  assert.equal(store.blitz.phase, 'expand');
+  const first = run(b, store, enabledCfg());
+  assert.ok(first, 'a decision is emitted on the tick after the burst');
+  assert.equal(store.blitz.phase, 'muster');
+  assert.equal(first.branch, 'blitz-muster', 'the tick after the burst already gathers');
+  assert.notEqual(first.branch, 'blitz-expand');
+  assert.equal(first.action.kind, 'attack');
+  // And it keeps gathering every tick instead of falling back to painting.
+  for (let tick = 0; tick < 4; tick += 1) {
+    const next = run(b, store, enabledCfg());
+    assert.ok(next);
+    assert.equal(store.blitz.phase, 'muster');
+    assert.notEqual(next.branch, 'blitz-expand', 'no lingering expansion after the burst');
+    assert.equal(next.action.kind, 'attack');
+    apply(b, next.action);
+  }
+});
+
+test('a wave exactly at the floor launches, with no extra gate', () => {
+  const floor = waveFloor(7 * 11, enabledCfg());
+  const b = corridorBoard({ length: 9, crownArmy: 10, homeArmy: 1, stacks: { 5: floor } });
+  const store = memory(b, { phase: 'muster', crown: at(0, 4), root: at(5, 4) });
+  const decision = run(b, store, enabledCfg());
+  assert.ok(decision);
+  assert.equal(store.blitz.phase, 'push');
+  assert.equal(store.blitz.launches, 1);
+  assert.match(decision.branch, /^blitz-(march|break|fork)$/);
 });
 
 // A corridor cut in the middle: our front half is isolated by an enemy stack,
@@ -546,7 +579,7 @@ test('a 759-unit wave launches even when the route estimate is far higher', () =
   assert.notEqual(decision.action.mode, 0, 'the launch never uses the smart split');
 });
 
-test('an exposed home crown vetoes the launch', () => {
+test('an exposed home crown is answered by defence before the launch', () => {
   const b = forkBoard({ wave: 759 });
   // An adjacent enemy stack that can take the home crown in one full push.
   b.grid[at(6, 3)] = 2;
@@ -557,4 +590,148 @@ test('an exposed home crown vetoes the launch', () => {
   assert.ok(decision);
   assert.equal(store.blitz.phase, 'muster');
   assert.equal(store.blitz.launches, 0);
+});
+
+// A fork whose side corridor is neutral ground that eventually reaches enemy
+// territory.  There is no enemy stack on the junction itself, so the branch
+// has nothing to cut the tail with: it is not a live threat.
+function neutralForkBoard() {
+  const grid = Array(N * M).fill(MOUNTAIN);
+  const army = Array(N * M).fill(0);
+  const isolated = Array(N * M).fill(0);
+  const fog = Array(N * M).fill(0);
+  const own = (x, y, kind, count) => {
+    grid[at(x, y)] = kind === 'crown' ? 101 : 1;
+    army[at(x, y)] = count;
+  };
+  const enemy = (x, y, kind, count) => {
+    grid[at(x, y)] = kind === 'crown' ? 102 : kind === 'city' ? 52 : 2;
+    army[at(x, y)] = count;
+  };
+  own(6, 4, 'crown', 20);
+  own(5, 4, 'plain', 1);
+  own(4, 4, 'plain', 400);
+  own(3, 4, 'plain', 1);
+  own(2, 4, 'plain', 1);
+  enemy(1, 4, 'crown', 10);
+  // Neutral corridor out of the junction: nothing there can cut the wave.
+  // The enemy city is three cells in, out of next-two-tick reach.
+  grid[at(4, 3)] = 1;
+  grid[at(4, 2)] = 1;
+  grid[at(4, 1)] = 1;
+  enemy(3, 1, 'city', 5);
+  return makeBoard({
+    n: N,
+    m: M,
+    grid,
+    army,
+    isolated,
+    fog,
+    turn: 80,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('a neutral side corridor is not a live branch and earns no guard', () => {
+  const b = neutralForkBoard();
+  const branch = analyzeBranch(b, at(4, 4), at(4, 3), enabledCfg());
+  // The enemy could in principle reconnect through neutral ground...
+  assert.equal(branch.reconnectable, true);
+  // ...but no enemy stack sits on the junction, so nothing can cut the tail.
+  assert.equal(branch.adjacent, 0);
+  assert.equal(branch.live, false);
+  assert.equal(branchWorthClearing(branch, enabledCfg()), false);
+
+  const store = memory(b, { phase: 'push', crown: at(1, 4), root: at(4, 4), prev: at(5, 4) });
+  const decision = run(b, store, enabledCfg());
+  assert.ok(decision);
+  assert.equal(decision.branch, 'blitz-march');
+  assert.equal(decision.action.mode, 2, 'the wave commits fully instead of halving at a neutral fork');
+  assert.deepEqual([decision.action.dx, decision.action.dy], [3, 4]);
+  assert.equal(store.blitz.splits, 0);
+  assert.equal(store.blitz.detach, null);
+});
+
+// The cut board with a second forward stack that is still connected: the cut
+// costs at most one tick, then the wave moves on.
+function cutWithReserve() {
+  const b = cutBoard();
+  b.army[at(3, 4)] = 200;
+  // A garrison the reseated wave cannot take, so the fallback keeps moving.
+  b.army[at(0, 4)] = 4000;
+  return b;
+}
+
+test('a cut holds at most one tick and then moves the body forward', () => {
+  const b = cutWithReserve();
+  const crown = at(0, 4);
+  const store = memory(b, { phase: 'push', crown, root: at(6, 4), prev: at(7, 4) });
+  const first = run(b, store, enabledCfg());
+  assert.ok(first);
+  assert.match(first.branch, /^blitz-(hold|rescue|advance|reseat)$/);
+  if (first.action) {
+    assert.equal(first.action.kind, 'attack');
+  }
+  // The next tick must move: the alternate forward stack takes the wave over.
+  b.turn += 1;
+  const second = run(b, store, enabledCfg());
+  assert.ok(second, 'the plan must emit a decision after one quiet tick');
+  assert.equal(second.action.kind, 'attack', 'a second frozen tick is never acceptable');
+  const f = BLITZ_HELPERS.field(b, [crown]);
+  assert.ok(f.distance[store.blitz.root] < f.distance[at(6, 4)], 'the wave moved off the cut root');
+  assert.ok(f.distance[store.blitz.root] <= f.distance[at(3, 4)], 'the alternate forward stack leads');
+  const to = b.idx(second.action.dx, second.action.dy);
+  assert.ok(f.distance[to] < f.distance[at(3, 4)], 'the fallback move goes toward the objective');
+  // No frozen stretch either: a quiet tick may happen once, never twice in a
+  // row, and the plan hands back instead of freezing forever.
+  apply(b, second.action);
+  let streak = 0;
+  for (let tick = 0; tick < 6; tick += 1) {
+    const next = run(b, store, enabledCfg());
+    if (!next) break;
+    if (!next.action) {
+      streak += 1;
+      assert.ok(streak <= 1, `frozen for ${streak} consecutive ticks at ${b.turn}`);
+      b.turn += 1;
+      continue;
+    }
+    streak = 0;
+    apply(b, next.action);
+  }
+});
+
+test('the crown stack is used even when the rally already holds a wave', () => {
+  // The old gather returned early once `army[root] >= need`, so a crown stack
+  // sitting behind the rally was never sent.  A stalled push must still pull it.
+  const n = 11;
+  const grid = Array(n * M).fill(MOUNTAIN);
+  const army = Array(n * M).fill(0);
+  const isolated = Array(n * M).fill(0);
+  const fog = Array(n * M).fill(0);
+  const put = (x, code, count) => {
+    grid[at(x, 4)] = code;
+    army[at(x, 4)] = count;
+  };
+  put(0, 102, 10);   // enemy crown
+  put(1, 2, 3000);   // enemy wall: the wave cannot push through it
+  put(2, 1, 400);    // the wave sits right on the enemy wall
+  put(3, 1, 1);
+  put(4, 1, 1);
+  put(5, 1, 1);
+  put(6, 1, 1);
+  for (let x = 7; x <= 9; x += 1) put(x, 1, 1);
+  put(10, 101, 400); // home crown: the mass the old short-circuit omitted
+  const b = makeBoard({
+    n, m: M, grid, army, isolated, fog, turn: 90,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const store = memory(b, { phase: 'push', crown: at(0, 4), root: at(2, 4), prev: at(3, 4) });
+  const decision = run(b, store, enabledCfg());
+  assert.ok(decision);
+  assert.equal(decision.branch, 'blitz-rejoin');
+  assert.equal(decision.action.x, 10, 'the crown stack is the gather source');
+  assert.equal(decision.action.mode, 2);
+  apply(b, decision.action);
+  assert.equal(b.army[at(10, 4)], 1, 'no defensive reserve is kept');
+  assert.equal(b.army[at(9, 4)], 400, 'the whole crown stack joined the column');
 });
