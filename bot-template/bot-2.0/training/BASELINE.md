@@ -272,6 +272,27 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - 代价（未解决，因此单独记录）：占用 Tick 会多跑一整轮 `defense`，基线在 campaign 返回后根本不跑。对 anti 的完整尺寸统计：p50 3.6 → 3.5 ms、p95 **38 → 76 ms**、>40 ms 决策 5676 → 18177、`budgetExceeded` 820 → 7554、兜底 180 → 2806（约 2% 决策）。单局剖析（`apex-long-3-mediterranean` 0.68 后手对 anti）显示占用 Tick 的 `defense` 占决策总耗时 69%。下一步应做「锚点附近有敌堆才跑完整防守」的廉价预检，而不是把占用改稀疏（cadence 2/4 更差）。
 - 默认值：`APEX_MED_PLAN` 现在默认开启，`APEX_MED_PLAN=0` 为消融；`test/medplan.test.cjs` 覆盖默认开启、1.6× 释放阈值（含 1.35× 覆盖对比）与逐局不变性。全部 161 个单元测试通过。
 
+### 2026-11-10：迷宫「无建设爆发 + 单波」方案（`APEX_MAZE_BLITZ=1`，默认关，未合并）
+
+- 用户提出的反制战术：爆发期不建设、只铺地；爆发结束后把全军汇成一个 400–600 的超级波，沿迷宫树推进，岔路分一支清支线、清完归队，优先拆建筑，小图希望 60–70 回合结束。
+- 实现（`bot/mazeblitz.cjs`，只在 `mapMode === 'maze'` 且 `APEX_MAZE_BLITZ=1` 时接管行动预算，默认关闭时逐局与基线一致）：
+  1. `expand`：Tick ≤ 50（引擎爆发窗口 26–50，见 `src/game-engine/tick-growth.ts`）只走 `mazeOpening`/`opening`，从不建设；
+  2. `muster`：把棋盘汇到一个发射格，门槛 `max(棋盘地板, 目标守军需求)`，地板按尺寸 340（0.34）/ 520（0.68），需求 = 路径敌军抵抗 ×1.15 + 20 与目标 4 格内敌军 ×1.35 + 20 取大，并封顶 2.5× 地板；另有 `APEX_MAZE_BLITZ_LATEST` 兜底；
+  3. `push`：单列沿 `route` 前进，智能分兵（mode 0）优先，离开岔口时刚好留下「其他敌邻之和 −1」的驻军，避免走廊被切断；岔路用 `connectedSet` 判定能否回到敌方锚点，孤立的纯地格支线不派分队（路口在手即可），能回锚点的支线才用半兵（mode 1）分队清除并归队；被切断的孤军先尝试真实连通性验证的「复位连通」再放弃；
+  4. 波被打光/放弃后进入 `done`，交回默认迷宫 planner，不空转到超时。
+- 结果（seeds 8、双座位、2400 Tick、10 worker；同机 flag-off 基线 `/tmp/maze-base.json`）：
+
+  | 范围 | 基线（flag off） | blitz（flag on） |
+  | --- | --- | --- |
+  | maze 全部（0.34+0.68，64 局） | 45W / 7D / 12L | 28W / 6D / 30L |
+  | 0.34（32 局） | 27W / 0D / 5L | 17W / 0D / 15L |
+  | 0.68（32 局） | 18W / 7D / 7L | 11W / 6D / 15L |
+  | vs anti（32 局） | 21W / 6D / 5L | 14W / 6D / 12L |
+  | vs apex（32 局） | 24W / 1D / 7L | 14W / 0D / 18L |
+
+- 结论：**负收益，未合并、默认关闭**。赢的局确实是用户描述的形态（106 / 94 / 89 / 148 / 175 Tick 一波推平，0.34 与 0.68 都有；`apex-long-1-maze` 在 0.34/0.68、两个对手、两个座位共 8 局里赢 7 局），但输的局集中在同一个引擎机制：迷宫走廊上的 1 兵尾巴被对手一支大堆反推即整列「孤军」——`chkMove` 拒绝孤军移动，且断链瞬间整列减半，超级波当场冻结。`frozen` 计数显示 30 个败局里 18 个发生过冻结（0.34 的 15 个败局里 12 个）；另有 10 个败局根本没发射（0.68 长走廊抵抗估算过大，门槛已封顶 2.5× 地板后仍不够）。要把它转正需要「走廊滚动驻军/沿线锚点」或选择避开敌方大堆邻格的路线，不是再调阈值。
+- 旋钮：`APEX_MAZE_BLITZ_OPENING`（默认 50）、`APEX_MAZE_BLITZ_FLOOR_SMALL/LARGE`（340/520）、`APEX_MAZE_BLITZ_MARGIN`（1.15）、`APEX_MAZE_BLITZ_GATE_CAP`（2.5）、`APEX_MAZE_BLITZ_LATEST`（170）、`APEX_MAZE_BLITZ_BRANCH_SHARE`（0.55）、`APEX_MAZE_BLITZ_JUNCTION`（12）、`APEX_MAZE_BLITZ_DEBUG=1` 输出波状态。单元测试见 `test/mazeblitz.test.cjs`（无建设窗口、发射门槛、孤立支线跳过、分队上限、敌方守军口径）。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；

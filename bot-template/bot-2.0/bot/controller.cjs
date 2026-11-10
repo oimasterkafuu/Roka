@@ -244,17 +244,30 @@ function createController(playerId, options = {}) {
           theirEta: strike.race.theirEta,
         };
       } else {
-        decision = secureDecision(board, plan(board, memory, deadline));
-        decision = mazeActionGuard(board, memory, decision);
+        const planned = plan(board, memory, deadline);
+        // The blitz layer validates its own actions (safeMove + preview) and
+        // advances its wave cursor from the exact action it emitted.  The
+        // generic route repair may replace that action with a build or a
+        // different push mode, which desynchronises the column and breaks the
+        // bounded fork split, so those layers are skipped for it.
+        if (/^blitz-/.test(String(planned.branch || ''))) {
+          decision = planned;
+        } else {
+          decision = secureDecision(board, planned);
+          decision = mazeActionGuard(board, memory, decision);
+        }
       }
     }
     if (!decision.action && !deadline.expired()) {
       memory.noActionTurns += 1;
       // A short no-op is intentional during muster.  A longer one means the
       // selected corridor or logistics cursor is stale; recover locally
-      // instead of appearing to idle forever on maze maps.
+      // instead of appearing to idle forever on maze maps.  The blitz layer
+      // plans its own recovery (rejoin/retarget) and must not be replaced by
+      // the generic campaign recovery.
       const recoveryThreshold = memory.maze ? 4 : board.size >= 800 ? 8 : 12;
-      if (memory.noActionTurns >= recoveryThreshold) {
+      const blitzActive = Boolean(memory.blitz) && memory.blitz.phase !== 'done';
+      if (memory.noActionTurns >= recoveryThreshold && !blitzActive) {
         const fallback = recover(
           board,
           memory,
@@ -356,6 +369,7 @@ function createController(playerId, options = {}) {
     memory.broadGrowthNext = undefined;
     memory.home = undefined;
     memory.musterWaitTurns = 0;
+    memory.blitz = null;
     memory.mazeHistory = {
       lastFrom: -1,
       lastTo: -1,
