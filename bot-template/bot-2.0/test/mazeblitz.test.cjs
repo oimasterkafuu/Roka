@@ -18,6 +18,9 @@ const {
   launchCell,
   homeCrownExposed,
   routeNeed,
+  pushModes,
+  cheapForwardTarget,
+  blitzGather,
 } = require('../bot/mazeblitz.cjs');
 
 const N = 7;
@@ -84,18 +87,27 @@ function forkBoard(options = {}) {
     grid[at(3, 2)] = 1;
     army[at(3, 2)] = 0;
     if (options.branchExit === 'force') enemy(2, 2, 'plain', options.branchExitArmy ?? 30);
-    else { grid[at(2, 2)] = 1; army[at(2, 2)] = 0; }
+    else {
+      grid[at(2, 2)] = 1;
+      army[at(2, 2)] = 0;
+    }
   }
-  return makeBoard({
-    n: N,
-    m: M,
-    grid,
-    army,
-    isolated,
-    fog,
-    turn: options.turn ?? 62,
-    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
-  }, 1);
+  return makeBoard(
+    {
+      n: N,
+      m: M,
+      grid,
+      army,
+      isolated,
+      fog,
+      turn: options.turn ?? 62,
+      leaderboard: [
+        { id: 1, team: 1 },
+        { id: 2, team: 2 },
+      ],
+    },
+    1,
+  );
 }
 
 function cells(b) {
@@ -139,10 +151,7 @@ function expectForward(b, action, crown) {
   const f = BLITZ_HELPERS.field(b, [crown]);
   const from = b.idx(action.x, action.y);
   const to = b.idx(action.dx, action.dy);
-  assert.ok(
-    f.distance[to] < f.distance[from],
-    `expected a move toward the crown, got ${from} -> ${to}`,
-  );
+  assert.ok(f.distance[to] < f.distance[from], `expected a move toward the crown, got ${from} -> ${to}`);
 }
 
 const enabledCfg = (extra = {}) => mazeBlitzConfig({ enabled: true, ...extra });
@@ -252,7 +261,13 @@ test('a branch with an external exit but no reconnection is still dead', () => {
 
 test('a live branch keeps the junction guard (mode-1 half pushes)', () => {
   const b = forkBoard({ wave: 480, branch: 'city', branchCityArmy: 20, turn: 70 });
-  const store = memory(b, { phase: 'push', crown: at(1, 4), root: at(4, 4), prev: at(5, 4), lastSplitTurn: 70 });
+  const store = memory(b, {
+    phase: 'push',
+    crown: at(1, 4),
+    root: at(4, 4),
+    prev: at(5, 4),
+    lastSplitTurn: 70,
+  });
   const wave = b.army[at(4, 4)];
   for (let step = 0; step < 3; step += 1) {
     const decision = run(b, store, enabledCfg());
@@ -262,8 +277,11 @@ test('a live branch keeps the junction guard (mode-1 half pushes)', () => {
     assert.equal(decision.action.mode, 1);
     assert.equal(decision.action.half, true);
     const last = step === 2;
-    assert.equal(store.blitz.root, last ? at(3, 4) : at(4, 4),
-      'the wave stays on the junction while it halves');
+    assert.equal(
+      store.blitz.root,
+      last ? at(3, 4) : at(4, 4),
+      'the wave stays on the junction while it halves',
+    );
     apply(b, decision.action);
   }
   assert.ok(b.army[at(4, 4)] >= wave / 8, `guard ${b.army[at(4, 4)]} < 1/8 of ${wave}`);
@@ -326,18 +344,23 @@ function corridorBoard(options = {}) {
   for (let x = 1; x <= length; x += 1) put(x, 1, 1);
   for (const [x, count] of Object.entries(options.stacks ?? {})) put(Number(x), 1, count);
   put(length + 1, 101, options.homeArmy ?? 1);
-  return makeBoard({
-    n,
-    m: M,
-    grid,
-    army,
-    isolated,
-    fog,
-    turn: 70,
-    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
-  }, 1);
+  return makeBoard(
+    {
+      n,
+      m: M,
+      grid,
+      army,
+      isolated,
+      fog,
+      turn: 70,
+      leaderboard: [
+        { id: 1, team: 1 },
+        { id: 2, team: 2 },
+      ],
+    },
+    1,
+  );
 }
-
 
 // A crown one cell away from our root, so the exchange is decided on this tick.
 // The optional side branch is either dead (its stacks are cut off) or live (an
@@ -368,30 +391,57 @@ function crownBoard(options = {}) {
     // An enemy city inside the side branch: anchored, so the branch is live.
     enemy(1, 2, 'city', options.sideArmy ?? 5);
   }
-  return makeBoard({
-    n: N,
-    m: M,
-    grid,
-    army,
-    isolated,
-    fog,
-    turn: options.turn ?? 80,
-    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
-  }, 1);
+  return makeBoard(
+    {
+      n: N,
+      m: M,
+      grid,
+      army,
+      isolated,
+      fog,
+      turn: options.turn ?? 80,
+      leaderboard: [
+        { id: 1, team: 1 },
+        { id: 2, team: 2 },
+      ],
+    },
+    1,
+  );
 }
 
-test('a crown capture defaults to the half push when half already kills', () => {
+test('a capture away from a junction is a full push', () => {
+  // v4 defaulted every capture to the half push, so a 306 wave paid a half
+  // push on plain road and left a guard behind for nothing (t143/t144.5 of the
+  // 4bQF replay).  Away from a live junction the wave commits fully.
   const b = crownBoard({ crownArmy: 14, wave: 200 });
   const store = memory(b, { phase: 'push', crown: at(0, 4), root: at(1, 4), prev: at(2, 4) });
   const decision = run(b, store, enabledCfg());
   assert.ok(decision);
   assert.equal(decision.branch, 'blitz-break');
-  assert.equal(decision.action.mode, 1, 'the half push kills the 14 crown and keeps a guard');
-  const half = Math.floor((200 - 4 - 1) / 2);
+  assert.equal(decision.action.mode, 2, 'a capture away from a threatened fork pushes fully');
   apply(b, decision.action);
   assert.equal(b.owner(at(0, 4)), 1, 'the crown is ours');
-  assert.equal(b.army[at(0, 4)], half - 14);
-  assert.equal(b.army[at(1, 4)], 200 - half, 'the junction keeps a real guard');
+  assert.equal(b.army[at(1, 4)], 1, 'the source keeps only the engine minimum');
+  assert.ok(b.army[at(0, 4)] > 180, 'the whole wave went through');
+});
+
+test('the half push is offered only at a threatened junction', () => {
+  // The threatened fork is the only place a half push is spent: the guard is
+  // the tail the branch could cut.  Everywhere else the mode list starts at a
+  // full push, captures included.
+  const b = crownBoard({ crownArmy: 14, wave: 200, side: 'live' });
+  assert.equal(analyzeBranch(b, at(1, 4), at(1, 3), enabledCfg()).live, true);
+  assert.deepEqual(pushModes(b, at(1, 4), at(0, 4), false), [2, 1], 'no fork: full push first');
+  assert.deepEqual(pushModes(b, at(1, 4), at(0, 4), true), [1], 'a live fork halves the capture');
+  const strong = crownBoard({ crownArmy: 300, wave: 400, side: 'live' });
+  assert.deepEqual(
+    pushModes(strong, at(1, 4), at(0, 4), true),
+    [],
+    'a live fork never commits fully into a capture the half cannot take',
+  );
+  // The plain-road transit is the same policy: full push away from a fork.
+  const plain = neutralForkBoard();
+  assert.deepEqual(pushModes(plain, at(4, 4), at(3, 4), false), [2, 1]);
 });
 
 test('a full push is allowed for an adjacent crown when half cannot kill it', () => {
@@ -426,8 +476,11 @@ test('forward gathering never walks a forward stack back toward the rally', () =
   assert.ok(decision);
   assert.equal(store.blitz.root, at(5, 4), 'the forward 150 is the rally, not the rear 400');
   const f = BLITZ_HELPERS.field(b, [crown]);
-  assert.ok(f.distance[b.idx(decision.action.dx, decision.action.dy)] <=
-    f.distance[b.idx(decision.action.x, decision.action.y)], 'no backward step');
+  assert.ok(
+    f.distance[b.idx(decision.action.dx, decision.action.dy)] <=
+      f.distance[b.idx(decision.action.x, decision.action.y)],
+    'no backward step',
+  );
   // Run a few ticks: the corridor is only ever walked forward.
   for (let tick = 0; tick < 4; tick += 1) {
     const next = run(b, store, enabledCfg());
@@ -456,11 +509,142 @@ test('the crown stack joins the wave with no defensive reserve', () => {
   assert.equal(b.army[at(9, 4)], 400 + 1 - 1, 'the whole crown stack went forward');
 });
 
+/**
+ * A corridor with a fat chain right next to the rally and a fat crown far
+ * behind it.  The chain always scores higher (short route, fat pile), which is
+ * exactly why the v4 gather never spent the crown garrison.
+ */
+function crownBehindChain() {
+  const b = corridorBoard({ length: 9, crownArmy: 10, homeArmy: 300, stacks: { 2: 40, 3: 40, 4: 40 } });
+  b.army[at(1, 4)] = 30; // the rally already holds a wave
+  return b;
+}
+
+test('the crown joins the gather even when a fat chain sits next to the rally', () => {
+  const b = crownBehindChain();
+  const crown = at(0, 4);
+  const store = memory(b, { phase: 'muster', crown, root: at(1, 4) });
+  const decision = run(b, store, enabledCfg());
+  assert.ok(decision);
+  assert.equal(decision.branch, 'blitz-muster');
+  assert.equal(decision.action.x, 10, 'the crown is the source, not the chain');
+  assert.equal(decision.action.mode, 2, 'the crown is spent fully');
+  apply(b, decision.action);
+  assert.equal(b.army[at(10, 4)], 1, 'the crown keeps only the engine minimum');
+  assert.equal(b.army[at(9, 4)], 300, 'the whole crown garrison moved into the column');
+});
+
+test('a stack with a cheap forward kill is not recalled into the gather', () => {
+  // A 60 stack that can still take a neighbouring 5-garrison city stays put;
+  // the gather uses the rear 40 instead of pulling the spearhead back.
+  const b = corridorBoard({ length: 9, crownArmy: 10, homeArmy: 1, stacks: { 3: 60, 6: 40 } });
+  b.grid[at(3, 3)] = 52; // enemy city, one cheap score below the 60
+  b.army[at(3, 3)] = 5;
+  const crown = at(0, 4);
+  const cf = BLITZ_HELPERS.field(b, [crown]);
+  assert.equal(cheapForwardTarget(b, at(3, 4), cf), true);
+  assert.equal(cheapForwardTarget(b, at(6, 4), cf), false);
+  const store = {
+    ...memory(b),
+    blitz: { ...initialState(), phase: 'muster', crown, root: at(1, 4) },
+  };
+  const decision = blitzGather(
+    b,
+    store,
+    cells(b).own,
+    store.blitz,
+    crown,
+    400,
+    enabledCfg(),
+    BLITZ_HELPERS,
+    'blitz-muster',
+  );
+  assert.ok(decision);
+  assert.equal(decision.action.x, 6, 'the rear stack delivers, the spearhead stays');
+  // With no other source the spearhead is still used, so the gather never dies.
+  b.army[at(6, 4)] = 1;
+  const fallback = blitzGather(
+    b,
+    store,
+    cells(b).own,
+    store.blitz,
+    crown,
+    400,
+    enabledCfg(),
+    BLITZ_HELPERS,
+    'blitz-muster',
+  );
+  assert.ok(fallback);
+  assert.equal(fallback.action.x, 3, 'a held stack is recalled when nothing else can deliver');
+});
+
+// A cut mid-gather with the mass behind it: the rally must follow the wave.
+function cutWaveBoard() {
+  const n = 11;
+  const grid = Array(n * M).fill(MOUNTAIN);
+  const army = Array(n * M).fill(0);
+  const isolated = Array(n * M).fill(0);
+  const fog = Array(n * M).fill(0);
+  const put = (x, code, count, dead = 0) => {
+    grid[at(x, 4)] = code;
+    army[at(x, 4)] = count;
+    isolated[at(x, 4)] = dead;
+  };
+  put(0, 102, 10);
+  put(1, 1, 1);
+  put(2, 1, 1);
+  put(3, 1, 1);
+  put(4, 1, 269); // the gathered wave, still connected
+  put(5, 2, 4000); // the cutter: it cannot be repaired this tick
+  for (let x = 6; x <= 8; x += 1) put(x, 1, 1, 1);
+  put(7, 1, 24, 1); // the cut head
+  put(10, 101, 300);
+  return makeBoard(
+    {
+      n,
+      m: M,
+      grid,
+      army,
+      isolated,
+      fog,
+      turn: 90,
+      leaderboard: [
+        { id: 1, team: 1 },
+        { id: 2, team: 2 },
+      ],
+    },
+    1,
+  );
+}
+
+test('a cut mid-gather keeps the 269 stack and the objective', () => {
+  const b = cutWaveBoard();
+  const crown = at(0, 4);
+  const store = memory(b, { phase: 'muster', crown, root: at(7, 4) });
+  const decision = run(b, store, enabledCfg());
+  assert.ok(decision);
+  assert.equal(store.blitz.crown, crown, 'the objective is not re-picked');
+  assert.equal(store.blitz.root, at(4, 4), 'the rally follows the 269 stack, not a token lane');
+  assert.notEqual(store.blitz.root, at(10, 4), 'the rear crown is never promoted');
+  assert.notEqual(decision.branch, 'blitz-expand');
+  if (decision.action?.kind === 'attack') {
+    const f = BLITZ_HELPERS.field(b, [crown]);
+    const from = b.idx(decision.action.x, decision.action.y);
+    const to = b.idx(decision.action.dx, decision.action.dy);
+    assert.ok(f.distance[to] <= f.distance[from], `backward regroup ${from} -> ${to}`);
+  }
+  assert.equal(store.blitz.abandons, 1, 'the cut is counted, not hidden');
+});
+
 test('the burst ends and gathering starts on the very next tick', () => {
+  // The decision state carries the tick that just finished, so a state turn of
+  // BURST_END_TURN is already the first post-burst tick (t25.5 in the replay).
   const b = corridorBoard({ length: 9, crownArmy: 10, homeArmy: 400, stacks: { 5: 60 } });
-  b.turn = BURST_END_TURN + 1;
+  b.turn = BURST_END_TURN - 1;
   const store = memory(b);
   assert.equal(store.blitz.phase, 'expand');
+  assert.match(run(b, store, enabledCfg()).branch, /^blitz-expand/, 'tick 50 still expands');
+  b.turn = BURST_END_TURN;
   const first = run(b, store, enabledCfg());
   assert.ok(first, 'a decision is emitted on the tick after the burst');
   assert.equal(store.blitz.phase, 'muster');
@@ -504,20 +688,26 @@ function cutBoard() {
   };
   put(0, 102, 10);
   for (let x = 1; x <= 4; x += 1) put(x, 1, 1);
-  put(5, 2, 30);            // the cutter
+  put(5, 2, 30); // the cutter
   for (let x = 6; x <= 9; x += 1) put(x, 1, 1, 1); // trapped front (isolated)
-  put(6, 1, 220, 1);        // the wave that got cut
-  put(10, 101, 300);        // home crown: the rear mass
-  return makeBoard({
-    n,
-    m: M,
-    grid,
-    army,
-    isolated,
-    fog,
-    turn: 90,
-    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
-  }, 1);
+  put(6, 1, 220, 1); // the wave that got cut
+  put(10, 101, 300); // home crown: the rear mass
+  return makeBoard(
+    {
+      n,
+      m: M,
+      grid,
+      army,
+      isolated,
+      fog,
+      turn: 90,
+      leaderboard: [
+        { id: 1, team: 1 },
+        { id: 2, team: 2 },
+      ],
+    },
+    1,
+  );
 }
 
 test('a cut frontier never re-seats the rally on the rear mass', () => {
@@ -620,16 +810,22 @@ function neutralForkBoard() {
   grid[at(4, 2)] = 1;
   grid[at(4, 1)] = 1;
   enemy(3, 1, 'city', 5);
-  return makeBoard({
-    n: N,
-    m: M,
-    grid,
-    army,
-    isolated,
-    fog,
-    turn: 80,
-    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
-  }, 1);
+  return makeBoard(
+    {
+      n: N,
+      m: M,
+      grid,
+      army,
+      isolated,
+      fog,
+      turn: 80,
+      leaderboard: [
+        { id: 1, team: 1 },
+        { id: 2, team: 2 },
+      ],
+    },
+    1,
+  );
 }
 
 test('a neutral side corridor is not a live branch and earns no guard', () => {
@@ -712,19 +908,31 @@ test('the crown stack is used even when the rally already holds a wave', () => {
     grid[at(x, 4)] = code;
     army[at(x, 4)] = count;
   };
-  put(0, 102, 10);   // enemy crown
-  put(1, 2, 3000);   // enemy wall: the wave cannot push through it
-  put(2, 1, 400);    // the wave sits right on the enemy wall
+  put(0, 102, 10); // enemy crown
+  put(1, 2, 3000); // enemy wall: the wave cannot push through it
+  put(2, 1, 400); // the wave sits right on the enemy wall
   put(3, 1, 1);
   put(4, 1, 1);
   put(5, 1, 1);
   put(6, 1, 1);
   for (let x = 7; x <= 9; x += 1) put(x, 1, 1);
   put(10, 101, 400); // home crown: the mass the old short-circuit omitted
-  const b = makeBoard({
-    n, m: M, grid, army, isolated, fog, turn: 90,
-    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
-  }, 1);
+  const b = makeBoard(
+    {
+      n,
+      m: M,
+      grid,
+      army,
+      isolated,
+      fog,
+      turn: 90,
+      leaderboard: [
+        { id: 1, team: 1 },
+        { id: 2, team: 2 },
+      ],
+    },
+    1,
+  );
   const store = memory(b, { phase: 'push', crown: at(0, 4), root: at(2, 4), prev: at(3, 4) });
   const decision = run(b, store, enabledCfg());
   assert.ok(decision);
