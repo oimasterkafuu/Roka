@@ -17,19 +17,35 @@
  *   3. push - march that single column at the nearest reachable crown and
  *      destroy crown > city > plain on the way.
  *
- * Junction rule: main-route transit uses half pushes (mode 1), repeated up to
- * three times, so 1/2 + 1/4 + 1/8 = 7/8 of the wave moves up while a real 1/8
- * guard holds the junction.  The smart split (mode 0) is never used there: it
- * reserves only the other hostile neighbours' army, which is the token guard
- * an adjacent anti stack cuts on the next tick.  A full push (mode 2) is only
- * allowed when the junction has no hostile contact besides the cell we move
- * into, so nothing can cut the one-soldier tail.
+ * Dead/live branch rule (strong form): a side branch is dead when, with the
+ * junction removed, the opponent cannot reconnect it to any anchor.  That is a
+ * real connectivity test, not "is it currently isolated": the branch is
+ * flooded with the junction blocked, and it is live only when a cell inside
+ * that flood is still in its owner's engine `connectedSet` (a real path of
+ * enemy-held cells back to an enemy crown/city that does not cross the
+ * junction), or when fog hides part of it.  A plain passable route that would
+ * have to fight through our own territory is not a reconnection.  Everything
+ * else - including a branch with another external exit that leads nowhere -
+ * is dead: its stacks are cut off, the engine freezes isolated cells, and a
+ * trapped stack can never push back out.  A dead branch therefore never earns
+ * a half-push tick or a detachment; the main wave goes fully into the live
+ * direction.
  *
- * Fork rule: a side branch is only worth clearing when it can still reconnect
- * to an enemy anchor (real connectivity through `connectedSet`, not a local
- * heuristic).  An already isolated branch (plain cells cut off from every
- * enemy crown and city) decays by itself; the held junction is enough, so the
- * main wave keeps moving instead of spending ticks in a dead end.
+ * Junction rule: at a live fork the main-route transit uses half pushes
+ * (mode 1), repeated up to three times, so 1/2 + 1/4 + 1/8 = 7/8 of the wave
+ * moves up while a real 1/8 guard holds the junction.  The smart split
+ * (mode 0) is never used there: it reserves only the other hostile neighbours'
+ * army, which is the token guard an adjacent anti stack cuts on the next tick.
+ *
+ * Capture rule: taking a crown/city defaults to the half push, which still
+ * kills the garrison in one tick and leaves 1/2 on the junction.  A full push
+ * (mode 2) is the exception: only when half cannot take the garrison (the
+ * target is one cell away, so the exchange is decided now) and the generic
+ * guard accepts the tail it would leave behind.
+ *
+ * Fork rule: a side branch is only worth clearing when it is live and holds a
+ * building.  A dead branch decays by itself; the held junction is enough, so
+ * the main wave keeps moving instead of spending ticks in a dead end.
  *
  * `mazeBlitzPlan` receives the planner helpers it needs from `planner.cjs` so
  * this module never imports the planner (no require cycle).
@@ -41,6 +57,9 @@ const { actionCoordinates, computePush, preview } = require('./rules.cjs');
 // Engine fact: the global burst runs from tick 26 through tick 50 inclusive.
 const BURST_END_TURN = 50;
 
+// A wave head below this cannot lead: the body has to take the wave over.
+const STACK_MIN = 8;
+
 const DEFAULTS = Object.freeze({
   smallFloor: 340,
   largeFloor: 520,
@@ -51,6 +70,13 @@ const DEFAULTS = Object.freeze({
   branchShare: 0.55,
   branchReserve: 24,
   junctionThreat: 12,
+  // Node budget for the dead/live flood and the enemy force walk.  Both are
+  // real graph searches, so the cap only protects against pathological boards.
+  branchScan: 240,
+  // A crown/city garrison above its defensive reserve joins the wave.  The
+  // reserve is the floor a home anchor keeps: it still has to survive the
+  // adjacent stack and anything that lands two ticks out.
+  anchorReserve: 20,
   halfPushes: 3,
   stallLimit: 10,
   detachStall: 4,
@@ -87,6 +113,8 @@ function mazeBlitzConfig(overrides = {}) {
     branchShare: envNumber('APEX_MAZE_BLITZ_BRANCH_SHARE', DEFAULTS.branchShare, 0, 1),
     branchReserve: DEFAULTS.branchReserve,
     junctionThreat: envNumber('APEX_MAZE_BLITZ_JUNCTION', DEFAULTS.junctionThreat, 0, 4000),
+    branchScan: envNumber('APEX_MAZE_BLITZ_BRANCH_SCAN', DEFAULTS.branchScan, 8, 20000),
+    anchorReserve: envNumber('APEX_MAZE_BLITZ_ANCHOR_RESERVE', DEFAULTS.anchorReserve, 1, 4000),
     halfPushes: envNumber('APEX_MAZE_BLITZ_HALF_PUSHES', DEFAULTS.halfPushes, 1, 6),
     stallLimit: DEFAULTS.stallLimit,
     detachStall: DEFAULTS.detachStall,
@@ -133,37 +161,81 @@ function initialState() {
   };
 }
 
-// The enemy anchor set is the real definition of "can reconnect": a cell that
-// is not in its owner's `connectedSet` has no path to a crown or city, so it
-// cannot be reinforced and decays on its own.
-function enemyConnectedOwners(b, cells) {
-  const owners = new Set();
-  for (const at of cells) {
-    const owner = b.owner(at);
-    if (owner > 0 && !b.sameTeam(owner, b.playerId)) owners.add(owner);
+/**
+ * Flood one fork branch with the junction removed.  This is a real
+ * connectivity test: everything reachable here can only be entered through the
+ * junction we already hold, so it is the branch's whole world once the
+ * junction is ours.
+ */
+function branchRegion(b, root, first) {
+  const region = new Set([first]);
+  const queue = [first];
+  let fogged = false;
+  for (let head = 0; head < queue.length; head += 1) {
+    const at = queue[head];
+    if (!b.visible[at]) fogged = true;
+    for (const next of b.neighbors(at)) {
+      if (next === root || region.has(next) || !b.passable(next)) continue;
+      region.add(next);
+      queue.push(next);
+    }
   }
-  const connected = new Set();
-  for (const owner of owners) {
-    for (const at of connectedSet(b, owner)) connected.add(at);
-  }
-  return connected;
+  return { region, fogged };
+}
+
+// A stack that can still push.  An anchor grows every tick, so it counts even
+// at one soldier.
+function pushCapable(b, at) {
+  if (b.isolated[at]) return false;
+  if (b.army[at] > 1) return true;
+  const kind = b.kind(at);
+  return kind === 'crown' || kind === 'city';
 }
 
 /**
- * Walk one fork branch and report what it contains.  The maze is a tree, so
- * excluding the junction keeps the scan inside the branch; the depth cap
- * protects boards that contain cycles.
+ * Is the branch still tied to one of its anchors?  A cell only counts when it
+ * is in its owner's engine `connectedSet`, i.e. when there is a path of
+ * enemy-held cells back to an enemy crown/city that does not cross the
+ * junction.  A plain passable flood is not enough: a branch whose only route
+ * out crosses our own territory is dead, because the enemy would have to fight
+ * through the ground we hold to reconnect it.
  */
-function analyzeBranch(b, root, first, cfg, connected) {
+function branchAnchored(b, region) {
+  const byOwner = new Map();
+  for (const at of region) {
+    if (!b.enemy(at)) continue;
+    const owner = b.owner(at);
+    let linked = byOwner.get(owner);
+    if (!linked) {
+      linked = connectedSet(b, owner);
+      byOwner.set(owner, linked);
+    }
+    if (linked.has(at)) return true;
+  }
+  return false;
+}
+
+/**
+ * Walk one fork branch and report what it contains.
+ *
+ * Dead / live is the strong definition: remove the junction, flood the branch,
+ * and ask whether the opponent can still reconnect it to an anchor.  Live only
+ * when an enemy city/crown sits in the flood, an enemy stack in the flood can
+ * force its way to the trapped cluster, or fog hides part of it.  A branch
+ * whose other exit leads nowhere is dead even though it is not "a dead end":
+ * the enemy force cannot come back in without passing the held junction.
+ */
+function analyzeBranch(b, root, first, cfg) {
+  const { region, fogged } = branchRegion(b, root, first);
+  const anchored = branchAnchored(b, region);
+  const reconnectable = fogged || anchored;
   const seen = new Set([root, first]);
   const nodes = [{ at: first, depth: 0, cost: b.enemy(first) ? b.army[first] + 1 : 0 }];
   let building = null;
-  let reconnectable = false;
   for (let head = 0; head < nodes.length; head += 1) {
     const node = nodes[head];
     const at = node.at;
     if (b.enemy(at)) {
-      if (connected && connected.has(at)) reconnectable = true;
       const kind = b.kind(at);
       if (kind === 'crown' || kind === 'city') {
         const value = kind === 'crown' ? 3 : 1;
@@ -193,15 +265,36 @@ function analyzeBranch(b, root, first, cfg, connected) {
     building,
     reconnectable,
     adjacent,
+    anchored,
+    fogged,
     cost: building ? building.cost : 0,
     reach: nodes.length,
   };
 }
 
+/**
+ * The passable side branches of a junction, each classified dead/live.  Our own
+ * cells are the rear, not a branch, and the transit target is excluded.
+ */
+function junctionSides(b, root, next, skip, cfg) {
+  const sides = [];
+  for (const side of b.neighbors(root)) {
+    if (side === next || side === skip) continue;
+    if (!b.passable(side) || b.own(side)) continue;
+    sides.push({ at: side, branch: analyzeBranch(b, root, side, cfg) });
+  }
+  return sides;
+}
+
+// A live side branch means the junction has a genuine reconnection threat.
+function junctionLive(sides) {
+  return sides.some((side) => side.branch.reconnectable);
+}
+
 function branchWorthClearing(branch, cfg) {
   if (!branch) return false;
-  // An isolated plain branch has nothing to destroy and cannot be reinforced:
-  // holding the junction is enough, so keep the main wave moving.
+  // A dead branch has nothing to destroy and cannot be reinforced: holding the
+  // junction is enough, so keep the main wave moving.
   if (!branch.reconnectable) return false;
   return Boolean(branch.building);
 }
@@ -270,34 +363,60 @@ function forkDegree(b, at) {
   return exits;
 }
 
-// A full push (mode 2) leaves one soldier behind, so it is only safe when no
-// hostile cell touches the source except the cell we move into: nothing can
-// retake the tail and isolate the wave.
-function allPushSafe(b, at, to) {
-  for (const next of b.neighbors(at)) {
-    if (next !== to && b.enemy(next)) return false;
-  }
-  return true;
-}
-
-// Re-seat the wave on the forward side.  Picking the largest stack regardless
-// of depth walks every forward stack back down the corridor, which is the
-// wasted-gathering stall seen in the replays.
+/**
+ * Re-seat the wave on the forward side.
+ *
+ *  1. A real stack (>= STACK_MIN) inside the forward band of the front cell
+ *     wins: that is the head, and the rear gathers into it.
+ *  2. Otherwise the wave's *body* takes over - the largest stack of the same
+ *     own-connected component.  That is the recovery the old "largest stack
+ *     anywhere" fallback provided when a half push dumped the head and left
+ *     the mass behind, but it can no longer jump across a cut, which is what
+ *     promoted the rear home crown and reversed the path.
+ *  3. With no stack in the front component at all, return -1: the caller
+ *     holds its objective instead of walking the rear mass up the corridor.
+ */
 function forwardStack(b, own, crown, h, slack = 3) {
   const f = h.field(b, [crown]);
-  const candidates = [];
+  const cells = [];
   for (const at of own) {
-    if (b.isolated[at] || b.army[at] <= 1) continue;
+    if (b.isolated[at]) continue;
     const distance = f.distance[at];
-    if (Number.isFinite(distance)) candidates.push({ at, distance, army: b.army[at] });
+    if (Number.isFinite(distance)) cells.push({ at, distance, army: b.army[at] });
   }
-  if (!candidates.length) return -1;
-  const front = Math.min(...candidates.map((cell) => cell.distance));
-  const band = candidates.filter((cell) => cell.distance <= front + slack);
+  if (!cells.length) return -1;
+  const staging = cells.filter((cell) => cell.distance >= 2);
+  const pool = staging.length ? staging : cells;
+  const frontCell = pool.reduce((best, cell) =>
+    cell.distance < best.distance || (cell.distance === best.distance && cell.army > best.army) ? cell : best,
+  pool[0]);
+  const comp = ownComponent(b, frontCell.at);
+  const stacks = cells.filter((cell) => comp.has(cell.at) && cell.army > 1);
+  if (!stacks.length) return -1;
+  const front = Math.min(...stacks.map((cell) => cell.distance));
+  const band = stacks.filter((cell) => cell.distance <= front + slack);
   band.sort((a, z) => z.army - a.army || a.distance - z.distance || a.at - z.at);
-  if (band[0].army >= 8) return band[0].at;
-  candidates.sort((a, z) => z.army - a.army || a.distance - z.distance || a.at - z.at);
-  return candidates[0].at;
+  if (band[0].army >= STACK_MIN) return band[0].at;
+  stacks.sort((a, z) => z.army - a.army || a.distance - z.distance || a.at - z.at);
+  return stacks[0].at;
+}
+
+// Own-anchor connectivity, not proximity: cells joined through our own live
+// territory.  A component cannot receive a delivery from another one, so a rear
+// crown cut off from the front must never be offered as the rally.
+function ownComponent(b, start) {
+  const comp = new Set();
+  if (!b.own(start) || b.isolated[start]) return comp;
+  comp.add(start);
+  const queue = [start];
+  for (let head = 0; head < queue.length; head += 1) {
+    for (const next of b.neighbors(queue[head])) {
+      if (comp.has(next) || !b.own(next) || b.isolated[next]) continue;
+      comp.add(next);
+      queue.push(next);
+    }
+  }
+  return comp;
 }
 
 function crownAtRisk(b, at) {
@@ -353,12 +472,12 @@ function pickCrown(b, m, own, state, h) {
   return best;
 }
 
-// Staging must sit on the forward side of the attack axis.  A deep rear cell
-// pulls every front stack backwards one corridor cell at a time, which is the
-// "gathering walked the same route twice" stall from the replays.  Scan
-// outward in two-cell bands and stop at the first band that actually holds a
-// stack: that is the forward-most mass, and the rear gathers into it instead
-// of the front walking back.
+// Staging must sit on the forward side of the attack axis.  Scan outward in
+// two-cell bands and stop at the first band that actually holds a stack: that
+// is the forward-most mass, and the rear gathers into it instead of the front
+// walking back.  The scan is restricted to the own-connected component of the
+// front cell: after a frontier cut the home crown is a *different* component,
+// and promoting it is exactly the rear re-seat that reversed the path.
 function launchCell(b, own, crown, h) {
   const f = h.field(b, [crown]);
   const cells = [];
@@ -370,25 +489,117 @@ function launchCell(b, own, crown, h) {
   }
   if (!cells.length) return -1;
   const nearest = Math.min(...cells.map((cell) => cell.distance));
+  const start = cells.find((cell) => cell.distance === nearest).at;
+  const comp = ownComponent(b, start);
+  const local = cells.filter((cell) => comp.has(cell.at));
+  if (!local.length) return start;
+  const nearestLocal = Math.min(...local.map((cell) => cell.distance));
   const largest = (pool) => pool.reduce((best, cell) =>
     cell.army > best.army || (cell.army === best.army && cell.distance < best.distance) ? cell : best,
   pool[0]);
   // Cells adjacent to the target are contact, not staging; only use them when
-  // the board has nothing else.
-  for (let band = nearest; band <= nearest + 60; band += 2) {
-    const inside = cells.filter((cell) => cell.distance <= band + 1);
+  // the connected part has nothing else.
+  for (let band = nearestLocal; band <= nearestLocal + 60; band += 2) {
+    const inside = local.filter((cell) => cell.distance <= band + 1);
     const staging = inside.filter((cell) => cell.distance >= 2);
     const stack = largest(staging.length ? staging : inside);
     if (stack && stack.army > 1) return stack.at;
   }
-  const staging = cells.filter((cell) => cell.distance >= 2);
-  const pool = staging.length ? staging : cells;
+  const staging = local.filter((cell) => cell.distance >= 2);
+  const pool = staging.length ? staging : local;
   return pool.reduce((best, cell) =>
     cell.distance < best.distance || (cell.distance === best.distance && cell.army > best.army) ? cell : best,
   pool[0]).at;
 }
 
-function expandDecision(b, m, own, h, state) {
+/**
+ * A crown/city keeps a real defensive reserve: the strongest adjacent enemy
+ * stack plus the force that lands two ticks out (anchors grow every tick, so a
+ * lone soldier there still counts).  Everything above the reserve belongs to
+ * the super-wave instead of sitting at home.
+ */
+function anchorReserve(b, h, at, floor = DEFAULTS.anchorReserve) {
+  if (!['crown', 'city'].includes(b.kind(at))) return 0;
+  let reserve = Math.max(1, floor);
+  for (const next of b.neighbors(at)) {
+    if (b.enemy(next) && !b.isolated[next]) reserve = Math.max(reserve, b.army[next]);
+  }
+  if (h?.enemyEta && h?.etaArrival) {
+    const eta = h.enemyEta(b);
+    reserve = Math.max(reserve, h.etaArrival(eta, at) + 1);
+  }
+  return reserve;
+}
+
+/**
+ * Forward gathering.
+ *
+ * The source selection is the proven generic gather (one stack per tick along
+ * the own-cell route toward the rally), with three corrections on top:
+ *
+ *   1. the rally is re-seated forward before the gather runs: if a real stack
+ *      is closer to the target crown than the root, the root moves up to it.
+ *      That is what stops a forward stack from being walked back.
+ *   2. a step that would increase the distance to the target crown is refused.
+ *      The t28.5-33 back-and-forth was the rally jumping to a rear pack cell
+ *      after a frontier cut and then pulling the front back; the stack now
+ *      holds, and the rally moves up to it instead.
+ *   3. an anchor (crown/city) keeps its defensive reserve when it contributes:
+ *      above the reserve its surplus joins the wave, below it the move is
+ *      refused so the anchor is never drained to a token garrison.
+ */
+function blitzGather(b, m, own, state, crown, need, cfg, h, reason) {
+  if (!Number.isInteger(crown) || crown < 0) return null;
+  if (!b.own(state.root) || b.isolated[state.root]) return null;
+  const cf = h.field(b, [crown]);
+  const forward = forwardStack(b, own, crown, h);
+  if (forward >= 0 && Number.isFinite(cf.distance[forward]) &&
+    (!Number.isFinite(cf.distance[state.root]) || cf.distance[forward] < cf.distance[state.root])) {
+    if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') {
+      console.error('RESEAT-FWD', b.turn, state.root, '->', forward, cf.distance[state.root], cf.distance[forward]);
+    }
+    state.root = forward;
+    state.halfAt = -1;
+    state.halfPushes = 0;
+    m.delivery = null;
+  }
+  if (b.army[state.root] >= need) {
+    m.delivery = null;
+    return null;
+  }
+  const decision = h.gather(b, m, state.root, need, reason);
+  if (!decision) return null;
+  const action = decision.action;
+  if (!action || action.kind !== 'attack') return decision;
+  const from = b.idx(action.x, action.y);
+  const to = b.idx(action.dx, action.dy);
+  if (!Number.isFinite(cf.distance[from]) || cf.distance[to] > cf.distance[from]) {
+    // The generic gather wanted to walk this stack back down the corridor.
+    // Hold it; the rally re-seats on it next tick instead of reversing.
+    if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') {
+      console.error('HOLD-BACK', b.turn, from, '->', to, cf.distance[from], '->', cf.distance[to]);
+    }
+    m.delivery = null;
+    return null;
+  }
+  const reserve = anchorReserve(b, h, from, cfg.anchorReserve);
+  if (reserve > 0) {
+    const send = computePush(b, from, to, action.mode ?? 0);
+    if (b.army[from] - send < reserve) {
+      // The anchor would be drained below its reserve: send half instead.
+      const half = computePush(b, from, to, 1);
+      const alt = actionCoordinates(b, from, to, 1);
+      if (half > 0 && b.army[from] - half >= reserve && preview(b, alt).ok) {
+        return { action: alt, branch: reason };
+      }
+      m.delivery = null;
+      return null;
+    }
+  }
+  return decision;
+}
+
+function expandDecision(b, m, own, h, state, cfg = mazeBlitzConfig()) {
   const enemies = [];
   for (let at = 0; at < b.size; at += 1) if (b.enemy(at) && !b.isolated[at]) enemies.push(at);
   const ed = h.field(b, enemies);
@@ -397,30 +608,86 @@ function expandDecision(b, m, own, h, state) {
   return { action: null, branch: 'blitz-expand-wait' };
 }
 
-// Main-route transit.  A half push keeps a real guard; repeating it up to
-// `cfg.halfPushes` times at a fork moves 7/8 of the wave while 1/8 stays on the
-// junction.  Mode 0 is never tried: its reserve is a token guard, not a hold.
+/**
+ * Rule: the main-route transit is only a half push when a side branch can still
+ * reconnect.  A dead branch never earns the three half-push ticks: the wave
+ * goes fully into the live direction.  Mode 0 is never tried (its reserve is a
+ * token guard, not a hold).
+ */
+function pushModes(b, root, next, live) {
+  const building = !b.friendly(next) && ['crown', 'city'].includes(b.kind(next));
+  const half = computePush(b, root, next, 1);
+  if (building) {
+    // Captures default to the half push: it still kills the garrison in one
+    // tick and leaves a real guard behind.  A full push is the exception, for
+    // the case where half cannot take the garrison at all (the target is one
+    // cell away, so that exchange is decided now).
+    if (half > b.army[next]) return [1];
+    return computePush(b, root, next, 2) > b.army[next] ? [2, 1] : [1];
+  }
+  return live ? [1] : [2, 1];
+}
+
+/**
+ * A push the generic guard refuses only because it still counts a dead branch
+ * as a live threat.  The move is still proven: legal, capturing, and the
+ * captured head stays connected to our anchors (the engine freezes a column
+ * that its own push cuts).
+ */
+function directPush(b, root, next, mode) {
+  const action = actionCoordinates(b, root, next, mode);
+  const result = preview(b, action);
+  if (!result.ok) return null;
+  if (b.enemy(next) && !result.captured) return null;
+  const connected = connectedSet(result.after, b.playerId);
+  return connected.has(next) ? action : null;
+}
+
+// Main-route transit.  At a live fork a half push keeps a real guard and is
+// repeated up to `cfg.halfPushes` times (7/8 forward, 1/8 on the junction).
+// With every side branch dead the wave commits fully instead.
 function march(b, state, path, cfg, h) {
   const root = state.root;
   const next = path[1];
   const fork = forkDegree(b, root) >= 3;
+  const sides = junctionSides(b, root, next, -1, cfg);
+  const live = junctionLive(sides);
+  // The guard only ever bypasses the generic push guard when every side branch
+  // is structurally dead: there the enemy really cannot touch the tail.  A
+  // live branch that is merely far away still goes through `safeMove`.
+  const deadOnly = sides.every((side) => !side.branch.reconnectable);
+  const modes = pushModes(b, root, next, live);
   let action = null;
   let mode = -1;
-  for (const candidate of allPushSafe(b, root, next) ? [2, 1] : [1]) {
-    const attempt = h.safeMove(b, root, next, 'blitz-push', [candidate]);
+  for (const candidate of modes) {
+    // The generic guard still charges us for a structurally dead branch, so a
+    // dead junction may verify the same push directly before falling back to a
+    // weaker mode.  Mode order is preserved: a half-sufficient capture stays a
+    // half push even when the full push would also be legal.
+    let attempt = h.safeMove(b, root, next, 'blitz-push', [candidate]);
+    if (!attempt && deadOnly) attempt = directPush(b, root, next, candidate);
     if (!attempt) continue;
     action = attempt;
     mode = candidate;
     break;
   }
   if (!action) return null;
-  const holding = fork && mode === 1;
+  if (process.env.APEX_MAZE_BLITZ_DEBUG === '1' && fork) {
+    console.error('JUNCTION', b.turn, 'root', root, 'army', b.army[root], 'mode', action.mode,
+      'live', live, 'sides', sides.map((side) => `${side.at}:${side.branch.reconnectable ? 'live' : 'dead'}:${b.isolated[side.at] ? 'iso' : 'free'}:${b.army[side.at]}`).join(','));
+  }
+  // Repeated half pushes only make sense on a real fork, and a capture at a
+  // fork stays in the ladder too: the captured cell is ours from the next tick
+  // on, so halving into it moves the rest of the wave through instead of
+  // stranding half the column on the junction.
+  const holding = fork && live && mode === 1;
   const count = holding ? (state.halfAt === root ? state.halfPushes : 0) + 1 : 0;
   return {
     action,
     branch: b.enemy(next) ? 'blitz-break' : 'blitz-march',
     next,
     mode,
+    live,
     // Stay on the junction for the next half push until the guard is 1/8.
     advance: !holding || count >= cfg.halfPushes,
     count,
@@ -462,26 +729,21 @@ function splitDecision(b, state, path, mainNeed, cfg, h) {
   if (b.turn - state.lastSplitTurn < cfg.splitCooldown) return null;
   const root = state.root;
   const next = path[1];
-  const sides = [];
-  for (const side of b.neighbors(root)) {
-    if (side === next || side === state.prev) continue;
-    if (!b.passable(side)) continue;
-    sides.push(side);
-  }
+  const sides = junctionSides(b, root, next, state.prev, cfg);
   if (!sides.length) return null;
-  const connected = enemyConnectedOwners(b, sides.length ? [root, ...sides] : [root]);
   const wave = b.army[root];
   let best = null;
   for (const side of sides) {
-    const branch = analyzeBranch(b, root, side, cfg, connected);
-    const threatened = branch.adjacent >= cfg.junctionThreat;
-    const worth = branchWorthClearing(branch, cfg) ||
-      (threatened && branch.reconnectable === false && branch.cost > 0);
+    const branch = side.branch;
+    // Rule A: an unreachable branch is dead.  Its stacks are already cut off
+    // and the engine freezes them, so they are never worth a tick.
+    const worth = branchWorthClearing(branch, cfg);
     if (!worth) {
       state.skippedBranches += 1;
       continue;
     }
-    const send = computePush(b, root, side, 1);
+    const threatened = branch.adjacent >= cfg.junctionThreat;
+    const send = computePush(b, root, side.at, 1);
     const need = Math.max(cfg.branchReserve, branch.cost + cfg.branchReserve);
     if (send < need) continue;
     if (send > wave * cfg.branchShare) continue;
@@ -490,7 +752,7 @@ function splitDecision(b, state, path, mainNeed, cfg, h) {
     const kindScore = branch.building?.kind === 'crown' ? 300 : branch.building ? 120 : 60;
     const score = kindScore - branch.depth * 2 - need * 0.1 + (threatened ? 40 : 0);
     if (!best || score > best.score) {
-      best = { side, branch, send, score, goal: branch.building?.at ?? -1 };
+      best = { side: side.at, branch, send, score, goal: branch.building?.at ?? -1 };
     }
   }
   if (!best) return null;
@@ -549,43 +811,60 @@ function pushDecision(b, m, own, h, state, cfg) {
   const detached = advanceDetach(b, m, state, cfg, h);
   if (detached) return detached;
   // A cut corridor freezes the column in place, so repairing the cut is worth
-  // one action before anything else; if no rear stack can reconnect it, the
-  // trapped stack can never move again and a new root is the only option.
+  // one action before anything else.  While the front is cut the objective and
+  // the root stay where they are: the repair is aimed at the trapped column,
+  // and no rear cell is promoted while the front can still be reconnected.
   if (Number.isInteger(state.root) && b.own(state.root) && b.isolated[state.root]) {
     if (!state.frozenAt) state.frozenAt = b.turn;
     state.frozen = (state.frozen || 0) + 1;
     const rescue = rescueCut(b, own, state, h, cfg);
     if (rescue) return rescue;
-    if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') console.error('ABANDON', b.turn, state.root, b.army[state.root]);
     state.abandons = (state.abandons || 0) + 1;
+    // Hold the objective and the root while the cut is fresh: the trapped
+    // column pays one half only, and a nearby stack may still reopen it.  The
+    // root is NOT re-seated to whatever stack happens to be largest - that is
+    // the rear fallback that produced the t28.5-33 backward walk.
+    if (state.abandons < cfg.abandonLimit) {
+      if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') console.error('HOLD-CUT', b.turn, state.root, state.abandons);
+      return { action: null, branch: 'blitz-hold' };
+    }
+    if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') console.error('ABANDON', b.turn, state.root, b.army[state.root]);
+    // The trapped column is really gone.  Take over from a forward, connected
+    // stack only; if there is none (or it is a token), hand the board back to
+    // the default planner instead of walking a rear stack up the same corridor.
     const forward = Number.isInteger(state.crown) && b.enemy(state.crown)
       ? forwardStack(b, own, state.crown, h)
       : -1;
-    const strongest = forward >= 0
-      ? forward
-      : own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
-    // A trapped column leaves no usable wave. Do not burn the rest of the
-    // game marching a token stack down the same corridor: hand the board back
-    // to the default maze planner (the layer stays additive).
-    if (state.abandons >= cfg.abandonLimit || b.army[strongest] < Math.max(100, waveFloor(b.size, cfg) * 0.4)) {
+    if (forward < 0 || b.army[forward] < Math.max(100, waveFloor(b.size, cfg) * 0.4)) {
       state.phase = 'done';
       return null;
     }
-    state.root = strongest;
+    state.root = forward;
     state.halfAt = -1;
     state.halfPushes = 0;
     state.stall = 0;
   }
+  const crownReady = Number.isInteger(state.crown) && b.enemy(state.crown) && b.kind(state.crown) === 'crown';
   if (!Number.isInteger(state.root) || !b.own(state.root) || b.army[state.root] <= 1) {
-    const forward = Number.isInteger(state.crown) && b.enemy(state.crown)
-      ? forwardStack(b, own, state.crown, h)
-      : -1;
+    const forward = crownReady ? forwardStack(b, own, state.crown, h) : -1;
     state.root = forward >= 0
       ? forward
-      : own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
+      : launchCell(b, own, state.crown, h);
     state.halfAt = -1;
     state.halfPushes = 0;
     state.stall = 0;
+  } else if (crownReady && b.army[state.root] < STACK_MIN) {
+    // The head was dumped by a half push and left a token behind.  A two or
+    // four soldier root cannot push, so the body takes the wave over (same
+    // own-connected component only).
+    const body = forwardStack(b, own, state.crown, h);
+    if (body >= 0 && b.army[body] > b.army[state.root] * 2) {
+      state.root = body;
+      state.halfAt = -1;
+      state.halfPushes = 0;
+      state.stall = 0;
+      return pushDecision(b, m, own, h, state, cfg);
+    }
   }
   if (!(Number.isInteger(state.crown) && b.enemy(state.crown) && b.kind(state.crown) === 'crown')) {
     state.crown = pickCrown(b, m, own, state, h);
@@ -647,7 +926,7 @@ function pushDecision(b, m, own, h, state, cfg) {
     }
     return { action: null, branch: 'blitz-retarget' };
   }
-  const delivery = h.gather(b, m, state.root, b.army[state.root] + 40, 'blitz-rejoin');
+  const delivery = blitzGather(b, m, own, state, state.crown, b.army[state.root] + 40, cfg, h, 'blitz-rejoin');
   if (delivery) return delivery;
   return { action: null, branch: 'blitz-push-wait' };
 }
@@ -657,14 +936,14 @@ function musterDecision(b, m, own, enemies, h, state, cfg) {
     state.crown = pickCrown(b, m, own, state, h);
     state.root = -1;
   }
-  if (state.crown < 0) return expandDecision(b, m, own, h, state);
+  if (state.crown < 0) return expandDecision(b, m, own, h, state, cfg);
   if (!Number.isInteger(state.root) || !b.own(state.root) || b.isolated[state.root]) {
     state.root = launchCell(b, own, state.crown, h);
     state.halfAt = -1;
     state.halfPushes = 0;
     m.delivery = null;
   }
-  if (state.root < 0) return expandDecision(b, m, own, h, state);
+  if (state.root < 0) return expandDecision(b, m, own, h, state, cfg);
   const f = h.field(b, [state.crown]);
   const path = h.route(f, state.root);
   if (!path || path.length < 2) {
@@ -694,9 +973,13 @@ function musterDecision(b, m, own, enemies, h, state, cfg) {
     state.launches += 1;
     return pushDecision(b, m, own, h, state, cfg);
   }
-  const delivery = h.gather(b, m, state.root, gate, 'blitz-muster');
+  if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') {
+    console.error('MUSTER', b.turn, 'root', state.root, 'wave', wave, 'floor', floor, 'gate', gate,
+      'remaining', remaining, 'dist', f.distance[state.root]);
+  }
+  const delivery = blitzGather(b, m, own, state, state.crown, gate, cfg, h, 'blitz-muster');
   if (delivery) return delivery;
-  return expandDecision(b, m, own, h, state);
+  return expandDecision(b, m, own, h, state, cfg);
 }
 
 function mazeBlitzPlan(b, m, own, enemies, h, cfg = mazeBlitzConfig()) {
@@ -707,7 +990,7 @@ function mazeBlitzPlan(b, m, own, enemies, h, cfg = mazeBlitzConfig()) {
   // Expansion phase: no construction at all, the burst window rewards cell
   // count and nothing else.
   if (state.phase === 'expand') {
-    if (b.turn <= cfg.openingEnd) return expandDecision(b, m, own, h, state);
+    if (b.turn <= cfg.openingEnd) return expandDecision(b, m, own, h, state, cfg);
     state.phase = 'muster';
     m.delivery = null;
   }
@@ -733,11 +1016,19 @@ module.exports = {
   enemyGuard,
   gatherableMass,
   forkDegree,
-  allPushSafe,
   forwardStack,
+  ownComponent,
   homeCrownExposed,
   launchCell,
   analyzeBranch,
   branchWorthClearing,
+  branchRegion,
+  branchAnchored,
+  junctionSides,
+  junctionLive,
+  pushModes,
+  directPush,
+  anchorReserve,
+  blitzGather,
   initialState,
 };

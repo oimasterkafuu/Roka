@@ -2789,5 +2789,5 @@ function plan(b,m,deadline) {
 }
 // Shared helper surface for the blitz module (no require cycle: the blitz
 // module keeps its own board/rules imports).
-const BLITZ_HELPERS={field,route,gather,safeMove,mazeOpening,opening,defense,localGuard};
+const BLITZ_HELPERS={field,route,gather,safeMove,mazeOpening,opening,defense,localGuard,enemyEta,etaArrival};
 module.exports={plan,recover,secureDecision,BLITZ_HELPERS,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,crownLandAnchor,defense,defensiveCut,emergencyDefensiveCut,econProfile,citySnowball};
