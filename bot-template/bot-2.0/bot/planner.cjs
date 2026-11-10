@@ -3,6 +3,7 @@
 const { makeBoard, connectedSet, distanceField, anchorCells, cutAnalysis } = require('./board.cjs');
 const { computePush, actionCoordinates, preview } = require('./rules.cjs');
 const { lastMileConfig, lastMileState, reseatRoot } = require('./lastmile.cjs');
+const { medPlanConfig, economyYields, crownRaceHold } = require('./medplan.cjs');
 const {
   snowballConfig, snowballEntry, snowballExit, snowballTurn, snowballTakesTick,
   anchorScore, paintScore, captureScore, freshSnowball,
@@ -1571,7 +1572,17 @@ function sustainEconomy(b, m, own, ed, enemies) {
       : own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
   const distance = cf.distance[head];
   // Do not stop a breach already within striking distance of the enemy core.
-  if (!Number.isFinite(distance) || distance < 24) {
+  // `APEX_MED_PLAN=1` rescales that reach on mediterranean rooms: the 24-cell
+  // large-map radius is longer than the ring those rooms are built from, so it
+  // held permanently and froze the crown economy from tick ~500 (7 crowns
+  // against 21 - see bot/medplan.cjs).  With the layer on, the yield boundary is
+  // the last-mile approach distance, i.e. economy stops exactly when a column
+  // starts trading blows on its crown.  Flag off: unchanged 24 for every map.
+  const economy = economyYields(
+    { mode: String(m?.mapMode || ''), size: b.size, distance },
+    medPlanConfig(),
+  );
+  if (economy.yields) {
     // A rear project selected before the spearhead arrived must not continue
     // consuming turns after the campaign enters its finishing corridor.
     // Abandon only the remote project; a safe frontline project remains valid
@@ -2572,6 +2583,33 @@ function plan(b,m,deadline) {
   // every tick; a harmless nearby pressure signal could therefore steal the
   // action budget, reset the delivery cursor, and make the bot collect the
   // same route forever without ever reaching the first hostile cell.
+  //
+  // Mediterranean crown-race hold (APEX_MED_PLAN, on by default): on a ring
+  // room, income is 1 army/tick per crown and a column that trades one-for-one
+  // wins nothing, so the crown budget the economy is chasing (`enemyCrowns + 2`)
+  // owns the action budget until it is actually met.  Defence, the kill strike
+  // and the last mile all run above this gate.
+  const medPlan = medPlanConfig();
+  if (medPlan.enabled && !campaignPaused) {
+    const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+    if (enemyCrowns) {
+      const campaignAt = m.campaign && Number.isInteger(m.campaign.crown) &&
+        Number.isInteger(m.campaign.at) && b.own(m.campaign.at) ? m.campaign : null;
+      // Live campaign distance: the stored one only refreshes inside
+      // chooseCampaign, which this gate is about to skip.  Built lazily so the
+      // board-wide field is only paid for when the hold can actually fire.
+      const campaignDistance = () => (campaignAt
+        ? field(b, [campaignAt.crown]).distance[campaignAt.at] : Infinity);
+      const held = crownRaceHold({
+        mode: String(m.mapMode || ''), size: b.size, maze: mazeBoard, turn: b.turn,
+        ownCrowns: own.filter((at) => b.kind(at) === 'crown').length,
+        enemyCrowns, campaignDistance,
+        ownArmy: own.reduce((sum, at) => sum + b.army[at], 0),
+        enemyArmy: enemies.reduce((sum, at) => sum + b.army[at], 0),
+      }, medPlan);
+      if (held) campaignPaused = true;
+    }
+  }
   if (m.campaign && Number.isInteger(m.campaign.at) && b.own(m.campaign.at) && !b.isolated[m.campaign.at]) {
     const campaign = chooseCampaign(b, m, own);
     if (campaign?.action) {

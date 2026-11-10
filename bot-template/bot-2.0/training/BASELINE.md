@@ -229,6 +229,49 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - 分模式（seeds 8）：anti random 9/11/12、med 14/9/9、arch 18/0/14、maze 21/6/5；apex random 25/0/7、med 17/4/11、arch 20/0/12、maze 24/1/7。
 - 结论：apex 已接近 70%，anti 的 random/mediterranean 大图仍是主缺口；early tempo 与 mediterranean 专项实验继续进行。
 
+### 2026-11-10：地中海皇冠竞赛层（`APEX_MED_PLAN=1`，默认关）
+
+- 诊断（官方尺寸 seeds 8、`/tmp/final8-apex.json`）：mediterranean 是唯一低于 70% 的地图（17W/4D/11L，胜率 53.1%），0.68 组 7W/4D/5L。败局时序的共同形态是**皇冠经济在中局完全停摆**：`seed apex-long-2-mediterranean` 先手 t700 以 2080 兵/7 皇冠对 2114 兵/14 皇冠打平，t1500 变成 4427/7 对 11278/21；`long-3` 先手 t100 是 5 皇冠对 4，t700 变成 1 对 7。引擎产能是「皇冠 +1/Tick、其他地 50 Tick +1」，7 对 21 就是 10 兵/Tick 的永久赤字，靠地盘或交换都补不回来。
+- 原因：`sustainEconomy` 里「campaign 已在敌方核心 24 格内就让位」是大地图常数；0.68 环形房只有约 890 格、其中约 380 是海，整圈子陆地周长不到 30 格，所以纵队从 t300 起永远在 24 格内，bot 从此既不建皇冠也不再回到经济窗口。
+- 机制（`bot/medplan.cjs` + `planner.cjs` 两处接线，全部由 `APEX_MED_PLAN=1` 开启）：
+  1. `economyYields`：地中海大图把该半径换成 12（`APEX_MED_PLAN_REACH`），只在纵队真的贴身（<= 12 格）时让位。
+  2. `crownRaceHold`：`ownCrowns < enemyCrowns + 2` 且兵力未到对手 1.35× 时，皇冠竞赛暂占行动预算（campaign 冻结一 Tick、根节点与集结状态保留）；防守、终结层、最后一段仍在它上面，纵队已贴到 `reach` 内则立刻放开。
+  - 距离探针按需构建（`campaignDistance` 传 thunk），只在廉价门控都已通过后才付一次棋盘级 field：早期 eager 版本把 apex 地中海 p95 抬到 43.8ms，惰性版本回落到 36.0ms（同种子基线 41.3ms）。
+- 结果（完整官方尺寸、10 worker、2400 Tick、双座位）：
+  - seeds 8 apex：**88W/7D/33L**（基线 86/5/37；配对 +2 胜，平均 +0.047，CI [−0.023,+0.125]）。mediterranean **19W/6D/7L**（基线 17/4/11；+6.3pp，CI [−0.094,+0.500]），0.68 组 9W/6D/1L（基线 7/4/5；+12.5pp，CI [−0.125,+0.938]）；random/maze/archipelago 与 0.34 组逐局完全一致。
+  - seeds 8 anti：**61W/33D/34L**（基线 62/26/40；配对平均 +0.039，CI [+0.000,+0.078]）。mediterranean 14W/15D/3L（基线 14/9/9，胜率不变，6 局 0.68 败局变平局，终局土地由 2~18 提高到 73~334）；random 组的 −1 胜是同参数重跑抖动（成对 CI 贴 0）。
+- 被否定的拆分/变体（mediterranean seeds 8、32 局）：只收半径 17W/2D/13L（比基线更差，两个平局变败局）；只做竞赛占用 17W/6D/9L（把败局拖成平局但拿不到胜局）；「经济先、不冻结 campaign」的 window 变体 12W/10D/10L（且同样付 defense 成本）；占用节奏 2 / 4 分别 18W/6D/8L、19W/3D/10L，均不如每 Tick。
+- 已知代价：占用让规划器在僵持局每 Tick 走一遍 `defense`（基线在 campaign 返回后根本不跑），单局对照（`apex-long-1-mediterranean` 0.68 后手）p50 6.95ms → 53.4ms、66% 决策 > 40ms；默认预算 80ms 下会有一部分决策走兜底。这是当前层未解决的问题：下一步应给「占用 Tick 上的防守」一个廉价预检（例如先看皇冠/城市 6 格内是否有敌兵再跑完整 `emergencyDefensiveCut`），或把占用限制在 `defense` 已触发过的 Tick 上，把这一层的延迟降回基线水平后再考虑并入默认。
+- 结论：机制方向明确（0.68 地中海 +2 胜、6 局败局移出败局），但成对 CI 仍跨 0，且存在上述延迟代价，因此**保持 `APEX_MED_PLAN` 默认关**，只在实验分支记录。
+
+### 2026-11-10：地中海皇冠竞赛层的释放阈值复核（`APEX_MED_PLAN` 默认开启）
+
+- 上一版把该层留在默认关，理由是「占用 Tick 会多跑一轮 `defense`」。本轮的诊断显示剩下的地中海平局/败局是另一种形态：**中局双方各持 25~30 座皇冠时 `enemyCrowns + 2` 永远达不到**，campaign 被永久冻结到 2400 Tick（例：`apex-long-3-mediterranean` 先手 t1300 为 30 皇冠/246 地/11.5k 兵对 31/238/11.0k，t1400 领地塌到 76）。因此问题不在「占用太多」，而在**释放条件太早**。
+- 只改一个旋钮：`crownRaceHold` 的兵力压制释放由 1.35× 放宽到 1.6×（`DEFAULT_DOMINANCE`，`APEX_MED_PLAN_DOMINANCE` 仍可覆盖）。环形房里 1.4× 总兵力是中局常态，不是已定胜负；在那里放开竞赛等于把正在复利的皇冠经济让掉。其余门控（预算达成、纵队贴身 <= `reach`、开局、小图、非地中海）不变。
+- 地中海 seeds 8（32 局、0.34+0.68、2400 Tick、双座位、对手 apex）逐档实测（每行一次完整运行，同机噪声 ±2 局）：
+
+  | 配置 | 地中海 | 0.68 |
+  | --- | --- | --- |
+  | `APEX_MED_PLAN=0`（消融） | 17W / 4D / 11L | 7W / 4D / 5L |
+  | `DOMINANCE=1.35`（旧默认） | 21W / 4D / 7L、20W / 5D / 7L、19W / 6D / 7L | 11/4/1、10/5/1、9/6/1 |
+  | `DOMINANCE=1.6`（新默认） | **22W / 3D / 7L** | **12W / 3D / 1L** |
+  | `DOMINANCE=1.15` | 19W / 7D / 6L | 9W / 7D / 0L |
+  | `CROWN_LEAD=1` | 18W / 5D / 9L | 8W / 5D / 3L |
+  | `CROWN_LEAD=3` | 21W / 4D / 7L | 11W / 4D / 1L |
+  | 产能追平即放开（`ownCrowns + ownLand/50`，试验用 `APEX_MED_PLAN_INCOME`） | 19W / 5D / 8L | 9W / 5D / 2L |
+
+  结论：占用越短越差（lead 1、dominance 1.15、产能追平都更差），所以保留「按皇冠数竞赛」并把压制阈值放宽；`CROWN_LEAD=3` 与 2 等价，保持 2。产能追平方案（`APEX_MED_PLAN_INCOME`）实测为负，代码未保留。
+- 完整官方尺寸 seeds 8（10 worker、2400 Tick、双座位，同机同一批次跑消融与候选）：
+
+  | 对手 | 候选（`APEX_MED_PLAN` 默认开） | 消融（`APEX_MED_PLAN=0`） |
+  | --- | --- | --- |
+  | apex | **90W / 5D / 33L**（70.3%） | 85W / 5D / 38L（66.4%） |
+  | anti | **62W / 32D / 34L** | 62W / 24D / 42L |
+
+  按地图（apex 候选/消融）：random 25/24、maze 24/24、archipelago 20/20、mediterranean **21 / 17**（0.68 地中海 12/7，0.34 地中海 10/10）。anti 的地中海胜场两者都是 14（0.68 组 1W/15D/0L 对 1W/6D/9L：9 个败局变平局）；apex 的 random +1 与 anti 的 maze −1 属于同参数重跑抖动（±1~2 局）。
+- 代价（未解决，因此单独记录）：占用 Tick 会多跑一整轮 `defense`，基线在 campaign 返回后根本不跑。对 anti 的完整尺寸统计：p50 3.6 → 3.5 ms、p95 **38 → 76 ms**、>40 ms 决策 5676 → 18177、`budgetExceeded` 820 → 7554、兜底 180 → 2806（约 2% 决策）。单局剖析（`apex-long-3-mediterranean` 0.68 后手对 anti）显示占用 Tick 的 `defense` 占决策总耗时 69%。下一步应做「锚点附近有敌堆才跑完整防守」的廉价预检，而不是把占用改稀疏（cadence 2/4 更差）。
+- 默认值：`APEX_MED_PLAN` 现在默认开启，`APEX_MED_PLAN=0` 为消融；`test/medplan.test.cjs` 覆盖默认开启、1.6× 释放阈值（含 1.35× 覆盖对比）与逐局不变性。全部 161 个单元测试通过。
+
 ## 后续对比约定
 
 1. 默认使用 `--profile large`（0.34+0.68）与 `--turns 2400`；1.0 地图不再参与基线；
