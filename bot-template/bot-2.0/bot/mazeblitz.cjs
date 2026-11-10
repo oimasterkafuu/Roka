@@ -12,16 +12,24 @@
  *      spent on a city.  The burst pays one army per owned plain per tick, so
  *      the number of owned cells *is* the size of the future wave.
  *   2. muster - after the burst, stop economy and small strikes and pull the
- *      board into one launch cell.
+ *      board into one forward launch cell (never a deep rear cell: a rear
+ *      rally sends every front stack backwards along the corridor).
  *   3. push - march that single column at the nearest reachable crown and
  *      destroy crown > city > plain on the way.
  *
+ * Junction rule: main-route transit uses half pushes (mode 1), repeated up to
+ * three times, so 1/2 + 1/4 + 1/8 = 7/8 of the wave moves up while a real 1/8
+ * guard holds the junction.  The smart split (mode 0) is never used there: it
+ * reserves only the other hostile neighbours' army, which is the token guard
+ * an adjacent anti stack cuts on the next tick.  A full push (mode 2) is only
+ * allowed when the junction has no hostile contact besides the cell we move
+ * into, so nothing can cut the one-soldier tail.
+ *
  * Fork rule: a side branch is only worth clearing when it can still reconnect
  * to an enemy anchor (real connectivity through `connectedSet`, not a local
- * heuristic) or when its column can take the junction we are standing on.
- * An already isolated branch (plain cells cut off from every enemy crown and
- * city) decays by itself; the held junction is enough, so the main wave keeps
- * moving instead of spending ticks in a dead end.
+ * heuristic).  An already isolated branch (plain cells cut off from every
+ * enemy crown and city) decays by itself; the held junction is enough, so the
+ * main wave keeps moving instead of spending ticks in a dead end.
  *
  * `mazeBlitzPlan` receives the planner helpers it needs from `planner.cjs` so
  * this module never imports the planner (no require cycle).
@@ -43,6 +51,7 @@ const DEFAULTS = Object.freeze({
   branchShare: 0.55,
   branchReserve: 24,
   junctionThreat: 12,
+  halfPushes: 3,
   stallLimit: 10,
   detachStall: 4,
   splitCooldown: 6,
@@ -78,6 +87,7 @@ function mazeBlitzConfig(overrides = {}) {
     branchShare: envNumber('APEX_MAZE_BLITZ_BRANCH_SHARE', DEFAULTS.branchShare, 0, 1),
     branchReserve: DEFAULTS.branchReserve,
     junctionThreat: envNumber('APEX_MAZE_BLITZ_JUNCTION', DEFAULTS.junctionThreat, 0, 4000),
+    halfPushes: envNumber('APEX_MAZE_BLITZ_HALF_PUSHES', DEFAULTS.halfPushes, 1, 6),
     stallLimit: DEFAULTS.stallLimit,
     detachStall: DEFAULTS.detachStall,
     splitCooldown: DEFAULTS.splitCooldown,
@@ -118,6 +128,8 @@ function initialState() {
     splits: 0,
     peakWave: 0,
     skippedBranches: 0,
+    halfAt: -1,
+    halfPushes: 0,
   };
 }
 
@@ -249,6 +261,67 @@ function gatherableMass(b, own, root) {
   return mass;
 }
 
+// A junction is any cell with more than one passable exit.  That is exactly
+// where the smart split (mode 0) leaves a token guard, so the main route must
+// never use it there.
+function forkDegree(b, at) {
+  let exits = 0;
+  for (const next of b.neighbors(at)) if (b.passable(next)) exits += 1;
+  return exits;
+}
+
+// A full push (mode 2) leaves one soldier behind, so it is only safe when no
+// hostile cell touches the source except the cell we move into: nothing can
+// retake the tail and isolate the wave.
+function allPushSafe(b, at, to) {
+  for (const next of b.neighbors(at)) {
+    if (next !== to && b.enemy(next)) return false;
+  }
+  return true;
+}
+
+// Re-seat the wave on the forward side.  Picking the largest stack regardless
+// of depth walks every forward stack back down the corridor, which is the
+// wasted-gathering stall seen in the replays.
+function forwardStack(b, own, crown, h, slack = 3) {
+  const f = h.field(b, [crown]);
+  const candidates = [];
+  for (const at of own) {
+    if (b.isolated[at] || b.army[at] <= 1) continue;
+    const distance = f.distance[at];
+    if (Number.isFinite(distance)) candidates.push({ at, distance, army: b.army[at] });
+  }
+  if (!candidates.length) return -1;
+  const front = Math.min(...candidates.map((cell) => cell.distance));
+  const band = candidates.filter((cell) => cell.distance <= front + slack);
+  band.sort((a, z) => z.army - a.army || a.distance - z.distance || a.at - z.at);
+  if (band[0].army >= 8) return band[0].at;
+  candidates.sort((a, z) => z.army - a.army || a.distance - z.distance || a.at - z.at);
+  return candidates[0].at;
+}
+
+function crownAtRisk(b, at) {
+  for (const next of b.neighbors(at)) {
+    if (!b.enemy(next) || b.isolated[next]) continue;
+    if (b.army[next] - 1 >= b.army[at]) return true;
+  }
+  return false;
+}
+
+// Minimal launch veto: a home crown that one enemy push can take must be
+// answered first (the defence layer above this plan already had its chance).
+function homeCrownExposed(b, m) {
+  const home = Number.isInteger(m?.home) ? m.home : -1;
+  if (home >= 0 && b.own(home) && b.kind(home) === 'crown' && !b.isolated[home]) {
+    return crownAtRisk(b, home);
+  }
+  for (let at = 0; at < b.size; at += 1) {
+    if (!b.own(at) || b.kind(at) !== 'crown' || b.isolated[at]) continue;
+    if (crownAtRisk(b, at)) return true;
+  }
+  return false;
+}
+
 function pickCrown(b, m, own, state, h) {
   const crowns = [];
   for (let at = 0; at < b.size; at += 1) {
@@ -280,28 +353,39 @@ function pickCrown(b, m, own, state, h) {
   return best;
 }
 
-// Pick the staging cell: an owned, connected cell a few steps behind the
-// target so the muster is not under fire, biased toward local support.
+// Staging must sit on the forward side of the attack axis.  A deep rear cell
+// pulls every front stack backwards one corridor cell at a time, which is the
+// "gathering walked the same route twice" stall from the replays.  Scan
+// outward in two-cell bands and stop at the first band that actually holds a
+// stack: that is the forward-most mass, and the rear gathers into it instead
+// of the front walking back.
 function launchCell(b, own, crown, h) {
   const f = h.field(b, [crown]);
-  let best = -1;
-  let bestScore = -Infinity;
+  const cells = [];
   for (const at of own) {
     if (b.isolated[at]) continue;
     const distance = f.distance[at];
     if (!Number.isFinite(distance)) continue;
-    const band = distance >= 4 && distance <= 12
-      ? 60
-      : Math.max(0, 40 - Math.abs(distance - 8) * 6);
-    let support = b.army[at] * 0.5;
-    for (const next of b.neighbors(at)) if (b.own(next)) support += b.army[next] * 0.25;
-    const score = band + support - Math.max(0, 3 - distance) * 40;
-    if (score > bestScore) {
-      bestScore = score;
-      best = at;
-    }
+    cells.push({ at, distance, army: b.army[at] });
   }
-  return best >= 0 ? best : -1;
+  if (!cells.length) return -1;
+  const nearest = Math.min(...cells.map((cell) => cell.distance));
+  const largest = (pool) => pool.reduce((best, cell) =>
+    cell.army > best.army || (cell.army === best.army && cell.distance < best.distance) ? cell : best,
+  pool[0]);
+  // Cells adjacent to the target are contact, not staging; only use them when
+  // the board has nothing else.
+  for (let band = nearest; band <= nearest + 60; band += 2) {
+    const inside = cells.filter((cell) => cell.distance <= band + 1);
+    const staging = inside.filter((cell) => cell.distance >= 2);
+    const stack = largest(staging.length ? staging : inside);
+    if (stack && stack.army > 1) return stack.at;
+  }
+  const staging = cells.filter((cell) => cell.distance >= 2);
+  const pool = staging.length ? staging : cells;
+  return pool.reduce((best, cell) =>
+    cell.distance < best.distance || (cell.distance === best.distance && cell.army > best.army) ? cell : best,
+  pool[0]).at;
 }
 
 function expandDecision(b, m, own, h, state) {
@@ -313,19 +397,33 @@ function expandDecision(b, m, own, h, state) {
   return { action: null, branch: 'blitz-expand-wait' };
 }
 
-function march(b, state, path, h) {
+// Main-route transit.  A half push keeps a real guard; repeating it up to
+// `cfg.halfPushes` times at a fork moves 7/8 of the wave while 1/8 stays on the
+// junction.  Mode 0 is never tried: its reserve is a token guard, not a hold.
+function march(b, state, path, cfg, h) {
+  const root = state.root;
   const next = path[1];
-  // Smart split first: it reserves exactly the army of the other hostile
-  // neighbours of the junction, so the cell we leave behind cannot be
-  // recaptured and the column is not cut off (an isolated column cannot move
-  // at all).  In a plain corridor the reserve is zero and this is identical to
-  // the full push.
-  const action = h.safeMove(b, state.root, next, 'blitz-push', [2, 0, 1]);
+  const fork = forkDegree(b, root) >= 3;
+  let action = null;
+  let mode = -1;
+  for (const candidate of allPushSafe(b, root, next) ? [2, 1] : [1]) {
+    const attempt = h.safeMove(b, root, next, 'blitz-push', [candidate]);
+    if (!attempt) continue;
+    action = attempt;
+    mode = candidate;
+    break;
+  }
   if (!action) return null;
+  const holding = fork && mode === 1;
+  const count = holding ? (state.halfAt === root ? state.halfPushes : 0) + 1 : 0;
   return {
     action,
     branch: b.enemy(next) ? 'blitz-break' : 'blitz-march',
     next,
+    mode,
+    // Stay on the junction for the next half push until the guard is 1/8.
+    advance: !holding || count >= cfg.halfPushes,
+    count,
   };
 }
 
@@ -347,7 +445,7 @@ function advanceDetach(b, m, state, cfg, h) {
     return null;
   }
   const next = path[1];
-  const action = h.safeMove(b, detach.at, next, 'blitz-detach', [2, 0, 1]);
+  const action = h.safeMove(b, detach.at, next, 'blitz-detach', [2, 1]);
   if (!action) {
     detach.stall = (detach.stall || 0) + 1;
     if (detach.stall >= cfg.detachStall) state.detach = null;
@@ -400,6 +498,9 @@ function splitDecision(b, state, path, mainNeed, cfg, h) {
   if (!action) return null;
   state.splits += 1;
   state.lastSplitTurn = b.turn;
+  // The detachment restarts the main-route half-push count.
+  state.halfAt = -1;
+  state.halfPushes = 0;
   state.detach = { at: best.side, goal: best.goal, started: b.turn, stall: 0, turns: 0 };
   return { action, branch: 'blitz-fork' };
 }
@@ -457,7 +558,12 @@ function pushDecision(b, m, own, h, state, cfg) {
     if (rescue) return rescue;
     if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') console.error('ABANDON', b.turn, state.root, b.army[state.root]);
     state.abandons = (state.abandons || 0) + 1;
-    const strongest = own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
+    const forward = Number.isInteger(state.crown) && b.enemy(state.crown)
+      ? forwardStack(b, own, state.crown, h)
+      : -1;
+    const strongest = forward >= 0
+      ? forward
+      : own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
     // A trapped column leaves no usable wave. Do not burn the rest of the
     // game marching a token stack down the same corridor: hand the board back
     // to the default maze planner (the layer stays additive).
@@ -466,10 +572,19 @@ function pushDecision(b, m, own, h, state, cfg) {
       return null;
     }
     state.root = strongest;
+    state.halfAt = -1;
+    state.halfPushes = 0;
     state.stall = 0;
   }
   if (!Number.isInteger(state.root) || !b.own(state.root) || b.army[state.root] <= 1) {
-    state.root = own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
+    const forward = Number.isInteger(state.crown) && b.enemy(state.crown)
+      ? forwardStack(b, own, state.crown, h)
+      : -1;
+    state.root = forward >= 0
+      ? forward
+      : own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
+    state.halfAt = -1;
+    state.halfPushes = 0;
     state.stall = 0;
   }
   if (!(Number.isInteger(state.crown) && b.enemy(state.crown) && b.kind(state.crown) === 'crown')) {
@@ -479,11 +594,13 @@ function pushDecision(b, m, own, h, state, cfg) {
       return null;
     }
     state.forward = null;
+    state.halfAt = -1;
+    state.halfPushes = 0;
   }
   const f = h.field(b, [state.crown]);
   const path = h.route(f, state.root);
   if (!path || path.length < 2) {
-    const action = h.safeMove(b, state.root, state.crown, 'blitz-push', [2, 0, 1]);
+    const action = h.safeMove(b, state.root, state.crown, 'blitz-push', [2, 1]);
     if (action) {
       state.prev = state.root;
       state.root = state.crown;
@@ -497,14 +614,23 @@ function pushDecision(b, m, own, h, state, cfg) {
   const mainNeed = routeNeed(b, path.slice(1), state.crown, h, cfg).need;
   const split = splitDecision(b, state, path, mainNeed, cfg, h);
   if (split) return split;
-  const moved = march(b, state, path, h);
+  const moved = march(b, state, path, cfg, h);
   if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') console.error('PUSH', b.turn, state.root, b.army[state.root], path.slice(0,3), moved ? [moved.action.x, moved.action.y, moved.action.dx, moved.action.dy, moved.action.mode] : null);
   if (moved) {
-    const { next, ...decision } = moved;
-    state.prev = state.root;
-    state.root = next;
+    const { next, advance, count, ...decision } = moved;
+    if (advance) {
+      state.prev = state.root;
+      state.root = next;
+      state.halfAt = -1;
+      state.halfPushes = 0;
+      state.peakWave = Math.max(state.peakWave, b.army[next]);
+    } else {
+      // The main wave committed only half this tick; keep the junction as the
+      // root so the following ticks push the next halves through it.
+      state.halfAt = state.root;
+      state.halfPushes = count;
+    }
     state.stall = 0;
-    state.peakWave = Math.max(state.peakWave, b.army[next]);
     return decision;
   }
   // The corridor head is too strong for the current column. Pull the rear in
@@ -534,6 +660,8 @@ function musterDecision(b, m, own, enemies, h, state, cfg) {
   if (state.crown < 0) return expandDecision(b, m, own, h, state);
   if (!Number.isInteger(state.root) || !b.own(state.root) || b.isolated[state.root]) {
     state.root = launchCell(b, own, state.crown, h);
+    state.halfAt = -1;
+    state.halfPushes = 0;
     m.delivery = null;
   }
   if (state.root < 0) return expandDecision(b, m, own, h, state);
@@ -547,21 +675,21 @@ function musterDecision(b, m, own, enemies, h, state, cfg) {
   const wave = b.army[state.root];
   const floor = waveFloor(b.size, cfg);
   // The full route resistance is unbounded (a 0.68 corridor can hold thousands
-  // of enemy army), and an unbounded staging gate simply never launches: those
-  // games hit the tick limit with a 2500-unit column still waiting.  Cap the
-  // gate at a multiple of the board floor so the wave stays decisive without
-  // becoming a permanent muster.
+  // of enemy army), so it is only used as the gather target, capped at a
+  // multiple of the board floor.
   const gate = Math.max(floor, Math.min(need.need, floor * cfg.gateCap));
   const remaining = gatherableMass(b, own, state.root);
   state.peakWave = Math.max(state.peakWave, wave);
-  // Launch when the column clears the target's defence and either reaches the
-  // board-size floor or has already pulled nearly everything the rear still
-  // holds (a small room cannot always reach the nominal floor).
-  const decisive = wave >= need.need && wave >= floor;
-  const exhausted = wave >= need.need && wave >= floor * 0.7 &&
-    remaining <= Math.max(40, wave * 0.2);
-  const deadline = b.turn >= cfg.latestLaunch && wave >= need.need * 0.85 && wave >= floor * 0.6;
-  if (decisive || exhausted || deadline) {
+  // Launch as soon as the wave clears the board floor and a route exists.  The
+  // resistance estimate must not hold a wave that is already bigger than what
+  // the corridor can meet: a 759-unit column waiting for a two-thousand-army
+  // "need" is the missed window from the replays.  The only veto is a home
+  // crown that one enemy push can take on this tick.
+  const viable = !homeCrownExposed(b, m);
+  const ready = wave >= floor;
+  const exhausted = wave >= floor * 0.7 && remaining <= Math.max(40, wave * 0.2);
+  const deadline = b.turn >= cfg.latestLaunch && wave >= floor * 0.6;
+  if (viable && (ready || exhausted || deadline)) {
     state.phase = 'push';
     state.launches += 1;
     return pushDecision(b, m, own, h, state, cfg);
@@ -604,6 +732,11 @@ module.exports = {
   routeNeed,
   enemyGuard,
   gatherableMass,
+  forkDegree,
+  allPushSafe,
+  forwardStack,
+  homeCrownExposed,
+  launchCell,
   analyzeBranch,
   branchWorthClearing,
   initialState,

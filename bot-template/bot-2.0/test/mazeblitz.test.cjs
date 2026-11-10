@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { makeBoard } = require('../bot/board.cjs');
+const { preview } = require('../bot/rules.cjs');
 const { BLITZ_HELPERS } = require('../bot/planner.cjs');
 const {
   BURST_END_TURN,
@@ -14,6 +15,9 @@ const {
   branchWorthClearing,
   waveFloor,
   enemyGuard,
+  launchCell,
+  homeCrownExposed,
+  routeNeed,
 } = require('../bot/mazeblitz.cjs');
 
 const N = 7;
@@ -107,6 +111,28 @@ function memory(b, overrides = {}) {
 function run(b, store, cfg) {
   const { own, enemies } = cells(b);
   return mazeBlitzPlan(b, store, own, enemies, BLITZ_HELPERS, cfg);
+}
+
+// Apply a decision through the real preview so the junction tests see the same
+// board the engine would on the next tick.
+function apply(b, action) {
+  const result = preview(b, action);
+  assert.equal(result.ok, true, 'the decision must be a legal action');
+  b.grid = result.grid;
+  b.army = result.army;
+  b.isolated = result.isolated;
+  b.turn += 1;
+  return result;
+}
+
+function expectForward(b, action, crown) {
+  const f = BLITZ_HELPERS.field(b, [crown]);
+  const from = b.idx(action.x, action.y);
+  const to = b.idx(action.dx, action.dy);
+  assert.ok(
+    f.distance[to] < f.distance[from],
+    `expected a move toward the crown, got ${from} -> ${to}`,
+  );
 }
 
 const enabledCfg = (extra = {}) => mazeBlitzConfig({ enabled: true, ...extra });
@@ -223,4 +249,116 @@ test('the staging guard counts the enemy garrison, not our own', () => {
   b.army[at(2, 3)] = 40;
   b.grid[at(2, 3)] = 2;
   assert.equal(enemyGuard(b, at(1, 4)), 55);
+});
+
+// A corridor: enemy crown at 0, our cells 1..length, our crown at length+1.
+// Options place stacks on the row so a rally can be asked to choose between a
+// forward and a deep stack.
+function corridorBoard(options = {}) {
+  const length = options.length ?? 9;
+  const n = length + 2;
+  const grid = Array(n * M).fill(MOUNTAIN);
+  const army = Array(n * M).fill(0);
+  const isolated = Array(n * M).fill(0);
+  const fog = Array(n * M).fill(0);
+  const put = (x, code, count) => {
+    grid[at(x, 4)] = code;
+    army[at(x, 4)] = count;
+  };
+  put(0, 102, options.crownArmy ?? 10);
+  for (let x = 1; x <= length; x += 1) put(x, 1, 1);
+  for (const [x, count] of Object.entries(options.stacks ?? {})) put(Number(x), 1, count);
+  put(length + 1, 101, options.homeArmy ?? 1);
+  return makeBoard({
+    n,
+    m: M,
+    grid,
+    army,
+    isolated,
+    fog,
+    turn: 70,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('main-route junction transit always half-pushes and keeps at least 1/8', () => {
+  const b = forkBoard({ wave: 480, branch: 'plain', branchArmy: 5, turn: 70 });
+  const store = memory(b, {
+    phase: 'push',
+    crown: at(1, 4),
+    root: at(4, 4),
+    prev: at(5, 4),
+    lastSplitTurn: 70,
+  });
+  const wave = b.army[at(4, 4)];
+  for (let step = 0; step < 3; step += 1) {
+    const decision = run(b, store, enabledCfg());
+    assert.ok(decision, `expected a main-route action on step ${step}`);
+    assert.notEqual(decision.action.mode, 0, 'the smart split is never a junction transit');
+    assert.equal(decision.action.mode, 1);
+    assert.equal(decision.action.half, true);
+    // The head only moves after the third half push has committed 7/8.
+    const last = step === 2;
+    assert.equal(
+      store.blitz.root,
+      last ? at(3, 4) : at(4, 4),
+      'the wave must stay on the junction while it halves',
+    );
+    apply(b, decision.action);
+  }
+  // 1/2 + 1/4 + 1/8 moved up, 1/8 stays as a real junction guard.
+  assert.ok(b.army[at(4, 4)] >= wave / 8, `guard ${b.army[at(4, 4)]} < 1/8 of ${wave}`);
+  assert.ok(b.army[at(3, 4)] > wave * 0.7, 'the forward cell should hold the majority of the wave');
+  // The following tick runs on a plain corridor cell with no hostile side
+  // branch, where the fully committed push is explicitly safe.
+  const advanced = run(b, store, enabledCfg());
+  assert.ok(advanced);
+  assert.equal(advanced.action.mode, 2);
+  assert.equal(store.blitz.halfPushes, 0);
+});
+
+test('the forward rally stages near the front and never sends rear stacks backwards', () => {
+  const b = corridorBoard({ stacks: { 2: 21, 8: 253 } });
+  const store = memory(b, { phase: 'muster', crown: at(0, 4), root: -1 });
+  const decision = run(b, store, enabledCfg());
+  assert.ok(decision);
+  // The staging cell is the forward 21 stack, not the deep 253 stack.
+  assert.equal(store.blitz.root, at(2, 4));
+  assert.equal(launchCell(b, cells(b).own, at(0, 4), BLITZ_HELPERS), at(2, 4));
+  // The deep stack walks toward the crown instead of pulling the front back.
+  expectForward(b, decision.action, at(0, 4));
+  assert.equal(decision.action.x, 8);
+  apply(b, decision.action);
+  // The rally does not re-walk the corridor: the root stays where it was.
+  const next = run(b, store, enabledCfg());
+  assert.ok(next);
+  assert.equal(store.blitz.root, at(2, 4));
+  if (next.action?.kind === 'attack') expectForward(b, next.action, at(0, 4));
+});
+
+test('a 759-unit wave launches even when the route estimate is far higher', () => {
+  const b = corridorBoard({ length: 20, crownArmy: 1500, homeArmy: 100, stacks: { 20: 759 } });
+  const cfg = enabledCfg();
+  const store = memory(b, { phase: 'muster', crown: at(0, 4), root: at(20, 4) });
+  const route = BLITZ_HELPERS.route(BLITZ_HELPERS.field(b, [at(0, 4)]), at(20, 4));
+  assert.ok(routeNeed(b, route, at(0, 4), BLITZ_HELPERS, cfg).need > 759);
+  const decision = run(b, store, cfg);
+  assert.ok(decision);
+  assert.equal(store.blitz.phase, 'push');
+  assert.equal(store.blitz.launches, 1);
+  assert.equal(decision.branch, 'blitz-march');
+  assert.notEqual(decision.action.mode, 0, 'the launch never uses the smart split');
+});
+
+test('an exposed home crown vetoes the launch', () => {
+  const b = forkBoard({ wave: 759 });
+  // An adjacent enemy stack that can take the home crown in one full push.
+  b.grid[at(6, 3)] = 2;
+  b.army[at(6, 3)] = 200;
+  assert.equal(homeCrownExposed(b, { home: at(6, 4) }), true);
+  const store = memory(b, { phase: 'muster', crown: at(1, 4), root: at(4, 4) });
+  const decision = run(b, store, enabledCfg());
+  assert.ok(decision);
+  assert.equal(store.blitz.phase, 'muster');
+  assert.equal(store.blitz.launches, 0);
 });
