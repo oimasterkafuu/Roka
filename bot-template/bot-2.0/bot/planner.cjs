@@ -2584,7 +2584,7 @@ function plan(b,m,deadline) {
   // action budget, reset the delivery cursor, and make the bot collect the
   // same route forever without ever reaching the first hostile cell.
   //
-  // Mediterranean crown-race hold (APEX_MED_PLAN=1, off by default): on a ring
+  // Mediterranean crown-race hold (APEX_MED_PLAN, on by default): on a ring
   // room, income is 1 army/tick per crown and a column that trades one-for-one
   // wins nothing, so the crown budget the economy is chasing (`enemyCrowns + 2`)
   // owns the action budget until it is actually met.  Defence, the kill strike

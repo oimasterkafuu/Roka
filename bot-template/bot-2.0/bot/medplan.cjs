@@ -1,6 +1,7 @@
 'use strict';
 
-// Mediterranean crown-economy window (APEX_MED_PLAN=1, off by default).
+// Mediterranean crown-economy window (APEX_MED_PLAN=1, on by default;
+// APEX_MED_PLAN=0 is the ablation).
 //
 // Diagnosis (seeds-8 official profile, opponent `apex`, 0.68 rooms, 2400 ticks,
 // both seats).  Mediterranean is the only mode below 70% (17W/4D/11L over 32
@@ -50,13 +51,56 @@
 // and the crown/land anchor keeps its random/archipelago scope (copying the
 // opponent's crown count is still the right answer on a mirrored map - imposing
 // the land anchor here measured -2 wins).
+//
+// Tuning (seeds 8, official sizes, 2400 ticks, both seats, opponent `apex`,
+// mediterranean only - 32 games per row): the two release conditions were
+// re-measured after the layer landed, because the remaining med draws were
+// 2400-tick stalemates in which both sides held 25-30 crowns and the
+// `enemyCrowns + 2` budget could therefore never be met:
+//
+//   off (main)                     17W/ 4D/11L
+//   crownLead 2, dominance 1.35    21W/ 4D/ 7L, 20W/5D/7L, 19W/6D/7L
+//   crownLead 2, dominance 1.60    22W/ 3D/ 7L
+//   crownLead 2, dominance 1.15    19W/ 7D/ 6L
+//   crownLead 1                    18W/ 5D/ 9L (also 16W/5D/11L with the
+//                                              income exit below)
+//   crownLead 3                    21W/ 4D/ 7L
+//   income-parity exit (see below) 19W/ 5D/ 8L
+//
+// So the hold is worth more than its release, and the release was firing too
+// early: 1.35x total army is the ordinary mid-game state on a ring, not a
+// decided map.  `DEFAULT_DOMINANCE` is now 1.6 (still released immediately by
+// a real finish, by an adjacent column and by the crown budget).  Shortening
+// the crown budget (lead 1) or replacing it with an income-parity exit
+// (`ownCrowns + ownLand/50 >= enemyCrowns + enemyLand/50`, tried as
+// `APEX_MED_PLAN_INCOME`) both measured negative and were dropped.
+//
+// Full official profile, seeds 8, 2400 ticks, both seats: apex 90W/5D/33L
+// against 85W/5D/38L without the layer (mediterranean 21W/4D/7L against
+// 17W/4D/11L, 0.68 med 12W/3D/1L against 7W/4D/5L; every other mode within
+// +-1 game of the ablation, which is the run-to-run floor on this box); anti
+// 62W/32D/34L against 62W/24D/42L (mediterranean 14W/15D/3L against
+// 14W/6D/12L - the same med wins, nine 0.68 losses becoming draws).
+//
+// Known cost, unchanged and documented in training/BASELINE.md: the held tick
+// falls through to a full defence pass that the campaign would otherwise skip,
+// so on a long 0.68 stalemate against anti p95 goes 38ms -> 76ms and ~2% of
+// decisions reach the 80ms budget.  The next step is a cheap precheck for that
+// defence pass (enemy stack near an anchor) rather than thinning the hold.
 
 const DEFAULT_CORE_REACH = 24;
 const DEFAULT_MED_REACH = 12;
 const DEFAULT_CROWN_LEAD = 2;
 const DEFAULT_START_TURN = 60;
 const DEFAULT_HOLD_CADENCE = 1;
-const DEFAULT_DOMINANCE = 1.35;
+// The hold used to yield to the attack at 1.35x total army.  On a ring that is
+// the ordinary mid-game state, so the race was abandoned exactly while the
+// opponent's crown economy was still compounding: seeds 8, 0.68 mediterranean,
+// 32 games, 22W/3D/7L at 1.6 against 21W/4D/7L, 20W/5D/7L and 19W/6D/7L at 1.35
+// (and 19W/7D/6L at 1.15, 17W/8D/7L when the release was 1.15 with the income
+// exit on).  A decisive finish is still released immediately - it now needs a
+// 1.6x army instead of 1.35x.
+const DEFAULT_DOMINANCE = 1.6;
 
 function number(raw, fallback, min, max) {
   const value = Number(raw);
@@ -74,7 +118,7 @@ function flag(raw, fallback = false) {
 // layer without reloading the planner.
 function medPlanConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.APEX_MED_PLAN, false),
+    enabled: overrides.enabled ?? flag(env.APEX_MED_PLAN, true),
     modes: overrides.modes ??
       String(env.APEX_MED_PLAN_MODES || 'mediterranean').split(',').map((v) => v.trim()).filter(Boolean),
     minBoard: overrides.minBoard ??

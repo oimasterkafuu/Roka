@@ -29,15 +29,16 @@ function withEnv(values, body) {
   }
 }
 
-// The layer is off by default and must stay a mediterranean large-room layer:
+// The layer is on by default and must stay a mediterranean large-room layer:
 // every other mode/size keeps main's 24-cell core reach and no crown-race hold.
-test('APEX_MED_PLAN is off by default and scoped to large mediterranean rooms', () => {
-  assert.equal(medPlanConfig({}, {}).enabled, false);
+// APEX_MED_PLAN=0 is the ablation.
+test('APEX_MED_PLAN is on by default and scoped to large mediterranean rooms', () => {
+  assert.equal(medPlanConfig({}, {}).enabled, true);
   assert.equal(medPlanConfig({}, { APEX_MED_PLAN: '1' }).enabled, true);
   for (const value of ['0', 'false', 'off']) {
     assert.equal(medPlanConfig({}, { APEX_MED_PLAN: value }).enabled, false);
   }
-  const config = medPlanConfig({}, { APEX_MED_PLAN: '1' });
+  const config = medPlanConfig({}, {});
   assert.deepEqual(config.modes, ['mediterranean']);
   assert.equal(config.minBoard, 800);
   assert.equal(config.reach, DEFAULT_MED_REACH);
@@ -53,11 +54,11 @@ test('APEX_MED_PLAN is off by default and scoped to large mediterranean rooms', 
 });
 
 test('the economy yield boundary only shortens on mediterranean large rooms', () => {
-  const off = medPlanConfig({}, {});
+  const off = medPlanConfig({}, { APEX_MED_PLAN: '0' });
   for (const mode of ['random', 'maze', 'archipelago', 'mediterranean']) {
     assert.equal(economyCoreReach({ mode, size: LARGE }, off), DEFAULT_CORE_REACH);
   }
-  const on = medPlanConfig({}, { APEX_MED_PLAN: '1' });
+  const on = medPlanConfig({}, {});
   assert.equal(economyCoreReach({ mode: 'mediterranean', size: LARGE }, on), DEFAULT_MED_REACH);
   // Every other mode and the official normal size keep the main behaviour.
   for (const mode of ['random', 'maze', 'archipelago']) {
@@ -85,7 +86,7 @@ test('the crown-race hold is scoped, released by a dominant army and by the crow
   };
   assert.equal(crownRaceHold(base, config), true);
   // Flag off, wrong mode, small room, maze room: main behaviour.
-  assert.equal(crownRaceHold(base, medPlanConfig({}, {})), false);
+  assert.equal(crownRaceHold(base, medPlanConfig({}, { APEX_MED_PLAN: '0' })), false);
   assert.equal(crownRaceHold({ ...base, mode: 'random' }, config), false);
   assert.equal(crownRaceHold({ ...base, size: 700 }, config), false);
   assert.equal(crownRaceHold({ ...base, maze: true }, config), false);
@@ -94,6 +95,17 @@ test('the crown-race hold is scoped, released by a dominant army and by the crow
   // Budget met, or a dominant army: finish the game instead of racing.
   assert.equal(crownRaceHold({ ...base, ownCrowns: 5 }, config), false);
   assert.equal(crownRaceHold({ ...base, ownArmy: 9000 }, config), false);
+  // The dominance release was widened from 1.35x to 1.6x: on a ring a 1.4x
+  // total army is the ordinary mid game, not a decided map, and releasing the
+  // race there measured -1 to -3 mediterranean wins per 32 games.  A real
+  // finish is still released immediately.
+  assert.equal(crownRaceHold({ ...base, ownArmy: 5600, enemyArmy: 4000 }, config), true);
+  assert.equal(
+    crownRaceHold({ ...base, ownArmy: 5600, enemyArmy: 4000 },
+      medPlanConfig({}, { APEX_MED_PLAN: '1', APEX_MED_PLAN_DOMINANCE: '1.35' })),
+    false,
+  );
+  assert.equal(crownRaceHold({ ...base, ownArmy: 7000, enemyArmy: 4000 }, config), false);
   // A column standing next to its crown must be allowed to land.
   assert.equal(crownRaceHold({ ...base, campaignDistance: 4 }, config), false);
   // No visible enemy crown means no race.
@@ -229,9 +241,9 @@ test('the flag changes nothing where the hold is released or out of scope', () =
   const holdOnly = { APEX_MED_PLAN: '1', APEX_MED_PLAN_REACH: '24' };
   const cases = [
     // Budget met: the race is already won, grind as before.
-    { options: { ownCrowns: 3, enemyCrowns: 3 } },
+    { options: { ownCrowns: 6, enemyCrowns: 3 } },
     // Dominant army: finish the game instead of racing.
-    { options: { ownArmy: 20, enemyArmy: 3 } },
+    { options: { ownArmy: 60, enemyArmy: 3 } },
     // Opening turns, official normal size, and every other map mode.
     { options: { turn: 20 } },
     { options: { side: 24 } },
