@@ -5,6 +5,9 @@ const { computePush, actionCoordinates, preview } = require('./rules.cjs');
 const { lastMileConfig, lastMileState, reseatRoot } = require('./lastmile.cjs');
 const { medPlanConfig, economyYields, crownRaceHold } = require('./medplan.cjs');
 const {
+  smallRaceConfig, smallRaceUpdate, smallRaceEconomyRelief, freshSmallRace,
+} = require('./crownrace.cjs');
+const {
   snowballConfig, snowballEntry, snowballExit, snowballTurn, snowballTakesTick,
   anchorScore, paintScore, captureScore, freshSnowball,
 } = require('./snowball.cjs');
@@ -1582,7 +1585,15 @@ function sustainEconomy(b, m, own, ed, enemies) {
     { mode: String(m?.mapMode || ''), size: b.size, distance },
     medPlanConfig(),
   );
-  if (economy.yields) {
+  // Small-map crown race (bot/crownrace.cjs).  A 0.34 room (221-255 cells) is
+  // smaller end to end than the 24-cell large-map radius, so this project
+  // yielded on every tick there and the rear crown economy never ran: land and
+  // crowns froze while the opponent painted.  While the race phase owns the
+  // budget the yield boundary is the last-mile reach, i.e. economy stops only
+  // when a column really is about to trade blows on its crown.  Flag off
+  // leaves `smallRaceEconomyRelief` false and this behaviour untouched.
+  const raceRelief = smallRaceEconomyRelief(m?.smallRace, distance, smallRaceConfig());
+  if (economy.yields && !raceRelief) {
     // A rear project selected before the spearhead arrived must not continue
     // consuming turns after the campaign enters its finishing corridor.
     // Abandon only the remote project; a safe frontline project remains valid
@@ -2493,6 +2504,61 @@ function recover(b, m, own) {
   return reposition(b, own) || emergencyProbe(b, own);
 }
 
+// Small-map crown-race phase (APEX_SMALL_CROWN_RACE, default off; see
+// bot/crownrace.cjs).  One assessment per planning tick, before any campaign
+// can claim the action budget, so the phase can outrank the push instead of
+// racing it.  The board work here is bounded: the size gate rejects every board
+// >= 800 before any army/land accounting, and the campaign-distance probe stays
+// lazy.
+function smallRaceStep(b, m, own, enemies) {
+  const config = smallRaceConfig();
+  if (!config.enabled) return { active: false, config, state: null };
+  if (!(b.size < config.maxBoard)) return { active: false, config, state: null };
+  const crowns = (list) => {
+    let count = 0;
+    for (const at of list) if (b.kind(at) === 'crown') count += 1;
+    return count;
+  };
+  const enemyCrowns = crowns(enemies);
+  if (!enemyCrowns) return { active: false, config, state: null };
+  const state = m.smallRace || (m.smallRace = freshSmallRace());
+  const campaignDistance = () => {
+    if (!m.campaign || !Number.isInteger(m.campaign.crown) || !Number.isInteger(m.campaign.at) ||
+      !b.own(m.campaign.at)) return Infinity;
+    return field(b, [m.campaign.crown]).distance[m.campaign.at];
+  };
+  const decision = smallRaceUpdate(state, {
+    turn: b.turn,
+    size: b.size,
+    maze: m.maze ?? isMazeBoard(b),
+    ownCrowns: crowns(own),
+    enemyCrowns,
+    ownLand: own.length,
+    enemyLand: enemies.length,
+    ownArmy: own.reduce((sum, at) => sum + b.army[at], 0),
+    enemyArmy: enemies.reduce((sum, at) => sum + b.army[at], 0),
+    campaignDistance,
+  }, config);
+  return { ...decision, config, state };
+}
+
+// Land is the second income term on a compact board (+1 army per 50 ticks per
+// cell) but every generic expansion layer (forward/broad/rear) is size-gated to
+// >= 800, so mid-game land on a 0.34 room never grew: the 0.34 traces show our
+// land frozen at 25-40 cells from tick 40 while the opponent painted 60-160.
+// During the race phase spend the budget on safe neutral cells (>= reach from
+// any enemy cell) until land parity, instead of on the withheld attacks.
+function smallRaceExpansion(b, m, own, ed, reach, enemyLand) {
+  if (own.length >= enemyLand) return null;
+  const reserved = supplyReservations(m);
+  const safe = own.filter((at) => !reserved.has(at) && ed.distance[at] >= reach);
+  if (safe.length < 2) return null;
+  const action = opening(b, m, safe, ed);
+  if (!action) return null;
+  const branch = action.branch === 'opening-route' ? 'small-race-route' : 'small-race-paint';
+  return { ...action, branch };
+}
+
 function plan(b,m,deadline) {
   const own=[]; const enemies=[];
   let campaignPaused = false;
@@ -2539,6 +2605,12 @@ function plan(b,m,deadline) {
     (!rushProfile.maritime && (rushProfile.maze || rushProfile.distance <= 24) &&
       b.turn >= 42 && rushProfile.homeReserve >= 80 &&
       b.army[rushProfile.crown] < rushCrownFloor(rushProfile)));
+  // Small-map crown-race phase (APEX_SMALL_CROWN_RACE=1, default off).  On a
+  // compact room the race is crowns plus painted land; when the opponent
+  // out-builds us and our attacks stop converting, a bounded economy window
+  // outranks the campaign instead of feeding it (see bot/crownrace.cjs).
+  const smallRace = smallRaceStep(b, m, own, enemies);
+  if (smallRace.active) campaignPaused = true;
   // On large maps a first campaign can monopolize the action budget while
   // the opponent paints several hundred cells. Pause only a gathering
   // campaign when the territory gap is structural; an already marching
@@ -2649,6 +2721,17 @@ function plan(b,m,deadline) {
   if (deadline && deadline.check()) return { action: null, branch: 'deadline' };
   const defend=defense(b,m,own);
   if(defend)return defend;
+  // Small-map crown race: crown construction first, then safe land, then the
+  // normal branches below with the low-value attacks withheld.  Defence, the
+  // kill strike and the tactical crown finish all run above this point.
+  if (smallRace.active) {
+    const raceGoal = Math.min(24,
+      Math.max(mazeGoal, enemyCrowns + smallRace.config.crownLead, Math.ceil(own.length / 8)));
+    const raceEconomy = sustainEconomy(b, m, own, ed, enemies) || economy(b, m, own, ed, raceGoal);
+    if (raceEconomy) return raceEconomy;
+    const paint = smallRaceExpansion(b, m, own, ed, smallRace.config.reach, enemies.length);
+    if (paint) return paint;
+  }
   if (!snowballDecision) {
     // No campaign owns the budget this tick (muster wait, maze hold or a reset),
     // so the phase may use the window directly instead of idling.
@@ -2706,9 +2789,12 @@ function plan(b,m,deadline) {
   }
   const cutGuard = cutDefense(b, m, own);
   if (cutGuard) return cutGuard;
-  const cut = strategicCut(b, own);
+  // While the race phase owns the budget, attacks that trade one-for-one are
+  // withheld: they feed the opponent's attrition instead of the crown economy.
+  const attackBudget = !smallRace.active;
+  const cut = attackBudget ? strategicCut(b, own) : null;
   if (cut && (!m.campaign || cut.score > 250)) return cut;
-  const strike=frontierStrike(b,own);
+  const strike = attackBudget ? frontierStrike(b, own) : null;
   // Once a campaign exists, its rally corridor owns the action budget.  A
   // tempting side capture can otherwise move the very stack being assembled
   // and leave the controller oscillating between two fronts.  Local strikes
