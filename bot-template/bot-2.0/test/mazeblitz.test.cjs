@@ -21,6 +21,15 @@ const {
   pushModes,
   cheapForwardTarget,
   blitzGather,
+  isJunction,
+  growthAt,
+  guardTimeline,
+  selectHalfPushes,
+  junctionThreat,
+  classifySides,
+  fullPushException,
+  trackIsolatedBranches,
+  computeDefense,
 } = require('../bot/mazeblitz.cjs');
 
 const N = 7;
@@ -90,6 +99,19 @@ function forkBoard(options = {}) {
     else {
       grid[at(2, 2)] = 1;
       army[at(2, 2)] = 0;
+    }
+  }
+  // The engine freezes every cell of a branch that no longer reaches an enemy
+  // anchor, so a structurally dead branch is isolated on the frame too: its
+  // stacks cannot move at all.  `branch: 'city'` keeps an enemy anchor inside
+  // the branch, which is what makes it live.
+  const anchored = options.branch === 'city' || options.branch === 'crown';
+  if (!anchored) {
+    for (let x = 2; x <= 4; x += 1) {
+      for (let y = 1; y <= 3; y += 1) {
+        const code = grid[at(x, y)];
+        if (code === 2 || code === 52 || code === 102) isolated[at(x, y)] = 1;
+      }
     }
   }
   return makeBoard(
@@ -269,23 +291,24 @@ test('a live branch keeps the junction guard (mode-1 half pushes)', () => {
     lastSplitTurn: 70,
   });
   const wave = b.army[at(4, 4)];
-  for (let step = 0; step < 3; step += 1) {
-    const decision = run(b, store, enabledCfg());
+  const cfg = enabledCfg();
+  let halves = 0;
+  for (let step = 0; step < cfg.maxHalf; step += 1) {
+    const decision = run(b, store, cfg);
     assert.ok(decision, `expected a main-route action on step ${step}`);
-    assert.equal(decision.branch, 'blitz-march');
     assert.notEqual(decision.action.mode, 0, 'the smart split is never a junction transit');
+    if (store.blitz.root !== at(4, 4)) break;
+    assert.equal(decision.branch, 'blitz-march');
     assert.equal(decision.action.mode, 1);
     assert.equal(decision.action.half, true);
-    const last = step === 2;
-    assert.equal(
-      store.blitz.root,
-      last ? at(3, 4) : at(4, 4),
-      'the wave stays on the junction while it halves',
-    );
+    assert.ok(b.army[at(4, 4)] >= 22 + 4, 'the guard still covers the simulated threat plus margin');
+    halves += 1;
     apply(b, decision.action);
   }
-  assert.ok(b.army[at(4, 4)] >= wave / 8, `guard ${b.army[at(4, 4)]} < 1/8 of ${wave}`);
-  assert.ok(b.army[at(3, 4)] > wave * 0.7, 'the forward cell holds the majority of the wave');
+  assert.ok(halves >= 3 && halves <= cfg.maxHalf, `ladder length ${halves} outside [3, ${cfg.maxHalf}]`);
+  assert.notEqual(store.blitz.root, at(4, 4), 'the column leaves the junction once the ladder ends');
+  assert.ok(b.army[at(4, 4)] >= wave / 16, `guard ${b.army[at(4, 4)]} < 1/16 of ${wave}`);
+  assert.ok(b.army[at(3, 4)] > wave * 0.35, 'the forward cell holds the majority of the wave');
   assert.equal(store.blitz.splits, 0, 'a live plain branch is guarded, not cleared');
 });
 
@@ -426,22 +449,27 @@ test('a capture away from a junction is a full push', () => {
 });
 
 test('the half push is offered only at a threatened junction', () => {
-  // The threatened fork is the only place a half push is spent: the guard is
-  // the tail the branch could cut.  Everywhere else the mode list starts at a
-  // full push, captures included.
-  const b = crownBoard({ crownArmy: 14, wave: 200, side: 'live' });
-  assert.equal(analyzeBranch(b, at(1, 4), at(1, 3), enabledCfg()).live, true);
-  assert.deepEqual(pushModes(b, at(1, 4), at(0, 4), false), [2, 1], 'no fork: full push first');
-  assert.deepEqual(pushModes(b, at(1, 4), at(0, 4), true), [1], 'a live fork halves the capture');
-  const strong = crownBoard({ crownArmy: 300, wave: 400, side: 'live' });
-  assert.deepEqual(
-    pushModes(strong, at(1, 4), at(0, 4), true),
-    [],
-    'a live fork never commits fully into a capture the half cannot take',
-  );
-  // The plain-road transit is the same policy: full push away from a fork.
-  const plain = neutralForkBoard();
-  assert.deepEqual(pushModes(plain, at(4, 4), at(3, 4), false), [2, 1]);
+  // The transit mode is binary: a junction ladder halves, everything else is a
+  // full push.  Mode 0 (the smart split) is never offered.
+  assert.deepEqual(pushModes(false), [2], 'no fork: full push only');
+  assert.deepEqual(pushModes(true), [1], 'a junction ladder halves');
+  assert.ok(!pushModes(true).includes(0) && !pushModes(false).includes(0));
+  // A corridor cell with two exits is not a junction, so even an adjacent
+  // enemy crown is taken with a full push.
+  const flat = corridorBoard({ length: 9, crownArmy: 14, homeArmy: 10, stacks: { 1: 200 } });
+  assert.equal(isJunction(flat, at(1, 4)), false);
+  const flatStore = memory(flat, { phase: 'push', crown: at(0, 4), root: at(1, 4), prev: at(2, 4) });
+  const flatDecision = run(flat, flatStore, enabledCfg());
+  assert.equal(flatDecision.branch, 'blitz-break');
+  assert.equal(flatDecision.action.mode, 2, 'no junction: full push, never a half');
+  // The neutral side corridor of the fork board gives the junction three exits.
+  const fork = neutralForkBoard();
+  assert.equal(isJunction(fork, at(4, 4)), true);
+  // ...but a 5-army city four cells away is not a real branch threat, so the
+  // wave still commits fully instead of paying a guard.
+  const forkStore = memory(fork, { phase: 'push', crown: at(1, 4), root: at(4, 4), prev: at(5, 4) });
+  const forkDecision = run(fork, forkStore, enabledCfg());
+  assert.equal(forkDecision.action.mode, 2);
 });
 
 test('a full push is allowed for an adjacent crown when half cannot kill it', () => {

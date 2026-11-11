@@ -40,25 +40,38 @@
  * a half-push tick or a detachment; the main wave goes fully into the live
  * direction.
  *
- * Junction rule: only a branch with a *live enemy threat* earns a guard.  A
- * branch is live when the opponent can reconnect it AND an enemy stack on that
- * side can reach the junction within two ticks (the only force that can cut the
- * tail).  The road ahead and a neutral corridor with no army in it are not
- * threats: there is nothing there to cut us with, so the wave commits fully.
- * At a live fork the transit uses half pushes (mode 1), repeated up to three
- * times, so 1/2 + 1/4 + 1/8 = 7/8 of the wave moves up while a real 1/8 guard
- * holds the junction.  The smart split (mode 0) is never used there: it
- * reserves only the other hostile neighbours' army, which is the token guard
- * an adjacent anti stack cuts on the next tick.
+ * Junction rule (v6, simulated): a junction is a passable cell with at least
+ * three passable 4-neighbours, i.e. at least two branch directions besides the
+ * arrival/transit cell (mountains and the board edge are not counted).  Only a
+ * move that *leaves* a junction is allowed to half; every other move is a full
+ * push.  At a junction the wave simulates the worst-case enemy arrival per
+ * tick (`threatTimeline`) and only halves while the simulated guard it leaves
+ * behind still covers that arrival plus `guardMargin`:
  *
- * Push-mode policy: the main wave pushes fully (mode 2) by default, captures
- * included.  A capture away from a fork keeps nothing back - the v4 rule that
- * defaulted every capture to the half push left a useless 1/2 behind on plain
- * road (t143/t144.5 in the reviewed replay).  The half push (mode 1) exists for
- * exactly one situation: leaving a junction whose live branch can cut the tail
- * within two ticks.  There it is repeated up to `halfPushes` times and a
- * capture the half cannot take is simply not attempted.  Mode 0 is never used
- * on the main route.
+ *   - the post-our-move state is simulated tick by tick for `threatHorizon`
+ *     ticks; the enemy gets one action per tick (not every source at once),
+ *     uses the all-in push (mode 2) and the real engine reserve formula;
+ *   - growth is applied every tick (crown +1, plain/city on the 50-tick
+ *     boundary, the extra burst growth inside ticks 26..50) to both the enemy
+ *     piles and our own junction guard;
+ *   - branches are classified rather than assumed: own ground is only skipped
+ *     when it survives the horizon, neutral ground is a delayed path (a capture
+ *     tick is paid), the planned destination is only impassable when our push
+ *     really captures it, an isolated enemy stack cannot move at all, and
+ *     sources sharing one approach cell may combine (a friendly transfer).
+ *
+ * k is the largest number of successive half pushes whose guard timeline stays
+ * above the threat timeline; it is not assumed to be 1/2, 1/4, 1/8 - the real
+ * post-push army of the junction is used.  When no k (not even 0) is safe the
+ * plan reinforces or aborts instead of pushing the guard away.  The full-push
+ * exception is narrow and documented in `fullPushException`.
+ *
+ * Push-mode policy: every move that does not leave a junction is a full push
+ * (mode 2), captures included - the v4 rule that defaulted every capture to the
+ * half push left a useless 1/2 behind on plain road (t143/t144.5 of the
+ * reviewed replay).  The half push (mode 1) exists only for the junction
+ * transit ladder above, and mode 0 (the smart split) is never used on the main
+ * route.
  *
  * Crown-join rule: while the wave is still gathering, an own crown or city with
  * more than the engine minimum is pulled first.  The chain below it always
@@ -104,11 +117,18 @@ const DEFAULTS = Object.freeze({
   branchDepth: 14,
   branchShare: 0.55,
   branchReserve: 24,
+  // A branch threat below this is not a real branch threat: the guard ladder
+  // would spend ticks to keep a guard the wave already has by momentum.
   junctionThreat: 12,
   // Node budget for the dead/live flood and the enemy force walk.  Both are
   // real graph searches, so the cap only protects against pathological boards.
   branchScan: 240,
-  halfPushes: 3,
+  // Junction half-push rule: simulated horizon T in ticks, the guard margin
+  // kept above the simulated threat, and the ladder cap.
+  threatHorizon: 6,
+  guardMargin: 4,
+  maxHalf: 4,
+  threatScan: 240,
   stallLimit: 10,
   detachStall: 4,
   splitCooldown: 6,
@@ -142,7 +162,16 @@ function mazeBlitzConfig(overrides = {}) {
     branchReserve: DEFAULTS.branchReserve,
     junctionThreat: envNumber('APEX_MAZE_BLITZ_JUNCTION', DEFAULTS.junctionThreat, 0, 4000),
     branchScan: envNumber('APEX_MAZE_BLITZ_BRANCH_SCAN', DEFAULTS.branchScan, 8, 20000),
-    halfPushes: envNumber('APEX_MAZE_BLITZ_HALF_PUSHES', DEFAULTS.halfPushes, 1, 6),
+    // APEX_MAZE_BLITZ_HALF_PUSHES is the pre-v6 name of the same ladder cap.
+    maxHalf: envNumber(
+      'APEX_MAZE_BLITZ_MAX_HALF',
+      envNumber('APEX_MAZE_BLITZ_HALF_PUSHES', DEFAULTS.maxHalf, 1, 8),
+      1,
+      8,
+    ),
+    threatHorizon: envNumber('APEX_MAZE_BLITZ_T', DEFAULTS.threatHorizon, 1, 50),
+    guardMargin: envNumber('APEX_MAZE_BLITZ_GUARD', DEFAULTS.guardMargin, 0, 4000),
+    threatScan: envNumber('APEX_MAZE_BLITZ_THREAT_SCAN', DEFAULTS.threatScan, 8, 20000),
     stallLimit: DEFAULTS.stallLimit,
     detachStall: DEFAULTS.detachStall,
     splitCooldown: DEFAULTS.splitCooldown,
@@ -184,6 +213,10 @@ function initialState() {
     skippedBranches: 0,
     halfAt: -1,
     halfPushes: 0,
+    // Isolated-branch experiment (see trackIsolatedBranches).
+    iso: null,
+    junctionTicks: 0,
+    halfLadders: 0,
   };
 }
 
@@ -643,6 +676,457 @@ function cheapForwardTarget(b, at, cf) {
   return false;
 }
 
+/* ========================================================================
+ * Junction half-push rule: simulate the worst-case enemy arrival instead of
+ * summing nearby stacks.
+ * ===================================================================== */
+
+// Engine fact, mirrored from src/game-engine/tick-growth.ts: the burst runs
+// ticks 26..50 inclusive, plains and cities grow on every 50th tick, and a
+// crown grows on every tick.
+const GROWTH_BURST_START = 26;
+const GROWTH_BURST_END = 50;
+const GROWTH_PLAIN_INTERVAL = 50;
+
+function growthAt(kind, tick) {
+  if (kind === 'crown') return 1;
+  const plainTick = tick % GROWTH_PLAIN_INTERVAL === 0;
+  if (kind === 'city') return plainTick ? 1 : 0;
+  if (kind === 'plain') {
+    const burst = tick >= GROWTH_BURST_START && tick <= GROWTH_BURST_END;
+    return (plainTick ? 1 : 0) + (burst ? 1 : 0);
+  }
+  return 0;
+}
+
+// How much a pile of `kind` gains while it waits `ticks` ticks after the tick
+// that just finished.  A crown grows every tick, so waiting is real growth.
+function pileGrowth(turn, kind, ticks) {
+  let gain = 0;
+  for (let step = 0; step < ticks; step += 1) gain += growthAt(kind, turn + 1 + step);
+  return gain;
+}
+
+/**
+ * A junction is a passable cell with at least three passable 4-neighbours.
+ * Three passable neighbours already give two branch directions besides the
+ * arrival (`state.prev`) or transit cell, so the degree test is the documented
+ * "two different branch directions" requirement; mountains, unknown terrain
+ * and the board edge are not counted.
+ */
+function isJunction(b, at) {
+  return forkDegree(b, at) >= 3;
+}
+
+// Threat simulation owner encoding: we only ever need us / them / neutral.
+const SIM_OURS = 1;
+const SIM_ENEMY = 2;
+const SIM_NONE = 0;
+const SIM_PLAIN = 0;
+const SIM_CITY = 1;
+const SIM_CROWN = 2;
+const SIM_OTHER = 3;
+
+/**
+ * Flat, engine-shaped copy of the frame used by the threat simulation.  Fog is
+ * kept as neutral ground: an unseen cell cannot be counted as ours, and the
+ * enemy still pays a movement tick to walk through it.
+ */
+function threatSnapshot(b) {
+  const size = b.size;
+  const sim = {
+    size,
+    kind: new Uint8Array(size),
+    owner: new Uint8Array(size),
+    army: new Float64Array(size),
+    passable: new Uint8Array(size),
+    isolated: new Uint8Array(size),
+    neighbors: (at) => b.neighbors(at),
+  };
+  for (let at = 0; at < size; at += 1) {
+    const kind = b.kind(at);
+    sim.kind[at] =
+      kind === 'crown' ? SIM_CROWN : kind === 'city' ? SIM_CITY : kind === 'plain' ? SIM_PLAIN : SIM_OTHER;
+    sim.passable[at] = b.passable(at) ? 1 : 0;
+    sim.owner[at] = b.own(at) ? SIM_OURS : b.enemy(at) ? SIM_ENEMY : SIM_NONE;
+    sim.army[at] = Math.max(0, Number(b.army[at]) || 0);
+    sim.isolated[at] = b.isolated[at] ? 1 : 0;
+  }
+  return sim;
+}
+
+// Engine `computePush` reserve: every non-friendly neighbour except the target
+// keeps `army - 1`.  Neutral cells count too (their army is zero, so they add
+// -1 exactly like the engine and `rules.computePush` do).
+function computeDefense(b, from, to, army = b.army) {
+  let defense = 0;
+  const fromOwner = b.owner(from);
+  for (const next of b.neighbors(from)) {
+    if (next === to || !b.passable(next)) continue;
+    const nextOwner = b.owner(next);
+    if (nextOwner > 0 && b.sameTeam(fromOwner, nextOwner)) continue;
+    defense += (Number(army[next]) || 0) - 1;
+  }
+  return defense;
+}
+
+function simDefense(sim, from, to) {
+  let defense = 0;
+  const fromOwner = sim.owner[from];
+  for (const next of sim.neighbors(from)) {
+    if (next === to || !sim.passable[next]) continue;
+    const owner = sim.owner[next];
+    if (owner !== SIM_NONE && owner === fromOwner) continue;
+    defense += sim.army[next] - 1;
+  }
+  return defense;
+}
+
+function simSend(sim, from, to, mode) {
+  const total = sim.army[from];
+  const cap = Math.max(0, total - 1);
+  if (mode === 2) return cap;
+  const theoretical = Math.max(0, total - simDefense(sim, from, to) - 1);
+  return Math.min(cap, mode === 1 ? Math.floor(theoretical / 2) : theoretical);
+}
+
+function simKindName(kind) {
+  return kind === SIM_CROWN ? 'crown' : kind === SIM_CITY ? 'city' : kind === SIM_PLAIN ? 'plain' : 'other';
+}
+
+/**
+ * Worst-case enemy arrival timeline at the junction, one enemy action per tick.
+ *
+ * The flood starts at the junction and walks the passable graph; the enemy may
+ * path through our own ground (paying the defender) and through neutral ground
+ * (paying one movement tick, which is the documented "delayed path" of a
+ * neutral branch).  Each source then walks its own shortest route toward the
+ * junction with the real engine arithmetic: every push leaves one soldier
+ * behind and a capture also removes the defender, so
+ * `mass -= 1` per move and `mass -= defender` for every non-enemy cell taken.
+ * The arrival tick is the number of moves, because one stack moves per tick.
+ *
+ * Sources sharing one approach cell (the junction neighbour they come through)
+ * may combine: the pile waits and the next stack pushes into it, which is a
+ * friendly transfer costing one extra tick.  Different approaches never sum -
+ * with one action per tick only one of them can attack, so the maximum is used.
+ */
+function threatTimeline(b, sim, root, blocked, cfg) {
+  const horizon = Math.max(1, Math.round(cfg.threatHorizon));
+  const threat = new Array(horizon + 1).fill(0);
+  const distance = new Int16Array(sim.size).fill(-1);
+  const parent = new Int32Array(sim.size).fill(-1);
+  distance[root] = 0;
+  const queue = [root];
+  let visited = 0;
+  for (let head = 0; head < queue.length; head += 1) {
+    if (visited >= cfg.threatScan) break;
+    const at = queue[head];
+    for (const next of sim.neighbors(at)) {
+      if (distance[next] >= 0 || !sim.passable[next] || blocked.has(next)) continue;
+      distance[next] = distance[at] + 1;
+      parent[next] = at;
+      queue.push(next);
+      visited += 1;
+    }
+  }
+  const groups = new Map();
+  for (let at = 0; at < sim.size; at += 1) {
+    // An isolated enemy stack cannot move at all (engine `chkMove`), so it is
+    // never a source; the flood above still lets a live stack behind it walk
+    // through its cell and reconnect it, which is the recorded risk.
+    if (sim.owner[at] !== SIM_ENEMY || sim.isolated[at] || sim.army[at] < 2) continue;
+    const start = distance[at];
+    if (start < 1 || start > horizon) continue;
+    let pile = sim.army[at];
+    let cell = at;
+    let moves = 0;
+    let approach = -1;
+    for (;;) {
+      const next = parent[cell];
+      if (next < 0) break;
+      if (next === root) {
+        approach = cell;
+        break;
+      }
+      if (!sim.passable[next]) break;
+      const defender = sim.owner[next] === SIM_ENEMY ? 0 : sim.army[next];
+      if (pile - 1 <= defender) break; // the stack cannot take the next cell
+      pile = pile - 1 - defender;
+      moves += 1;
+      cell = next;
+      if (moves > horizon) break;
+    }
+    if (approach < 0 || pile < 2) continue;
+    // The attack on the junction is one more action and it pushes all but one
+    // soldier (mode 2), so that is the force that actually arrives.
+    pile -= 1;
+    if (pile < 1) continue;
+    const tick = moves + 1;
+    if (tick > horizon) continue;
+    const list = groups.get(approach) || [];
+    list.push({ at, tick, mass: pile, kind: sim.kind[at] });
+    groups.set(approach, list);
+  }
+  for (const sources of groups.values()) {
+    for (const source of sources) {
+      const kind = simKindName(source.kind);
+      for (let tick = source.tick; tick <= horizon; tick += 1) {
+        // A pile that waits at home keeps growing (a crown grows every tick), so
+        // the later it attacks the more it brings.
+        const mass = source.mass + pileGrowth(b.turn, kind, tick - source.tick);
+        if (mass > threat[tick]) threat[tick] = mass;
+      }
+    }
+    if (sources.length > 1) {
+      const total = sources.reduce((sum, source) => sum + source.mass, 0);
+      const last = Math.max(...sources.map((source) => source.tick));
+      for (let tick = last + 1; tick <= horizon; tick += 1) {
+        // The merged pile waits on the approach cell, which is not its home
+        // crown, so it does not grow while it waits.
+        if (total > threat[tick]) threat[tick] = total;
+      }
+    }
+  }
+  return threat;
+}
+
+/**
+ * The guard the junction keeps for ticks 1..T when the wave halves out of it
+ * `halfPushes` times and then leaves.  Both the guard growth and the real
+ * post-push army of the junction are used, so 3 half pushes are not assumed to
+ * be exactly 1/8: the engine reserve (other hostile neighbours) is recomputed
+ * on the frame, and the send is the engine's `floor((total - reserve - 1)/2)`.
+ */
+function guardTimeline(b, root, next, halfPushes, cfg) {
+  const horizon = Math.max(1, Math.round(cfg.threatHorizon));
+  const kind = b.kind(root);
+  const defense = computeDefense(b, root, next);
+  const guard = new Array(horizon + 1).fill(0);
+  let total = Math.max(0, Number(b.army[root]) || 0);
+  for (let tick = 1; tick <= horizon; tick += 1) {
+    total += growthAt(kind, b.turn + tick);
+    if (tick <= halfPushes) {
+      const cap = Math.max(0, total - 1);
+      const theoretical = Math.max(0, total - defense - 1);
+      total -= Math.min(cap, Math.floor(theoretical / 2));
+    }
+    guard[tick] = total;
+  }
+  return guard;
+}
+
+/**
+ * The largest k in [0, maxHalf] whose guard timeline stays above the threat
+ * timeline plus the margin on *every* simulated tick - including the ticks
+ * after the wave has left the junction, because the guard it left behind is
+ * still the cell the branch can take.  `-1` means not even holding (k = 0) is
+ * safe and the plan must reinforce or abort.
+ */
+function selectHalfPushes(b, root, next, threat, cfg) {
+  const horizon = Math.max(1, Math.round(cfg.threatHorizon));
+  const limit = Math.min(Math.max(1, Math.round(cfg.maxHalf)), horizon);
+  let best = -1;
+  for (let k = 0; k <= limit; k += 1) {
+    const guard = guardTimeline(b, root, next, k, cfg);
+    let safe = true;
+    for (let tick = 1; tick <= horizon; tick += 1) {
+      if (guard[tick] < threat[tick] + cfg.guardMargin) {
+        safe = false;
+        break;
+      }
+    }
+    // The guard only shrinks with each extra half push, so the first unsafe k
+    // ends the ladder.
+    if (!safe) break;
+    best = k;
+  }
+  return best;
+}
+
+/**
+ * Branch classification at a junction, kept separate from the simulation so the
+ * rule is testable: own ground is only skipped when it survives the horizon,
+ * neutral ground is a delayed path, the planned destination is skipped only
+ * when our planned push really captures it, an isolated enemy stack cannot move
+ * but may still be reconnected, and normal enemy ground is an immediate threat.
+ */
+function classifySides(b, root, next, cfg) {
+  const sides = [];
+  for (const side of b.neighbors(root)) {
+    if (!b.passable(side)) continue;
+    const kind = b.kind(side);
+    const base = { at: side, kind, army: b.army[side], isolated: Boolean(b.isolated[side]) };
+    if (side === next) {
+      // `send >= defender + 1` is the engine capture test; the half push is the
+      // weaker of the two modes, so a half that captures proves the push does.
+      const send = computePush(b, root, side, 1);
+      const captures = !b.enemy(side) || send > b.army[side];
+      sides.push({ ...base, role: 'destination', threat: captures ? 0 : b.army[side] - 1, delay: 0, captured: captures });
+      continue;
+    }
+    if (b.own(side)) {
+      // Own ground is not safe by itself: an enemy stack that can take this
+      // cell within the horizon and then reach the junction is a delayed threat.
+      sides.push({ ...base, role: 'own', threat: 0, delay: 2, captured: false });
+      continue;
+    }
+    if (b.enemy(side)) {
+      if (b.isolated[side]) {
+        sides.push({ ...base, role: 'enemy-isolated', threat: 0, delay: Infinity, captured: false });
+        continue;
+      }
+      sides.push({ ...base, role: 'enemy', threat: Math.max(0, b.army[side] - 1), delay: 1, captured: false });
+      continue;
+    }
+    // Neutral: the enemy must spend a tick capturing it before it can attack
+    // from there, so it is a delayed path and never an immediate threat.
+    sides.push({ ...base, role: 'neutral', threat: 0, delay: 1, captured: false });
+  }
+  return sides;
+}
+
+/**
+ * Full analysis of a junction transit: the branch classification, the enemy
+ * arrival timeline, whether that threat is real enough to pay a guard for, and
+ * the half-push ladder k.
+ */
+function junctionThreat(b, root, next, path, cfg) {
+  const sim = threatSnapshot(b);
+  // Our planned push is a half push while the ladder runs; using the weaker
+  // mode for the capture test means the destination is only ever excluded when
+  // we really take it.
+  const halfSend = simSend(sim, root, next, 1);
+  const captures = sim.owner[next] !== SIM_ENEMY || halfSend > sim.army[next];
+  const blocked = new Set();
+  if (captures) {
+    blocked.add(next);
+    const beyond = path?.[2];
+    if (Number.isInteger(beyond) && sim.owner[beyond] === SIM_ENEMY) blocked.add(beyond);
+  }
+  const threat = threatTimeline(b, sim, root, blocked, cfg);
+  let maxThreat = 0;
+  for (let tick = 1; tick < threat.length; tick += 1) maxThreat = Math.max(maxThreat, threat[tick]);
+  const real = maxThreat >= cfg.junctionThreat;
+  const halfLimit = real ? selectHalfPushes(b, root, next, threat, cfg) : 0;
+  return {
+    junction: true,
+    sides: classifySides(b, root, next, cfg),
+    captures,
+    blocked,
+    threat,
+    maxThreat,
+    real,
+    halfLimit,
+  };
+}
+
+/**
+ * The only two full pushes out of a threatened junction, both documented and
+ * narrow:
+ *   1. building: the cell ahead is an enemy crown/city one step away and no
+ *      number of half pushes can take it (halving only shrinks the send), so
+ *      the guard can never be worth keeping;
+ *   2. trade: one own stack next to the junction can already take the cell we
+ *      are pushing into on the following tick, so the 1-for-1 exchange of the
+ *      junction guard for the advance is acceptable.
+ */
+function fullPushException(b, root, next, cfg) {
+  if (!b.enemy(next)) return null;
+  const kind = b.kind(next);
+  if ((kind === 'crown' || kind === 'city') && computePush(b, root, next, 1) <= b.army[next]) return 'building';
+  for (const from of b.neighbors(root)) {
+    if (from === next || !b.own(from) || b.isolated[from]) continue;
+    // The retaking stack has to be adjacent to the target, not only to the
+    // junction: `computePush` does not check adjacency.
+    if (!b.neighbors(from).includes(next)) continue;
+    if (computePush(b, from, next, 2) > b.army[next]) return 'trade';
+  }
+  return null;
+}
+
+/**
+ * No half push out of this junction is safe: reinforce instead of pushing the
+ * guard away.  A half push leaves roughly half of the junction behind, so the
+ * guard has to reach twice the threat plus the margin before the ladder opens
+ * again.  With nothing left to reinforce with the caller hands the board back
+ * (abort) rather than freeze or dump the guard.
+ */
+function holdJunction(b, m, own, h, state, cfg, threat) {
+  const need = Math.max(STACK_MIN, Math.ceil(2 * (threat + cfg.guardMargin)));
+  if (!b.own(state.root) || b.isolated[state.root]) return null;
+  const delivery = blitzGather(b, m, own, state, state.crown, need, cfg, h, 'blitz-junction-hold');
+  if (delivery) return delivery;
+  return null;
+}
+
+/* ========================================================================
+ * Isolated-branch experiment (measure, do not assume it is safe).
+ * ===================================================================== */
+
+const ISO_WATCH_LIMIT = 8;
+const ISO_WATCH_TICKS = 60;
+
+function isoState(state) {
+  if (!state.iso) {
+    state.iso = {
+      watched: [],
+      watchedTotal: 0,
+      recapture: 0,
+      otherPath: 0,
+      decayed: 0,
+      pending: 0,
+      reconnectTicks: 0,
+      reconnectMass: 0,
+      reconnects: 0,
+    };
+  }
+  return state.iso;
+}
+
+/**
+ * Watch the isolated enemy branches the wave walks away from and record which
+ * of the three outcomes really happened: (1) the enemy recaptured the junction
+ * we left and reconnected through it, (2) it reconnected through another path,
+ * (3) the branch decayed/disappeared without ever reconnecting.  The counters
+ * live on the plan state, so a diagnostic run can read them after a match
+ * (`controller.stats().blitz.iso`) without any extra telemetry channel.
+ */
+function trackIsolatedBranches(b, state, root) {
+  const iso = isoState(state);
+  const keep = [];
+  for (const watch of iso.watched) {
+    if (!b.enemy(watch.at) || !b.isolated[watch.at]) {
+      if (b.enemy(watch.at)) {
+        iso.reconnects += 1;
+        iso.reconnectTicks += Math.max(0, b.turn - watch.turn);
+        iso.reconnectMass += Math.max(0, b.army[watch.at]);
+        if (b.enemy(watch.junction)) iso.recapture += 1;
+        else iso.otherPath += 1;
+      } else {
+        iso.decayed += 1;
+      }
+      continue;
+    }
+    if (b.turn - watch.turn > ISO_WATCH_TICKS) {
+      iso.decayed += 1;
+      continue;
+    }
+    keep.push(watch);
+  }
+  iso.watched = keep;
+  if (!Number.isInteger(root) || !b.own(root)) return iso;
+  for (const side of b.neighbors(root)) {
+    if (!b.enemy(side) || !b.isolated[side]) continue;
+    if (iso.watched.some((watch) => watch.at === side)) continue;
+    if (iso.watched.length >= ISO_WATCH_LIMIT) iso.watched.shift();
+    iso.watched.push({ at: side, junction: root, turn: b.turn, army: b.army[side] });
+    iso.watchedTotal += 1;
+  }
+  iso.pending = iso.watched.length;
+  return iso;
+}
+
 function blitzGather(b, m, own, state, crown, need, cfg, h, reason) {
   if (!Number.isInteger(crown) || crown < 0) return null;
   if (!b.own(state.root) || b.isolated[state.root]) return null;
@@ -756,10 +1240,14 @@ function expandDecision(b, m, own, h, state, cfg = mazeBlitzConfig()) {
  * half cannot take is not attempted.  Mode 0 is never tried on the main route
  * (its reserve is a token guard, not a hold).
  */
-function pushModes(b, root, next, live) {
-  if (!live) return [2, 1];
-  if (b.enemy(next) && computePush(b, root, next, 1) <= b.army[next]) return [];
-  return [1];
+/**
+ * Transit modes.  A junction ladder is half pushes only (mode 1); every other
+ * move - and every move out of a junction whose half push is not justified by
+ * the simulated threat - is a full push (mode 2).  Mode 0 (the smart split) is
+ * never a transit mode: its reserve is a token guard, not a hold.
+ */
+function pushModes(halfAllowed) {
+  return halfAllowed ? [1] : [2];
 }
 
 /**
@@ -777,36 +1265,110 @@ function directPush(b, root, next, mode) {
   return connected.has(next) ? action : null;
 }
 
-// Main-route transit.  At a live fork a half push keeps a real guard and is
-// repeated up to `cfg.halfPushes` times (7/8 forward, 1/8 on the junction).
-// With every side branch dead the wave commits fully instead.
+/**
+ * Main-route transit.
+ *
+ * Leaving a junction is the only place the half/full decision exists.  The
+ * junction is simulated (`junctionThreat`): when its worst-case enemy arrival
+ * over the horizon is a real threat, the wave halves out of it k times (k from
+ * `selectHalfPushes`) so the guard the enemy can reach is never thinner than
+ * the arrival plus the margin.  When the threat is not real, or the cell is not
+ * a junction at all, the wave commits fully.  When no half push is safe the
+ * decision is a hold and `pushDecision` reinforces or hands the board back.
+ *
+ * A half push that cannot take the cell ahead is not attempted either: dumping
+ * half the wave on an uncapturable cell and keeping the other half on the
+ * junction is worse than both alternatives, so only the documented
+ * `fullPushException` may override the ladder.
+ */
 function march(b, state, path, cfg, h) {
   const root = state.root;
   const next = path[1];
-  const fork = forkDegree(b, root) >= 3;
   const sides = junctionSides(b, root, next, -1, cfg);
-  const live = junctionLive(sides);
-  // The guard only ever bypasses the generic push guard when every side branch
-  // is structurally dead: there the enemy really cannot touch the tail.  A
-  // live branch that is merely far away still goes through `safeMove`.
+  // The guard only bypasses the generic push guard when every side branch is
+  // structurally dead: there the enemy really cannot touch the tail.  A live
+  // branch is left to `safeMove`.
   const deadOnly = sides.every((side) => !side.branch.reconnectable);
-  const modes = pushModes(b, root, next, live);
+  const junction = isJunction(b, root);
+  const analysis = junction ? junctionThreat(b, root, next, path, cfg) : null;
+  const used = state.halfAt === root ? state.halfPushes : 0;
+  let holding = false;
+  let count = 0;
+  let modes = pushModes(false);
+  if (junction) {
+    // Isolated branches we walk past are recorded whether or not the junction
+    // is threatened: the diagnostic watch measures what happens to them.
+    trackIsolatedBranches(b, state, root);
+  }
+  if (junction && analysis?.real) {
+    state.junctionTicks = (state.junctionTicks || 0) + 1;
+    const k = analysis.halfLimit;
+    if (b.enemy(next) && k >= 1 && computePush(b, root, next, 1) <= b.army[next]) {
+      // No amount of halving takes the cell ahead: hold or use the documented
+      // full-push exception, never dump half the wave on it.
+      const exception = fullPushException(b, root, next, cfg);
+      if (!exception) {
+        return {
+          action: null,
+          branch: 'blitz-junction-hold',
+          threat: analysis.maxThreat,
+          halfLimit: k,
+        };
+      }
+    } else if (used >= cfg.maxHalf) {
+      // The ladder cap is reached: hand the column to the forward cell.  The
+      // guard stays on the junction, which is exactly what k protects.
+      state.root = next;
+      state.halfAt = -1;
+      state.halfPushes = 0;
+      const forward = h.route(h.field(b, [state.crown]), state.root);
+      if (forward && forward.length > 1) return march(b, state, forward, cfg, h);
+      return null;
+    } else if (k < 1) {
+      // Not even holding is safe (k = -1) or leaving the junction is not safe
+      // yet (k = 0) although the cell ahead could be halved into: the ladder is
+      // closed, so only the documented exceptions may push out of it.
+      const exception = fullPushException(b, root, next, cfg);
+      if (!exception) {
+        return {
+          action: null,
+          branch: 'blitz-junction-hold',
+          threat: analysis.maxThreat,
+          halfLimit: k,
+        };
+      }
+    } else {
+      modes = pushModes(true);
+      holding = true;
+      count = used + 1;
+    }
+  }
   let action = null;
-  let mode = -1;
   for (const candidate of modes) {
-    // The generic guard still charges us for a structurally dead branch, so a
-    // dead junction may verify the same push directly before falling back to a
-    // weaker mode.  Mode order is preserved: a half-sufficient capture stays a
-    // half push even when the full push would also be legal.
+    // The generic guard still charges us for a branch the simulation does not
+    // consider a threat, so a junction with only dead sides may verify the same
+    // push directly.  A half push is never promoted to a full push here: the
+    // ladder is the whole point of the junction rule.
     let attempt = h.safeMove(b, root, next, 'blitz-push', [candidate]);
     if (!attempt && deadOnly) attempt = directPush(b, root, next, candidate);
     if (!attempt) continue;
     action = attempt;
-    mode = candidate;
     break;
   }
-  if (!action) return null;
-  if (process.env.APEX_MAZE_BLITZ_DEBUG === '1' && fork) {
+  if (!action) {
+    if (holding) {
+      // The guard refused the half push: hold instead of promoting it to a full
+      // push behind the junction rule.
+      return {
+        action: null,
+        branch: 'blitz-junction-hold',
+        threat: analysis?.maxThreat ?? 0,
+        halfLimit: analysis?.halfLimit ?? 0,
+      };
+    }
+    return null;
+  }
+  if (process.env.APEX_MAZE_BLITZ_DEBUG === '1' && junction) {
     console.error(
       'JUNCTION',
       b.turn,
@@ -816,31 +1378,32 @@ function march(b, state, path, cfg, h) {
       b.army[root],
       'mode',
       action.mode,
-      'live',
-      live,
+      'threat',
+      analysis ? analysis.threat.slice(1).join('/') : '-',
+      'k',
+      analysis ? analysis.halfLimit : '-',
       'sides',
-      sides
-        .map(
-          (side) =>
-            `${side.at}:${side.branch.reconnectable ? 'live' : 'dead'}:${b.isolated[side.at] ? 'iso' : 'free'}:${b.army[side.at]}`,
-        )
+      (analysis ? analysis.sides : [])
+        .map((side) => `${side.at}:${side.role}:${side.isolated ? 'iso' : 'free'}:${side.army}`)
         .join(','),
+      'dead',
+      deadOnly,
     );
   }
-  // Repeated half pushes only make sense on a real fork, and a capture at a
-  // fork stays in the ladder too: the captured cell is ours from the next tick
-  // on, so halving into it moves the rest of the wave through instead of
-  // stranding half the column on the junction.
-  const holding = fork && live && mode === 1;
-  const count = holding ? (state.halfAt === root ? state.halfPushes : 0) + 1 : 0;
+  // Repeated half pushes are the junction ladder: the guard stays on the
+  // junction until the ladder reaches k, and the k-th push hands the column to
+  // the forward cell.
+  if (holding && count === 1) state.halfLadders = (state.halfLadders || 0) + 1;
   return {
     action,
     branch: b.enemy(next) ? 'blitz-break' : 'blitz-march',
     next,
-    mode,
-    live,
-    // Stay on the junction for the next half push until the guard is 1/8.
-    advance: !holding || count >= cfg.halfPushes,
+    mode: action.mode,
+    live: Boolean(analysis?.real),
+    // This push is the last affordable one when the fresh ladder from the
+    // post-push state has no room left, or when the maxHalf cap is reached: the
+    // column then moves to the forward cell and the guard stays behind.
+    advance: !holding || count >= cfg.maxHalf || (analysis?.halfLimit ?? 0) <= 1,
     count,
   };
 }
@@ -1121,6 +1684,20 @@ function pushDecision(b, m, own, h, state, cfg) {
     return split;
   }
   const moved = march(b, state, path, cfg, h);
+  // No half push out of this junction is safe: reinforce it, and only hand the
+  // board back when there is nothing left to reinforce with.
+  if (moved && !moved.action && moved.branch === 'blitz-junction-hold') {
+    if (process.env.APEX_MAZE_BLITZ_DEBUG === '1')
+      console.error('JUNCTION-HOLD', b.turn, state.root, b.army[state.root], moved.threat, moved.halfLimit);
+    const hold = holdJunction(b, m, own, h, state, cfg, moved.threat || 0);
+    if (hold) {
+      state.idle = 0;
+      return hold;
+    }
+    // Nothing can raise the guard: abort the blitz instead of pushing it away.
+    state.phase = 'done';
+    return waitOne(b, m, own, state, h, cfg, { action: null, branch: 'blitz-junction-abort' });
+  }
   if (process.env.APEX_MAZE_BLITZ_DEBUG === '1')
     console.error(
       'PUSH',
@@ -1128,7 +1705,11 @@ function pushDecision(b, m, own, h, state, cfg) {
       state.root,
       b.army[state.root],
       path.slice(0, 3),
-      moved ? [moved.action.x, moved.action.y, moved.action.dx, moved.action.dy, moved.action.mode] : null,
+      moved && moved.action
+        ? [moved.action.x, moved.action.y, moved.action.dx, moved.action.dy, moved.action.mode]
+        : moved
+          ? moved.branch
+          : null,
     );
   if (moved) {
     const { next, advance, count, ...decision } = moved;
@@ -1331,4 +1912,17 @@ module.exports = {
   advanceBody,
   blitzGather,
   initialState,
+  isJunction,
+  growthAt,
+  pileGrowth,
+  computeDefense,
+  threatSnapshot,
+  threatTimeline,
+  guardTimeline,
+  selectHalfPushes,
+  classifySides,
+  junctionThreat,
+  fullPushException,
+  holdJunction,
+  trackIsolatedBranches,
 };

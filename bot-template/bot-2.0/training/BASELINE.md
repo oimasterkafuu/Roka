@@ -411,3 +411,37 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
 - **已知权衡（0.68 退化）**：全推把纵列身后留成一串 1 兵格，敌人在尾巴上切一刀就让整条波变孤军（引擎立刻减半），而身后没有 >1 兵的堆可以反推修连通（`rescueCut` 找不到源），于是出现 v5 回放里的 `ab9`（九次换手）。v4 的半兵推每一格都留下半个堆，尾巴本身就是可反推的储备——这也是 v4 在 0.68 上更抗切的原因。下一步若要在「默认全推」下补回这一块，应让 `rescueCut`/切断换手从**后方指标格**（皇冠/城市，每 Tick 增长）反推，而不是退回半兵推；本轮未做。以 `OPENEQ` 形式复测（保留 v4 的爆发边界、其余为 v5）：0.68 回到 6W、0.34 掉到 5W，总计 11W——即本轮的 0.34 收益正是从爆发边界那一 Tick 换来的，0.68 的损失来自全推抗切能力，两者互相独立。
 - 单测：`test/mazeblitz.test.cjs`（27 项，其中本轮新增/改写 5 项）——平地占点全推、半兵只出现在受威胁岔口（`pushModes` 直接断言）、皇冠在肥链旁边仍被优先抽干、有便宜前向击杀的堆不被召回、切断时保留 269 波与目标（`waveAnchorRoot`）、爆发结束后第一个 Tick 即集结；bot-2.0 全部 188 项单测通过。
 - 结论：仍为默认关的实验层（`APEX_MAZE_BLITZ=1` 开启），flag off 逐局不变；本轮未合并到 main。
+
+### 2026-11-11：迷宫 blitz 第六轮（路口威胁模拟 k 阶梯，`APEX_MAZE_BLITZ` 仍默认关）
+
+- 设计（`bot/mazeblitz.cjs`，全部只在 `APEX_MAZE_BLITZ=1` 的 maze 房间生效）：
+  1. **路口定义**：可通行 4 邻度 `>= 3`（`isJunction`）。只有“离开路口”的移动适用威胁规则；其余移动一律整推（mode 2），mode 0 永不用于主路。低威胁路口（`maxThreat < APEX_MAZE_BLITZ_JUNCTION`，默认 12）也不付驻军，直接整推。
+  2. **分支分类**（`classifySides`）：己方弱格是延迟威胁；中立格是延迟路径（敌人多付 1 Tick 占领）；计划目标只在我们这半推真的能占下时才屏蔽，并把目标格与其后一格敌方格从敌人仿真中移除；当前孤立敌格不能移动、不构成即时威胁但被记录；普通敌格是即时威胁。
+  3. **威胁时间线**（`threatTimeline`）：对移动后的局面按 T Tick 仿真，敌人每 Tick 只做**一个动作**，使用真实引擎推兵/驻军公式，并按引擎增长（皇冠 +1/Tick、普通地/城市每 50 Tick、普通地 26–50 爆发）给等待中的源点与路口守军增长；每个 Tick 取“能到达路口的最大单股兵力”，同一进入格的多股可以合并，不同进入格绝不求和。
+  4. **k 阶梯**（`selectHalfPushes`）：`guardTimeline` 用真实局面推演 k 次半推后的守军；取满足 `guard[t] >= threat[t] + margin`（每 Tick）的最大 `k ∈ [0, maxHalf]`，k 用完即把列交给前方格、守军留在路口；k = -1 表示连守都守不住，先 `holdJunction` 补兵，补不到就 abort；k = 0 表示不能离开路口，同样先补兵再 abort。整推只留给 `fullPushException` 的两种窄情形：半推吃不下的相邻建筑，或己方相邻堆下一 Tick 能 1 换 1 占住目标。
+  5. **孤立支线实验**（`trackIsolatedBranches`）：记录被路过的孤立敌格最终是（1）敌人反占我们离开的路口、（2）从另一条路重新连回、（3）衰减/消失；计数写入 `controller.stats().blitz.iso`，另记重连 Tick 与兵力。
+- 旋钮：`APEX_MAZE_BLITZ_T`（默认 6）、`APEX_MAZE_BLITZ_GUARD`（默认 4）、`APEX_MAZE_BLITZ_MAX_HALF`（默认 4，旧名 `APEX_MAZE_BLITZ_HALF_PUSHES` 仍可用）、`APEX_MAZE_BLITZ_THREAT_SCAN`（默认 240）、`APEX_MAZE_BLITZ_JUNCTION`（默认 12）；`APEX_MAZE_BLITZ_DEBUG=1` 额外输出 `JUNCTION`（威胁时间线、k、分支角色）与 `JUNCTION-HOLD`。
+- 单测：新增 `test/mazeblitz-junction.test.cjs`（10 项）覆盖中立延迟路径、己方弱格延迟威胁、计划目标只在实际占领时屏蔽、孤立支线跳过并记录、每 Tick 一个动作/同入口合并、守军与威胁增长、k 选择与路口交接、无安全 k 的补兵/放弃、模式二元策略；`test/mazeblitz.test.cjs` 同步更新。bot-2.0 全部 **198** 项单测通过。
+- 用户点名的五局（单种子单 worker、2400 Tick、flag on、anti；v5 = `3771cd5`，v6 = 本轮工作区）：
+
+  | 局（种子 / 尺寸 / 座位） | v5 | v6 |
+  | --- | --- | --- |
+  | `apex-long-1-maze` 0.34 seat 0（pzr） | W 93 | W 250 |
+  | `apex-long-1-maze` 0.34 seat 1（2ikw） | W 130 | W 130 |
+  | `apex-long-0-maze` 0.34 seat 0（pbwm） | W 667 | W 821 |
+  | `apex-long-7-maze` 0.68 seat 1（KuYd） | W 325 | **L 1571** |
+  | `apex-long-3-maze` 0.68 seat 0（4bQF） | L 1824 | L 1624 |
+
+- maze seeds 8 全量（0.34+0.68、双座位、2400 Tick、8 worker、同一命令跑 v5 worktree 与 v6 工作区）：
+
+  | 对手 | v5 | v6 |
+  | --- | --- | --- |
+  | anti（32 局） | **25W / 2D / 5L**（0.34 15/0/1，0.68 10/2/4） | 22W / 0D / 10L（0.34 13/0/3，0.68 9/0/7） |
+  | apex（32 局） | 15W / 0D / 17L（0.34 5/0/11，0.68 10/0/6） | 16W / 0D / 16L（0.34 8/0/8，0.68 8/0/8） |
+  | 合计（64 局） | 40W / 2D / 22L | 38W / 0D / 26L |
+
+- 孤立支线频率（`training/isolated-branch.cjs`，seeds 4、0.34+0.68、双座位、2400 Tick、flag on）：
+  - vs anti（16 局，8 胜）：55 条被路过，53 条有结局——反占路口 **18（34.0%）**、另一条路重连 **0（0%）**、衰减/消失 **35（66.0%）**，2 条终局未决；重连平均 12.9 Tick / 4.5 兵。
+  - vs apex（16 局，9 胜）：27 条被路过，19 条有结局——反占路口 **1（5.3%）**、另一条路重连 **1（5.3%）**、衰减/消失 **17（89.5%）**，8 条终局未决；重连平均 3 Tick / 2 兵。
+  - 结论：孤立支线在多数情况下确实衰减，但 anti 对手仍有约三分之一经“反占路口”重新连回，当前“跳过孤立格”的前提只在对抗 Apex 时稳健。
+- 结论：规则与测试按设计完成，但完整 seeds 8 评测为**混合偏负**（anti −3 胜，apex +1 胜；合计 −2 胜且少了 2 个平局）。主要退化在 0.68：全推留下的 1 兵尾巴被切后，路口守军/阶梯不足以像 v5 的半推堆那样反推修连通（KuYd 由 W325 变 L1571）。这一层仍是默认关的实验层（`APEX_MAZE_BLITZ=1` 开启），flag off 逐局不变，未合并到 main；下一步应把 k 阶梯与后方指标格反推（`rescueCut`）结合，或在 0.68 上限制全推，而不是继续放宽 k。
