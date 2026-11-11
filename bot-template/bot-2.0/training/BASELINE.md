@@ -445,3 +445,44 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
   - vs apex（16 局，9 胜）：27 条被路过，19 条有结局——反占路口 **1（5.3%）**、另一条路重连 **1（5.3%）**、衰减/消失 **17（89.5%）**，8 条终局未决；重连平均 3 Tick / 2 兵。
   - 结论：孤立支线在多数情况下确实衰减，但 anti 对手仍有约三分之一经“反占路口”重新连回，当前“跳过孤立格”的前提只在对抗 Apex 时稳健。
 - 结论：规则与测试按设计完成，但完整 seeds 8 评测为**混合偏负**（anti −3 胜，apex +1 胜；合计 −2 胜且少了 2 个平局）。主要退化在 0.68：全推留下的 1 兵尾巴被切后，路口守军/阶梯不足以像 v5 的半推堆那样反推修连通（KuYd 由 W325 变 L1571）。这一层仍是默认关的实验层（`APEX_MAZE_BLITZ=1` 开启），flag off 逐局不变，未合并到 main；下一步应把 k 阶梯与后方指标格反推（`rescueCut`）结合，或在 0.68 上限制全推，而不是继续放宽 k。
+
+### 2026-11-11：迷宫 blitz 第七轮（孤立支线按侧跳过 + 大图全推限制 + 后方反推救援，`APEX_MAZE_BLITZ` 仍默认关）
+
+- 用户对孤立支线的语义澄清与实现（`bot/mazeblitz.cjs`）：
+  1. 相邻支线若是孤立敌军（与**全部**敌方锚点断开），只把**该侧**视为安全；威胁时间线仍从所有其他支线计算，**没有**「某侧孤立 → 整个路口安全」的提前返回。敌人「从另一个方向把这条支线重连回来」不进入路口评估：威胁洪水的 BFS 也不再穿过孤立敌格，因此那条侧廊既不是来源也不是通道。
+  2. 回归测试（`test/mazeblitz-junction.test.cjs`「an isolated side is skipped on its own side only」）：孤立支线 + 普通敌支线仍按 59 威胁走半兵阶梯（mode 1）；孤立 + 中立支线（78）、孤立 + 弱己方支线（96）同样继续计威胁；只有孤立支线单独存在时 `maxThreat` 才是 0、才整推。
+- 大图（`size >= APEX_MAZE_BLITZ_BIG`，默认 800；0.68 迷宫房约 890 格）限制整推：路口有真实威胁且 k 阶梯无安全 k（k<1）时不再回退整推。
+  - 只有「相邻建筑」例外（`fullPushException` 的 building）可以整推；`trade` 例外在大图上停用。
+  - 否则 hold/补兵/abort；唯一允许整推的替代是**与后方反推救援配对**（后方 6 Tick 自有连通窗口内存在皇冠/指挥所锚点时，`APEX_MAZE_BLITZ_PAIR=0` 可关闭该配对，回到纯 hold）。
+  - 大图路口连续 hold 上限 `APEX_MAZE_BLITZ_HOLD_LIMIT`（默认 4）后 abort 交回默认 planner：v6 在 KuYd 上连续 hold 174 Tick 把整波耗死。该 abort **只在大图生效**——同参数全局启用时 0.34 的 pzr 由 W250 变 L834（小图上的 hold 会真的凑齐并获胜）。
+- k 阶梯与后方反推救援配对（复用 `rescueCut`/路由机制，无第二个锚点层）：
+  - `rescueCut` 先找断口外侧相邻的厚堆（`trappedComponent` + `cutTargets`）；全推留下的 1 兵尾巴通常找不到。
+  - `rearRescueCut` 从最近的皇冠/指挥所沿自有连通路由一 Tick 一步走到断口外侧 hub（`h.field`/`h.route`/`safeMove`），到达后由 `rescueCut` 反推重连；上限 `APEX_MAZE_BLITZ_RESCUE_TICKS`=6 Tick，且被困纵队兵力需 >= max(60, floor×0.25)（`APEX_MAZE_BLITZ_RESCUE_MASS` 可覆盖）。
+  - 单测「a cut 1-soldier tail is reopened by a rear anchor march」：皇冠 200 走到 hub（(6,4)）→ 下一 Tick `blitz-rescue` 拿下断口格 (5,4) → 被困根恢复连通。
+- 保留 v6 的威胁仿真、`APEX_MAZE_BLITZ_T`/`GUARD`/`MAX_HALF` 旋钮、一 Tick 一敌动作与增长时间线；`pushModes` 仍是二元（路口阶梯半兵 / 其他整推）。
+- 用户点名的五局（单种子单 worker、2400 Tick、flag on、anti；v6 = `e1185f4`，本轮 = 工作区）：
+
+  | 局（种子 / 尺寸 / 座位） | v6 | 本轮 |
+  | --- | --- | --- |
+  | `apex-long-1-maze` 0.34 seat 0（pzr） | W 250 | W 250 |
+  | `apex-long-1-maze` 0.34 seat 1（2ikw） | W 130 | W 130 |
+  | `apex-long-0-maze` 0.34 seat 0（pbwm） | W 821 | W 821 |
+  | `apex-long-7-maze` 0.68 seat 1（KuYd） | **L 1571** | **W 934** |
+  | `apex-long-3-maze` 0.68 seat 0（4bQF） | L 1624 | L 1624 |
+
+- maze seeds 8 全量（0.34+0.68、双座位、2400 Tick、8 worker，同一命令跑 v6 worktree 与本轮工作区）：
+
+  | 对手 | v6 | 本轮 |
+  | --- | --- | --- |
+  | anti（32 局） | 22W / 0D / 10L（0.34 13/0/3，0.68 9/0/7） | **23W / 3D / 6L**（0.34 13/0/3，0.68 10/3/3） |
+  | apex（32 局） | 16W / 0D / 16L（0.34 8/0/8，0.68 8/0/8） | **17W / 0D / 15L**（0.34 8/0/8，0.68 9/0/7） |
+  | 合计（64 局） | 38W / 0D / 26L | **40W / 3D / 21L** |
+
+  - 0.34 逐局完全不变：所有新规则都以 `size >= 800` 为门槛（配对、hold abort、trade 停用）。
+  - 0.68 由 9W/0D/7L 变为 10W/3D/3L（+1 胜、+3 平、−4 负）：KuYd 由 L1571 转 W934，另有 3 局 hold 僵持转为平局；4bQF 仍是 L1624（波在 0.68 长走廊上被打光，属于波体量问题而不是路口规则）。
+  - 中间消融（未保留）：仅加配对、未加 hold abort → anti 与 v6 逐局完全一致（22W/0D/10L；KuYd 的 `rescuePaired=0`，后方锚点不在 6 Tick 窗口内，174 Tick hold 仍在）；hold abort 全局启用（不限大图）→ anti 22W/3D/7L 但 pzr 由 W250 变 L834。
+- 孤立支线诊断（`training/isolated-branch.cjs`，seeds 4、0.34+0.68、双座位、2400 Tick、flag on；**按支线计数**，不是整路口结论）：
+  - vs anti（16 局，8 胜）：46 条被路过，39 条有结局——反占路口 **14（35.9%）**、另一条路重连 **0（0%）**、衰减/消失 **25（64.1%）**，7 条终局未决；重连平均 11.7 Tick / 5.9 兵。分尺寸：0.34 7/16（43.8%）、0.68 7/23（30.4%）。
+  - vs apex（16 局，10 胜）：21 条被路过，12 条有结局——反占路口 **1（8.3%）**、另一条路重连 **0（0%）**、衰减/消失 **11（91.7%）**，9 条终局未决；0.68 为 0/9。与 v6 的 34% / 5~10% 量级一致，支持「只跳过该侧」而不是「整路口安全」。
+- 测试：bot-2.0 `node --test test/*.test.cjs` **202 项全通过**（新增 4 项：孤立按侧跳过、大图不放行整推、后方反推救援、既有阶梯回归不变）；仓库根 `pnpm test` 退出码 0，`pnpm run lint`、`pnpm run build`、`pnpm run test:bot` 通过；`test/replay-regression.test.cjs` 在 202 项内通过。
+- 结论：仍是默认关的实验层（`APEX_MAZE_BLITZ=1` 开启），flag off 逐局不变，未合并到 main。0.68 剩余失败集中在「波被打光」（体量与路线抵抗），下一步应针对波体量/发射门槛，而不是继续放宽 k 或 hold。

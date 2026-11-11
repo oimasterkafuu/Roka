@@ -9,7 +9,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { makeBoard } = require('../bot/board.cjs');
+const { makeBoard, connectedSet } = require('../bot/board.cjs');
 const { preview } = require('../bot/rules.cjs');
 const { BLITZ_HELPERS } = require('../bot/planner.cjs');
 const {
@@ -457,4 +457,154 @@ test('no safe k holds and reinforces, or aborts instead of pushing', () => {
 test('the transit mode is binary: a junction ladder or a full push', () => {
   assert.deepEqual(pushModes(false), [2]);
   assert.deepEqual(pushModes(true), [1]);
+});
+
+test('an isolated side is skipped on its own side only', () => {
+  const cfg = enabledCfg();
+  // (4,3) is an isolated enemy branch: it cannot move and, per the isolated
+  // experiment, its side contributes no threat.  The normal branch on (4,5)
+  // must still drive the timeline and the ladder - there is no "the junction is
+  // safe because one side is isolated" shortcut.
+  const b = junctionBoard([
+    [4, 3, 'enemy', 50, 'plain', 1],
+    [4, 5, 'enemy', 60],
+  ]);
+  const analysis = junctionThreat(b, at(4, 4), at(3, 4), ROAD, cfg);
+  const isolated = analysis.sides.find((side) => side.at === at(4, 3));
+  const normal = analysis.sides.find((side) => side.at === at(4, 5));
+  assert.equal(isolated.role, 'enemy-isolated');
+  assert.equal(isolated.threat, 0);
+  assert.equal(normal.role, 'enemy');
+  assert.equal(analysis.threat[1], 59, 'the normal branch still arrives with 60 - 1');
+  assert.equal(analysis.real, true);
+  assert.ok(analysis.halfLimit >= 1, 'the ladder is open and bounded by the normal branch');
+  const store = memory(b, { phase: 'push', crown: at(0, 4), root: at(4, 4), prev: at(5, 4) });
+  const decision = run(b, store, cfg);
+  assert.equal(decision.action.mode, 1, 'the normal branch forces the half-push ladder');
+  assert.equal(store.blitz.iso.watchedTotal, 1, 'the isolated side is still recorded');
+
+  // A neutral branch behind the isolated side: the isolated side does not hide
+  // the neutral approach either (one capture tick, then 78).
+  const neutral = junctionBoard([
+    [4, 3, 'enemy', 50, 'plain', 1],
+    [4, 5, 'neutral'],
+    [4, 6, 'enemy', 80],
+  ]);
+  const neutralAnalysis = junctionThreat(neutral, at(4, 4), at(3, 4), ROAD, cfg);
+  assert.equal(neutralAnalysis.threat[1], 0);
+  assert.equal(neutralAnalysis.threat[2], 78);
+  assert.equal(neutralAnalysis.real, true);
+  assert.ok(neutralAnalysis.halfLimit >= 0);
+
+  // A weak own branch behind the isolated side is still a delayed threat.
+  const weak = junctionBoard([
+    [4, 3, 'enemy', 50, 'plain', 1],
+    [4, 5, 'own', 2],
+    [4, 6, 'enemy', 100],
+  ]);
+  const weakAnalysis = junctionThreat(weak, at(4, 4), at(3, 4), ROAD, cfg);
+  assert.equal(weakAnalysis.threat[2], 96, '100 - 2 defenders - 2 pushes');
+  assert.equal(weakAnalysis.real, true);
+
+  // And the isolated side alone is still safe, as the experiment says.
+  const alone = junctionBoard([[4, 3, 'enemy', 500, 'plain', 1]]);
+  const aloneAnalysis = junctionThreat(alone, at(4, 4), at(3, 4), ROAD, cfg);
+  assert.equal(aloneAnalysis.maxThreat, 0);
+  assert.equal(aloneAnalysis.real, false);
+});
+
+// A large (0.68) room: 120 rows x 7 columns = 840 cells, so the big-room gate
+// applies the same way it does on the 891..957 cell maze rooms.
+function bigJunctionBoard(extra = [], options = {}) {
+  const cells = [
+    [0, 4, 'enemy', options.crownArmy ?? 10, 'crown'],
+    [1, 4, 'own', 1],
+    [2, 4, 'own', 1],
+    [3, 4, 'own', 1],
+    [4, 4, 'own', options.wave ?? 400],
+    [4, 5, 'own', 1],
+    [5, 4, 'own', 1],
+  ];
+  if (options.rear !== 'far') cells.push([4, 6, 'own', options.homeArmy ?? 200, 'crown']);
+  if (options.rear === 'far') {
+    for (let x = 5; x <= 12; x += 1) cells.push([x, 4, 'own', 1]);
+    cells.push([13, 4, 'own', options.homeArmy ?? 200, 'crown']);
+  }
+  return gridBoard(120, [...cells, ...extra], options);
+}
+
+test('a large room never falls back to a full push out of a live junction', () => {
+  // 600 next to the junction: k = -1, but the cell ahead (3,4) could be halved
+  // into.  The ladder is closed, so only the adjacent building, or a push
+  // paired with the rear cut rescue, may leave the junction.
+  const extra = [[4, 3, 'enemy', 600]];
+  const big = bigJunctionBoard(extra);
+  const cfg = enabledCfg();
+  const analysis = junctionThreat(big, at(4, 4), at(3, 4), ROAD, cfg);
+  assert.equal(analysis.halfLimit, -1);
+
+  // The rear crown is 5 own cells away (inside the rescue window), so the push
+  // is allowed only as the paired variant.
+  const paired = memory(big, { phase: 'push', crown: at(0, 4), root: at(4, 4), prev: at(5, 4) });
+  const decision = run(big, paired, cfg);
+  assert.equal(decision.action.mode, 2);
+  assert.equal(paired.blitz.rescuePaired, 1, 'the full push is paired with the rear rescue');
+
+  // With the pairing disabled the same junction holds instead of pushing.
+  const held = memory(big, { phase: 'push', crown: at(0, 4), root: at(4, 4), prev: at(5, 4) });
+  const heldDecision = run(big, held, enabledCfg({ pairRescue: false }));
+  assert.equal(heldDecision.branch, 'blitz-junction-hold');
+  assert.equal(held.blitz.rescuePaired, 0);
+  assert.notDeepEqual(
+    [heldDecision.action.dx, heldDecision.action.dy],
+    [3, 4],
+    'the guard is reinforced, never pushed out of the junction',
+  );
+
+  // A compact 0.34 room never uses the pairing: the rule is scoped to the large
+  // rooms where a full push really leaves an unrepairable 1-soldier tail.
+  const small = junctionBoard(extra);
+  const smallStore = memory(small, { phase: 'push', crown: at(0, 4), root: at(4, 4), prev: at(5, 4) });
+  const smallDecision = run(small, smallStore, cfg);
+  assert.equal(smallDecision.branch, 'blitz-junction-hold');
+
+  // Without a rear anchor inside the rescue window, the large room holds too.
+  const far = bigJunctionBoard(extra, { rear: 'far' });
+  const farStore = memory(far, { phase: 'push', crown: at(0, 4), root: at(4, 4), prev: at(5, 4) });
+  const farDecision = run(far, farStore, cfg);
+  assert.equal(farDecision.branch, 'blitz-junction-hold');
+  assert.equal(farStore.blitz.rescuePaired, 0);
+  assert.equal(farStore.blitz.fullExceptions, 0);
+});
+
+test('a cut 1-soldier tail is reopened by a rear anchor march', () => {
+  // Full pushes left 1s behind the column; the enemy cut at (5,4) froze (4,4)
+  // and everything forward.  No adjacent stack is fat enough for rescueCut, so
+  // the rear crown at (7,4) walks to the cut hub (6,4) and reconnects there.
+  const b = gridBoard(8, [
+    [0, 4, 'enemy', 10, 'crown'],
+    [1, 4, 'own', 1],
+    [2, 4, 'own', 1],
+    [3, 4, 'own', 1, 'plain', 1],
+    [4, 4, 'own', 300, 'plain', 1],
+    [5, 4, 'enemy', 40],
+    [6, 4, 'own', 1],
+    [7, 4, 'own', 200, 'crown'],
+  ]);
+  const cfg = enabledCfg();
+  const store = memory(b, { phase: 'push', crown: at(0, 4), root: at(4, 4), prev: at(5, 4) });
+  const first = run(b, store, cfg);
+  assert.equal(first.branch, 'blitz-rescue-rear');
+  assert.deepEqual([first.action.x, first.action.y], [7, 4], 'the rear crown stack starts the march');
+  assert.deepEqual([first.action.dx, first.action.dy], [6, 4]);
+  assert.equal(store.blitz.rearRescues, 1);
+
+  apply(b, first.action);
+  const second = run(b, store, cfg);
+  assert.equal(second.branch, 'blitz-rescue', 'the staged stack pushes the cut cell back in');
+  assert.deepEqual([second.action.x, second.action.y], [6, 4]);
+  assert.deepEqual([second.action.dx, second.action.dy], [5, 4]);
+  apply(b, second.action);
+  assert.equal(connectedSet(b, 1).has(at(4, 4)), true, 'the trapped column is connected again');
+  assert.equal(store.blitz.rescue, null);
 });

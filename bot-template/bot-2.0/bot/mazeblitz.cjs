@@ -133,6 +133,17 @@ const DEFAULTS = Object.freeze({
   detachStall: 4,
   splitCooldown: 6,
   rescueScan: 6,
+  // Large rooms (0.68 maze, ~890 cells) are judged by size, not by profile:
+  // a full push there leaves a 1-soldier tail the opponent can cut, so the
+  // junction rule behaves differently from the compact 0.34 rooms.
+  bigBoard: 800,
+  rescueTicks: 6,
+  rescueMass: 0,
+  pairRescue: true,
+  // A junction whose ladder is closed may be reinforced, but not forever: a
+  // 174-tick hold was the v6 stall on the 0.68 rooms, so after a few failed
+  // holds the blitz hands the board back instead of feeding one junction.
+  holdLimit: 4,
 });
 
 function envNumber(name, fallback, min, max) {
@@ -176,6 +187,13 @@ function mazeBlitzConfig(overrides = {}) {
     detachStall: DEFAULTS.detachStall,
     splitCooldown: DEFAULTS.splitCooldown,
     rescueScan: DEFAULTS.rescueScan,
+    bigBoard: envNumber('APEX_MAZE_BLITZ_BIG', DEFAULTS.bigBoard, 0, 100000),
+    rescueTicks: envNumber('APEX_MAZE_BLITZ_RESCUE_TICKS', DEFAULTS.rescueTicks, 1, 40),
+    rescueMass: envNumber('APEX_MAZE_BLITZ_RESCUE_MASS', DEFAULTS.rescueMass, 0, 100000),
+    // APEX_MAZE_BLITZ_PAIR=0 disables the large-room "pair the push with the
+    // rear cut rescue" escape and leaves the pure hold/reinforce/abort rule.
+    pairRescue: envFlag('APEX_MAZE_BLITZ_PAIR', DEFAULTS.pairRescue),
+    holdLimit: envNumber('APEX_MAZE_BLITZ_HOLD_LIMIT', DEFAULTS.holdLimit, 1, 400),
     ...overrides,
   };
 }
@@ -217,6 +235,14 @@ function initialState() {
     iso: null,
     junctionTicks: 0,
     halfLadders: 0,
+    // Rear-anchor cut rescue (see rearRescueCut).
+    rescue: null,
+    rescueSince: 0,
+    rearRescues: 0,
+    rescuePaired: 0,
+    fullExceptions: 0,
+    holdTicks: 0,
+    junctionAborts: 0,
   };
 }
 
@@ -824,6 +850,16 @@ function threatTimeline(b, sim, root, blocked, cfg) {
     const at = queue[head];
     for (const next of sim.neighbors(at)) {
       if (distance[next] >= 0 || !sim.passable[next] || blocked.has(next)) continue;
+      // Isolated-side rule: an adjacent branch that is an isolated enemy cell is
+      // disconnected from every enemy anchor, so *that side* contributes no
+      // threat and is not a corridor either.  We deliberately do not model the
+      // enemy walking another live stack through the isolated branch to
+      // reconnect it: the isolated-branch experiment is what makes that
+      // assumption explicit (34% direct recapture of the cut junction at 0.34,
+      // ~5-10% at 0.68).  Only the isolated side is dropped - every other
+      // normal, neutral or weak-own branch still feeds the timeline below, and
+      // there is deliberately no "the whole junction is safe" shortcut here.
+      if (sim.isolated[next] && sim.owner[next] === SIM_ENEMY) continue;
       distance[next] = distance[at] + 1;
       parent[next] = at;
       queue.push(next);
@@ -833,8 +869,7 @@ function threatTimeline(b, sim, root, blocked, cfg) {
   const groups = new Map();
   for (let at = 0; at < sim.size; at += 1) {
     // An isolated enemy stack cannot move at all (engine `chkMove`), so it is
-    // never a source; the flood above still lets a live stack behind it walk
-    // through its cell and reconnect it, which is the recorded risk.
+    // never a source either.
     if (sim.owner[at] !== SIM_ENEMY || sim.isolated[at] || sim.army[at] < 2) continue;
     const start = distance[at];
     if (start < 1 || start > horizon) continue;
@@ -948,8 +983,8 @@ function selectHalfPushes(b, root, next, threat, cfg) {
  * Branch classification at a junction, kept separate from the simulation so the
  * rule is testable: own ground is only skipped when it survives the horizon,
  * neutral ground is a delayed path, the planned destination is skipped only
- * when our planned push really captures it, an isolated enemy stack cannot move
- * but may still be reconnected, and normal enemy ground is an immediate threat.
+ * when our planned push really captures it, and an isolated enemy stack cannot
+ * move and is skipped on its own side only (the other branches still count).
  */
 function classifySides(b, root, next, cfg) {
   const sides = [];
@@ -1029,12 +1064,17 @@ function junctionThreat(b, root, next, path, cfg) {
  *      the guard can never be worth keeping;
  *   2. trade: one own stack next to the junction can already take the cell we
  *      are pushing into on the following tick, so the 1-for-1 exchange of the
- *      junction guard for the advance is acceptable.
+ *      junction guard for the advance is acceptable.  Large rooms never use
+ *      this exception: there a full push leaves a 1-soldier tail that the
+ *      opponent cuts, which is the v6 regression, so only the adjacent
+ *      building (or a push paired with the rear cut rescue) may leave a live
+ *      junction.
  */
-function fullPushException(b, root, next, cfg) {
+function fullPushException(b, root, next, cfg, allowTrade = true) {
   if (!b.enemy(next)) return null;
   const kind = b.kind(next);
   if ((kind === 'crown' || kind === 'city') && computePush(b, root, next, 1) <= b.army[next]) return 'building';
+  if (!allowTrade) return null;
   for (const from of b.neighbors(root)) {
     if (from === next || !b.own(from) || b.isolated[from]) continue;
     // The retaking stack has to be adjacent to the target, not only to the
@@ -1058,6 +1098,23 @@ function holdJunction(b, m, own, h, state, cfg, threat) {
   const delivery = blitzGather(b, m, own, state, state.crown, need, cfg, h, 'blitz-junction-hold');
   if (delivery) return delivery;
   return null;
+}
+
+/**
+ * A closed ladder at a live junction.  `holdLimit` consecutive holds mean the
+ * reinforcement is not arriving (the threat grows as fast as the deliveries),
+ * so the plan aborts the blitz and hands the board back instead of feeding the
+ * same junction for a hundred ticks - the v6 0.68 stall.
+ */
+function junctionHold(state, analysis, cfg, large) {
+  state.holdTicks = (state.holdTicks || 0) + 1;
+  // The abort is a large-room rule: on a compact 0.34 room the same hold really
+  // does finish gathering and wins, so the ladder is allowed to wait there.
+  if (large && state.holdTicks > cfg.holdLimit) {
+    state.junctionAborts = (state.junctionAborts || 0) + 1;
+    return { action: null, branch: 'blitz-junction-abort', threat: analysis.maxThreat, halfLimit: analysis.halfLimit };
+  }
+  return { action: null, branch: 'blitz-junction-hold', threat: analysis.maxThreat, halfLimit: analysis.halfLimit };
 }
 
 /* ========================================================================
@@ -1265,6 +1322,32 @@ function directPush(b, root, next, mode) {
   return connected.has(next) ? action : null;
 }
 
+function ownCells(b) {
+  const cells = [];
+  for (let at = 0; at < b.size; at += 1) if (b.own(at) && !b.isolated[at]) cells.push(at);
+  return cells;
+}
+
+/**
+ * Whether a rear anchor can still reach the junction area through our own
+ * ground inside the rescue window.  Only then may a large room push fully out
+ * of a live junction: the push is paired with `rearRescueCut`, so the
+ * one-soldier tail it leaves can be reopened instead of halving the wave.  The
+ * anchor is one of the crowns/cities the gather already uses - this is not a
+ * second anchor layer.
+ */
+function rearRescueReady(b, own, root, h, cfg) {
+  if (!Number.isInteger(root) || !b.own(root)) return false;
+  const f = h.field(b, [root], (at) => b.own(at) && !b.isolated[at]);
+  for (const anchor of own) {
+    if (b.isolated[anchor] || !b.own(anchor) || b.army[anchor] <= 1) continue;
+    if (b.kind(anchor) !== 'crown' && b.kind(anchor) !== 'city') continue;
+    const distance = f.distance[anchor];
+    if (Number.isFinite(distance) && distance > 0 && distance <= cfg.rescueTicks + 2) return true;
+  }
+  return false;
+}
+
 /**
  * Main-route transit.
  *
@@ -1290,6 +1373,7 @@ function march(b, state, path, cfg, h) {
   // branch is left to `safeMove`.
   const deadOnly = sides.every((side) => !side.branch.reconnectable);
   const junction = isJunction(b, root);
+  const large = b.size >= cfg.bigBoard;
   const analysis = junction ? junctionThreat(b, root, next, path, cfg) : null;
   const used = state.halfAt === root ? state.halfPushes : 0;
   let holding = false;
@@ -1303,17 +1387,15 @@ function march(b, state, path, cfg, h) {
   if (junction && analysis?.real) {
     state.junctionTicks = (state.junctionTicks || 0) + 1;
     const k = analysis.halfLimit;
-    if (b.enemy(next) && k >= 1 && computePush(b, root, next, 1) <= b.army[next]) {
+    // A half push has to be able to take the cell ahead; otherwise sending half
+    // the guard there is worse than both alternatives.
+    const halfCaptures = !b.enemy(next) || computePush(b, root, next, 1) > b.army[next];
+    if (b.enemy(next) && k >= 1 && !halfCaptures) {
       // No amount of halving takes the cell ahead: hold or use the documented
       // full-push exception, never dump half the wave on it.
-      const exception = fullPushException(b, root, next, cfg);
+      const exception = fullPushException(b, root, next, cfg, !large);
       if (!exception) {
-        return {
-          action: null,
-          branch: 'blitz-junction-hold',
-          threat: analysis.maxThreat,
-          halfLimit: k,
-        };
+        return junctionHold(state, analysis, cfg, large);
       }
     } else if (used >= cfg.maxHalf) {
       // The ladder cap is reached: hand the column to the forward cell.  The
@@ -1327,15 +1409,18 @@ function march(b, state, path, cfg, h) {
     } else if (k < 1) {
       // Not even holding is safe (k = -1) or leaving the junction is not safe
       // yet (k = 0) although the cell ahead could be halved into: the ladder is
-      // closed, so only the documented exceptions may push out of it.
-      const exception = fullPushException(b, root, next, cfg);
-      if (!exception) {
-        return {
-          action: null,
-          branch: 'blitz-junction-hold',
-          threat: analysis.maxThreat,
-          halfLimit: k,
-        };
+      // closed, so a plain full push out of the junction is not allowed.  The
+      // adjacent building is the one documented exception; on a large room the
+      // push may instead be paired with the rear cut rescue, which is what
+      // reopens the one-soldier tail a full push leaves.  Everything else holds
+      // and reinforces, and aborts when there is nothing left to reinforce with.
+      const exception = fullPushException(b, root, next, cfg, !large);
+      if (exception) {
+        state.fullExceptions = (state.fullExceptions || 0) + 1;
+      } else if (large && halfCaptures && cfg.pairRescue && rearRescueReady(b, ownCells(b), root, h, cfg)) {
+        state.rescuePaired += 1;
+      } else {
+        return junctionHold(state, analysis, cfg, large);
       }
     } else {
       modes = pushModes(true);
@@ -1359,12 +1444,7 @@ function march(b, state, path, cfg, h) {
     if (holding) {
       // The guard refused the half push: hold instead of promoting it to a full
       // push behind the junction rule.
-      return {
-        action: null,
-        branch: 'blitz-junction-hold',
-        threat: analysis?.maxThreat ?? 0,
-        halfLimit: analysis?.halfLimit ?? 0,
-      };
+      return junctionHold(state, analysis ?? { maxThreat: 0, halfLimit: 0 }, cfg, large);
     }
     return null;
   }
@@ -1486,9 +1566,7 @@ function splitDecision(b, state, path, mainNeed, cfg, h) {
 // action to reconnect: the recaptured bridge also doubles the trapped army
 // back.  The bridge must really reconnect, verified with the real
 // connectivity rule, not with proximity.
-function rescueCut(b, own, state, h, cfg) {
-  const root = state.root;
-  if (!b.own(root) || !b.isolated[root]) return null;
+function trappedComponent(b, root) {
   const trapped = new Set([root]);
   const queue = [root];
   for (let head = 0; head < queue.length; head += 1) {
@@ -1498,14 +1576,38 @@ function rescueCut(b, own, state, h, cfg) {
       queue.push(next);
     }
   }
-  const candidates = [];
-  for (const from of own) {
-    if (b.isolated[from] || !b.own(from) || b.army[from] <= 1) continue;
-    for (const to of b.neighbors(from)) {
-      if (!b.enemy(to) || b.isolated[to]) continue;
-      if (![...b.neighbors(to)].some((next) => trapped.has(next))) continue;
-      candidates.push({ from, to, army: b.army[to] });
+  return trapped;
+}
+
+/**
+ * Every enemy cell whose capture reconnects the trapped column: it is adjacent
+ * to a trapped cell and to one of our own cells that is still connected to the
+ * rear (`hub`, the cell a rescue has to reach first).
+ */
+function cutTargets(b, trapped) {
+  const targets = [];
+  const seen = new Set();
+  for (const at of trapped) {
+    for (const to of b.neighbors(at)) {
+      if (!b.enemy(to) || b.isolated[to] || seen.has(to)) continue;
+      seen.add(to);
+      for (const hub of b.neighbors(to)) {
+        if (trapped.has(hub) || !b.own(hub) || b.isolated[hub]) continue;
+        targets.push({ to, hub, army: b.army[to], hubArmy: b.army[hub] });
+      }
     }
+  }
+  return targets;
+}
+
+function rescueCut(b, own, state, h, cfg) {
+  const root = state.root;
+  if (!b.own(root) || !b.isolated[root]) return null;
+  const trapped = trappedComponent(b, root);
+  const candidates = [];
+  for (const target of cutTargets(b, trapped)) {
+    if (b.army[target.hub] <= 1) continue;
+    candidates.push({ from: target.hub, to: target.to, army: target.army });
   }
   if (!candidates.length) return null;
   candidates.sort((a, z) => a.army - z.army || b.army[z.from] - b.army[a.from]);
@@ -1519,6 +1621,70 @@ function rescueCut(b, own, state, h, cfg) {
     return { action, branch: 'blitz-rescue' };
   }
   return null;
+}
+
+/**
+ * Rear-anchor cut rescue, paired with the junction k ladder.
+ *
+ * A full push leaves a one-soldier tail, so when the opponent cuts it behind
+ * the column `rescueCut` finds no own stack left to push back in and the wave
+ * is abandoned (half its soldiers already gone).  This walks a real stack from
+ * the nearest rear anchor (crown/city, the anchors the gather already uses - no
+ * second anchor layer) along own ground to the cut's own-side hub, one action
+ * per tick, and lets `rescueCut` reconnect from there.  Bounded by
+ * `rescueTicks`, and only for a column worth the march.
+ */
+function rearRescueCut(b, own, state, h, cfg) {
+  const root = state.root;
+  if (!Number.isInteger(root) || !b.own(root) || !b.isolated[root]) {
+    state.rescue = null;
+    state.rescueSince = 0;
+    return null;
+  }
+  if (!state.rescueSince) state.rescueSince = b.turn;
+  if (b.turn - state.rescueSince > cfg.rescueTicks) {
+    state.rescue = null;
+    return null;
+  }
+  const trapped = trappedComponent(b, root);
+  const mass = componentMass(b, trapped);
+  const minimum = cfg.rescueMass > 0 ? cfg.rescueMass : Math.max(60, waveFloor(b.size, cfg) * 0.25);
+  if (mass < minimum) return null;
+  const targets = cutTargets(b, trapped);
+  if (!targets.length) return null;
+  let plan = state.rescue;
+  if (plan && !targets.some((target) => target.to === plan.to && target.hub === plan.hub)) plan = null;
+  if (plan && (!b.own(plan.at) || b.isolated[plan.at] || b.army[plan.at] <= 1)) plan = null;
+  if (!plan) {
+    let best = null;
+    for (const target of targets.slice(0, cfg.rescueScan)) {
+      const f = h.field(b, [target.hub], (at) => b.own(at) && !b.isolated[at]);
+      for (const anchor of own) {
+        if (b.isolated[anchor] || !b.own(anchor) || b.army[anchor] <= 1) continue;
+        if (b.kind(anchor) !== 'crown' && b.kind(anchor) !== 'city') continue;
+        const distance = f.distance[anchor];
+        if (!Number.isFinite(distance) || distance <= 0) continue;
+        if (!best || distance < best.distance || (distance === best.distance && b.army[anchor] > best.army)) {
+          best = { to: target.to, hub: target.hub, at: anchor, distance, army: b.army[anchor] };
+        }
+      }
+    }
+    if (!best) return null;
+    plan = { to: best.to, hub: best.hub, at: best.at, started: b.turn };
+    state.rescue = plan;
+  }
+  const f = h.field(b, [plan.hub], (at) => b.own(at) && !b.isolated[at]);
+  const route = h.route(f, plan.at);
+  if (route.length < 2) return null;
+  const next = route[1];
+  const action = h.safeMove(b, plan.at, next, 'blitz-rescue-rear', [2]) || directPush(b, plan.at, next, 2);
+  if (!action) return null;
+  plan.at = next;
+  state.rearRescues += 1;
+  if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') {
+    console.error('RESCUE-REAR', b.turn, plan.at, '->', plan.hub, 'cut', plan.to, b.army[root]);
+  }
+  return { action, branch: 'blitz-rescue-rear' };
 }
 
 // The rally is gone or cut: move the body itself forward on the same crown.
@@ -1586,7 +1752,18 @@ function pushDecision(b, m, own, h, state, cfg) {
     if (rescue) {
       state.frozen = 0;
       state.idle = 0;
+      state.rescue = null;
+      state.rescueSince = 0;
       return rescue;
+    }
+    // No adjacent stack can push the cut back in (the tail of a full push is a
+    // run of one-soldier cells).  Walk a rear anchor to the cut instead of
+    // abandoning the column: this is the rescue the k ladder is paired with.
+    const rear = rearRescueCut(b, own, state, h, cfg);
+    if (rear) {
+      state.frozen = 0;
+      state.idle = 0;
+      return rear;
     }
     // One tick of patience, no more: the engine makes the trapped column pay
     // one half, and a nearby stack may still reopen it next tick.  From the
@@ -1599,6 +1776,8 @@ function pushDecision(b, m, own, h, state, cfg) {
       return waitOne(b, m, own, state, h, cfg, { action: null, branch: 'blitz-hold' });
     }
     state.abandons = (state.abandons || 0) + 1;
+    state.rescue = null;
+    state.rescueSince = 0;
     if (process.env.APEX_MAZE_BLITZ_DEBUG === '1')
       console.error('ABANDON', b.turn, state.root, b.army[state.root]);
     // An alternate forward connected stack takes the wave over; the cut root
@@ -1629,6 +1808,10 @@ function pushDecision(b, m, own, h, state, cfg) {
       const expand = expandDecision(b, m, own, h, state, cfg);
       return expand.action ? expand : null;
     }
+  } else {
+    // The column is connected again: no rescue march is pending.
+    state.rescue = null;
+    state.rescueSince = 0;
   }
   const crownReady = Number.isInteger(state.crown) && b.enemy(state.crown) && b.kind(state.crown) === 'crown';
   if (!Number.isInteger(state.root) || !b.own(state.root) || b.army[state.root] <= 1) {
@@ -1698,6 +1881,15 @@ function pushDecision(b, m, own, h, state, cfg) {
     state.phase = 'done';
     return waitOne(b, m, own, state, h, cfg, { action: null, branch: 'blitz-junction-abort' });
   }
+  if (moved && !moved.action && moved.branch === 'blitz-junction-abort') {
+    // The ladder stayed closed for `holdLimit` ticks: the reinforcement never
+    // arrived, so the blitz hands the board back (abort) rather than keep
+    // feeding the junction.  `waitOne` still spends this tick on progress.
+    if (process.env.APEX_MAZE_BLITZ_DEBUG === '1')
+      console.error('JUNCTION-ABORT', b.turn, state.root, b.army[state.root], moved.threat);
+    state.phase = 'done';
+    return waitOne(b, m, own, state, h, cfg, { action: null, branch: 'blitz-junction-abort' });
+  }
   if (process.env.APEX_MAZE_BLITZ_DEBUG === '1')
     console.error(
       'PUSH',
@@ -1727,6 +1919,7 @@ function pushDecision(b, m, own, h, state, cfg) {
     }
     state.stall = 0;
     state.idle = 0;
+    state.holdTicks = 0;
     return decision;
   }
   // The corridor head is too strong for the current column. Pull the rear in
@@ -1925,4 +2118,9 @@ module.exports = {
   fullPushException,
   holdJunction,
   trackIsolatedBranches,
+  ownCells,
+  rearRescueReady,
+  rearRescueCut,
+  trappedComponent,
+  cutTargets,
 };
