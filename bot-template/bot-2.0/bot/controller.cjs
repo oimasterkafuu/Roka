@@ -145,6 +145,7 @@ function createController(playerId, options = {}) {
     maxNoActionStreak: 0,
     byBranch: Object.create(null),
     threatDistance: Object.create(null),
+    smallRace: null,
     enemyHome: undefined,
     mazeHistory: {
       lastFrom: -1,
@@ -367,6 +368,7 @@ function createController(playerId, options = {}) {
     memory.site = undefined;
     memory.buildPlan = null;
     memory.snowball = null;
+    memory.smallRace = null;
     memory.rearEconomy = null;
     memory.rearGrowthNext = undefined;
     memory.forwardGrowthNext = undefined;
