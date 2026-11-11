@@ -4,6 +4,7 @@ const { makeBoard, connectedSet, distanceField, anchorCells, cutAnalysis } = req
 const { computePush, actionCoordinates, preview } = require('./rules.cjs');
 const { lastMileConfig, lastMileState, reseatRoot } = require('./lastmile.cjs');
 const { medPlanConfig, economyYields, crownRaceHold } = require('./medplan.cjs');
+const { mazeBlitzPlan } = require('./mazeblitz.cjs');
 const {
   snowballConfig, snowballEntry, snowballExit, snowballTurn, snowballTakesTick,
   anchorScore, paintScore, captureScore, freshSnowball,
@@ -2571,6 +2572,12 @@ function plan(b,m,deadline) {
   if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
   if(tactic?.branch==='crown')return tactic;
+  // Maze blitz (APEX_MAZE_BLITZ=1, maze rooms only, default off): a dedicated
+  // no-build burst opening plus one concentrated super-wave.  It returns null
+  // immediately unless the flag is on, so every other room keeps the default
+  // planner byte-for-byte.
+  const blitz = mazeBlitzPlan(b, m, own, enemies, BLITZ_HELPERS);
+  if (blitz) return blitz;
   // Before an opponent is visible, reserve a small deterministic share of
   // the action budget for scouting. This keeps fog games from becoming two
   // isolated local economies that never discover a crown to attack.
@@ -2780,4 +2787,7 @@ function plan(b,m,deadline) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,crownLandAnchor,defense,defensiveCut,emergencyDefensiveCut,econProfile,citySnowball};
+// Shared helper surface for the blitz module (no require cycle: the blitz
+// module keeps its own board/rules imports).
+const BLITZ_HELPERS={field,route,gather,safeMove,mazeOpening,opening,defense,localGuard,enemyEta,etaArrival};
+module.exports={plan,recover,secureDecision,BLITZ_HELPERS,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,crownLandAnchor,defense,defensiveCut,emergencyDefensiveCut,econProfile,citySnowball};
