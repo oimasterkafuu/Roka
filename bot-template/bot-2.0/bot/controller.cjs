@@ -266,7 +266,11 @@ function createController(playerId, options = {}) {
       // plans its own recovery (rejoin/retarget) and must not be replaced by
       // the generic campaign recovery.
       const recoveryThreshold = memory.maze ? 4 : board.size >= 800 ? 8 : 12;
-      const blitzActive = Boolean(memory.blitz) && memory.blitz.phase !== 'done';
+      // The observation window (`expand`) still belongs to the default
+      // planner, so a no-action streak there must recover exactly like a
+      // blitz-free game; only a committed wave suppresses generic recovery.
+      const blitzPhase = memory.blitz?.phase;
+      const blitzActive = Boolean(memory.blitz) && blitzPhase !== 'done' && blitzPhase !== 'expand';
       if (memory.noActionTurns >= recoveryThreshold && !blitzActive) {
         const fallback = recover(
           board,

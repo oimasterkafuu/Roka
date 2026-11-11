@@ -196,20 +196,19 @@ test('maze blitz is off by default and gated to maze rooms', () => {
   });
 });
 
-test('the burst opening spends every action on expansion and never builds', () => {
+test('the burst window belongs to the default planner and is only observed', () => {
   const b = forkBoard({ turn: 30, wave: 200 });
   const m = memory();
-  for (const turn of [0, BURST_END_TURN - 1, BURST_END_TURN]) {
+  const cfg = enabledCfg({ gate: false });
+  for (const turn of [0, BURST_END_TURN - 1]) {
     b.turn = turn;
-    const decision = run(b, m, enabledCfg());
-    assert.ok(decision, `expected an expansion decision at tick ${turn}`);
-    assert.match(decision.branch, /^blitz-/);
-    assert.notEqual(decision.action?.kind, 'build');
+    assert.equal(run(b, m, cfg), null, `the blitz must not act at tick ${turn}`);
+    assert.equal(m.blitz.phase, 'expand');
   }
-  // The window ends exactly at the engine burst boundary; the same board then
-  // switches to the muster phase instead of continuing to paint.
+  // The observation window ends exactly at the engine burst boundary: the same
+  // board then hands the launch tick to the gate/muster instead of painting.
   b.turn = BURST_END_TURN + 1;
-  run(b, m, enabledCfg());
+  run(b, m, cfg);
   assert.equal(m.blitz.phase, 'muster');
 });
 
@@ -670,10 +669,13 @@ test('the burst ends and gathering starts on the very next tick', () => {
   const b = corridorBoard({ length: 9, crownArmy: 10, homeArmy: 400, stacks: { 5: 60 } });
   b.turn = BURST_END_TURN - 1;
   const store = memory(b);
+  // Blanket mode: the gate decision is covered by its own tests, and an
+  // unchanged board would correctly read as a quiet (non-swarm) opponent.
+  const cfg = enabledCfg({ gate: false });
   assert.equal(store.blitz.phase, 'expand');
-  assert.match(run(b, store, enabledCfg()).branch, /^blitz-expand/, 'tick 50 still expands');
+  assert.equal(run(b, store, cfg), null, 'the pre-burst tick still belongs to the planner');
   b.turn = BURST_END_TURN;
-  const first = run(b, store, enabledCfg());
+  const first = run(b, store, cfg);
   assert.ok(first, 'a decision is emitted on the tick after the burst');
   assert.equal(store.blitz.phase, 'muster');
   assert.equal(first.branch, 'blitz-muster', 'the tick after the burst already gathers');
@@ -681,7 +683,7 @@ test('the burst ends and gathering starts on the very next tick', () => {
   assert.equal(first.action.kind, 'attack');
   // And it keeps gathering every tick instead of falling back to painting.
   for (let tick = 0; tick < 4; tick += 1) {
-    const next = run(b, store, enabledCfg());
+    const next = run(b, store, cfg);
     assert.ok(next);
     assert.equal(store.blitz.phase, 'muster');
     assert.notEqual(next.branch, 'blitz-expand', 'no lingering expansion after the burst');
@@ -970,4 +972,168 @@ test('the crown stack is used even when the rally already holds a wave', () => {
   apply(b, decision.action);
   assert.equal(b.army[at(10, 4)], 1, 'no defensive reserve is kept');
   assert.equal(b.army[at(9, 4)], 400, 'the whole crown stack joined the column');
+});
+
+/**
+ * Opponent-style gate boards.  A compact maze room with an own crown plus a
+ * short corridor on row 6 and a growing enemy zone in columns 0-1.  Enemy land
+ * is the number of cells the gate counts (crown/city included); `buildings` is
+ * how many of those are anchors, which is the crown-race signature.
+ */
+function gateBoard({ turn = 40, enemyLand = 2, buildings = 1 } = {}) {
+  const grid = Array(N * M).fill(MOUNTAIN);
+  const army = Array(N * M).fill(0);
+  const isolated = Array(N * M).fill(0);
+  const fog = Array(N * M).fill(0);
+  for (let x = 3; x <= 6; x += 1) {
+    grid[at(x, 6)] = x === 6 ? 101 : 1;
+    army[at(x, 6)] = x === 6 ? 400 : 1;
+  }
+  const board = makeBoard(
+    { n: N, m: M, grid, army, isolated, fog, turn, leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }] },
+    1,
+  );
+  if (enemyLand) paintEnemy(board, enemyLand, buildings);
+  return board;
+}
+
+// Enemy zone cells in paint order: columns 0-5 above the own corridor row, so
+// the gate can observe up to 36 enemy cells without touching our territory.
+const GATE_ZONE = (() => {
+  const zone = [];
+  for (let x = 0; x <= 5; x += 1) for (let y = 0; y < 6; y += 1) zone.push(at(x, y));
+  return zone;
+})();
+
+// Paint the first `land` zone cells: the first `buildings` are anchors (crown,
+// then a city), the rest are enemy plains.
+function paintEnemy(b, land, buildings = 1) {
+  for (let index = 0; index < land; index += 1) {
+    const cell = GATE_ZONE[index];
+    b.grid[cell] = index === 0 ? 102 : index < buildings ? 52 : 2;
+    b.army[cell] = 10;
+  }
+}
+
+// Drive the expand phase over the gate window with a given enemy paint rate.
+function gateWindow(board, store, { from = 40, to = 50, start, end, buildings = 1 } = {}) {
+  for (let turn = from; turn < to; turn += 1) {
+    board.turn = turn;
+    const land = start + Math.round(((end - start) * (turn - from)) / (to - from));
+    paintEnemy(board, land, buildings);
+    const decision = run(board, store, enabledCfg());
+    assert.equal(decision, null, `the observation window must not act at tick ${turn}`);
+  }
+  board.turn = to;
+  paintEnemy(board, end, buildings);
+  return run(board, store, enabledCfg());
+}
+
+test('the opponent gate keeps the blitz against a swarm that keeps painting', () => {
+  const b = gateBoard({ turn: 40 });
+  const store = memory(b);
+  const decision = gateWindow(b, store, { start: 24, end: 34 });
+  assert.ok(decision, 'a painting opponent must still launch the blitz');
+  // The home crown already holds a wave floor, so the approved blitz may go
+  // straight to the push phase on the same tick.
+  assert.match(store.blitz.phase, /^(muster|push)$/);
+  assert.equal(store.blitz.gate.allow, true);
+  assert.equal(store.blitz.gate.reason, 'swarm');
+  assert.equal(store.blitz.gate.paint, 10);
+  assert.equal(store.blitz.gate.buildings, 1);
+});
+
+test('the opponent gate declines the blitz against a quiet crown racer', () => {
+  const b = gateBoard({ turn: 40 });
+  const store = memory(b);
+  const decision = gateWindow(b, store, { start: 26, end: 28 });
+  assert.equal(decision, null, 'a quiet opponent must fall back to the planner');
+  assert.equal(store.blitz.phase, 'done');
+  assert.equal(store.blitz.gate.allow, false);
+  assert.equal(store.blitz.gate.reason, 'quiet');
+  assert.equal(store.blitz.gate.paint, 2);
+  // The gate never re-opens: the blitz stays dead for the rest of the game.
+  b.turn = 120;
+  assert.equal(run(b, store, enabledCfg()), null);
+  assert.equal(store.blitz.phase, 'done');
+});
+
+test('a second enemy building already marks a crown race, whatever it paints', () => {
+  const b = gateBoard({ turn: 40 });
+  const store = memory(b);
+  const decision = gateWindow(b, store, { start: 24, end: 34, buildings: 2 });
+  assert.equal(decision, null);
+  assert.equal(store.blitz.gate.reason, 'crown-race');
+  assert.equal(store.blitz.gate.buildings, 2);
+});
+
+test('the gate can be forced on, disabled, or left without evidence', () => {
+  const forced = gateBoard({ turn: 40 });
+  const forcedStore = memory(forced);
+  const forcedDecision = gateWindow(forced, forcedStore, { start: 26, end: 28 });
+  assert.equal(forcedStore.blitz.gate.reason, 'quiet');
+  const forcedCfg = enabledCfg({ gateForce: true });
+  forced.turn = 50;
+  const reopened = run(forced, memory(forced, { phase: 'expand', gate: null }), forcedCfg);
+  assert.ok(reopened, 'APEX_MAZE_BLITZ_GATE_FORCE=1 must ignore the gate');
+  assert.ok(forcedDecision === null);
+
+  // APEX_MAZE_BLITZ_GATE=0 restores the blanket v6 blitz.
+  const blanket = gateBoard({ turn: 40 });
+  const blanketStore = memory(blanket);
+  for (let turn = 40; turn < 50; turn += 1) {
+    blanket.turn = turn;
+    paintEnemy(blanket, 26, 1);
+    run(blanket, blanketStore, enabledCfg({ gate: false }));
+  }
+  blanket.turn = 50;
+  const blanketDecision = run(blanket, blanketStore, enabledCfg({ gate: false }));
+  assert.ok(blanketDecision);
+  assert.match(blanketStore.blitz.phase, /^(muster|push)$/);
+  assert.equal(blanketStore.blitz.gate.reason, 'gate-off');
+
+  // No observation at all (a first decision after the burst) keeps the flag
+  // semantics instead of silently disabling the experiment.
+  const late = gateBoard({ turn: 60, enemyLand: 30 });
+  const lateStore = memory(late);
+  const lateDecision = run(late, lateStore, enabledCfg());
+  assert.ok(lateDecision);
+  assert.equal(lateStore.blitz.gate.reason, 'unobserved');
+});
+
+test('a declined gate plans every tick exactly as a blitz-free planner', () => {
+  const { plan } = require('../bot/planner.cjs');
+  // Two identical boards: a crown racer that already stopped painting, so the
+  // gate has to decline at the launch tick.  The gated run drives the real
+  // planner (the observation window included) and must be indistinguishable
+  // from the flag-off run on every tick, not just the fallback tick.
+  const gated = gateBoard({ turn: 40, enemyLand: 26 });
+  const plainBoard = gateBoard({ turn: 40, enemyLand: 26 });
+  const blitzStore = memory(gated);
+  const plainStore = memory(plainBoard);
+  delete plainStore.blitz;
+  const quiet = { start: 26, end: 28 };
+  const rows = [];
+  for (let turn = 40; turn <= 56; turn += 1) {
+    const land = quiet.start + Math.round(((quiet.end - quiet.start) * (turn - 40)) / 10);
+    for (const [board, store] of [[gated, blitzStore], [plainBoard, plainStore]]) {
+      board.turn = turn;
+      paintEnemy(board, Math.min(land, quiet.end), 1);
+    }
+    const withBlitz = withEnv('APEX_MAZE_BLITZ', '1', () => plan(gated, blitzStore));
+    const withoutBlitz = withEnv('APEX_MAZE_BLITZ', undefined, () => plan(plainBoard, plainStore));
+    rows.push({ turn, withBlitz, withoutBlitz });
+  }
+  const declined = rows.find((row) => row.turn === 50);
+  assert.equal(blitzStore.blitz.gate.reason, 'quiet');
+  assert.equal(blitzStore.blitz.phase, 'done');
+  for (const row of rows) {
+    assert.deepEqual(
+      { action: row.withBlitz.action, branch: row.withBlitz.branch },
+      { action: row.withoutBlitz.action, branch: row.withoutBlitz.branch },
+      `tick ${row.turn} diverged from the blitz-free planner`,
+    );
+  }
+  assert.ok(declined, 'the launch tick was planned');
+  assert.equal(blitzStore.blitz.phase, 'done', 'no half-blitz state survives the fallback');
 });

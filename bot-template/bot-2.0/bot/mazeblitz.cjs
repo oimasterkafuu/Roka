@@ -3,14 +3,18 @@
 /**
  * Maze blitz (APEX_MAZE_BLITZ=1, maze rooms only, default off).
  *
- * A dedicated opening/assault plan for corridor maps, kept separate from the
- * default planner so open maps and the existing maze campaign are untouched
- * when the flag is off:
+ * A dedicated assault plan for corridor maps, kept separate from the default
+ * planner so open maps and the existing maze campaign are untouched when the
+ * flag is off:
  *
- *   1. expand only - every action in the engine burst window (ticks 26..50,
- *      see src/game-engine/tick-growth.ts) paints a new cell and no army is
- *      spent on a city.  The burst pays one army per owned plain per tick, so
- *      the number of owned cells *is* the size of the future wave.
+ *   0. watch - ticks before the launch belong to the default planner (the
+ *      burst opening is not changed); this layer only records the opponent's
+ *      land growth so the opponent-style gate can classify the match-up.
+ *   1. gate - at the launch tick the gate decides whether this opponent is a
+ *      swarm (keeps painting at burst rate, no second building) or a crown
+ *      racer.  A declined gate ends the layer for the game and the default
+ *      planner keeps the board on that very tick: the fallback is literally
+ *      the pre-blitz maze behaviour, not a partial blitz.
  *   2. muster - the very first post-burst tick the plan gathers; there is no
  *      lingering expansion once anything can be gathered.  The board is pulled
  *      into one forward launch cell (never a deep rear cell: a rear rally
@@ -144,6 +148,17 @@ const DEFAULTS = Object.freeze({
   // 174-tick hold was the v6 stall on the 0.68 rooms, so after a few failed
   // holds the blitz hands the board back instead of feeding one junction.
   holdLimit: 4,
+  // Opponent-style gate (see opponentGate): the blitz is anti-specific, so it
+  // only runs when the observed opponent behaves like a swarm (keeps painting
+  // through the burst) instead of a crown racer (stops painting, starts a
+  // second building).  Window in ticks before the launch, the enemy cells the
+  // opponent must still add inside it, and the enemy buildings that already
+  // mark a crown racer.
+  gate: true,
+  gateForce: false,
+  gateWindow: 10,
+  gatePaint: 6,
+  gateBuildings: 2,
 });
 
 function envNumber(name, fallback, min, max) {
@@ -194,6 +209,14 @@ function mazeBlitzConfig(overrides = {}) {
     // rear cut rescue" escape and leaves the pure hold/reinforce/abort rule.
     pairRescue: envFlag('APEX_MAZE_BLITZ_PAIR', DEFAULTS.pairRescue),
     holdLimit: envNumber('APEX_MAZE_BLITZ_HOLD_LIMIT', DEFAULTS.holdLimit, 1, 400),
+    // Opponent-style gate.  APEX_MAZE_BLITZ_GATE=0 restores the blanket (v6)
+    // blitz, APEX_MAZE_BLITZ_GATE_FORCE=1 forces the blitz past the gate; both
+    // are A/B switches, the shipped behaviour is the gate.
+    gate: envFlag('APEX_MAZE_BLITZ_GATE', DEFAULTS.gate),
+    gateForce: envFlag('APEX_MAZE_BLITZ_GATE_FORCE', DEFAULTS.gateForce),
+    gateWindow: envNumber('APEX_MAZE_BLITZ_GATE_WINDOW', DEFAULTS.gateWindow, 2, 60),
+    gatePaint: envNumber('APEX_MAZE_BLITZ_GATE_PAINT', DEFAULTS.gatePaint, 0, 400),
+    gateBuildings: envNumber('APEX_MAZE_BLITZ_GATE_BUILDINGS', DEFAULTS.gateBuildings, 1, 20),
     ...overrides,
   };
 }
@@ -243,6 +266,8 @@ function initialState() {
     fullExceptions: 0,
     holdTicks: 0,
     junctionAborts: 0,
+    // Opponent-style gate (see opponentGate).
+    gate: null,
   };
 }
 
@@ -2051,17 +2076,136 @@ function musterDecision(b, m, own, enemies, h, state, cfg) {
   return expandDecision(b, m, own, h, state, cfg);
 }
 
+/**
+ * Opponent-style gate (APEX_MAZE_BLITZ_GATE, on by default).
+ *
+ * The blitz is not a general improvement: seeds 8 of the 0.34/0.68 maze suite
+ * moved Anti-Human from 21W/6D/5L to 23W/3D/6L but the Apex baseline from
+ * 24W/1D/7L to 17W/0D/15L.  Apex plays a crown race (build a second crown,
+ * keep a large home garrison, stop painting), so a no-build swarm wave feeds
+ * its defence instead of racing it.  The gate therefore reads only what the
+ * board shows at the burst end - never a name, seed, or opponent id:
+ *
+ *   - enemy land growth inside the `gateWindow` ticks before the launch
+ *     (`APEX_MAZE_BLITZ_GATE_WINDOW`, default 10, i.e. ticks 40..50).  A swarm
+ *     still paints about one cell per tick there (measured over 16 games each:
+ *     9-10 cells for Anti-Human, -1..5 for Apex);
+ *   - enemy buildings (crowns + cities) at the launch tick.  A crown racer
+ *     already owns a second building (`APEX_MAZE_BLITZ_GATE_BUILDINGS`,
+ *     default 2), a swarm opponent still owns exactly its starting crown.
+ *
+ * The gate allows the blitz only when the opponent is *still painting at burst
+ * rate* and has not started a second building.  Growth is normalised to the
+ * configured window so a late first observation (bot joins mid-game) cannot
+ * read as a swarm.  With no observation at all there is no style evidence and
+ * the flag semantics are kept (blitz), which is also why `_FORCE=1` exists for
+ * A/B runs; `GATE=0` restores the blanket v6 blitz.
+ */
+function enemyStyle(b) {
+  let land = 0;
+  let buildings = 0;
+  for (let at = 0; at < b.size; at += 1) {
+    if (!b.enemy(at)) continue;
+    land += 1;
+    const kind = b.kind(at);
+    if (kind === 'crown' || kind === 'city') buildings += 1;
+  }
+  return { land, buildings };
+}
+
+// Record the first in-window enemy land sample.  Called once per expand tick,
+// so the sample is the earliest tick at or after `openingEnd - gateWindow`.
+function observeOpponent(b, state, cfg) {
+  if (!cfg.gate || cfg.gateForce) return;
+  if (!state.gate) state.gate = { turn: -1, land: -1, gate: false, reason: null, paint: -1, buildings: -1 };
+  const gate = state.gate;
+  if (gate.turn >= 0) return;
+  const start = Math.max(0, cfg.openingEnd - cfg.gateWindow);
+  if (b.turn < start) return;
+  gate.turn = b.turn;
+  gate.land = enemyStyle(b).land;
+}
+
+function opponentGate(b, state, cfg) {
+  const gate = state.gate || { turn: -1, land: -1 };
+  const style = enemyStyle(b);
+  const result = {
+    turn: b.turn,
+    from: gate.turn,
+    land: style.land,
+    buildings: style.buildings,
+    paint: -1,
+    allow: true,
+    reason: 'swarm',
+  };
+  if (!cfg.gate) return { ...result, reason: 'gate-off' };
+  if (cfg.gateForce) return { ...result, reason: 'forced' };
+  if (Number.isFinite(gate.turn) && gate.turn >= 0 && Number.isFinite(gate.land) && gate.land >= 0) {
+    const span = Math.max(1, Number(b.turn) - Number(gate.turn));
+    result.paint = ((style.land - gate.land) * cfg.gateWindow) / span;
+  }
+  // A second building before the wave launches is a crown race, not a swarm:
+  // the wave would have to break a defended anchor instead of out-tempoing a
+  // painter.  This rule does not need the growth window, so it also covers a
+  // first observation after the burst.
+  if (style.buildings >= cfg.gateBuildings) return { ...result, allow: false, reason: 'crown-race' };
+  if (result.paint < 0) return { ...result, reason: 'unobserved' };
+  if (result.paint >= cfg.gatePaint) return { ...result, reason: 'swarm' };
+  return { ...result, allow: false, reason: 'quiet' };
+}
+
 function mazeBlitzPlan(b, m, own, enemies, h, cfg = mazeBlitzConfig()) {
   if (!cfg.enabled || !own.length) return null;
   if (String(m?.mapMode || '') !== 'maze') return null;
   const state = m.blitz || (m.blitz = initialState());
   if (state.phase === 'done') return null;
-  // Expansion phase: no construction at all, the burst window rewards cell
-  // count and nothing else.  The decision state carries the tick that just
-  // finished, so a state turn of `openingEnd` is already the first post-burst
-  // tick - the gather must start there, not paint once more.
+  // Observation window.  The burst opening belongs to the default planner:
+  // the v7 "no construction until tick 50" opening was what cost the Apex
+  // match-up six wins even when the wave itself was gated off (24W -> 18W,
+  // see BASELINE.md), and it bought the Anti-Human match-up nothing (23W with
+  // and without it).  So the blitz only *watches* the opponent here and hands
+  // the board back unchanged; the plan becomes real at the launch tick, after
+  // the gate has read the opponent's style.
   if (state.phase === 'expand') {
-    if (b.turn < cfg.openingEnd) return expandDecision(b, m, own, h, state, cfg);
+    if (b.turn < cfg.openingEnd) {
+      observeOpponent(b, state, cfg);
+      return null;
+    }
+    // The launch is committed here, so the opponent-style gate decides here:
+    // a declined blitz stops existing (phase `done`) and this very tick is
+    // planned by the untouched default planner - never a half-blitz.  Nothing
+    // before this tick depended on the blitz, so a declined game is
+    // byte-for-byte a blitz-free game.
+    const gate = opponentGate(b, state, cfg);
+    state.gate = gate;
+    if (!gate.allow) {
+      state.phase = 'done';
+      if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') {
+        console.error(
+          'GATE',
+          b.turn,
+          'off',
+          gate.reason,
+          'paint',
+          gate.paint,
+          'buildings',
+          gate.buildings,
+        );
+      }
+      return null;
+    }
+    if (process.env.APEX_MAZE_BLITZ_DEBUG === '1') {
+      console.error(
+        'GATE',
+        b.turn,
+        'on',
+        gate.reason,
+        'paint',
+        gate.paint,
+        'buildings',
+        gate.buildings,
+      );
+    }
     state.phase = 'muster';
     m.delivery = null;
   }
@@ -2123,4 +2267,7 @@ module.exports = {
   rearRescueCut,
   trappedComponent,
   cutTargets,
+  enemyStyle,
+  observeOpponent,
+  opponentGate,
 };

@@ -486,3 +486,45 @@ node training/long-eval.cjs --profile large --seeds 4 --workers 10 \n  --turns 2
   - vs apex（16 局，10 胜）：21 条被路过，12 条有结局——反占路口 **1（8.3%）**、另一条路重连 **0（0%）**、衰减/消失 **11（91.7%）**，9 条终局未决；0.68 为 0/9。与 v6 的 34% / 5~10% 量级一致，支持「只跳过该侧」而不是「整路口安全」。
 - 测试：bot-2.0 `node --test test/*.test.cjs` **202 项全通过**（新增 4 项：孤立按侧跳过、大图不放行整推、后方反推救援、既有阶梯回归不变）；仓库根 `pnpm test` 退出码 0，`pnpm run lint`、`pnpm run build`、`pnpm run test:bot` 通过；`test/replay-regression.test.cjs` 在 202 项内通过。
 - 结论：仍是默认关的实验层（`APEX_MAZE_BLITZ=1` 开启），flag off 逐局不变，未合并到 main。0.68 剩余失败集中在「波被打光」（体量与路线抵抗），下一步应针对波体量/发射门槛，而不是继续放宽 k 或 hold。
+
+### 2026-11-11：迷宫 blitz 第八轮（对手风格门控 + 共享爆发开局，`APEX_MAZE_BLITZ` 仍默认关）
+
+- 问题：v7（`7bb687f`）的 blitz 是**对 anti 专属**的。seeds 8 迷宫（0.34+0.68、双座位、2400 Tick）：anti 23W/3D/6L（好于 flag off 的 21W/6D/5L），apex 17W/0D/15L（远差于 flag off 的 24W/1D/7L）。一刀切的 blitz 不能合并。
+- 诊断（`training/opponent-gate-report.cjs`，新脚本；`APEX_MAZE_BLITZ=1`，seeds 4、0.34+0.68、双座位、2400 Tick、16 局/对手，逐 Tick 读棋盘并打印窗口特征分布）：
+  - **敌方领地增速 t40→t50（爆发窗口）**：anti **9–10 格**（16/16 ≥9），apex **−1–5 格**（中位 2）。这是唯一完全干净的分离量：anti 每 Tick 还在刷一格，apex 在 t40 前后就停止铺地。t45→t50 同样干净（anti 4–5、apex 0–2），但窗口更短、余量更小。
+  - **敌方建筑数（皇冠+城市）t50**：anti **恒为 1**（只有出生皇冠，城市 0），apex **1–2**（5/16 已经第二座皇冠或第一座城市）。干净，但只覆盖一部分 apex 局（其余要到 t50 之后才建）。
+  - **敌方领地 / 我方领地（t50）**：anti 1.20–1.58，apex 0.69–1.23（在 1.20–1.23 重叠，单独不可用）。
+  - **敌方皇冠驻军最大值（t50）**：anti 27–35，apex 2–80（不可分：apex 在 0.34 堆 37–80，在 0.68 反而只留 2–10）。
+  - **己方皇冠半径 2 内敌军占比**：anti 0.10–0.53，apex 0.24–0.59（不可分）。
+  - **敌方总兵力（t50）**：anti 635–784，apex 496–716（重叠）。
+  - 结论：真正的风格量是「爆发期还在不在刷地」＋「是否已开第二座建筑」，而不是驻军堆大小或总兵力。
+- 门控实现（`bot/mazeblitz.cjs` 的 `enemyStyle`/`observeOpponent`/`opponentGate`）：在 `expand` 观察窗记录窗口起点（`openingEnd - APEX_MAZE_BLITZ_GATE_WINDOW`，默认 10 Tick，即 40）的敌方领地，发射 Tick（50）再读一次，增长按实际观察跨度归一到窗口长度：
+  1. 敌方建筑 `>= APEX_MAZE_BLITZ_GATE_BUILDINGS`（默认 2）→ 皇冠竞赛，拒绝（`crown-race`，不依赖观察窗，也能覆盖晚入场）；
+  2. 否则增速 `< APEX_MAZE_BLITZ_GATE_PAINT`（默认 6 格/窗）→ 拒绝（`quiet`）；
+  3. 否则放行（`swarm`）；完全没有观察（首个决策晚于爆发期）时保留 flag 语义放行（`unobserved`）。
+  - 拒绝即 `phase='done'` 并**当 Tick 返回 null**，本局后续不再触达 blitz：`test/mazeblitz.test.cjs` 的等价测试从 t40 跑到 t56 逐 Tick 断言「有 blitz 但被拒」与「flag off」的决策完全一致。
+  - 开关：`APEX_MAZE_BLITZ_GATE=0` 回到 v6 一刀切，`APEX_MAZE_BLITZ_GATE_FORCE=1` 无视门控强制爆发（A/B 用）；`APEX_MAZE_BLITZ=0`（默认）仍然逐局不变。
+- **共享爆发开局**（本轮最关键的一次测量）：只加门控、保留 v6 的「爆发期只铺地不建设」开局时，apex 只从 17W 回到 **18W/1D/13L**——即使 32/32 局全部被门控拒绝并逐 Tick 回落到 planner，apex 仍比 flag off 少 6 胜。原因是 26–50 Tick 的无建设开局本身就是退化（apex 的皇冠竞赛只需要 100 兵的第二座皇冠，被推迟到 t50 之后）。而把开局交回默认 planner（blitz 在 t50 前只观察、不行动）后 anti 胜场不变（23W），于是本轮把「爆发期只铺地」整段删除：**观察窗由默认 planner 独占**，blitz 真正生效的唯一入口是 t50 的门控+muster。
+  - 中间消融（未保留）：门控 + 旧开局 → anti 23W/3D/6L、apex 18W/1D/13L（0.34 9/0/7、0.68 9/1/6）。
+- 评测（maze seeds 8、0.34+0.68、双座位、2400 Tick、8 worker）：
+
+  | 对手 | flag off（基线） | v6 一刀切 | 本轮（门控+共享开局） |
+  | --- | --- | --- | --- |
+  | anti（32 局） | 21W / 6D / 5L | 23W / 3D / 6L | **23W / 2D / 7L**（0.34 12/0/4，0.68 11/2/3） |
+  | apex（32 局） | 24W / 1D / 7L | 17W / 0D / 15L | **24W / 1D / 7L**（0.34 12/0/4，0.68 12/1/3） |
+
+  - apex 与 flag off 逐局只差 1 局（seed 4 0.34 seat 0：W190 → W236，该局门控因无观察样本放行 `unobserved` 但仍然获胜），其余 31 局胜平负与结束 Tick 完全一致。
+  - anti 32 局里 31 局读到 `swarm`（paint 9–10、buildings 1），1 局读到 `quiet`（paint 5，被拒绝回落到 planner 后仍然 W251）；门控代价为 0 胜，平局由 3 变 2、负局由 6 变 7（0.34 少 1 胜、0.68 多 1 平少 1 负的抖动）。
+- 用户点名的五局（单种子单 worker、2400 Tick、flag on、anti；v6 = `7bb687f`）：
+
+  | 局（种子 / 尺寸 / 座位） | v6 | 本轮 |
+  | --- | --- | --- |
+  | `apex-long-1-maze` 0.34 seat 0（pzr） | W 250 | **W 91** |
+  | `apex-long-1-maze` 0.34 seat 1（2ikw） | W 130 | **W 94** |
+  | `apex-long-0-maze` 0.34 seat 0（pbwm） | W 821 | **W 292** |
+  | `apex-long-7-maze` 0.68 seat 1（KuYd） | W 934 | **W 602** |
+  | `apex-long-3-maze` 0.68 seat 0（4bQF） | L 1624 | **W 1212** |
+
+  五局读到的门控都是 `swarm`（paint 10、buildings 1），anti 路径没有被打断，且五局全部提前结束。
+- 测试：bot-2.0 `node --test test/*.test.cjs` **207 项全通过**（新增 5 项：swarm 放行、quiet 拒绝并永久关闭、第二座建筑判皇冠竞赛、GATE=0/GATE_FORCE=1/无观察三种开关、门控拒绝对 flag off 的逐 Tick 等价）；原先「爆发期只铺地」的两项改为「观察窗交回默认 planner」。
+- 结论：门控把 blitz 收敛成 anti 专属层，apex 完全回到 24W/1D/7L 基线，合并候选；仍是默认关的实验层（`APEX_MAZE_BLITZ=1` 开启），未合并到 main。
