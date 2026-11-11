@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Maze blitz (APEX_MAZE_BLITZ=1, maze rooms only, default off).
+ * Maze blitz (maze rooms only, default off; APEX_MAZE_BLITZ=1 enables).
  *
  * A dedicated assault plan for corridor maps, kept separate from the default
  * planner so open maps and the existing maze campaign are untouched when the
