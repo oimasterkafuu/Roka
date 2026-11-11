@@ -55,8 +55,8 @@ function step(inputs, overrides = {}, config = smallRaceConfig(ON)) {
   return { state, decision };
 }
 
-test('the layer is off by default and scoped to compact rooms', () => {
-  assert.equal(smallRaceConfig({}, {}).enabled, false);
+test('the layer is on by default, can be disabled, and is scoped to compact rooms', () => {
+  assert.equal(smallRaceConfig({}, {}).enabled, true);
   assert.equal(smallRaceConfig({}, { APEX_SMALL_CROWN_RACE: '1' }).enabled, true);
   for (const value of ['0', 'false', 'off']) {
     assert.equal(smallRaceConfig({}, { APEX_SMALL_CROWN_RACE: value }).enabled, false);
@@ -240,7 +240,7 @@ function raceState(board) {
 }
 
 test('with the race behind us the planner spends the window on economy, not the push', () => {
-  const off = drive(compactRoom(), raceState(compactRoom()), 8);
+  const off = withEnv({ APEX_SMALL_CROWN_RACE: '0' }, () => drive(compactRoom(), raceState(compactRoom()), 8));
   const on = withEnv({ APEX_SMALL_CROWN_RACE: '1' }, () => {
     const board = compactRoom();
     return drive(board, raceState(board), 8);

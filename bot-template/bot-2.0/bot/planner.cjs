@@ -2505,7 +2505,7 @@ function recover(b, m, own) {
   return reposition(b, own) || emergencyProbe(b, own);
 }
 
-// Small-map crown-race phase (APEX_SMALL_CROWN_RACE, default off; see
+// Small-map crown-race phase (APEX_SMALL_CROWN_RACE, on by default; set =0 to disable; see
 // bot/crownrace.cjs).  One assessment per planning tick, before any campaign
 // can claim the action budget, so the phase can outrank the push instead of
 // racing it.  The board work here is bounded: the size gate rejects every board
@@ -2606,7 +2606,7 @@ function plan(b,m,deadline) {
     (!rushProfile.maritime && (rushProfile.maze || rushProfile.distance <= 24) &&
       b.turn >= 42 && rushProfile.homeReserve >= 80 &&
       b.army[rushProfile.crown] < rushCrownFloor(rushProfile)));
-  // Small-map crown-race phase (APEX_SMALL_CROWN_RACE=1, default off).  On a
+  // Small-map crown-race phase (on by default; =0 disables).  On a
   // compact room the race is crowns plus painted land; when the opponent
   // out-builds us and our attacks stop converting, a bounded economy window
   // outranks the campaign instead of feeding it (see bot/crownrace.cjs).

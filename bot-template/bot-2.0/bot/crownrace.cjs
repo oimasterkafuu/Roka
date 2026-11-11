@@ -1,7 +1,7 @@
 'use strict';
 
 // Small-map crown-race (attrition) phase for the 0.34 room.
-// `APEX_SMALL_CROWN_RACE=1`, off by default; `=0` is the ablation.
+// On by default; `APEX_SMALL_CROWN_RACE=0` is the ablation.
 //
 // Diagnosis.  On a compact room (0.34 is 221-255 cells, one or two screens) the
 // decisive quantity is production, not a breakthrough: income is +1 army/tick
@@ -108,7 +108,7 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function smallRaceConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.APEX_SMALL_CROWN_RACE, false),
+    enabled: overrides.enabled ?? flag(env.APEX_SMALL_CROWN_RACE, true),
     // 0.34 rooms are 221-255 cells; 0.68 is 891-957.  800 is the same boundary
     // the rest of the bot already uses for "compact board".
     maxBoard: overrides.maxBoard ??
