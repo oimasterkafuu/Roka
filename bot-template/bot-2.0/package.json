@@ -1,0 +1,15 @@
+{
+  "name": "bot-2.0",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Bot(2.0) - Roka 1v1 focused strategy bot, based on Apex",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/*.test.cjs",
+    "benchmark": "node training/benchmark.cjs",
+    "compare": "node training/compare.cjs"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}

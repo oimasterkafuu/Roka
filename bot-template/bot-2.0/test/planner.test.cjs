@@ -1,0 +1,722 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { distanceField, makeBoard } = require('../bot/board.cjs');
+const { actionCoordinates, preview } = require('../bot/rules.cjs');
+const { plan, recover, routeGuard, constructionThreat, earlyRushThreat, projectedArrival, mazeInfrastructureHold, isMazeBoard, mazeActionGuard, sustainEconomy, treeGather, advanceSupplyTree, defensiveCut, emergencyDefensiveCut, econProfile, crownLandAnchor } = require('../bot/planner.cjs');
+
+function withOpeningSmall(value, body) {
+  const previous = process.env.APEX_OPENING_SMALL;
+  try {
+    if (value === undefined) delete process.env.APEX_OPENING_SMALL;
+    else process.env.APEX_OPENING_SMALL = value;
+    return body();
+  } finally {
+    if (previous === undefined) delete process.env.APEX_OPENING_SMALL;
+    else process.env.APEX_OPENING_SMALL = previous;
+  }
+}
+
+function corridor(sourceArmy, enemyArmy) {
+  return makeBoard({
+    n: 3, m: 3,
+    grid: [101, 1, 201, 2, 1, 2, 201, 201, 201],
+    army: [5, 30, 0, enemyArmy, sourceArmy, 10, 0, 0, 0],
+    isolated: Array(9).fill(0), fog: Array(9).fill(0),
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('the tuned economy profile is gated to random and maze maps', () => {
+  assert.deepEqual(econProfile({ mapMode: 'random' }), { goal: 10, deadline: 45 });
+  assert.deepEqual(econProfile({ mapMode: 'maze' }), { goal: 10, deadline: 45 });
+  assert.deepEqual(econProfile({ mapMode: 'archipelago' }), { goal: 6, deadline: 90 });
+  assert.deepEqual(econProfile({ mapMode: 'mediterranean' }), { goal: 6, deadline: 90 });
+  // The room snapshot may be missing in a direct controller test; random is
+  // the historical default and keeps the tuned profile.
+  assert.deepEqual(econProfile({}), { goal: 10, deadline: 45 });
+
+  const previous = process.env.APEX_ECON_MODE_GATE;
+  try {
+    process.env.APEX_ECON_MODE_GATE = '0';
+    assert.deepEqual(econProfile({ mapMode: 'mediterranean' }), { goal: 10, deadline: 45 });
+  } finally {
+    if (previous === undefined) delete process.env.APEX_ECON_MODE_GATE;
+    else process.env.APEX_ECON_MODE_GATE = previous;
+  }
+});
+
+test('recognizes a saved no-build home reserve before it reaches the front', () => {
+  const b = makeBoard({
+    n: 1, m: 8,
+    grid: [101, 1, 1, 1, 1, 2, 2, 102],
+    army: [20, 20, 20, 20, 20, 20, 20, 20],
+    isolated: Array(8).fill(0), fog: Array(8).fill(0), turn: 50,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [0, 1, 2, 3, 4];
+  const enemies = [5, 6, 7];
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+});
+
+test('protects a low crown before letting a saved home reserve trigger a raid', () => {
+  const grid = [101, ...Array(23).fill(1), 102];
+  const army = [80, 120, ...Array(23).fill(20)];
+  for (let at = 19; at < 24; at += 1) grid[at] = 2;
+  for (let at = 19; at < 24; at += 1) army[at] = 25;
+  const b = makeBoard({
+    n: 1, m: 25, grid, army,
+    isolated: Array(25).fill(0), fog: Array(25).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [...Array(19).keys()];
+  const enemies = [...Array(6).keys()].map((at) => at + 19);
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+  const decision = withOpeningSmall('0', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.equal(decision.branch, 'delayed-rush-guard');
+  assert.equal(decision.action.x, 0);
+  assert.equal(decision.action.y, 1);
+  assert.equal(decision.action.dx, 0);
+  assert.equal(decision.action.dy, 0);
+  assert.notEqual(decision.action.kind, 'build');
+});
+
+test('detects an immediate home raid before the first construction window', () => {
+  const grid = [101, ...Array(28).fill(1), 102];
+  const army = [30, ...Array(28).fill(0), 30];
+  for (let at = 24; at < 29; at += 1) grid[at] = 2;
+  for (let at = 24; at < 29; at += 1) army[at] = 30;
+  const b = makeBoard({
+    n: 1, m: 30, grid, army,
+    isolated: Array(30).fill(0), fog: Array(30).fill(0), turn: 30,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [0];
+  const enemies = [...Array(6).keys()].map((at) => at + 24);
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(decision.branch, 'delayed-rush-wait');
+});
+
+test('guards the nearest weak crown when a saved reserve can choose a second crown', () => {
+  const grid = Array(40).fill(1);
+  const army = Array(40).fill(20);
+  grid[0] = 101;
+  grid[25] = 101;
+  army[0] = 200;
+  army[25] = 5;
+  for (let at = 30; at < 39; at += 1) {
+    grid[at] = 2;
+    army[at] = 25;
+  }
+  grid[39] = 102;
+  army[39] = 25;
+  const b = makeBoard({
+    n: 1, m: 40, grid, army,
+    isolated: Array(40).fill(0), fog: Array(40).fill(0), turn: 70,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [...Array(30).keys()];
+  const enemies = [...Array(10).keys()].map((at) => at + 30);
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+  const decision = withOpeningSmall('0', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.equal(decision.branch, 'delayed-rush-guard');
+  assert.equal(decision.action.dy, 25);
+});
+
+test('projected arrival measures the force that can land, not the stack size', () => {
+  const shape = (garrisons) => makeBoard({
+    n: 1, m: 12,
+    grid: [101, ...Array(7).fill(1), ...Array(4).fill(2)],
+    army: [10, ...garrisons, 200, 20, 20, 20],
+    isolated: Array(12).fill(0), fog: Array(12).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const enemies = [8];
+  // Three sixty-unit garrisons stand between the reserve and the crown, so a
+  // two-hundred stack can only land the handful of soldiers that survives them.
+  const guarded = shape([60, 60, 60, 1, 1, 1, 1]);
+  assert.ok(projectedArrival(guarded, 0, enemies, 12).force < 20);
+  // The same reserve next to an empty corridor lands almost everything.
+  const open = shape([1, 1, 1, 1, 1, 1, 1]);
+  assert.ok(projectedArrival(open, 0, enemies, 12).force > 150);
+  // Nothing outside the warning horizon counts.
+  assert.equal(projectedArrival(open, 0, enemies, 4), null);
+});
+
+test('a held reserve that cannot reach the crown no longer freezes the opening', () => {
+  // Eighteen of our own twenty-unit garrisons sit between the saved reserve and
+  // the crown: the reserve is real, the rush is not.  The hold used to fire on
+  // the composition alone and starve the economy pass.
+  const grid = Array(40).fill(1);
+  const army = Array(40).fill(20);
+  grid[0] = 101;
+  grid[25] = 101;
+  army[0] = 200;
+  army[25] = 5;
+  for (let at = 30; at < 39; at += 1) {
+    grid[at] = 2;
+    army[at] = 25;
+  }
+  grid[39] = 102;
+  army[39] = 25;
+  const b = makeBoard({
+    n: 1, m: 40, grid, army,
+    isolated: Array(40).fill(0), fog: Array(40).fill(0), turn: 70,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const own = [...Array(30).keys()];
+  const enemies = [...Array(10).keys()].map((at) => at + 30);
+  assert.equal(earlyRushThreat(b, own, enemies), true);
+  const held = withOpeningSmall('0', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.equal(held.branch, 'delayed-rush-guard');
+  const gated = withOpeningSmall('1', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.doesNotMatch(String(gated.branch), /delayed-rush/);
+});
+
+function reachableRushBoard(cells) {
+  const grid = [101, ...Array(cells - 1).fill(2)];
+  grid[1] = 102;
+  return makeBoard({
+    n: 1, m: cells,
+    grid,
+    army: [60, ...Array(cells - 1).fill(200)],
+    isolated: Array(cells).fill(0), fog: Array(cells).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('a reachable rush still takes the opening action budget', () => {
+  // The reserve is adjacent with two hundred soldiers against a sixty-unit
+  // crown: the projected arrival really can break it, so the hold stands.
+  const b = reachableRushBoard(12);
+  const gated = withOpeningSmall('1', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.match(String(gated.branch), /delayed-rush/);
+});
+
+test('the compact opening gate leaves large maps on the old rush path', () => {
+  // Same geometry above the eight-hundred-cell large-map threshold: the gate
+  // must not fire, so 0.68+ behaviour stays identical.
+  const b = reachableRushBoard(900);
+  const gated = withOpeningSmall('1', () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  const plain = withOpeningSmall(undefined, () => plan(b, { playerId: 1, home: 0, threatDistance: {} }));
+  assert.match(String(gated.branch), /delayed-rush/);
+  assert.deepEqual(gated, plain);
+});
+
+test('campaign refuses a safe head move when an older bridge can strand it', () => {
+  const b = corridor(100, 80);
+  const action = actionCoordinates(b, 4, 5, 2);
+  assert.deepEqual(routeGuard(b, action), { blocked: true, anchor: -1, cut: 4 });
+});
+
+test('campaign can anchor a threatened bridge before committing the column', () => {
+  const b = corridor(200, 110);
+  const action = actionCoordinates(b, 4, 5, 2);
+  assert.deepEqual(routeGuard(b, action), { blocked: true, anchor: 4, cut: 4 });
+});
+
+test('campaign keeps moving when the supply bridge can withstand the counterattack', () => {
+  const b = corridor(100, 2);
+  const action = actionCoordinates(b, 4, 5, 2);
+  assert.deepEqual(routeGuard(b, action), { blocked: false, anchor: -1, cut: -1 });
+});
+
+test('sole crown gathers a full local column before a saved enemy stack arrives', () => {
+  const b = makeBoard({
+    n: 1, m: 4,
+    grid: [1, 101, 1, 2],
+    army: [5, 10, 80, 60],
+    isolated: Array(4).fill(0), fog: Array(4).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const decision = plan(b, { playerId: 1, home: 1, threatDistance: {} });
+  assert.equal(decision.branch, 'anchor-approach');
+  assert.deepEqual(decision.action, actionCoordinates(b, 2, 1, 0));
+});
+
+test('previews a direct enemy crown capture and reinforces before the hit', () => {
+  const b = makeBoard({
+    n: 2, m: 2,
+    grid: [101, 2, 1, 1],
+    army: [10, 60, 80, 1],
+    isolated: Array(4).fill(0), fog: Array(4).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(decision.branch, 'anchor-reinforce');
+  assert.deepEqual(decision.action, actionCoordinates(b, 2, 0, 2));
+});
+
+test('opens a staged campaign before the full maze resistance is assembled', () => {
+  const b = makeBoard({
+    n: 1, m: 8,
+    grid: [101, 1, 1, 2, 2, 2, 2, 102],
+    army: [20, 170, 1, 4, 4, 4, 4, 8],
+    isolated: Array(8).fill(0), fog: Array(8).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const memory = {
+    playerId: 1, home: 0,
+    campaign: {
+      crown: 7, at: 1, phase: 'gather', started: 0, lastPhase: 'gather',
+      lastProgress: 0, deliveryBestDistance: Infinity, bestCrownDistance: 6,
+      musterTurns: 2,
+    },
+    delivery: null, blocked: null, threatDistance: {},
+  };
+  const decision = plan(b, memory);
+  assert.equal(decision.branch, 'march');
+  assert.deepEqual(decision.action, actionCoordinates(b, 1, 2, 2));
+});
+
+test('pauses a long maze campaign after the opponent builds until anchors are funded', () => {
+  const n = 5;
+  const m = 15;
+  const size = n * m;
+  const grid = Array(size).fill(201);
+  const army = Array(size).fill(0);
+  for (let y = 0; y < m; y += 1) {
+    const at = 2 * m + y;
+    grid[at] = y === 1 ? 101 : y === 10 ? 52 : y === 14 ? 102 : 1;
+    army[at] = y === 1 ? 120 : y === 10 ? 40 : y === 14 ? 40 : 30;
+  }
+  const b = makeBoard({
+    n, m, grid, army, isolated: Array(size).fill(0), fog: Array(size).fill(0), turn: 80,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const memory = {
+    playerId: 1, home: 31, enemyHome: 44,
+    campaign: { crown: 44, at: 31, phase: 'gather' },
+    delivery: null, threatDistance: {},
+  };
+  const own = [...Array(size).keys()].filter((at) => b.own(at));
+  const enemies = [...Array(size).keys()].filter((at) => b.enemy(at));
+  assert.equal(mazeInfrastructureHold(b, memory, own, enemies), true);
+  const decision = plan(b, memory);
+  assert.equal(memory.campaign, null);
+  assert.equal(decision.branch, 'cluster-fund');
+  assert.notEqual(decision.branch, 'march');
+});
+
+test('cuts an enemy supply articulation when direct crown defence cannot arrive', () => {
+  const b = makeBoard({
+    n: 2, m: 5,
+    grid: [101, 1, 2, 2, 102, 1, 1, 1, 1, 1],
+    army: [5, 20, 100, 20, 5, 5, 20, 1, 100, 1],
+    isolated: Array(10).fill(0), fog: Array(10).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const decision = defensiveCut(b, { at: 2, crown: 0, need: 100 });
+  assert.equal(decision.branch, 'defense-cut');
+  assert.deepEqual(decision.action, actionCoordinates(b, 8, 3, 2));
+});
+
+function rearRouteThreat(targetCode = 200, targetArmy = 0, enemyArmy = 240) {
+  const grid = [101, 1, targetCode, targetCode === 3 ? 3 : 200, 2, 1, 1, 1, 200, 200];
+  const army = [100, 1, targetArmy, targetCode === 3 ? targetArmy : 0, enemyArmy, 1, 1, 100, 0, 0];
+  return makeBoard({
+    n: 2, m: 5, grid, army,
+    isolated: Array(10).fill(0), fog: Array(10).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }, { id: 3, team: 3 }],
+  }, 1);
+}
+
+test('cuts across visible neutral land when an enemy column bypasses our border', () => {
+  const b = rearRouteThreat();
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(decision.branch, 'emergency-defense-cut');
+  assert.deepEqual(decision.action, actionCoordinates(b, 7, 2, 2));
+  assert.equal(preview(b, decision.action).ok, true);
+});
+
+test('keeps a swamp route available for an emergency defensive cut', () => {
+  const b = rearRouteThreat(204);
+  const decision = emergencyDefensiveCut(b, [...Array(10).keys()].filter((at) => b.own(at)));
+  assert.equal(decision.branch, 'emergency-defense-cut');
+  assert.deepEqual(decision.action, actionCoordinates(b, 7, 2, 2));
+  assert.equal(b.kind(2), 'swamp');
+  assert.equal(preview(b, decision.action).ok, true);
+});
+
+test('can enter another visible player territory to intercept the rear route', () => {
+  const b = rearRouteThreat(3, 20);
+  const decision = emergencyDefensiveCut(b, [...Array(10).keys()].filter((at) => b.own(at)));
+  assert.equal(decision.branch, 'emergency-defense-cut');
+  assert.equal(b.owner(2), 3);
+  assert.deepEqual(decision.action, actionCoordinates(b, 7, 2, 2));
+  assert.equal(preview(b, decision.action).captured, true);
+});
+
+test('does not promote an ordinary foreign move without a rear threat', () => {
+  const b = rearRouteThreat(3, 20, 20);
+  const decision = plan(b, { playerId: 1, home: 0, threatDistance: {} });
+  assert.equal(emergencyDefensiveCut(b, [...Array(10).keys()].filter((at) => b.own(at))), null);
+  assert.notEqual(decision.branch, 'emergency-defense-cut');
+});
+
+test('rejects mountains and underpowered foreign targets for emergency cuts', () => {
+  const mountain = makeBoard({
+    n: 1, m: 5, grid: [101, 1, 201, 201, 2], army: [100, 100, 0, 0, 240],
+    isolated: Array(5).fill(0), fog: Array(5).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  assert.equal(emergencyDefensiveCut(mountain, [0, 1]), null);
+
+  const weak = rearRouteThreat(3, 120);
+  assert.equal(emergencyDefensiveCut(weak, [...Array(10).keys()].filter((at) => bOwn(weak, at))), null);
+});
+
+function bOwn(board, at) {
+  return board.own(at) && !board.isolated[at];
+}
+
+test('campaign gathers a token spearhead instead of marching it through a corridor', () => {
+  const b = makeBoard({
+    n: 3, m: 5,
+    grid: [101, 1, 200, 2, 102, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201],
+    army: [20, 5, 0, 3, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    isolated: Array(15).fill(0), fog: Array(15).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const memory = {
+    playerId: 1,
+    home: 0,
+    campaign: {
+      crown: 4, at: 1, phase: 'gather', started: 0, lastPhase: 'gather',
+      lastProgress: 0, deliveryBestDistance: Infinity, bestCrownDistance: 3,
+    },
+    delivery: null, blocked: null, threatDistance: {},
+  };
+  const decision = plan(b, memory);
+  assert.equal(decision.branch, 'muster');
+  assert.deepEqual(decision.action, actionCoordinates(b, 0, 1, 0));
+});
+
+test('maze hysteresis reroutes a repeated edge instead of feeding it forever', () => {
+  const b = makeBoard({
+    n: 3, m: 5,
+    grid: [101, 1, 1, 2, 102, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201],
+    army: [30, 20, 20, 4, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    isolated: Array(15).fill(0), fog: Array(15).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  assert.equal(isMazeBoard(b), true);
+  const memory = {
+    mazeHistory: {
+      lastFrom: 1, lastTo: 2, edge: '1:2', edgeStreak: 1,
+      recent: ['1:2'], blockedUntil: Object.create(null), reroutes: 0, holds: 0,
+    },
+  };
+  const decision = mazeActionGuard(b, memory, {
+    action: actionCoordinates(b, 1, 2, 2),
+    branch: 'delayed-rush-guard',
+  });
+  assert.ok(decision.action);
+  assert.notDeepEqual(decision.action, actionCoordinates(b, 1, 2, 2));
+  assert.equal(memory.mazeHistory.reroutes, 1);
+});
+
+test('maze hysteresis blocks an immediate reverse when no alternate corridor is safe', () => {
+  const b = makeBoard({
+    n: 3, m: 3,
+    grid: [101, 1, 201, 201, 201, 201, 201, 201, 201],
+    army: [30, 20, 10, 0, 0, 0, 0, 0, 0],
+    isolated: Array(9).fill(0), fog: Array(9).fill(0), turn: 60,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const memory = {
+    mazeHistory: {
+      lastFrom: 1, lastTo: 0, edge: '0:1', edgeStreak: 1,
+      recent: ['0:1'], blockedUntil: Object.create(null), reroutes: 0, holds: 0,
+    },
+  };
+  const decision = mazeActionGuard(b, memory, {
+    action: actionCoordinates(b, 0, 1, 2),
+    branch: 'opening',
+  });
+  assert.equal(decision.action, null);
+  assert.equal(decision.branch, 'maze-hold');
+  assert.equal(memory.mazeHistory.holds, 1);
+});
+
+test('stalled campaign recovery clears stale cursors and resumes a safe frontier', () => {
+  const b = makeBoard({
+    n: 3, m: 5,
+    grid: [101, 1, 0, 201, 102, 201, 201, 201, 201, 201, 201, 201, 201, 201, 201],
+    army: [40, 20, 20, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    isolated: Array(15).fill(0), fog: Array(15).fill(0), turn: 160,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const memory = {
+    playerId: 1,
+    home: 0,
+    campaign: { crown: 4, at: 1, phase: 'gather', started: 0 },
+    delivery: { root: 1, at: 1 },
+    blocked: { crown: 4, until: 999 },
+    buildPlan: { cells: [1], index: 0 },
+  };
+  const decision = recover(b, memory, [0, 1, 2]);
+  assert.ok(decision?.action);
+  assert.equal(memory.campaign, null);
+  assert.equal(memory.delivery, null);
+  assert.deepEqual(memory.buildPlan, { cells: [1], index: 0 });
+});
+
+function investmentBoard(enemyArmy) {
+  return makeBoard({
+    n: 5, m: 5,
+    grid: [101, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 102],
+    army: [50, 10, 10, 10, 10, 0, 0, 0, 0, enemyArmy, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30],
+    isolated: Array(25).fill(0), fog: Array(25).fill(0), turn: 80,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('construction reserves a nearby garrison before spending fifty units', () => {
+  const b = investmentBoard(80);
+  assert.equal(constructionThreat(b, [0, 1, 2, 3, 4], [9, 24]), true);
+  const memory = { playerId: 1, home: 0, threatDistance: {} };
+  const decision = plan(b, memory);
+  assert.equal(decision.branch, 'defend');
+  assert.notEqual(decision.action?.kind, 'build');
+});
+
+test('construction resumes after the saved enemy stack is no longer a threat', () => {
+  const b = investmentBoard(20);
+  assert.equal(constructionThreat(b, [0, 1, 2, 3, 4], [9, 24]), false);
+});
+
+test('a cleared construction threat lets the existing cluster plan build again', () => {
+  const b = makeBoard({
+    n: 5, m: 5,
+    grid: [101, ...Array(24).fill(1)],
+    army: [60, 120, ...Array(23).fill(5)],
+    isolated: Array(25).fill(0), fog: Array(25).fill(0), turn: 80,
+    leaderboard: [{ id: 1, team: 1 }],
+  }, 1);
+  const memory = { playerId: 1, home: 0, threatDistance: {} };
+  const decision = plan(b, memory);
+  assert.equal(decision.branch, 'cluster-foundation');
+  assert.equal(decision.action.kind, 'build');
+});
+
+test('route guard catches a large push that leaves a smaller branch exposed', () => {
+  const b = makeBoard({
+    n: 4, m: 4,
+    grid: [101, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 2, 201, 201, 2, 201],
+    army: [86, 146, 202, 85, 197, 148, 139, 18, 193, 71, 215, 15, 0, 0, 163, 0],
+    isolated: Array(16).fill(0), fog: Array(16).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const action = actionCoordinates(b, 10, 14, 2);
+  assert.deepEqual(routeGuard(b, action), { blocked: true, anchor: 10, cut: 10 });
+});
+
+test('long campaigns can build a funded safe frontline site instead of hauling from the rear', () => {
+  const grid = [101, ...Array(10).fill(1), 1, ...Array(22).fill(0), 102];
+  const army = [1000, ...Array(9).fill(20), 100, 101, ...Array(22).fill(0), 20];
+  const b = makeBoard({
+    n: 1, m: 35, grid, army,
+    isolated: Array(35).fill(0), fog: Array(35).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const enemies = [34];
+  const ed = require('../bot/board.cjs').distanceField(b, enemies);
+  const memory = {
+    playerId: 1,
+    campaign: { at: 10 },
+    delivery: null,
+    rearEconomy: null,
+  };
+  const decision = sustainEconomy(b, memory, [...Array(12).keys()], ed, enemies);
+  assert.equal(decision.branch, 'rear-foundation');
+  assert.deepEqual(decision.action, { kind: 'build', x: 0, y: 11, op: 'b' });
+});
+
+test('frontline construction can use a bounded local supply branch', () => {
+  const grid = [101, ...Array(12).fill(1), ...Array(21).fill(0), 102];
+  const army = Array(35).fill(0);
+  army[0] = 99;
+  for (let at = 1; at <= 9; at += 1) army[at] = 1;
+  army[10] = 100;
+  army[11] = 20;
+  army[12] = 90;
+  army[34] = 20;
+  const b = makeBoard({
+    n: 1, m: 35, grid, army,
+    isolated: Array(35).fill(0), fog: Array(35).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const enemies = [34];
+  const ed = require('../bot/board.cjs').distanceField(b, enemies);
+  const memory = { playerId: 1, campaign: { at: 10 }, delivery: null, rearEconomy: null };
+  const decision = sustainEconomy(b, memory, [...Array(13).keys()], ed, enemies);
+  assert.equal(decision.branch, 'front-fund');
+  assert.deepEqual(decision.action, { kind: 'attack', x: 0, y: 12, dx: 0, dy: 11, mode: 0, half: false });
+  assert.equal(memory.rearEconomy.front, true);
+});
+
+test('tree gathering drains tributaries before their shared trunk', () => {
+  const grid = [101, ...Array(9).fill(1)];
+  const army = [1, 2, 2, 2, 20, 1, 1, 1, 30, 1];
+  const b = makeBoard({
+    n: 1, m: 10, grid, army,
+    isolated: Array(10).fill(0), fog: Array(10).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }],
+  }, 1);
+  const root = 0;
+  const canEnter = (at) => b.own(at) && !b.isolated[at];
+  const field = distanceField(b, [root], canEnter);
+  const memory = { delivery: null };
+  const sources = [
+    { at: 4, p: [4, 3, 2, 1, 0] },
+    { at: 8, p: [8, 7, 6, 5, 4, 3, 2, 1, 0] },
+  ];
+  const decision = treeGather(b, memory, root, 100, 'muster', canEnter, field, sources);
+  assert.equal(decision.branch, 'muster-tree');
+  assert.equal(decision.action.x, 0);
+  assert.equal(decision.action.y, 8);
+  assert.equal(decision.action.dy, 7);
+  assert.equal(memory.delivery.edges[0][0], 8);
+});
+
+// A three-tributary tree whose trunk runs over one exposed bridge cell (7):
+// an enemy stack sits next to it, so the bridge must keep a real garrison while
+// the non-cut tributaries are still allowed to supply.
+function cutTree() {
+  const grid = [201, 1, 1, 201, 201, 201, 101, 1, 1, 201, 201, 201, 201, 2, 1, 201, 201, 201];
+  const army = [0, 30, 30, 0, 0, 0, 0, 60, 30, 0, 0, 0, 0, 5, 30, 0, 0, 0];
+  return makeBoard({
+    n: 3, m: 6, grid, army,
+    isolated: Array(18).fill(0), fog: Array(18).fill(0), turn: 100,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('tree gathering keeps a garrison on a threatened cut bridge', () => {
+  const b = cutTree();
+  const canEnter = (at) => b.own(at) && !b.isolated[at];
+  const memory = { delivery: { mode: 'tree', root: 6, at: 7, edges: [[7, 6]], branches: 1, movedTurn: -1 } };
+  const decision = advanceSupplyTree(b, memory, 'muster', canEnter);
+  assert.equal(decision.branch, 'muster-tree');
+  // A full push would leave pressure + 1 (5); the guard keeps pressure + 2.
+  assert.equal(b.army[7], 60);
+  assert.ok(preview(b, decision.action).army[7] >= 4 + 2);
+  assert.equal(memory.delivery.at, 6);
+});
+
+test('tree gathering still lets non-cut tributaries supply the cut trunk', () => {
+  const b = cutTree();
+  const canEnter = (at) => b.own(at) && !b.isolated[at];
+  const field = distanceField(b, [6], canEnter);
+  const memory = { delivery: null };
+  const sources = [
+    { at: 8, p: [8, 7, 6] },
+    { at: 1, p: [1, 7, 6] },
+    { at: 14, p: [14, 8, 7, 6] },
+    { at: 2, p: [2, 8, 7, 6] },
+  ];
+  const decision = treeGather(b, memory, 6, 400, 'muster', canEnter, field, sources);
+  assert.equal(decision.branch, 'muster-tree');
+  // The first edge is the leaf at index 2, which is not a cut point.
+  assert.equal(decision.action.x, 0);
+  assert.equal(decision.action.y, 2);
+  assert.equal(decision.action.mode, 0);
+  // Non-cut leaves still hand over everything but one soldier.
+  assert.equal(preview(b, decision.action).army[2], 1);
+  assert.equal(memory.delivery.branches, 3);
+  assert.ok(memory.delivery.edges.some(([from, to]) => from === 7 && to === 6));
+});
+
+function withEnv(values, body) {
+  const previous = new Map();
+  for (const [key, value] of Object.entries(values)) {
+    previous.set(key, process.env[key]);
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return body();
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+// A 30x30 open board: our rear in the top rows, the opponent in the bottom rows.
+function openLargeBoard({ own = 40, enemy = 40, turn = 400, army = 6 } = {}) {
+  const n = 30, m = 30, size = n * m;
+  const grid = Array(size).fill(200);
+  const troops = Array(size).fill(0);
+  for (let at = 0; at < own; at += 1) {
+    grid[at] = 1;
+    troops[at] = army;
+  }
+  for (let at = size - 1; at > size - 1 - enemy; at -= 1) {
+    grid[at] = 2;
+    troops[at] = army;
+  }
+  grid[0] = 101;
+  grid[size - 1] = 102;
+  return makeBoard({
+    n, m, grid, army: troops,
+    isolated: Array(size).fill(0), fog: Array(size).fill(0), turn,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+}
+
+test('the crown budget is anchored to held land on open-paint modes only', () => {
+  const board = openLargeBoard({ own: 40, enemy: 220, turn: 400 });
+  const own = [...Array(40).keys()];
+  const enemies = [...Array(220).keys()].map((i) => 900 - 1 - i);
+  // Default on, `=0` restores the old crown chase for A/B runs.
+  assert.equal(crownLandAnchor({ mapMode: 'random' }, own, enemies), true);
+  withEnv({ APEX_CROWN_LAND_ANCHOR: '0' }, () => {
+    assert.equal(crownLandAnchor({ mapMode: 'random' }, own, enemies), false);
+  });
+  assert.equal(crownLandAnchor({ mapMode: 'archipelago' }, own, enemies), true);
+  // A mirrored crown race (Apex baseline) keeps the original chase.
+  assert.equal(crownLandAnchor({ mapMode: 'maze' }, own, enemies), false);
+  assert.equal(crownLandAnchor({ mapMode: 'mediterranean' }, own, enemies), false);
+  // Parity releases the anchor.
+  assert.equal(crownLandAnchor({ mapMode: 'random' }, own, own), false);
+  // The ratio knob keeps the phase open only while the gap is structural.
+  withEnv({ APEX_CROWN_LAND_RATIO: '0.5' }, () => {
+    assert.equal(crownLandAnchor({ mapMode: 'random' }, [...Array(40).keys()], [...Array(60).keys()]), false);
+  });
+
+  // Anchored build budget: eight crowns on forty cells already exceed one
+  // crown per twelve cells, so no further construction project opens.  The
+  // unanchored mediterranean profile still chases the opponent's crowns.
+  const n = 30, m = 30, size = n * m;
+  const grid = Array(size).fill(200);
+  const troops = Array(size).fill(0);
+  for (let at = 0; at < 40; at += 1) {
+    grid[at] = at < 8 ? 101 : 1;
+    troops[at] = 120;
+  }
+  // Rows 24-29 belong to the opponent: the nearest hostile crown is 24 steps
+  // from our rear, the distance at which sustainEconomy() stops abandoning rear
+  // projects for an assault that is already close to the enemy core.
+  for (let at = size - 180; at < size; at += 1) {
+    grid[at] = 102;
+    troops[at] = 4;
+  }
+  const crowded = makeBoard({
+    n, m, grid, army: troops,
+    isolated: Array(size).fill(0), fog: Array(size).fill(0), turn: 400,
+    leaderboard: [{ id: 1, team: 1 }, { id: 2, team: 2 }],
+  }, 1);
+  const ownCells = [...Array(40).keys()];
+  const enemyCells = [...Array(180).keys()].map((i) => size - 1 - i);
+  const ed = distanceField(crowded, enemyCells);
+  const memory = () => ({ playerId: 1, campaign: { at: 0 }, delivery: null, rearEconomy: null });
+  const anchored = sustainEconomy(crowded, { ...memory(), mapMode: 'archipelago' }, ownCells, ed, enemyCells);
+  const stock = sustainEconomy(crowded, { ...memory(), mapMode: 'mediterranean' }, ownCells, ed, enemyCells);
+  assert.equal(anchored, null);
+  assert.notEqual(stock, null);
+});
