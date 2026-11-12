@@ -30,6 +30,7 @@ import { renderRichText, renderRichTextWithMentions } from './text-render';
 import { FeedComment, FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { CaptchaService } from './server/captcha-service';
+import { ContributorsService, handleContributorsRequest } from './server/contributors-service';
 import { EditableLobbyKey, FIXED_SWAMP_RATIO, LobbyService } from './server/lobby-service';
 import { PresenceService } from './server/presence-service';
 import { ServerBotManager } from './server/server-bot-manager';
@@ -81,6 +82,7 @@ const feedStore = new FeedStore(dataDir);
 const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const captchaService = new CaptchaService();
+const contributorsService = new ContributorsService();
 const lobbyService = new LobbyService(replayStore, userStore, (username) => {
   authService.disconnectUserSockets(username);
 });
@@ -1080,6 +1082,10 @@ const boot = async (): Promise<void> => {
   app.get('/api/announcement', async (_request, reply) => {
     return reply.send(decorateAnnouncement(announcementStore.get()));
   });
+
+  app.get('/api/contributors', async (_request, reply) =>
+    handleContributorsRequest(contributorsService, reply),
+  );
 
   // 版本信息（公开）：首页页脚右下角版本号链接到 GitHub 对应 commit。
   app.get('/api/version', async (_request, reply) => {
