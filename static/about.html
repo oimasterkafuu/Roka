@@ -14,6 +14,72 @@
     <link rel="stylesheet" href="/styles/docs.css?v={{V}}" />
     <link rel="stylesheet" href="/styles/intro.css?v={{V}}" />
     <script defer src="/intro.js?v={{V}}" data-version="{{V}}"></script>
+    <style>
+      .contributors-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .contributor-card {
+        min-width: 0;
+        border: 1px solid #e3e8f0;
+        border-radius: 8px;
+        background: #f7f9fb;
+      }
+      .contributor-link {
+        display: grid;
+        min-width: 0;
+        grid-template-columns: 64px minmax(0, 1fr);
+        align-items: center;
+        gap: 4px 10px;
+        padding: 12px;
+        color: #253042;
+        text-decoration: none;
+      }
+      .contributor-link img {
+        width: 64px;
+        height: 64px;
+        grid-row: 1 / span 2;
+        border-radius: 50%;
+        background: #e3e8f0;
+      }
+      .contributor-name {
+        min-width: 0;
+        align-self: end;
+        overflow-wrap: anywhere;
+        font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+      }
+      .contributor-count {
+        display: block;
+        align-self: start;
+        color: #5c6675;
+        font-size: 13px;
+      }
+      #contributors-status {
+        margin-top: 10px;
+        color: #5c6675;
+      }
+      .contributors-github-link {
+        margin-top: 12px;
+        font-size: 14px;
+      }
+      @media (max-width: 640px) {
+        .contributors-grid {
+          grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
+          gap: 8px;
+        }
+        .contributor-link {
+          grid-template-columns: 48px minmax(0, 1fr);
+          gap: 4px 8px;
+          padding: 10px;
+        }
+        .contributor-link img {
+          width: 48px;
+          height: 48px;
+        }
+      }
+    </style>
     <title>Roka - 关于</title>
   </head>
 
@@ -48,6 +114,23 @@
           <button data-goto="/develop" class="small">参与网站开发 →</button>
           <button data-goto="/develop/bot" class="small">机器人开发协议 →</button>
         </div>
+      </section>
+
+      <section class="doc-panel" aria-labelledby="contributors-title">
+        <h2 id="contributors-title">项目贡献者</h2>
+        <p>感谢每一位为 Roka 提交代码、完善项目的贡献者。</p>
+        <p id="contributors-status" role="status">正在加载贡献者名单…</p>
+        <div id="contributors-grid" class="contributors-grid"></div>
+        <p class="contributors-github-link">
+          也可以在 GitHub 查看
+          <a
+            class="doc-link"
+            href="https://github.com/oimasterkafuu/Roka/graphs/contributors"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Contributors 完整名单</a
+          >。
+        </p>
       </section>
 
       <section class="doc-panel">
@@ -141,5 +224,6 @@
     </div>
 
     <script src="/docs.js?v={{V}}"></script>
+    <script src="/about-contributors.js?v={{V}}"></script>
   </body>
 </html>
