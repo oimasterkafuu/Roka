@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-12T09:19:49.048Z",
+  "evaluatedCommit": "4a87a7e78c882db13e3d40e31826954215ea7ca1",
+  "sourceSha256": "800ca8ceae35a2b237759886cd428e36c0dba7466e2af7b97e4550fbe61c02c4",
+  "settings": {
+    "profile": "large",
+    "seeds": 8,
+    "turns": 2400,
+    "workers": 10,
+    "seats": [
+      false,
+      true
+    ],
+    "opponents": [
+      "anti",
+      "apex"
+    ],
+    "sizes": [
+      0.34,
+      0.68
+    ],
+    "modes": [
+      "random",
+      "maze",
+      "archipelago",
+      "mediterranean"
+    ],
+    "fog": [
+      false
+    ]
+  },
+  "total": {
+    "matches": 256,
+    "wins": 155,
+    "draws": 37,
+    "losses": 64,
+    "effectiveLosses": 101,
+    "winRate": 0.6055
+  },
+  "byOpponent": {
+    "anti": {
+      "matches": 128,
+      "wins": 65,
+      "draws": 32,
+      "losses": 31,
+      "effectiveLosses": 63,
+      "winRate": 0.5078
+    },
+    "apex": {
+      "matches": 128,
+      "wins": 90,
+      "draws": 5,
+      "losses": 33,
+      "effectiveLosses": 38,
+      "winRate": 0.7031
+    }
+  },
+  "bySize": {
+    "0.34": {
+      "matches": 128,
+      "wins": 91,
+      "draws": 0,
+      "losses": 37,
+      "effectiveLosses": 37,
+      "winRate": 0.7109
+    },
+    "0.68": {
+      "matches": 128,
+      "wins": 64,
+      "draws": 37,
+      "losses": 27,
+      "effectiveLosses": 64,
+      "winRate": 0.5
+    }
+  },
+  "table": [
+    {
+      "opponent": "anti",
+      "mode": "random",
+      "size": "0.34",
+      "matches": 16,
+      "wins": 8,
+      "draws": 0,
+      "losses": 8,
+      "effectiveLosses": 8,
+      "winRate": 0.5
+    },
+    {
+      "opponent": "anti",
+      "mode": "random",
+      "size": "0.68",
+      "matches": 16,
+      "wins": 3,
+      "draws": 11,
+      "losses": 2,
+      "effectiveLosses": 13,
+      "winRate": 0.1875
+    },
+    {
+      "opponent": "anti",
+      "mode": "maze",
+      "size": "0.34",
+      "matches": 16,
+      "wins": 14,
+      "draws": 0,
+      "losses": 2,
+      "effectiveLosses": 2,
+      "winRate": 0.875
+    },
+    {
+      "opponent": "anti",
+      "mode": "maze",
+      "size": "0.68",
+      "matches": 16,
+      "wins": 7,
+      "draws": 6,
+      "losses": 3,
+      "effectiveLosses": 9,
+      "winRate": 0.4375
+    },
+    {
+      "opponent": "anti",
+      "mode": "archipelago",
+      "size": "0.34",
+      "matches": 16,
+      "wins": 10,
+      "draws": 0,
+      "losses": 6,
+      "effectiveLosses": 6,
+      "winRate": 0.625
+    },
+    {
+      "opponent": "anti",
+      "mode": "archipelago",
+      "size": "0.68",
+      "matches": 16,
+      "wins": 9,
+      "draws": 0,
+      "losses": 7,
+      "effectiveLosses": 7,
+      "winRate": 0.5625
+    },
+    {
+      "opponent": "anti",
+      "mode": "mediterranean",
+      "size": "0.34",
+      "matches": 16,
+      "wins": 13,
+      "draws": 0,
+      "losses": 3,
+      "effectiveLosses": 3,
+      "winRate": 0.8125
+    },
+    {
+      "opponent": "anti",
+      "mode": "mediterranean",
+      "size": "0.68",
+      "matches": 16,
+      "wins": 1,
+      "draws": 15,
+      "losses": 0,
+      "effectiveLosses": 15,
+      "winRate": 0.0625
+    },
+    {
+      "opponent": "apex",
+      "mode": "random",
+      "size": "0.34",
+      "matches": 16,
+      "wins": 14,
+      "draws": 0,
+      "losses": 2,
+      "effectiveLosses": 2,
+      "winRate": 0.875
+    },
+    {
+      "opponent": "apex",
+      "mode": "random",
+      "size": "0.68",
+      "matches": 16,
+      "wins": 11,
+      "draws": 0,
+      "losses": 5,
+      "effectiveLosses": 5,
+      "winRate": 0.6875
+    },
+    {
+      "opponent": "apex",
+      "mode": "maze",
+      "size": "0.34",
+      "matches": 16,
+      "wins": 12,
+      "draws": 0,
+      "losses": 4,
+      "effectiveLosses": 4,
+      "winRate": 0.75
+    },
+    {
+      "opponent": "apex",
+      "mode": "maze",
+      "size": "0.68",
+      "matches": 16,
+      "wins": 12,
+      "draws": 1,
+      "losses": 3,
+      "effectiveLosses": 4,
+      "winRate": 0.75
+    },
+    {
+      "opponent": "apex",
+      "mode": "archipelago",
+      "size": "0.34",
+      "matches": 16,
+      "wins": 10,
+      "draws": 0,
+      "losses": 6,
+      "effectiveLosses": 6,
+      "winRate": 0.625
+    },
+    {
+      "opponent": "apex",
+      "mode": "archipelago",
+      "size": "0.68",
+      "matches": 16,
+      "wins": 10,
+      "draws": 0,
+      "losses": 6,
+      "effectiveLosses": 6,
+      "winRate": 0.625
+    },
+    {
+      "opponent": "apex",
+      "mode": "mediterranean",
+      "size": "0.34",
+      "matches": 16,
+      "wins": 10,
+      "draws": 0,
+      "losses": 6,
+      "effectiveLosses": 6,
+      "winRate": 0.625
+    },
+    {
+      "opponent": "apex",
+      "mode": "mediterranean",
+      "size": "0.68",
+      "matches": 16,
+      "wins": 11,
+      "draws": 4,
+      "losses": 1,
+      "effectiveLosses": 5,
+      "winRate": 0.6875
+    }
+  ]
+}

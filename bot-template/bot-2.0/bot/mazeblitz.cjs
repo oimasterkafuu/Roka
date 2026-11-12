@@ -86,7 +86,7 @@
  * cell it can take with a half push that is forward on the target axis) is not
  * recalled into the gather while any other source exists; the reserve that is
  * needed elsewhere is a different stack.  The junction guard size itself is a
- * separate tradeoff and is deliberately left as-is for now (see BASELINE.md).
+ * separate tradeoff and is deliberately left as-is for now (see FINAL_REPORT.md).
  *
  * Cut rule: a cut never abandons the wave.  The plan first tries to repair the
  * cut, then hands the rally to the forward cell of the component that holds
@@ -2162,7 +2162,7 @@ function mazeBlitzPlan(b, m, own, enemies, h, cfg = mazeBlitzConfig()) {
   // Observation window.  The burst opening belongs to the default planner:
   // the v7 "no construction until tick 50" opening was what cost the Apex
   // match-up six wins even when the wave itself was gated off (24W -> 18W,
-  // see BASELINE.md), and it bought the Anti-Human match-up nothing (23W with
+  // see FINAL_REPORT.md), and it bought the Anti-Human match-up nothing (23W with
   // and without it).  So the blitz only *watches* the opponent here and hands
   // the board back unchanged; the plan becomes real at the launch tick, after
   // the gate has read the opponent's style.

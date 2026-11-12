@@ -82,7 +82,7 @@
 // 62W/32D/34L against 62W/24D/42L (mediterranean 14W/15D/3L against
 // 14W/6D/12L - the same med wins, nine 0.68 losses becoming draws).
 //
-// Known cost, unchanged and documented in training/BASELINE.md: the held tick
+// Known cost, unchanged and documented in training/FINAL_REPORT.md: the held tick
 // falls through to a full defence pass that the campaign would otherwise skip,
 // so on a long 0.68 stalemate against anti p95 goes 38ms -> 76ms and ~2% of
 // decisions reach the 80ms budget.  The next step is a cheap precheck for that
