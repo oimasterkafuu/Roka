@@ -191,7 +191,22 @@ assert.equal(frontendSource.includes('innerHTML'), false);
 
 const aboutSource = readFileSync(new URL('../static/about.html', import.meta.url), 'utf8');
 assert.ok(aboutSource.indexOf('项目贡献者') < aboutSource.indexOf('来源与参考'));
-assert.ok(aboutSource.includes('https://github.com/oimasterkafuu/Roka/graphs/contributors'));
+const contributorsParagraph = aboutSource.match(
+  /<p\b[^>]*class="contributors-github-link"[^>]*>([\s\S]*?)<\/p>/,
+);
+assert.ok(contributorsParagraph, 'contributors GitHub link paragraph exists');
+const contributorsHref = contributorsParagraph[1].match(/<a\b[^>]*\bhref=(['"])(.*?)\1/s);
+assert.ok(contributorsHref, 'contributors link has an href');
+const contributorsUrl = new URL(contributorsHref[2]);
+assert.equal(contributorsUrl.protocol, 'https:');
+assert.equal(contributorsUrl.hostname, 'github.com');
+assert.equal(contributorsUrl.pathname, '/oimasterkafuu/Roka/graphs/contributors');
+assert.equal(contributorsUrl.username, '');
+assert.equal(contributorsUrl.password, '');
+assert.equal(contributorsUrl.port, '');
+assert.equal(contributorsUrl.search, '');
+assert.equal(contributorsUrl.hash, '');
+assert.equal(contributorsUrl.href, `${contributorsUrl.origin}${contributorsUrl.pathname}`);
 assert.ok(aboutSource.includes('/about-contributors.js?v={{V}}'));
 
 console.log('contributor API, cache, validation, anonymous access and DOM rendering tests passed');
