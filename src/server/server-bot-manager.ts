@@ -1,5 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
@@ -18,7 +26,7 @@ import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
  * simple-strategy-bot、anti-human-bot）；random-patch-bot 是 CLI 参考模板，
  * 模块加载即连接服务器，不作为可托管选项。模板按目录名缓存加载。
  *
- * 重启自动恢复（issue #28）：start/stop 时把运行中 bot 的
+ * 重启自动恢复（issue #28）：start/config/stop 时把运行中 bot 的
  * {username, room, template, allowTeam, allowFog, allowMultiLine} 列表同步写入
  * stateFilePath（JSON，临时文件 + rename 原子替换）；服务器重启后由 restore()
  * 读回，逐条重做与手动启动相同的校验（用户存在且未封禁、房间号长度 1~15、
@@ -42,14 +50,17 @@ interface StrategyModule {
   attachStrategy: (socket: ClientSocket, options: StrategyOptions) => StrategyHandle;
 }
 
-interface ServerBotInfo {
+interface ServerBotPermissions {
+  allowTeam: boolean;
+  allowFog: boolean;
+  allowMultiLine: boolean;
+}
+
+interface ServerBotInfo extends ServerBotPermissions {
   id: string;
   username: string;
   room: string;
   template: string;
-  allowTeam: boolean;
-  allowFog: boolean;
-  allowMultiLine: boolean;
   startedAt: number;
   connected: boolean;
 }
@@ -87,11 +98,8 @@ interface SavedServerBot {
 }
 
 /** 内存临时令牌表项：token → bot 身份、组队/迷雾/多线许可，供 server.ts 查询。 */
-interface TokenEntry {
+interface TokenEntry extends ServerBotPermissions {
   username: string;
-  allowTeam: boolean;
-  allowFog: boolean;
-  allowMultiLine: boolean;
 }
 
 const BOT_TEMPLATE_DIR = path.join('bot-template');
@@ -110,6 +118,10 @@ class ServerBotManager {
   /** socket 中间件用：命中内存临时令牌时返回对应 bot 信息，否则返回 null。 */
   resolveToken(token: string): TokenEntry | null {
     return this.tokens.get(token) ?? null;
+  }
+
+  getSocketId(id: string): string | null {
+    return this.bots.get(id)?.socket.id ?? null;
   }
 
   list(): ServerBotInfo[] {
@@ -228,6 +240,33 @@ class ServerBotManager {
     return this.list().find((item) => item.id === id) as ServerBotInfo;
   }
 
+  updateConfig(id: string, config: ServerBotPermissions): ServerBotInfo | null {
+    const bot = this.bots.get(id);
+    if (!bot) {
+      return null;
+    }
+    if (
+      typeof config.allowTeam !== 'boolean' ||
+      typeof config.allowFog !== 'boolean' ||
+      typeof config.allowMultiLine !== 'boolean'
+    ) {
+      throw new Error('allowTeam、allowFog、allowMultiLine 必须是布尔值。');
+    }
+    const tokenEntry = this.tokens.get(bot.token);
+    if (!tokenEntry) {
+      throw new Error(`Bot ${bot.username} 的内存令牌已失效，无法更新配置。`);
+    }
+
+    // 先持久化完整的新快照；任何写盘失败都发生在内存变更之前，运行中的 bot 保持原配置。
+    this.writeState(this.createStateSnapshot(id, config));
+    Object.assign(bot, config);
+    Object.assign(tokenEntry, config);
+    console.log(
+      `[server-bot] ${bot.username}: config updated (allowTeam=${config.allowTeam}, allowFog=${config.allowFog}, allowMultiLine=${config.allowMultiLine}, id=${id})`,
+    );
+    return this.list().find((item) => item.id === id) as ServerBotInfo;
+  }
+
   stop(id: string): boolean {
     const bot = this.bots.get(id);
     if (!bot) {
@@ -301,21 +340,38 @@ class ServerBotManager {
     }
   }
 
+  private createStateSnapshot(updatedId?: string, updatedConfig?: ServerBotPermissions): SavedServerBot[] {
+    return [...this.bots.values()].map((bot) => ({
+      username: bot.username,
+      room: bot.room,
+      template: bot.template,
+      allowTeam: bot.id === updatedId && updatedConfig ? updatedConfig.allowTeam : bot.allowTeam,
+      allowFog: bot.id === updatedId && updatedConfig ? updatedConfig.allowFog : bot.allowFog,
+      allowMultiLine:
+        bot.id === updatedId && updatedConfig ? updatedConfig.allowMultiLine : bot.allowMultiLine,
+    }));
+  }
+
+  private writeState(snapshot: SavedServerBot[]): void {
+    mkdirSync(path.dirname(this.options.stateFilePath), { recursive: true });
+    const tmpPath = `${this.options.stateFilePath}.${process.pid}.tmp`;
+    try {
+      writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2));
+      renameSync(tmpPath, this.options.stateFilePath);
+    } catch (error) {
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        // 临时文件可能尚未创建；保留原始错误。
+      }
+      throw error;
+    }
+  }
+
   /** 把运行中 bot 列表写入状态文件（临时文件 + rename 原子替换）；写盘失败只记警告。 */
   private persistState(): void {
     try {
-      const snapshot: SavedServerBot[] = [...this.bots.values()].map((bot) => ({
-        username: bot.username,
-        room: bot.room,
-        template: bot.template,
-        allowTeam: bot.allowTeam,
-        allowFog: bot.allowFog,
-        allowMultiLine: bot.allowMultiLine,
-      }));
-      mkdirSync(path.dirname(this.options.stateFilePath), { recursive: true });
-      const tmpPath = `${this.options.stateFilePath}.${process.pid}.tmp`;
-      writeFileSync(tmpPath, JSON.stringify(snapshot, null, 2));
-      renameSync(tmpPath, this.options.stateFilePath);
+      this.writeState(this.createStateSnapshot());
     } catch (error) {
       console.warn(`[server-bot] 状态文件写入失败：${error instanceof Error ? error.message : error}`);
     }

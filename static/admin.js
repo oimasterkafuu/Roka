@@ -475,15 +475,18 @@ function renderBots() {
     usernameEnsureColors([bot.username]);
     $('<td></td>').text(bot.room).appendTo($tr);
     $('<td></td>').text(bot.template).appendTo($tr);
-    $('<td></td>')
-      .text(bot.allowTeam ? '允许' : '不允许')
-      .appendTo($tr);
-    $('<td></td>')
-      .text(bot.allowFog ? '允许' : '不允许')
-      .appendTo($tr);
-    $('<td></td>')
-      .text(bot.allowMultiLine ? '允许' : '不允许')
-      .appendTo($tr);
+    var inputs = {};
+    [
+      ['allowTeam', '组队'],
+      ['allowFog', '迷雾远征'],
+      ['allowMultiLine', '多线争锋'],
+    ].forEach(function (item) {
+      var key = item[0];
+      inputs[key] = $('<input type="checkbox" />')
+        .prop('checked', bot[key] === true)
+        .attr('aria-label', bot.username + ' 允许' + item[1]);
+      $('<td></td>').append(inputs[key]).appendTo($tr);
+    });
     $('<td></td>').text(fullTime(bot.startedAt)).appendTo($tr);
     $('<td></td>')
       .append(
@@ -493,6 +496,11 @@ function renderBots() {
       )
       .appendTo($tr);
     var $ops = $('<td class="op-cell"></td>');
+    $('<button type="button" class="btn btn-secondary btn-sm">保存配置</button>')
+      .on('click', function () {
+        updateBot(bot, inputs, $tr);
+      })
+      .appendTo($ops);
     $('<button type="button" class="btn btn-danger btn-sm">停止</button>')
       .on('click', function () {
         stopBot(bot);
@@ -501,6 +509,23 @@ function renderBots() {
     $tr.append($ops);
     $body.append($tr);
   });
+}
+
+async function updateBot(bot, inputs, $row) {
+  $row.find('input, button').prop('disabled', true);
+  try {
+    await apiPost('/api/admin/bots/config', {
+      id: bot.id,
+      allowTeam: inputs.allowTeam.prop('checked'),
+      allowFog: inputs.allowFog.prop('checked'),
+      allowMultiLine: inputs.allowMultiLine.prop('checked'),
+    });
+    showBotError('');
+    loadBots();
+  } catch (err) {
+    $row.find('input, button').prop('disabled', false);
+    showBotError(err.message);
+  }
 }
 
 async function loadBots() {

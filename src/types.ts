@@ -53,11 +53,11 @@ export interface LobbyPlayer {
   ready: boolean;
   /** 服务端托管策略 Bot（管理后台启动）：进房时排在普通成员之后，不当房主。 */
   serverBot?: boolean;
-  /** 托管 Bot 启动时的组队许可：false 的房间禁止开启组队（change_game_conf 校验）。 */
+  /** 托管 Bot 当前的组队许可：false 的房间禁止开启组队（change_game_conf 校验）。 */
   serverBotAllowTeam?: boolean;
-  /** 托管 Bot 启动时的迷雾许可：false 的房间禁止开启迷雾（change_game_conf 校验）。 */
+  /** 托管 Bot 当前的迷雾许可：false 的房间禁止开启迷雾（change_game_conf 校验）。 */
   serverBotAllowFog?: boolean;
-  /** 托管 Bot 启动时的多线争锋许可：false 的房间禁止开启多线争锋（change_game_conf 校验）。 */
+  /** 托管 Bot 当前的多线争锋许可：false 的房间禁止开启多线争锋（change_game_conf 校验）。 */
   serverBotAllowMultiLine?: boolean;
   /** 任意 Bot 成员（第三方 bot 令牌或服务端托管）：未允许时禁用迷雾远征。 */
   bot?: boolean;
