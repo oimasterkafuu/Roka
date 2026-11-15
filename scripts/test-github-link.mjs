@@ -1176,7 +1176,7 @@ function testStaticStarInitialPlacement() {
     const relative = path.relative(rootDir, file).split(path.sep).join('/');
     if (!starMarker.test(fs.readFileSync(file, 'utf8'))) continue;
     assert.ok(
-      /^static\/(?:username\.js|profile\.(?:js|html)|styles\/(?:profile|rating)\.css)$/.test(relative),
+      /^static\/(?:index\.html|username\.js|profile\.(?:js|html)|styles\/(?:profile|rating)\.css)$/.test(relative),
       `Star initial implementation belongs to the public component, found ${relative}`,
     );
   }

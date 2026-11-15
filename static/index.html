@@ -396,6 +396,7 @@
             title: p.title,
             admin: p.admin === true,
             banned: p.banned === true,
+            starred: p.starred === true,
           };
           usernameCacheSeed(seed);
           // 顶栏链接已在 loadUser 经组件渲染；个人卡名字也由同一缓存刷新。
