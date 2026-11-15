@@ -453,6 +453,12 @@ if (runtimeEnv.createdKeys.length > 0) {
   app.log.info({ keys: runtimeEnv.createdKeys }, '已自动补全缺失环境变量到 .env。');
 }
 
+let chatAuditTimer: NodeJS.Timeout | undefined;
+app.addHook('onClose', async () => {
+  clearInterval(chatAuditTimer);
+  await chatModeration.flush();
+});
+
 const boot = async (): Promise<void> => {
   await replayStore.ensureReady();
   await userStore.ensureReady();
@@ -462,12 +468,8 @@ const boot = async (): Promise<void> => {
   const flushChatAudit = (): void => {
     void chatModeration.flush().catch((error) => app.log.error({ err: error }, 'chat audit write failed'));
   };
-  const chatAuditTimer = setInterval(flushChatAudit, 60_000);
+  chatAuditTimer = setInterval(flushChatAudit, 60_000);
   chatAuditTimer.unref();
-  app.addHook('onClose', async () => {
-    clearInterval(chatAuditTimer);
-    await chatModeration.flush();
-  });
   await announcementStore.ensureReady();
   await userStore.initializeHistoricalPoints(await replayStore.listReplays(), feedStore.listAll());
 
