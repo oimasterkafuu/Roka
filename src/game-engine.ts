@@ -244,6 +244,8 @@ export class GameEngine {
 
   private readonly replayTurnSurrenders: Array<Set<number>>;
 
+  private readonly replayAfkSurrenders: Array<[number, number]> = [];
+
   /** 历史 ops-v1 未标记自动转属，重建时必须沿用旧推兵语义。 */
   private readonly autoCrownTransfer: boolean;
   private readonly isolatedReinforcementFix: boolean;
@@ -516,6 +518,13 @@ export class GameEngine {
     const { scheduledMoves, scheduledBuilds, scheduledSurrenders, scheduledTransfers } =
       buildScheduledReplayActions(replay);
 
+    const afkSurrenders = new Map<number, number[]>();
+    for (const [turn, player] of replay.afk_surrenders ?? []) {
+      const players = afkSurrenders.get(turn) ?? [];
+      players.push(player);
+      afkSurrenders.set(turn, players);
+    }
+
     const initial = engine.buildReplayFrame(false);
     let prevFrame = initial;
     const patches: ReplayPatch[] = [];
@@ -549,7 +558,7 @@ export class GameEngine {
         engine.addMove(engine.playerSids[p], move[0], move[1], move[2], move[3], move[4]);
       }
 
-      const gameEnd = await engine.gameTick();
+      const gameEnd = await engine.gameTick(afkSurrenders.get(nextTurn));
       const isFinalFrame = gameEnd || engine.turn >= replay.total_turns;
       const nextFrame = engine.buildReplayFrame(isFinalFrame);
       patches.push(buildReplayPatch(prevFrame, nextFrame));
@@ -1634,7 +1643,7 @@ export class GameEngine {
     }
   }
 
-  private async gameTick(): Promise<boolean> {
+  private async gameTick(replayAfkSurrenders: number[] = []): Promise<boolean> {
     this.turn += 1;
     const nowMs = Date.now();
 
@@ -1763,6 +1772,10 @@ export class GameEngine {
       this.afkLastMoveTurn[p] = this.turn;
       this.afkLastMoveAt[p] = nowMs;
     }
+    // Recorded AFK events occur after moves/connectivity, just like the live check.
+    for (const player of replayAfkSurrenders) {
+      this.applySurrenderByIndex(player, 'afk');
+    }
     this.applyAfkSurrender(nowMs);
 
     const aliveTeams: Record<number, true> = {};
@@ -1859,7 +1872,11 @@ export class GameEngine {
     if (this.pstat[playerIndex] === LEFT_GAME) {
       return false;
     }
-    this.replayTurnSurrenders[playerIndex].add(this.turn + 1);
+    if (cause === 'afk') {
+      this.replayAfkSurrenders.push([this.turn, playerIndex]);
+    } else {
+      this.replayTurnSurrenders[playerIndex].add(this.turn + 1);
+    }
     const heir = this.findSurrenderHeir(playerIndex);
     if (heir >= 0) {
       this.transferEmpire(playerIndex + 1, heir + 1);
@@ -1923,6 +1940,13 @@ export class GameEngine {
         meta: this.replayMeta,
         total_turns: this.turn,
         player_ops: this.buildReplayPlayerOps(),
+        ...(this.replayAfkSurrenders.length > 0
+          ? {
+              afk_surrenders: this.replayAfkSurrenders.map(
+                ([turn, player]) => [turn, player] as [number, number],
+              ),
+            }
+          : {}),
       },
       {
         rank: this.buildFinalRank(),
