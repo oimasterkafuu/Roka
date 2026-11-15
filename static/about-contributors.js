@@ -63,6 +63,14 @@ function aboutContributorCard(doc, value) {
 
   link.append(avatar, name, count);
   card.append(link);
+  const rokaUsername = value.rokaUsername;
+  if (typeof rokaUsername === 'string' && /^[A-Za-z0-9_]{3,20}$/.test(rokaUsername)) {
+    const rokaLink = doc.createElement('a');
+    rokaLink.className = 'contributor-roka-link';
+    rokaLink.href = `/u/${encodeURIComponent(rokaUsername)}`;
+    rokaLink.textContent = `Roka: ${rokaUsername}`;
+    card.append(rokaLink);
+  }
   return card;
 }
 

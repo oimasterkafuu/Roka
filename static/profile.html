@@ -41,8 +41,25 @@
           <section class="card">
             <div>
               <span id="p-name" class="profile-name"></span>
+              <a
+                id="p-github-star-badge"
+                class="profile-github-star-badge"
+                href="https://github.com/oimasterkafuu/Roka"
+                target="_blank"
+                rel="noopener noreferrer"
+                style="display: none"
+                ><span aria-hidden="true">★</span> 已 Star Roka</a
+              >
               <span id="p-title" class="profile-title"></span>
             </div>
+            <a
+              id="p-github-link"
+              class="profile-github-link"
+              href="#"
+              target="_blank"
+              rel="noopener noreferrer"
+              style="display: none"
+            ></a>
             <div class="profile-stats profile-stats-peak">
               <div class="profile-stat">
                 <div class="profile-stat-value" id="p-max-rating">-</div>
@@ -79,6 +96,37 @@
               <div class="rating-changes-title">最近 Rating 变更</div>
               <ul id="rating-changes-list" class="rating-changes-list"></ul>
             </div>
+          </section>
+
+          <section id="github-link-card" class="card" style="display: none">
+            <h2 class="card-title">GitHub 绑定</h2>
+            <p id="github-not-configured" class="github-link-note" style="display: none">
+              管理员尚未配置 GitHub OAuth，暂不能绑定或换绑。
+            </p>
+            <div id="github-linked-view" style="display: none">
+              <a id="github-account-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+              <p id="github-star-state" class="github-link-note"></p>
+              <p id="github-star-verified" class="github-link-meta"></p>
+            </div>
+            <p id="github-unlinked-view" class="github-link-note" style="display: none">
+              绑定 GitHub 后，可以在个人主页展示 GitHub 链接，并在 Star Roka 后获得徽章。
+            </p>
+            <div class="github-link-actions">
+              <button id="github-bind-btn" type="button" class="btn btn-primary btn-sm">绑定 GitHub</button>
+              <button id="github-star-refresh-btn" type="button" class="btn btn-secondary btn-sm">
+                刷新 Star 状态
+              </button>
+              <button id="github-unlink-btn" type="button" class="btn btn-ghost btn-sm">解绑</button>
+            </div>
+            <a
+              id="github-repo-link"
+              class="github-repo-link"
+              href="https://github.com/oimasterkafuu/Roka"
+              target="_blank"
+              rel="noopener noreferrer"
+              >前往 GitHub 为 Roka 点 Star ↗</a
+            >
+            <p id="github-action-status" class="github-action-status" role="status" aria-live="polite"></p>
           </section>
 
           <section class="card" id="ambassador-card">

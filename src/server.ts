@@ -32,6 +32,7 @@ import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { ChatModeration, CHAT_TEXT_MAX } from './server/chat-moderation';
 import { CaptchaService } from './server/captcha-service';
 import { ContributorsService, handleContributorsRequest } from './server/contributors-service';
+import { GithubService, GithubServiceError } from './server/github-service';
 import { EditableLobbyKey, FIXED_SWAMP_RATIO, LobbyService } from './server/lobby-service';
 import { PresenceService } from './server/presence-service';
 import { ServerBotManager } from './server/server-bot-manager';
@@ -85,6 +86,15 @@ const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const captchaService = new CaptchaService();
 const contributorsService = new ContributorsService();
+const githubService = new GithubService({
+  userStore,
+  jwtSecret: runtimeEnv.jwtSecret,
+  clientId: process.env.GITHUB_CLIENT_ID,
+  clientSecret: process.env.GITHUB_CLIENT_SECRET,
+  redirectUri: process.env.GITHUB_REDIRECT_URI,
+  oauthBaseUrl: process.env.GITHUB_OAUTH_BASE_URL,
+  apiBaseUrl: process.env.GITHUB_API_BASE_URL,
+});
 const lobbyService = new LobbyService(replayStore, userStore, (username) => {
   authService.disconnectUserSockets(username);
 });
@@ -737,6 +747,71 @@ const boot = async (listen = true): Promise<void> => {
     return reply.send({ ok: true });
   });
 
+  const githubNoStore = (reply: FastifyReply): FastifyReply =>
+    reply.header('Cache-Control', 'no-store').header('Referrer-Policy', 'no-referrer');
+
+  app.post(
+    '/api/auth/github/start',
+    { preHandler: authActionRateLimitPreHandler },
+    async (request, reply) => {
+      githubNoStore(reply);
+      const authUser = (request as AuthRequest).authUser;
+      try {
+        return reply.send({ url: githubService.startLink(authUser) });
+      } catch (error) {
+        if (error instanceof GithubServiceError && error.code === 'not-configured') {
+          return reply.code(503).send({ error: '管理员尚未配置 GitHub OAuth，暂不能绑定。' });
+        }
+        return reply.code(400).send({ error: '无法开始 GitHub 绑定，请重新登录后重试。' });
+      }
+    },
+  );
+
+  app.get(
+    '/api/auth/github/callback',
+    { preHandler: authActionRateLimitPreHandler, logLevel: 'silent' },
+    async (request, reply) => {
+      githubNoStore(reply);
+      const authUser = (request as AuthRequest).authUser;
+      const profilePath = `/u/${encodeURIComponent(authUser.username)}`;
+      try {
+        await githubService.completeLink(authUser, request.query as Record<string, unknown>);
+        return reply.redirect(`${profilePath}?github=linked`);
+      } catch (error) {
+        const code = error instanceof GithubServiceError ? error.code : 'failed';
+        const allowed = new Set(['not-configured', 'state', 'denied', 'exchange', 'identity', 'conflict']);
+        return reply.redirect(`${profilePath}?github=${allowed.has(code) ? code : 'failed'}`);
+      }
+    },
+  );
+
+  app.post(
+    '/api/auth/github/unlink',
+    { preHandler: authActionRateLimitPreHandler },
+    async (request, reply) => {
+      githubNoStore(reply);
+      const authUser = (request as AuthRequest).authUser;
+      await githubService.unlink(authUser.username);
+      return reply.send({ ok: true });
+    },
+  );
+
+  app.post(
+    '/api/auth/github/star/refresh',
+    { preHandler: authActionRateLimitPreHandler },
+    async (request, reply) => {
+      githubNoStore(reply);
+      const authUser = (request as AuthRequest).authUser;
+      try {
+        const github = await githubService.refreshStar(authUser.username, true);
+        if (!github) return reply.code(404).send({ error: '尚未绑定 GitHub 账号。' });
+        return reply.send({ ok: true, github });
+      } catch {
+        return reply.code(502).send({ error: 'GitHub 暂时无法核验 Star 状态，请稍后重试。' });
+      }
+    },
+  );
+
   app.get('/api/auth/me', async (request, reply) => {
     const authUser = (request as AuthRequest).authUser;
     if (!authUser) {
@@ -747,6 +822,10 @@ const boot = async (listen = true): Promise<void> => {
       rating: userStore.getDisplayRating(authUser.username),
       isAdmin: userStore.isAdminUser(authUser.username),
       isSuperAdmin: userStore.isSuperAdminUser(authUser.username),
+      github: {
+        configured: githubService.isConfigured(),
+        link: userStore.getGithubPublicProfile(authUser.username),
+      },
       // 会话戳不下发到 JSON 接口：任何 JWT 持有者（含第三方 bot）都能调本接口
       // 自取戳并伪造 client_verify 洗掉 [AI] 标记。戳只随游戏页 HTML 注入
       // （见 serveGameHtml），socket 直连的 bot 拿不到。
@@ -1217,7 +1296,9 @@ const boot = async (listen = true): Promise<void> => {
   });
 
   app.get('/api/contributors', async (_request, reply) =>
-    handleContributorsRequest(contributorsService, reply),
+    handleContributorsRequest(contributorsService, reply, (githubId) =>
+      userStore.findUsernameByGithubId(githubId),
+    ),
   );
 
   // 版本信息（公开）：首页页脚右下角版本号链接到 GitHub 对应 commit。
@@ -1302,6 +1383,11 @@ const boot = async (listen = true): Promise<void> => {
 
   app.get('/api/profile/:username', async (request, reply) => {
     const { username } = request.params as { username: string };
+    try {
+      await githubService.refreshStar(username);
+    } catch {
+      // A previously verified badge remains subject to the store's maximum staleness.
+    }
     const profile = userStore.getPublicProfile(username);
     if (!profile) {
       return reply.code(404).send({ error: '用户不存在。' });
