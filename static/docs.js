@@ -12,7 +12,15 @@ async function docsLoadUser() {
       return;
     }
     const data = await res.json();
-    nameEl.textContent = data.username;
+    if (typeof usernameLink === 'function') {
+      const component = usernameLink(data.username, null, null, { element: 'span' })[0];
+      component.id = nameEl.id;
+      component.setAttribute('style', nameEl.getAttribute('style') || '');
+      nameEl.replaceWith(component);
+      usernameEnsureColors([data.username]);
+    } else {
+      nameEl.textContent = data.username;
+    }
     loginEl.style.display = 'none';
   } catch (err) {
     nameEl.style.display = 'none';

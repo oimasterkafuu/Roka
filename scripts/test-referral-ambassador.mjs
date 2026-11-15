@@ -404,6 +404,17 @@ const context = vm.createContext({
     assert.equal(delay, 1500);
     context.resetCopy = callback;
   },
+  usernameLink: (username, _info, extraClass, options) => {
+    assert.equal(options.element, 'span');
+    const element = new FakeElement('span');
+    element.className = extraClass;
+    element.textContent = username;
+    element.attributes['data-username'] = username;
+    return [element];
+  },
+  usernameEnsureColors: (names) => {
+    context.ambassadorColorNames = names;
+  },
   fetch: async (url) => ({
     ok: true,
     json: async () =>
@@ -458,7 +469,11 @@ console.log('ambassador sharing: authenticated, guest, clipboard, fallback and f
 assert.equal(nodes['ambassador-grid'].children.length, 1);
 const renderedCard = nodes['ambassador-grid'].children[0];
 assert.equal(renderedCard.href, '/u/Admin1');
+assert.equal(renderedCard.children[0].tagName, 'SPAN');
+assert.equal(renderedCard.children[0].className, 'ambassador-name');
+assert.equal(renderedCard.children[0].attributes['data-username'], 'Admin1');
 assert.equal(renderedCard.children[0].textContent, 'Admin1');
+assert.equal(context.ambassadorColorNames.join(','), 'Admin1');
 assert.equal(renderedCard.children[1].textContent, '推广大使 · Lv 1');
 assert.equal(nodes['referral-activations'].textContent, '1');
 assert.equal(frontendSource.includes('innerHTML'), false);

@@ -1,3 +1,4 @@
+<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -9,16 +10,15 @@
       name="viewport"
       content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
     />
+    <link rel="stylesheet" href="/main.css?v={{V}}" />
     <script
       src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"
       integrity="sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK"
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     ></script>
-    <link rel="stylesheet" href="/main.css?v={{V}}" />
     <title>Roka - 登录</title>
   </head>
-
   <body>
     <div class="center center-tag" style="width: min(92vw, 520px)">
       <div class="background" style="padding: 18px 20px">
@@ -29,14 +29,12 @@
           type="text"
           placeholder="用户名（3-20 位：字母/数字/_）"
           style="width: 100%; box-sizing: border-box; margin-bottom: 8px"
-        />
-        <input
+        /><input
           id="auth-password"
           type="password"
           placeholder="密码（6-72 位）"
           style="width: 100%; box-sizing: border-box; margin-bottom: 8px"
-        />
-        <input
+        /><input
           id="auth-website"
           type="text"
           tabindex="-1"
@@ -51,8 +49,7 @@
             placeholder="验证码"
             maxlength="6"
             style="flex: 1; min-width: 0; box-sizing: border-box; text-transform: uppercase"
-          />
-          <img
+          /><img
             id="captcha-image"
             alt="验证码"
             width="132"
@@ -62,8 +59,8 @@
           />
         </div>
         <div style="display: flex; gap: 8px; margin: 6px 0">
-          <button id="login-btn" style="flex: 1; margin: 0">登录</button>
-          <button id="register-btn" class="inverted" style="flex: 1; margin: 0">注册</button>
+          <button id="login-btn" style="flex: 1; margin: 0">登录</button
+          ><button class="inverted" id="register-btn" style="flex: 1; margin: 0">注册</button>
         </div>
         <div
           style="

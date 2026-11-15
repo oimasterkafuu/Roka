@@ -96,16 +96,24 @@ try {
   console.log('PASS API: normalized/unknown username, inclusive from/to, invalid dates, total, 50/page, unfiltered stats regression');
   console.log('PASS guest: /replays, viewer routes and script 200; upload 401; startup cache sweep honors env');
 
-  // Run the actual page controller with inert DOM handles to check URL and local-day semantics.
+  // Run the actual page controller with inert DOM handles to check URL, local-day and socket semantics.
   const calls = [];
+  const socketHandlers = {};
   const dom = { on() { return this; }, val() { return this; }, prop() { return this; }, text() { return this; }, empty() { return this; } };
   const location = { search: '', href: '/replays' };
   let popstate;
+  let refreshCallback;
+  let refreshDelay;
   const context = vm.createContext({
     $, Date, URLSearchParams, Uint8Array, String, Number, Object,
     location,
     history: { pushState(_state, _title, url) { location.search = new URL(url, 'http://localhost').search; } },
     window: { addEventListener(event, handler) { if (event === 'popstate') popstate = handler; } },
+    io(options) {
+      assert.equal(options.query.home, '1');
+      return { on(event, handler) { socketHandlers[event] = handler; } };
+    },
+    setTimeout(callback, delay) { refreshCallback = callback; refreshDelay = delay; return 1; },
     fetch(url) { calls.push(url); return new Promise(() => {}); },
   });
   function $() { return dom; }
@@ -122,10 +130,28 @@ try {
   popstate();
   assert.equal(context.replayState.username, 'Bob');
   assert.equal(context.replayState.page, 3);
+  const callsBeforeRefresh = calls.length;
+  socketHandlers.home_leaderboard();
+  socketHandlers.home_leaderboard();
+  assert.equal(refreshDelay, 2000);
+  assert.equal(calls.length, callsBeforeRefresh, 'events coalesce into one delayed refresh');
+  refreshCallback();
+  assert.equal(calls.length, callsBeforeRefresh + 1);
+  query = new URL(calls.at(-1), 'http://localhost').searchParams;
+  assert.equal(query.get('username'), 'Bob');
+  assert.equal(query.get('offset'), '100');
+  assert.equal(query.get('limit'), '50');
   context.navigateReplays({ searching: false });
   assert.equal(location.search, '');
   assert.equal(context.replayState.searching, false);
-  console.log('PASS page controller: latest 10, local-day endpoints, query/page URL, popstate, return to latest');
+  const latestCallsBeforeRefresh = calls.length;
+  socketHandlers.home_leaderboard();
+  refreshCallback();
+  assert.equal(calls.length, latestCallsBeforeRefresh + 1);
+  query = new URL(calls.at(-1), 'http://localhost').searchParams;
+  assert.equal(query.get('offset'), '0');
+  assert.equal(query.get('limit'), '10');
+  console.log('PASS page controller: latest 10, local-day endpoints, query/page URL, popstate, throttled socket refresh');
 
 } finally {
   if (app) await app.close();

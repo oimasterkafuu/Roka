@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/main.css?v={{V}}" />
     <link rel="stylesheet" href="/styles/docs.css?v={{V}}" />
     <link rel="stylesheet" href="/styles/intro.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/rating.css?v={{V}}" />
     <script defer src="/intro.js?v={{V}}" data-version="{{V}}"></script>
     <style>
       .contributors-grid {
@@ -93,41 +94,36 @@
     </style>
     <title>Roka - 关于</title>
   </head>
-
   <body style="overflow: auto; height: auto">
     <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
-      <button data-goto="/" class="small">返回首页</button>
+      <button class="small" data-goto="/">返回首页</button>
     </div>
     <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
       <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span
       ><a id="login-btn" href="/login">登录</a>
     </div>
-
     <div id="app">
       <h1 class="doc-title">关于 Roka</h1>
       <p class="doc-subtitle">
         Roka 是一个多人策略对战项目：自定义房间、实时对局、回放与账号系统，在 generals.io
         玩法基础上做了适配与扩展。本项目不是官方 generals.io 服务。
       </p>
-
       <section class="doc-panel">
         <h2>游戏介绍片</h2>
         <p>两分钟走进 Roka 的方格战场。由浏览器实时绘制，包含音乐，可暂停、静音或跳过。</p>
         <div class="cta-row">
-          <button type="button" data-intro-replay class="small inverted">重播游戏介绍片 →</button>
+          <button class="small inverted" type="button" data-intro-replay>重播游戏介绍片 →</button>
         </div>
       </section>
-
       <section class="doc-panel">
         <h2>了解更多</h2>
         <div class="cta-row">
-          <button data-goto="/tutorial" class="small inverted">完整规则与教程 →</button>
-          <button data-goto="/develop" class="small">参与网站开发 →</button>
-          <button data-goto="/develop/bot" class="small">机器人开发协议 →</button>
-          <button data-goto="/ambassadors" class="small">推广大使感谢墙 →</button>
+          <button class="small inverted" data-goto="/tutorial">完整规则与教程 →</button
+          ><button class="small" data-goto="/develop">参与网站开发 →</button
+          ><button class="small" data-goto="/develop/bot">机器人开发协议 →</button
+          ><button class="small" data-goto="/ambassadors">推广大使感谢墙 →</button>
         </div>
       </section>
-
       <section class="doc-panel">
         <h2>Star 支持</h2>
         <p>
@@ -143,12 +139,11 @@
           >前往 GitHub 为 Roka 点 Star →</a
         >
       </section>
-
       <section class="doc-panel" aria-labelledby="contributors-title">
         <h2 id="contributors-title">项目贡献者</h2>
         <p>感谢每一位为 Roka 提交代码、完善项目的贡献者。</p>
         <p id="contributors-status" role="status">正在加载贡献者名单…</p>
-        <div id="contributors-grid" class="contributors-grid"></div>
+        <div class="contributors-grid" id="contributors-grid"></div>
         <p class="contributors-github-link">
           也可以在 GitHub 查看
           <a
@@ -160,7 +155,6 @@
           >。
         </p>
       </section>
-
       <section class="doc-panel">
         <h2>来源与参考</h2>
         <p>以下信息用于致谢与许可证合规说明，便于追溯核心玩法、实现参考和协议来源。</p>
@@ -168,9 +162,7 @@
           <tr>
             <th>项目源码</th>
             <td>
-              oimasterkafuu / Roka
-              <br />
-              <a
+              oimasterkafuu / Roka<br /><a
                 class="doc-link"
                 href="https://github.com/oimasterkafuu/Roka"
                 target="_blank"
@@ -183,9 +175,11 @@
           <tr>
             <th>原始玩法</th>
             <td>
-              generals.io
-              <br />
-              <a class="doc-link" href="https://generals.io/" target="_blank" rel="noopener noreferrer"
+              generals.io<br /><a
+                class="doc-link"
+                href="https://generals.io/"
+                target="_blank"
+                rel="noopener noreferrer"
                 >https://generals.io/</a
               >
             </td>
@@ -194,9 +188,11 @@
           <tr>
             <th>玩法参考</th>
             <td>
-              Konkr.io
-              <br />
-              <a class="doc-link" href="https://konkr.io/" target="_blank" rel="noopener noreferrer"
+              Konkr.io<br /><a
+                class="doc-link"
+                href="https://konkr.io/"
+                target="_blank"
+                rel="noopener noreferrer"
                 >https://konkr.io/</a
               >
             </td>
@@ -205,9 +201,7 @@
           <tr>
             <th>复刻基础</th>
             <td>
-              mcfx0 / generals.io_copy
-              <br />
-              <a
+              mcfx0 / generals.io_copy<br /><a
                 class="doc-link"
                 href="https://github.com/mcfx/generals.io_copy"
                 target="_blank"
@@ -220,9 +214,7 @@
           <tr>
             <th>灵感启发</th>
             <td>
-              By-Ha / Checkmate
-              <br />
-              <a
+              By-Ha / Checkmate<br /><a
                 class="doc-link"
                 href="https://github.com/By-Ha/Checkmate"
                 target="_blank"
@@ -235,9 +227,7 @@
           <tr>
             <th>代码基础</th>
             <td>
-              oimasterkafuu / checkmate
-              <br />
-              <a
+              oimasterkafuu / checkmate<br /><a
                 class="doc-link"
                 href="https://github.com/oimasterkafuu/checkmate"
                 target="_blank"
@@ -250,8 +240,9 @@
         </table>
       </section>
     </div>
-
     <script src="/docs.js?v={{V}}"></script>
+    <script src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"></script>
+    <script src="/username.js?v={{V}}"></script>
     <script src="/about-contributors.js?v={{V}}"></script>
   </body>
 </html>

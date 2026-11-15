@@ -290,6 +290,15 @@ async function testUsernameComponent() {
     $user.classes.has('rt-green') && $user.attrs.title === '绿牌' && !$user.kids.length,
     'usernameLink 普通用户保持原样',
   );
+  const $inline = ctx.usernameLink('User1', null, 'ambassador-name', { element: 'span' });
+  assert(
+    $inline.tagName === 'span' &&
+      !$inline.attrs.href &&
+      $inline.classes.has('ambassador-name') &&
+      $inline.classes.has('rt-green') &&
+      $inline.textContent === 'User1',
+    'span 模式保留组件缓存外观且不产生嵌套链接',
+  );
 
   // 3) 异步补色即使返回旧 rating，也遵从 admin 标记。
   await ctx.usernameEnsureColors(['Boss1', 'Peon1']);

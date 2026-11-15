@@ -1,0 +1,103 @@
+extends layout.pug
+
+block vars
+  - var htmlLang = 'zh-CN'
+  - var bodyClass = 'home'
+
+block head
+  title 回放 - Roka
+  link(rel='stylesheet', href='/styles/home.css?v={{V}}')
+  link(rel='stylesheet', href='/styles/docs.css?v={{V}}')
+  link(rel='stylesheet', href='/styles/rating.css?v={{V}}')
+  style.
+    .replay-query,
+    .replay-pagination {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+    }
+    .replay-query label {
+      display: grid;
+      gap: 6px;
+    }
+    .replay-query input {
+      padding: 8px;
+      border: 1px solid #c6dddd;
+      border-radius: 6px;
+      max-width: 100%;
+    }
+    .replay-table-wrap {
+      overflow-x: auto;
+      margin: 14px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th,
+    td {
+      padding: 12px 8px;
+      border-bottom: 1px solid #e3eeee;
+    }
+    tbody tr {
+      cursor: pointer;
+    }
+    tbody tr:hover {
+      background: #effafa;
+    }
+    [hidden] {
+      display: none !important;
+    }
+  script(src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}')
+  script(src='/vendor/socket.io/socket.io-4.0.1.js?v={{V}}')
+  script(src='/username.js?v={{V}}')
+  script(defer, src='/replays.js?v={{V}}')
+
+block navigation
+
+block content
+  main#app
+    header.home-topbar
+      h1.doc-title 回放
+      a(href='/') 返回首页
+    section.doc-panel
+      h2 查询回放
+      form#replay-query.replay-query
+        label
+          | 用户名
+          input#query-username(name='username', autocomplete='off')
+        label
+          | 开始日期
+          input#query-from(name='from', type='date')
+        label
+          | 结束日期
+          input#query-to(name='to', type='date')
+        button.btn.btn-primary(type='submit') 查询
+    section.doc-panel
+      h2#replays-heading 最新回放
+      p#replays-status(role='status', aria-live='polite')
+      .replay-table-wrap
+        table
+          thead
+            tr
+              th 时间
+              th 回合
+              th 结果
+          tbody#replays-body
+      #replays-pagination.replay-pagination(hidden)
+        button#replays-prev.btn.btn-secondary(type='button') 上一页
+        span#replays-page
+        button#replays-next.btn.btn-secondary(type='button') 下一页
+        button#replays-latest.btn.btn-ghost(type='button') 返回最新
+    section.doc-panel
+      h2 上传 RPL
+      p#replay-login
+        | 登录后可上传并查看回放 · 
+        a(href='/login') 登录
+      #replay-upload(hidden)
+        label
+          | 选择回放文件 
+          input#replay-upload-file(type='file', accept='.rpl')
+        button#replay-upload-view.btn.btn-primary(type='button', disabled) 查看

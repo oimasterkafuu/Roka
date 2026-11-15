@@ -12,6 +12,7 @@
     />
     <link rel="stylesheet" href="/main.css?v={{V}}" />
     <link rel="stylesheet" href="/styles/docs.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/rating.css?v={{V}}" />
     <style>
       .invite-controls {
         display: flex;
@@ -88,7 +89,7 @@
   </head>
   <body style="overflow: auto; height: auto">
     <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
-      <button data-goto="/" class="small">返回首页</button>
+      <button class="small" data-goto="/">返回首页</button>
     </div>
     <div id="app">
       <h1 class="doc-title">推广大使感谢墙</h1>
@@ -113,7 +114,7 @@
       <section class="doc-panel" aria-labelledby="ambassador-wall-title">
         <h2 id="ambassador-wall-title">社区致谢</h2>
         <p id="ambassadors-status" role="status">正在加载感谢墙…</p>
-        <div id="ambassador-grid" class="ambassador-grid"></div>
+        <div class="ambassador-grid" id="ambassador-grid"></div>
       </section>
       <section class="doc-panel">
         <h2>成为推广大使</h2>
@@ -123,16 +124,22 @@
         <div id="ambassador-share" hidden>
           <label for="ambassador-invite-link">我的邀请链接</label>
           <div class="invite-controls">
-            <input id="ambassador-invite-link" type="text" readonly />
-            <button id="ambassador-invite-copy" class="small">复制</button>
+            <input id="ambassador-invite-link" type="text" readonly /><button
+              class="small"
+              id="ambassador-invite-copy"
+            >
+              复制
+            </button>
           </div>
         </div>
-        <div id="ambassador-login" class="cta-row">
-          <button data-goto="/login" class="small inverted">登录并分享 →</button>
+        <div class="cta-row" id="ambassador-login">
+          <button class="small inverted" data-goto="/login">登录并分享 →</button>
         </div>
       </section>
     </div>
     <script src="/docs.js?v={{V}}"></script>
+    <script src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"></script>
+    <script src="/username.js?v={{V}}"></script>
     <script src="/ambassadors.js?v={{V}}"></script>
   </body>
 </html>
