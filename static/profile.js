@@ -136,7 +136,7 @@ function normalizeGithubProfile(value) {
     return {
       login: login,
       htmlUrl: url.toString(),
-      starred: value.starred === true,
+      starred: value.starred === true && value.starState === 'starred',
       starState: ['starred', 'not-starred', 'unknown', 'stale'].includes(value.starState)
         ? value.starState
         : 'unknown',
@@ -144,6 +144,16 @@ function normalizeGithubProfile(value) {
     };
   } catch (e) {
     return null;
+  }
+}
+
+function renderProfileName(github) {
+  var $name = $('#p-name').empty();
+  if (github && github.starred && profileUsername) {
+    $('<span class="profile-star-initial"></span>').text(profileUsername.charAt(0)).appendTo($name);
+    $name.append(document.createTextNode(profileUsername.slice(1)));
+  } else {
+    $name.text(profileUsername);
   }
 }
 
@@ -160,14 +170,13 @@ function setGithubActionBusy(busy) {
 function renderGithubProfile(value) {
   var github = normalizeGithubProfile(value);
   var own = isOwnProfile();
+  renderProfileName(github);
   $('#p-github-link').hide().attr('href', '#').text('');
-  $('#p-github-star-badge').hide();
   if (github) {
     $('#p-github-link')
       .attr('href', github.htmlUrl)
       .text('GitHub：' + github.login)
       .show();
-    $('#p-github-star-badge').toggle(github.starred);
   }
 
   $('#github-link-card').toggle(own);
@@ -191,8 +200,8 @@ function renderGithubProfile(value) {
   }
 
   var starText = {
-    starred: '已确认你 Star 了 Roka。',
-    'not-starred': '尚未确认你 Star 了 Roka，欢迎前往仓库支持我们。',
+    starred: '已确认你 Star 了 Roka，名字首字母已变为金色。',
+    'not-starred': 'Star Roka 并刷新核验后，名字首字母会变为金色。',
     unknown: '暂时无法确认 Star 状态，请稍后手动刷新。',
     stale: 'Star 状态可能已过期，请手动刷新。',
   };

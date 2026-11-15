@@ -133,28 +133,8 @@ body.profile .profile-title {
   color: #9aa4b2;
   margin-left: 8px;
 }
-body.profile .profile-github-star-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: 10px;
-  padding: 3px 8px;
-  border: 1px solid #ead083;
-  border-radius: 99px;
-  background: #fff8dc;
-  color: #765b00;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.4;
-  text-decoration: none;
-  vertical-align: middle;
-}
-body.profile .profile-github-star-badge:hover {
-  background: #fff2bd;
-  color: #765b00;
-}
-body.profile .profile-github-star-badge span {
-  color: #d4a017;
+body.profile .profile-star-initial {
+  color: #b8860b;
 }
 body.profile .profile-github-link,
 body.profile #github-account-link {

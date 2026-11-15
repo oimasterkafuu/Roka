@@ -883,6 +883,7 @@ async function testIntegration() {
   assert.equal(aliceProfile.json.github.starred, true);
   assert.equal(aliceProfile.json.github.starState, 'starred');
   assertNoSensitiveDto(aliceProfile.json);
+  await testProfileStarInitialBrowser(server.baseUrl, true);
 
   const badState = await api('/api/auth/github/callback?code=alice-code&state=definitely-wrong', {
     user: 'alice',
@@ -1010,6 +1011,7 @@ async function testIntegration() {
   assert.equal(refreshed.json.github.starState, 'not-starred');
   assertNoSensitiveDto(refreshed.json);
   assert.equal((await api('/api/profile/alice')).json.github.starred, false);
+  await testProfileStarInitialBrowser(server.baseUrl, false);
   assert.equal((await api('/api/auth/github/star/refresh', { method: 'POST', user: 'bob' })).status, 404);
   assertDiskDoesNotContain(dataDir, secrets);
 
@@ -1027,31 +1029,96 @@ async function testIntegration() {
   );
 }
 
-function testStaticBadgePlacement() {
+async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
+  const { chromium } = require(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
+  const browser = await chromium.launch({
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+    headless: true,
+    args: ['--no-sandbox'],
+  });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.goto(`${baseUrl}/u/alice`);
+    await page.waitForFunction(() => {
+      const main = document.querySelector('#profile-main');
+      const name = document.querySelector('#p-name');
+      return main && getComputedStyle(main).display !== 'none' && name.textContent === 'alice';
+    });
+    const name = page.locator('#p-name');
+    assert.match(await name.getAttribute('class'), /(?:^|\s)rt-admin(?:\s|$)/);
+    assert.equal(await name.getAttribute('title'), 'Headquarters');
+    assert.equal(await name.evaluate((element) => getComputedStyle(element).color), 'rgb(0, 0, 0)');
+    const initial = name.locator('.profile-star-initial');
+    assert.equal(await initial.count(), expectedStarred ? 1 : 0);
+    if (expectedStarred) {
+      assert.equal(await initial.textContent(), 'a');
+      assert.equal(await initial.evaluate((element) => getComputedStyle(element).color), 'rgb(184, 134, 11)');
+    } else {
+      assert.equal(await name.evaluate((element) => element.children.length), 0);
+      for (const starState of ['unknown', 'stale']) {
+        await page.evaluate((state) => {
+          renderGithubProfile({
+            login: 'alice-github',
+            htmlUrl: 'https://github.com/alice-github',
+            starred: true,
+            starState: state,
+            starVerifiedAt: Date.now(),
+          });
+        }, starState);
+        assert.equal(await name.locator('.profile-star-initial').count(), 0, `${starState} must not be gold`);
+        assert.equal(await name.textContent(), 'alice');
+      }
+    }
+    assert.deepEqual(errors, []);
+    if (expectedStarred) {
+      await page.route('**/api/contributors', (route) =>
+        route.fulfill({ contentType: 'application/json', body: '[]' }),
+      );
+      await page.goto(`${baseUrl}/about`);
+      await page.getByRole('heading', { name: 'Star 支持' }).waitFor();
+      const link = page.getByRole('link', { name: '前往 GitHub 为 Roka 点 Star →' });
+      assert.equal(await link.getAttribute('href'), 'https://github.com/oimasterkafuu/Roka');
+    }
+  } finally {
+    await browser.close();
+  }
+  log(`passed real profile browser UI for ${expectedStarred ? 'starred' : 'not-starred'}`);
+}
+
+function testStaticStarInitialPlacement() {
   const profileHtml = fs.readFileSync(path.join(rootDir, 'static', 'profile.html'), 'utf8');
   const profileJs = fs.readFileSync(path.join(rootDir, 'static', 'profile.js'), 'utf8');
-  const badgeMarker = /github-star|profile-github-star|starred|starState/i;
-  assert.ok(badgeMarker.test(profileHtml), 'profile.html contains the Star badge');
-  assert.ok(
-    /github\.starred|starState|p-github-star-badge/.test(profileJs),
-    'profile.js controls the Star badge',
-  );
-  for (const relative of ['username.js', 'about.html', 'about-contributors.js', 'main.js']) {
+  const profileCss = fs.readFileSync(path.join(rootDir, 'static', 'styles', 'profile.css'), 'utf8');
+  const aboutHtml = fs.readFileSync(path.join(rootDir, 'static', 'about.html'), 'utf8');
+  const starMarker = /github-star|profile-star-initial|starred|starState/i;
+  assert.equal(profileHtml.includes('p-github-star-badge'), false, 'redundant Star badge is removed');
+  assert.match(profileJs, /github\.starred/);
+  assert.match(profileJs, /profile-star-initial/);
+  assert.match(profileCss, /body\.profile \.profile-star-initial/);
+  assert.match(aboutHtml, /Star 支持/);
+  assert.match(aboutHtml, /https:\/\/github\.com\/oimasterkafuu\/Roka/);
+  for (const relative of ['username.js', 'about-contributors.js', 'main.js']) {
     const source = fs.readFileSync(path.join(rootDir, 'static', relative), 'utf8');
-    assert.equal(badgeMarker.test(source), false, `Star badge implementation leaked into static/${relative}`);
+    assert.equal(
+      starMarker.test(source),
+      false,
+      `Star initial implementation leaked into static/${relative}`,
+    );
   }
   const staticFiles = readFilesRecursively(path.join(rootDir, 'static')).filter((file) =>
-    /\.(?:js|html)$/i.test(file),
+    /\.(?:js|html|css)$/i.test(file),
   );
   for (const file of staticFiles) {
     const relative = path.relative(rootDir, file).split(path.sep).join('/');
-    if (!badgeMarker.test(fs.readFileSync(file, 'utf8'))) continue;
+    if (!starMarker.test(fs.readFileSync(file, 'utf8'))) continue;
     assert.ok(
-      /^static\/profile\.(?:js|html)$/.test(relative),
-      `Star badge implementation is only allowed in static/profile.*, found ${relative}`,
+      /^static\/(?:profile\.(?:js|html)|styles\/profile\.css)$/.test(relative),
+      `Star initial implementation is only allowed in profile HTML/JS/CSS, found ${relative}`,
     );
   }
-  log('passed static Star badge placement checks');
+  log('passed static Star initial scope and about-page explanation checks');
 }
 
 function deferred() {
@@ -1264,8 +1331,8 @@ async function main() {
   await testStarStatesAndCache();
   await testOAuthCancellationAndBodyTimeouts();
   await testIntegration();
-  testStaticBadgePlacement();
-  log('all unit, mocked-integration and static tests passed (no live GitHub OAuth was used)');
+  testStaticStarInitialPlacement();
+  log('all unit, mocked-integration, browser UI and static tests passed (no live GitHub OAuth was used)');
 }
 
 try {
