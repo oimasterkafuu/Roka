@@ -453,3 +453,8 @@ Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/front
 - `scripts/test-asset-versioning-exit.mjs`：真实运行静态资源测试及临时故障副本，验证成功 exit 0、异常与断言失败 exit 1；纳入 `pnpm test`。SW VM 覆盖脚本版本、运行时配置优先及 window load 延迟注册。
 
 - issue #137：`lobby-service.ts` 的 `lobbyHostActivity` 按房间保存当前非托管房主 sid 与活动时间；准备阶段 15 分钟无操作复用 `kickFromLobby` 清理并迁移房主，每分钟扫描。`recordLobbyActivity` 由 `server.ts` 的聊天/准备/换队/设置有效操作调用，心跳不续期；迁移、换绑、进入对局与终局清理旧期限。`static/game.html` 显示固定规则，`room_kick.reason` 由 `static/main.js` 提示后返回首页。`scripts/test-lobby-host-idle.mjs` 用假时钟驱动真实大厅与引擎覆盖期限、活动、迁移、清理、对局豁免及终局重置；纳入 `pnpm test`。
+
+### 回放终局 AFK 事件（issue #143）
+
+- `ReplayActionData.afk_surrenders` 是 ops-v1 的可选 `[tick, zero-based player index][]` 事件表；缺省为空，旧 `r` 操作仍在 Tick 前执行。AFK 投降发生在移动/连通之后，单独记录在当前 Tick，避免下一 Tick 未执行时丢失终局事件；重建 `gameTick` 在相同阶段应用事件，不依赖重建时的墙上时间。RPB4 编码与客户端格式不变；新原始文件具有新内容哈希，不复用旧文件的观看缓存。旧文件未记录的 AFK 事件无法恢复。
+- `scripts/test-replay-termination.mjs`：真实引擎 FFA/组队 AFK 终局、中途淘汰与手动投降，逐帧比对地图、兵力、孤军、排行榜与结束标记，并用真实 RPB 解码器验证终局；`scripts/fixtures/replay-143-danrgjM9hfR7.rpl` 为公开原始 ops 证据，断言 Tick 600 未终局且重建至 Tick 2151。

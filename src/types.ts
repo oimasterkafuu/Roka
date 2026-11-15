@@ -294,6 +294,8 @@ export interface ReplayActionData {
   meta: ReplayMeta;
   total_turns: number;
   player_ops: ReplayPlayerOp[][];
+  /** AFK eliminations after tick movement/connectivity: [tick, zero-based player index]. */
+  afk_surrenders?: Array<[number, number]>;
 }
 
 export interface RoomListItem {
