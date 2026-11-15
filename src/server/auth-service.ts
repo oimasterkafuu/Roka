@@ -78,6 +78,10 @@ class AuthService {
       return false;
     }
 
+    if (/^\/invite(\/[A-Za-z0-9_-]+)?$/.test(normalizedPathname)) {
+      return true;
+    }
+
     const publicPages = new Set([
       '/',
       '/develop',

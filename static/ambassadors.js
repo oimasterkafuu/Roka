@@ -47,3 +47,41 @@ async function loadAmbassadorWall() {
 }
 
 var ambassadorWallReady = loadAmbassadorWall();
+
+async function loadAmbassadorInvite() {
+  try {
+    var response = await fetch('/api/auth/me', { cache: 'no-store' });
+    if (!response.ok) return;
+    var user = await response.json();
+    if (!user.username) return;
+    var input = document.getElementById('ambassador-invite-link');
+    var button = document.getElementById('ambassador-invite-copy');
+    input.value = location.origin + '/invite/' + encodeURIComponent(user.username);
+    button.addEventListener('click', async function () {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(input.value);
+        } else {
+          input.select();
+          if (!document.execCommand('copy')) throw new Error('copy-failed');
+        }
+        button.textContent = '已复制';
+        setTimeout(function () {
+          button.textContent = '复制';
+        }, 1500);
+      } catch (error) {
+        input.focus();
+        input.select();
+        button.textContent = '请手动复制';
+      }
+    });
+    document.getElementById('ambassador-share').hidden = false;
+    document.getElementById('ambassador-login').hidden = true;
+    document.getElementById('ambassador-share-hint').textContent =
+      '分享你的专属邀请链接，新玩家注册并完成首次有效对局后即可激活。';
+  } catch (error) {
+    // Keep the login prompt when authentication is unavailable.
+  }
+}
+
+var ambassadorInviteReady = loadAmbassadorInvite();

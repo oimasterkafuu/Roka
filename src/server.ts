@@ -635,6 +635,23 @@ const boot = async (listen = true): Promise<void> => {
     }
   };
 
+  const invalidInvite = (_request: FastifyRequest, reply: FastifyReply) =>
+    reply.code(404).type('text/html; charset=utf-8').send(`<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roka - 邀请链接</title><body style="margin:48px auto;padding:0 24px;max-width:640px;font-family:sans-serif;color:#253042;background:#f3f8f8">
+<h1 style="color:teal">Roka</h1><p>邀请链接不完整或已失效，请向邀请人复制完整的邀请链接。</p><a href="/" style="color:teal">返回首页</a></body></html>`);
+
+  app.get('/invite', { preHandler: authPageRateLimitPreHandler }, invalidInvite);
+  app.get<{ Params: { username: string } }>(
+    '/invite/:username',
+    { preHandler: authPageRateLimitPreHandler },
+    async (request, reply) => {
+      const username = userStore.resolveUsername(request.params.username);
+      if (!username) return invalidInvite(request, reply);
+      return reply.redirect('/login?ref=' + encodeURIComponent(username));
+    },
+  );
+
   app.get('/login', { preHandler: authPageRateLimitPreHandler }, async (request, reply) => {
     const token = authService.getTokenFromCookie(request.headers.cookie);
     const authUser = authService.verifyAuthToken(token);

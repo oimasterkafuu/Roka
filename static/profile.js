@@ -386,7 +386,7 @@ function renderAmbassador(profile) {
     currentUsername && currentUsername.toLowerCase() === String(profile.username).toLowerCase();
   $('#referral-share').toggle(Boolean(ownProfile));
   if (ownProfile) {
-    $('#referral-link').val(location.origin + '/login?ref=' + encodeURIComponent(profile.username));
+    $('#referral-link').val(location.origin + '/invite/' + encodeURIComponent(profile.username));
   }
 }
 
