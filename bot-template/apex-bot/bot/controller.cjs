@@ -3,6 +3,7 @@
 const { makeBoard } = require('./board.cjs');
 const { plan, recover, secureDecision, growth, isMazeBoard, mazeActionGuard } = require('./planner.cjs');
 const { preview } = require('./rules.cjs');
+const { parallelActions } = require('./multiline.cjs');
 
 function createController(playerId) {
   const memory = {
@@ -135,7 +136,19 @@ function createController(playerId) {
     return decision.action;
   }
 
+  function chooseBatch(raw) {
+    const board = raw?.neighbors ? raw : makeBoard(raw, memory.playerId);
+    if (board.turn === memory.lastTurn || board.dead || board.ended || !board.playerId) return [];
+    const action = choose(board);
+    if (!board.multiLine) return action ? [action] : [];
+    return parallelActions(board, memory, { action, branch: memory.branch });
+  }
+
   function reset() {
+    memory.parallelRecent = new Map();
+    memory.parallelDefense = null;
+    memory.parallelTicks = 0;
+    memory.maxParallel = 0;
     memory.lastTurn = -1;
     memory.target = null;
     memory.staging = null;
@@ -175,6 +188,7 @@ function createController(playerId) {
 
   return {
     choose,
+    chooseBatch,
     reset,
     stats: () => ({ ...memory, byBranch: { ...memory.byBranch } }),
   };

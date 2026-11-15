@@ -468,6 +468,8 @@ Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/front
 
 - `scripts/test-asset-versioning-exit.mjs`：真实运行静态资源测试及临时故障副本，验证成功 exit 0、异常与断言失败 exit 1；纳入 `pnpm test`。SW VM 覆盖脚本版本、运行时配置优先及 window load 延迟注册。
 
+- Apex v3 多线（`bot-template/apex-bot/`）：`bot/controller.cjs` 的 `chooseBatch` 保留单线决策入口；`bot/multiline.cjs` 组合独立动作头、预演组合后的驻军安全，保留主攻/回防/经济送兵链并限制副线预算和低力度扩张，直接推冠与 51 建/101 升不设保守前置；`strategy.js` 按全局 seq 维护完整队列与重连 init 同步，换绑缺省模式标记时保留未结束对局的多线模式。`training/long-eval.cjs --multi-line true` 在真实引擎启用并行；`training/engine.cjs` 按真实成功操作统计所有副线动作。回归见 `test/multiline.test.cjs`（含单线真实终局哈希 parity），原 13×17 回放门槛不变。
+
 ### 聊天审计与反广告（issue #134）
 
 - `src/server/chat-moderation.ts`：公开聊天审计与账号聊天限流、早期发网址后迅速离开的候选检测、10 分钟限聊与管理员解除。`data/chat-audit.json` 为 0600 原子覆盖文件，不留备份；只保留必要字段及去除网址秘密的公开消息，7 天 / 2000 条 / 2 MiB 上限，启动与每分钟清理，队聊不存。
@@ -490,6 +492,8 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 逐次成功操作计数，`training/multiline-benchmark.cjs` 输出仓库外冻结基线 A/B、
 未决率和源码哈希。参考源码与结果仅本地使用，不入库。
 
+- Apex PR163 聚焦修复：`bot-template/apex-bot/bot/rules.cjs`、`bot/planner.cjs` 为多线 board 对象缓存预演、路线安全与纯战术分析；`bot/multiline.cjs` 只为入选副线预演，保护大图主攻送兵链。大图主计划不再让可选截断抢占持续进攻，并取消远距兵堆硬排除；单线规划保持原路径。`test/multiline.test.cjs` 增加大图送兵链保护和跨帧/多线预演隔离回归；根 `REVIEW_FIX_RESULT.md` 记录本次限时验收和剩余阻断项。
+- Apex `planner.cjs` 的多线夺冠续攻在选定突破口后直接继续该计划，避免被尚为空的通用候选覆盖；单线保留旧路径，回归断言下一座皇冠和实际前进方向。
 ### 多线争锋回放录制与重建
 
 - `src/game-engine.ts` 每 Tick 按实战执行顺序采集所有成功动作，失效出队只通过实时 `lst_moves` 确认；保持全局队列按入度并行与单线每玩家每 Tick 最多一个成功动作的规则。
