@@ -9,11 +9,7 @@ import vm from 'node:vm';
 import jwt from 'jsonwebtoken';
 import { UserStore, getAmbassadorBadgeLevel, getGamePoints } from '../dist/auth-store.js';
 import { AuthService } from '../dist/server/auth-service.js';
-import {
-  LobbyService,
-  REFERRAL_MIN_DURATION_MS,
-  REFERRAL_MIN_TURNS,
-} from '../dist/server/lobby-service.js';
+import { LobbyService, REFERRAL_MIN_DURATION_MS, REFERRAL_MIN_TURNS } from '../dist/server/lobby-service.js';
 
 const rootDir = path.resolve(new URL('..', import.meta.url).pathname);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -132,8 +128,7 @@ try {
   assert.equal(store.listReferralsForAdmin()[0].status, 'pending', 'bot match does not activate');
   const newRatingBefore = store.getRating('NewPlayer').rating;
   const existingRatingBefore = store.getRating('Existing').rating;
-  const expectedDelta =
-    128 * (1 - 1 / (1 + 10 ** ((existingRatingBefore - newRatingBefore) / 400)));
+  const expectedDelta = 128 * (1 - 1 / (1 + 10 ** ((existingRatingBefore - newRatingBefore) / 400)));
   await lobby.applyGameResult(result, validGame);
   assert.equal(store.listReferralsForAdmin()[0].status, 'active');
   assert.equal(
@@ -158,6 +153,11 @@ assert.equal(auth.isPublicPath('/api/ambassadors', 'GET'), true);
 assert.equal(auth.isPublicPath('/api/referrals/click', 'POST'), true);
 assert.equal(auth.isPublicPath('/api/referrals/click', 'GET'), false);
 assert.equal(auth.isPublicPath('/api/admin/referrals', 'GET'), false);
+
+for (const pathname of ['/invite', '/invite/Admin1']) {
+  assert.equal(auth.isPublicPath(pathname, 'GET'), true);
+  assert.equal(auth.isPublicPath(pathname, 'POST'), false);
+}
 
 const probe = net.createServer();
 probe.listen(0, '127.0.0.1');
@@ -232,6 +232,19 @@ try {
   }
   assert.equal(ready, true, `server did not start: ${serverLogs}`);
 
+  for (const username of ['Admin1', 'aDmIn1']) {
+    const response = await fetch(`${base}/invite/${username}`, { redirect: 'manual' });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('location'), '/login?ref=Admin1');
+  }
+  for (const pathname of ['/invite/Missing', '/invite']) {
+    const response = await fetch(base + pathname, { redirect: 'manual' });
+    assert.equal(response.status, 404);
+    assert.match(response.headers.get('content-type'), /text\/html/);
+    assert.match(await response.text(), /完整/);
+  }
+  console.log('invite HTTP: anonymous redirect, canonical username and 404 hints passed');
+
   const firstClick = await post('/api/referrals/click', { referrer: 'Admin1' });
   assert.equal(firstClick.status, 200);
   const referralCookie = cookieFrom(firstClick, 'roka_referral');
@@ -242,13 +255,19 @@ try {
   const secondClick = await post('/api/referrals/click', { referrer: 'Other1' }, referralCookie);
   assert.deepEqual(secondClick.headers.getSetCookie(), [], 'first valid invitation cookie wins');
   const invalidClick = await post('/api/referrals/click', { referrer: 'Missing' });
-  assert.deepEqual((await invalidClick.json()), { ok: false });
+  assert.deepEqual(await invalidClick.json(), { ok: false });
 
   const registration = await post('/api/auth/register', await authBody('InvitedHttp'), referralCookie);
   assert.equal(registration.status, 200, await registration.text());
   const registrationCookies = registration.headers.getSetCookie();
-  assert.equal(registrationCookies.some((value) => value.startsWith('roka_referral=;')), true);
-  assert.equal(registrationCookies.some((value) => value.startsWith('auth_token=')), true);
+  assert.equal(
+    registrationCookies.some((value) => value.startsWith('roka_referral=;')),
+    true,
+  );
+  assert.equal(
+    registrationCookies.some((value) => value.startsWith('auth_token=')),
+    true,
+  );
   const invitedAuthCookie = cookieFrom(registration, 'auth_token');
   const publicAdmin = await (await fetch(`${base}/api/profile/Admin1`)).json();
   assert.deepEqual(publicAdmin.ambassador, { activatedCount: 0, badgeLevel: 0 });
@@ -277,13 +296,12 @@ try {
   assert.equal(adminRelations.items[0].invitee, 'InvitedHttp');
   assert.equal(adminRelations.items[0].referrer, 'Admin1');
 
-  const oldLogin = await post(
-    '/api/auth/login',
-    await authBody('OldUser'),
-    'roka_referral=Other1',
-  );
+  const oldLogin = await post('/api/auth/login', await authBody('OldUser'), 'roka_referral=Other1');
   assert.equal(oldLogin.status, 200);
-  assert.equal(oldLogin.headers.getSetCookie().some((value) => value.startsWith('roka_referral=;')), true);
+  assert.equal(
+    oldLogin.headers.getSetCookie().some((value) => value.startsWith('roka_referral=;')),
+    true,
+  );
   const selfRegistration = await post(
     '/api/auth/register',
     await authBody('SelfHttp'),
@@ -331,6 +349,15 @@ class FakeElement {
     this.hidden = false;
     this.textContent = '';
   }
+  addEventListener(event, handler) {
+    this[event] = handler;
+  }
+  select() {
+    this.selected = true;
+  }
+  focus() {
+    this.focused = true;
+  }
   set innerHTML(_value) {
     throw new Error('innerHTML is forbidden in ambassador rendering');
   }
@@ -350,6 +377,11 @@ const nodes = Object.fromEntries(
     'referral-registrations',
     'referral-activations',
     'referral-excluded',
+    'ambassador-invite-link',
+    'ambassador-invite-copy',
+    'ambassador-share',
+    'ambassador-login',
+    'ambassador-share-hint',
   ].map((id) => [id, new FakeElement('div')]),
 );
 const documentStub = {
@@ -360,20 +392,69 @@ const context = vm.createContext({
   console,
   document: documentStub,
   encodeURIComponent,
-  fetch: async () => ({
+  location: { origin: 'https://roka.example' },
+  navigator: {
+    clipboard: {
+      writeText: async (value) => {
+        context.copied = value;
+      },
+    },
+  },
+  setTimeout: (callback, delay) => {
+    assert.equal(delay, 1500);
+    context.resetCopy = callback;
+  },
+  fetch: async (url) => ({
     ok: true,
-    json: async () => ({
-      conversion: { clicks: 2, registrations: 1, activations: 1, excluded: 0 },
-      items: [
-        { username: 'Admin1', activatedCount: 1, badgeLevel: 1, invitee: 'Secret' },
-        { username: '<img>', activatedCount: 99, badgeLevel: 4 },
-      ],
-    }),
+    json: async () =>
+      url === '/api/auth/me'
+        ? { username: 'Admin1' }
+        : {
+            conversion: { clicks: 2, registrations: 1, activations: 1, excluded: 0 },
+            items: [
+              { username: 'Admin1', activatedCount: 1, badgeLevel: 1, invitee: 'Secret' },
+              { username: '<img>', activatedCount: 99, badgeLevel: 4 },
+            ],
+          },
   }),
 });
 const frontendSource = await fs.readFile(path.join(rootDir, 'static/ambassadors.js'), 'utf8');
 vm.runInContext(frontendSource, context, { filename: 'static/ambassadors.js' });
 await context.ambassadorWallReady;
+await context.ambassadorInviteReady;
+assert.equal(nodes['ambassador-share'].hidden, false);
+assert.equal(nodes['ambassador-login'].hidden, true);
+assert.equal(nodes['ambassador-invite-link'].value, 'https://roka.example/invite/Admin1');
+const copyButton = nodes['ambassador-invite-copy'];
+await copyButton.click();
+assert.equal(context.copied, nodes['ambassador-invite-link'].value);
+assert.equal(copyButton.textContent, '已复制');
+context.resetCopy();
+assert.equal(copyButton.textContent, '复制');
+context.navigator.clipboard = undefined;
+documentStub.execCommand = (command) => command === 'copy';
+await copyButton.click();
+assert.equal(nodes['ambassador-invite-link'].selected, true);
+assert.equal(copyButton.textContent, '已复制');
+documentStub.execCommand = () => false;
+await copyButton.click();
+assert.equal(copyButton.textContent, '请手动复制');
+for (const fetchAuth of [
+  async () => ({ ok: false, status: 401 }),
+  async () => {
+    throw new Error('offline');
+  },
+]) {
+  nodes['ambassador-share'].hidden = true;
+  nodes['ambassador-login'].hidden = false;
+  nodes['ambassador-share-hint'].textContent = '登录后进入自己的个人主页';
+  context.fetch = fetchAuth;
+  await context.loadAmbassadorInvite();
+  assert.equal(nodes['ambassador-share'].hidden, true);
+  assert.equal(nodes['ambassador-login'].hidden, false);
+  assert.match(nodes['ambassador-share-hint'].textContent, /登录后/);
+}
+console.log('ambassador sharing: authenticated, guest, clipboard, fallback and failure passed');
 assert.equal(nodes['ambassador-grid'].children.length, 1);
 const renderedCard = nodes['ambassador-grid'].children[0];
 assert.equal(renderedCard.href, '/u/Admin1');

@@ -13,6 +13,18 @@
     <link rel="stylesheet" href="/main.css?v={{V}}" />
     <link rel="stylesheet" href="/styles/docs.css?v={{V}}" />
     <style>
+      .invite-controls {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      #ambassador-invite-link {
+        flex: 1;
+        min-width: 0;
+        padding: 8px;
+        border: 1px solid teal;
+        border-radius: 6px;
+      }
       .ambassador-stats {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -105,8 +117,19 @@
       </section>
       <section class="doc-panel">
         <h2>成为推广大使</h2>
-        <p>登录后进入自己的个人主页，即可复制专属邀请链接。大使等级仅用于纪念与致谢。</p>
-        <div class="cta-row"><button data-goto="/login" class="small inverted">登录并分享 →</button></div>
+        <p id="ambassador-share-hint">
+          登录后进入自己的个人主页，即可复制专属邀请链接。大使等级仅用于纪念与致谢。
+        </p>
+        <div id="ambassador-share" hidden>
+          <label for="ambassador-invite-link">我的邀请链接</label>
+          <div class="invite-controls">
+            <input id="ambassador-invite-link" type="text" readonly />
+            <button id="ambassador-invite-copy" class="small">复制</button>
+          </div>
+        </div>
+        <div id="ambassador-login" class="cta-row">
+          <button data-goto="/login" class="small inverted">登录并分享 →</button>
+        </div>
       </section>
     </div>
     <script src="/docs.js?v={{V}}"></script>
