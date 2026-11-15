@@ -105,10 +105,11 @@ function compileEngine({ synchronous = true } = {}) {
       ['initializeMap', 'void'],
       ['gameTick', 'boolean'],
     ]) {
-      const header = `private async ${name}(): Promise<${result}> {`;
-      const start = source.indexOf(header);
+      const signature = new RegExp(`private async ${name}\\([\\s\\S]*?\\): Promise<${result}> \\{`);
+      const match = signature.exec(source);
+      const start = match?.index ?? -1;
       const end = source.indexOf('\n  }', start);
-      if (start < 0 || end < 0) throw new Error(`engine interface changed: ${name}`);
+      if (!match || end < 0) throw new Error(`engine interface changed: ${name}`);
       let body = source.slice(start, end);
       const awaitCount = (body.match(/\bawait\b/g) || []).length;
       if (
@@ -117,8 +118,12 @@ function compileEngine({ synchronous = true } = {}) {
       ) {
         throw new Error(`engine async contract changed: ${name}`);
       }
+      const header = match[0];
+      const synchronousHeader = header
+        .replace('private async ', 'private ')
+        .replace(`Promise<${result}>`, result);
       body = body
-        .replace(header, `private ${name}(): ${result} {`)
+        .replace(header, synchronousHeader)
         .replace('await this.sendMap(gameEnd);', 'this.sendMap(gameEnd);');
       source = source.slice(0, start) + body + source.slice(end);
     }
@@ -393,15 +398,18 @@ function createArena({
       speed: configured.speed ?? 1,
       allow_team: configured.allow_team ?? false,
       fog: configured.fog ?? Boolean(fog),
+      multi_line: configured.multi_line === true,
       map_token: configured.map_token ?? String(seed),
       map_mode: configuredMode,
       map_region: configured.map_region,
-      player_names: Array.isArray(configured.player_names) && configured.player_names.length === 2
-        ? configured.player_names
-        : sids,
-      player_teams: Array.isArray(configured.player_teams) && configured.player_teams.length === 2
-        ? configured.player_teams
-        : [1, 2],
+      player_names:
+        Array.isArray(configured.player_names) && configured.player_names.length === 2
+          ? configured.player_names
+          : sids,
+      player_teams:
+        Array.isArray(configured.player_teams) && configured.player_teams.length === 2
+          ? configured.player_teams
+          : [1, 2],
     },
     sids,
     sids,
@@ -440,7 +448,15 @@ function createArena({
       adapter.attach();
       adapter.socket.trigger('set_id', sids[p]);
     }
-    engine.emitInitMap(sids[p], { n: engine.n, m: engine.m, player_ids: sids, general: engine.generals[p], next_seq: engine.nextSeq[p], queue_ops: [] });
+    engine.emitInitMap(sids[p], {
+      n: engine.n,
+      m: engine.m,
+      player_ids: sids,
+      general: engine.generals[p],
+      next_seq: engine.nextSeq[p],
+      queue_ops: [],
+      multi_line: engine.multiLine,
+    });
   }
   // Full frame each tick keeps the offline protocol simple while exercising
   // the exact per-player fog filter and payload shape.
@@ -455,23 +471,35 @@ function createArena({
       payload.kills = kills;
       payload.lst_moves = engine.lstMoves[p] || [];
       updateSeat(p, payload);
-      if (engine.lstMove[p]) {
-        const op = engine.lstMove[p];
-        if (op.kind === 'm') stats[p].attacks += 1;
-        else if (op.kind === 'b') stats[p].builds += 1;
-        else stats[p].upgrades += 1;
-      }
-      stats[p].rejected += (engine.lstMoves[p] || []).length;
       engine.lstMove[p] = null;
       engine.lstMoves[p] = [];
     }
     ended = Boolean(gameEnd);
   };
+  for (const [method, kind] of [
+    ['attack', 'attacks'],
+    ['chkBuildCity', 'builds'],
+    ['chkUpgradeCrown', 'upgrades'],
+  ]) {
+    const original = engine[method].bind(engine);
+    engine[method] = (...args) => {
+      const player = method === 'attack' ? engine.owner[args[0]][args[1]] - 1 : args[2];
+      const success = original(...args);
+      if (success) {
+        if (stats[player]) stats[player][kind]++;
+      }
+      return success;
+    };
+  }
   engine.sendMap(false);
   if (captureReplay) initialSnapshot = engineSnapshot(engine);
 
   function submit(player, action) {
     if (action == null) return;
+    if (Array.isArray(action)) {
+      for (const item of action) submit(player, item);
+      return;
+    }
     if (captureReplay && !replayTruncated) {
       const line = `${JSON.stringify([engine.turn + 1, player, action])}\n`;
       replayBytes += Buffer.byteLength(line);
@@ -734,7 +762,7 @@ function runMatch({
         recordTiming(arena.decision[p].timing, elapsed);
         if (elapsed > decisionTimeoutMs) arena.decision[p].timeouts += 1;
       }
-      if (action) arena.decision[p].emitted += 1;
+      if (action) arena.decision[p].emitted += Array.isArray(action) ? action.length : 1;
       return action;
     });
     arena.tick(actions);

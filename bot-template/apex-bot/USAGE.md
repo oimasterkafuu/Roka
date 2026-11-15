@@ -2,7 +2,7 @@
 
 需要 Node.js 18+ 和 Socket.IO Bot token。`BOT_ROOM`、`BOT_TOKEN` 必填；`BOT_SERVER` 默认是 `http://127.0.0.1:23333`。
 
-`BOT_AUTO_READY=0` 可以关闭自动准备，`BOT_ACTION_DELAY_MS` 用于设置决策发送延迟。Bot 每个服务器 Tick 最多发送一条移动或建造操作，收到差分帧后重新计算局面；如果上一条操作没有在 `lst_moves` 中确认，会先清空服务器队列再发送新操作，避免高倍速或网络抖动时执行过期长距离调兵。
+`BOT_AUTO_READY=0` 可以关闭自动准备，`BOT_ACTION_DELAY_MS` 用于设置决策发送延迟。Bot 在 `multi_line=false` 时每 Tick 最多发送一条操作，过期未确认操作会清队列重算；v3 多线下每 Tick 最多六个独立动作，维护完整 `queue_ops` 镜像并按 `lst_moves` 确认，重连从 `next_seq` 续接。队列排空后才规划下一组动作；换绑补发缺少 `multi_line` 的 `init_map` 时保留未结束对局的原模式。普通副线受总兵力预算、主攻/回防/经济送兵链保留和低力度送兵门控约束，建设与升级分别至少需要 51、101 兵。
 
 默认行为是加入房间后自动切换到 `BOT_TEAM`（默认 1）并准备；服务端托管入口同样默认自动准备。决策默认在最新服务器帧到达后立即排队，`BOT_ACTION_DELAY_MS` 只用于故障复现或调试。
 
@@ -19,6 +19,6 @@ node training/long-eval.cjs --seeds 8 --workers 8 --turns 600 --opponents simple
 node training/long-eval.cjs --profile large --seeds 8 --workers 8 --turns 1200 --opponents anti --seat both
 ```
 
-常用选项：`--profile standard|large` 选择尺寸套件（large 固定覆盖 0.5、0.68、1），`--sizes CSV` 可精确覆盖尺寸；`--seeds N` 设置每张地图的种子数，`--workers N` 设置并行线程数，`--turns N` 设置单局服务器 Tick 上限，`--opponents anti|simple` 选择对手，`--modes random,maze,...` 固定地图类型，`--seat 0|1|both` 选择我方先后手，`--output FILE` 指定结果 JSON。环境变量 `APEX_EVAL_PROFILE`、`APEX_EVAL_SIZES`、`APEX_EVAL_SEEDS`、`APEX_EVAL_WORKERS`、`APEX_EVAL_TURNS`、`APEX_EVAL_MODES` 可替代对应默认值。
+常用选项：`--multi-line true|false` 控制真实引擎全局队列多线语义（默认 false）；`--profile standard|large` 选择尺寸套件（large 固定覆盖 0.5、0.68、1），`--sizes CSV` 可精确覆盖尺寸；`--seeds N` 设置每张地图的种子数，`--workers N` 设置并行线程数，`--turns N` 设置单局服务器 Tick 上限，`--opponents anti|simple` 选择对手，`--modes random,maze,...` 固定地图类型，`--seat 0|1|both` 选择我方先后手，`--output FILE` 指定结果 JSON。环境变量 `APEX_EVAL_PROFILE`、`APEX_EVAL_SIZES`、`APEX_EVAL_SEEDS`、`APEX_EVAL_WORKERS`、`APEX_EVAL_TURNS`、`APEX_EVAL_MODES` 可替代对应默认值。
 
 结果 JSON 包含胜负汇总、每局 Tick、失败回放、决策延迟 p50/p95/p99，以及按地图尺寸和 standard/large 尺寸组统计的阶段性皇冠、城市、兵力、领土、建设/升级/攻击动作和存活率；配对样本还会给出相对对手的兵力/领土/皇冠比、城市差和兵力领先率。大地图回归示例：`node training/long-eval.cjs --profile large --seeds 8 --turns 1200 --workers 8 --opponents anti --seat both`。未结束对局保留在 `draws`，同时计入 `losses`/`effectiveLosses`。

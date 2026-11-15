@@ -97,6 +97,9 @@ function attachStrategy(socket, options = {}) {
     pendingAction: null,
     lastActionTurn: -1,
     queueResets: 0,
+    queueOps: [],
+    nextSeq: 1,
+    multiLine: false,
   };
   let controller = null;
   let heartbeat = null;
@@ -119,6 +122,7 @@ function attachStrategy(socket, options = {}) {
     state.turn = -1;
     state.leaderboard = [];
     state.teams = new Map();
+    state.queueOps = [];
     state.queued = 0;
     state.actionPending = false;
     state.pendingAction = null;
@@ -156,30 +160,32 @@ function attachStrategy(socket, options = {}) {
         leaderboard: state.leaderboard,
         teams: state.teams,
         turn: state.turn,
+        multiLine: state.multiLine,
         dead: state.dead,
         ended: state.ended,
       },
       state.playerId,
     );
-    const action = controller.choose(board);
-    if (!action) return;
-    // The server executes one queued operation per tick. When a decision was
-    // delayed past the next tick, the old operation can still be at the head
-    // of that queue and would be applied to a stale board. The update payload
-    // acknowledges the previous operation through lst_moves; only clear
-    // when that acknowledgement did not arrive, then append the fresh action.
+    // Rebound queues are authoritative. Let their existing chains drain
+    // before planning new heads; seq is global and never rewound by a clear.
+    if (state.multiLine && state.queueOps.length) return;
+    const actions = controller.chooseBatch(board);
+    if (!actions.length) return;
     if (state.actionPending) {
       socket.emit('clear_queue');
       state.queueResets += 1;
-      state.actionPending = false;
-      state.pendingAction = null;
+      state.queueOps = [];
     }
-    state.queued += 1;
+    for (const action of actions) {
+      const { half, ...payload } = action;
+      const queued = { ...payload, seq: state.nextSeq++ };
+      state.queueOps.push(queued);
+      state.queued += 1;
+      socket.emit(action.kind === 'build' ? 'build' : 'attack', payload);
+    }
     state.lastActionTurn = state.turn;
-    state.actionPending = true;
-    state.pendingAction = { ...action, seq: state.nextSeq++ };
-    const { half, ...payload } = action;
-    socket.emit(action.kind === 'build' ? 'build' : 'attack', payload);
+    state.actionPending = state.queueOps.length > 0;
+    state.pendingAction = state.queueOps[0] || null;
   }
 
   function onSetId(id) {
@@ -191,8 +197,21 @@ function attachStrategy(socket, options = {}) {
     const m = Number(payload.m);
     const ids = Array.isArray(payload.player_ids) ? payload.player_ids.map(String) : [];
     if (!Number.isInteger(n) || !Number.isInteger(m) || n < 1 || m < 1 || n * m > 100000) return;
+    // rebindPlayer clears the server queue and its init payload currently omits
+    // multi_line. Preserve the mode only across an unfinished game; a new game
+    // still defaults to the legacy single-line protocol when the flag is absent.
+    const resumeMultiLine = state.multiLine && controller && !state.ended;
     reset(n, m, ids);
-    state.nextSeq = payload.next_seq;
+    state.multiLine = payload.multi_line === true || resumeMultiLine;
+    state.queueOps = Array.isArray(payload.queue_ops)
+      ? payload.queue_ops.filter((op) => Number.isInteger(op?.seq) && op.seq > 0).map((op) => ({ ...op }))
+      : [];
+    state.nextSeq = Math.max(
+      Number.isInteger(payload.next_seq) && payload.next_seq > 0 ? payload.next_seq : 1,
+      ...state.queueOps.map((op) => op.seq + 1),
+    );
+    state.actionPending = state.queueOps.length > 0;
+    state.pendingAction = state.queueOps[0] || null;
     log(`new game ${n}x${m}, player=${state.playerId}`);
   }
 
@@ -229,18 +248,21 @@ function attachStrategy(socket, options = {}) {
     state.isolated.splice(0, state.size, ...next.isolated);
     state.fog.splice(0, state.size, ...next.fog);
     updatePlayers(payload);
-    if (state.actionPending && payload.lst_moves.includes(state.pendingAction.seq)) {
-      state.actionPending = false;
-      state.pendingAction = null;
-    }
+    const removed = new Set(Array.isArray(payload.lst_moves) ? payload.lst_moves : []);
+    state.queueOps = state.queueOps.filter((op) => !removed.has(op.seq));
+    state.actionPending = state.queueOps.length > 0;
+    state.pendingAction = state.queueOps[0] || null;
     state.turn = payload.turn;
     state.ended = Boolean(payload.game_end);
     if (payload.kills && payload.kills[state.clientId]) state.dead = true;
     if (state.ended) {
       const changes = opponentStats.record(payload.leaderboard, state.playerId, now());
       for (const change of changes) {
-        log(`result vs ${change.uid}: ${change.result}, games=${change.games}, wins=${change.wins}, losses=${change.losses}, draws=${change.draws}, streak=${change.consecutiveLosses}`);
+        log(
+          `result vs ${change.uid}: ${change.result}, games=${change.games}, wins=${change.wins}, losses=${change.losses}, draws=${change.draws}, streak=${change.consecutiveLosses}`,
+        );
       }
+      state.queueOps = [];
       state.inGame = false;
       state.actionPending = false;
       state.pendingAction = null;
@@ -297,6 +319,7 @@ function attachStrategy(socket, options = {}) {
   }
 
   function onDisconnect() {
+    state.queueOps = [];
     state.inGame = false;
     state.actionPending = false;
     state.pendingAction = null;
@@ -311,6 +334,7 @@ function attachStrategy(socket, options = {}) {
   }
 
   function onLeft() {
+    state.queueOps = [];
     state.inGame = false;
     state.ended = true;
     state.actionPending = false;
@@ -320,7 +344,9 @@ function attachStrategy(socket, options = {}) {
   }
 
   function onKick() {
+    state.queueOps = [];
     state.inGame = false;
+    state.ended = true;
     state.actionPending = false;
     state.pendingAction = null;
     lastRoomCommand = '';
