@@ -54,6 +54,37 @@ export interface GithubPublicProfile {
   starVerifiedAt: number | null;
 }
 
+export type ReferralStatus = 'pending' | 'active' | 'excluded';
+
+export interface ReferralAttribution {
+  invitee: string;
+  referrer: string;
+  registeredAt: number;
+  status: ReferralStatus;
+  activatedAt?: number;
+  activationGameId?: string;
+  excludedAt?: number;
+  exclusionReason?: string;
+}
+
+export interface AmbassadorSummary {
+  activatedCount: number;
+  badgeLevel: number;
+}
+
+export interface AmbassadorWallEntry extends AmbassadorSummary {
+  username: string;
+}
+
+export interface ReferralConversion {
+  clicks: number;
+  registrations: number;
+  activations: number;
+  excluded: number;
+}
+
+export type ReferralAdminEntry = ReferralAttribution;
+
 interface StoredUser {
   username: string;
   passwordSalt: string;
@@ -99,6 +130,7 @@ export interface PublicProfile {
   isAdmin: boolean;
   ratingHistory: RatingHistoryPoint[];
   github?: GithubPublicProfile;
+  ambassador: AmbassadorSummary;
 }
 
 export interface UserLevelProgress {
@@ -161,6 +193,8 @@ export const formatBanMessage = (banStatus: BanStatus): string => {
 interface UserFile {
   users: StoredUser[];
   pointsMigrationVersion?: number;
+  referrals?: ReferralAttribution[];
+  referralClicks?: Record<string, number>;
 }
 
 /**
@@ -179,6 +213,12 @@ export const POINTS_MIGRATION_VERSION = 1;
 /** @deprecated 使用 getGamePoints(place, totalPlayers)。 */
 export const GAME_POINTS = GAME_BASE_POINTS;
 export const LEVEL_THRESHOLDS = [0, 100, 1000, 10000, 30000, 100000] as const;
+export const AMBASSADOR_BADGE_THRESHOLDS = [1, 3, 10, 25] as const;
+
+export const getAmbassadorBadgeLevel = (activatedCount: number): number => {
+  const count = Number.isFinite(activatedCount) ? Math.max(0, Math.floor(activatedCount)) : 0;
+  return AMBASSADOR_BADGE_THRESHOLDS.filter((threshold) => count >= threshold).length;
+};
 
 export const getGamePoints = (place: number, totalPlayers: number): number => {
   const normalizedPlace = Math.max(1, Math.floor(place));
@@ -488,6 +528,36 @@ const toStoredUser = (value: unknown): StoredUser | null => {
   };
 };
 
+const toReferralAttribution = (value: unknown): ReferralAttribution | null => {
+  if (!isRecord(value)) return null;
+  const status = value.status;
+  if (
+    typeof value.invitee !== 'string' ||
+    typeof value.referrer !== 'string' ||
+    typeof value.registeredAt !== 'number' ||
+    !Number.isFinite(value.registeredAt) ||
+    (status !== 'pending' && status !== 'active' && status !== 'excluded')
+  ) {
+    return null;
+  }
+  return {
+    invitee: value.invitee,
+    referrer: value.referrer,
+    registeredAt: value.registeredAt,
+    status,
+    ...(typeof value.activatedAt === 'number' && Number.isFinite(value.activatedAt)
+      ? { activatedAt: value.activatedAt }
+      : {}),
+    ...(typeof value.activationGameId === 'string' ? { activationGameId: value.activationGameId } : {}),
+    ...(typeof value.excludedAt === 'number' && Number.isFinite(value.excludedAt)
+      ? { excludedAt: value.excludedAt }
+      : {}),
+    ...(typeof value.exclusionReason === 'string'
+      ? { exclusionReason: value.exclusionReason.slice(0, 200) }
+      : {}),
+  };
+};
+
 const parseUserFile = (value: unknown): UserFile => {
   if (!isRecord(value) || !Array.isArray(value.users)) {
     throw new Error('用户数据结构无效。');
@@ -499,12 +569,25 @@ const parseUserFile = (value: unknown): UserFile => {
       users.push(parsed);
     }
   }
+  const referrals = (Array.isArray(value.referrals) ? value.referrals : [])
+    .map(toReferralAttribution)
+    .filter((item): item is ReferralAttribution => item !== null);
+  const referralClicks: Record<string, number> = {};
+  if (isRecord(value.referralClicks)) {
+    for (const [username, count] of Object.entries(value.referralClicks)) {
+      if (typeof count === 'number' && Number.isFinite(count) && count >= 0) {
+        referralClicks[username.trim().toLowerCase()] = Math.floor(count);
+      }
+    }
+  }
   return {
     users,
     pointsMigrationVersion:
       typeof value.pointsMigrationVersion === 'number' && Number.isFinite(value.pointsMigrationVersion)
         ? value.pointsMigrationVersion
         : 0,
+    referrals,
+    referralClicks,
   };
 };
 
@@ -518,6 +601,10 @@ export class UserStore {
   private usersByGithubId = new Map<number, StoredUser>();
 
   private pointsMigrationVersion = 0;
+
+  private referrals: ReferralAttribution[] = [];
+
+  private referralClicks = new Map<string, number>();
 
   // 写盘合并串行化：突发连续写入只压缩落盘一次（见 binary-store）。
   private readonly writer: CoalescingFileWriter;
@@ -535,6 +622,23 @@ export class UserStore {
       const userFile = await this.loadFromBinary();
       this.replaceUsers(userFile.users);
       this.pointsMigrationVersion = userFile.pointsMigrationVersion ?? 0;
+      const seenInvitees = new Set<string>();
+      this.referrals = (userFile.referrals ?? []).filter((referral) => {
+        const inviteeKey = this.normalize(referral.invitee);
+        const referrerKey = this.normalize(referral.referrer);
+        const invitee = this.usersByKey.get(inviteeKey);
+        const referrer = this.usersByKey.get(referrerKey);
+        if (!invitee || !referrer || inviteeKey === referrerKey || seenInvitees.has(inviteeKey)) return false;
+        seenInvitees.add(inviteeKey);
+        referral.invitee = invitee.username;
+        referral.referrer = referrer.username;
+        return true;
+      });
+      this.referralClicks = new Map(
+        Object.entries(userFile.referralClicks ?? {}).filter(([username]) =>
+          this.usersByKey.has(this.normalize(username)),
+        ),
+      );
       const now = Date.now();
       let migrated = false;
       for (const user of this.usersByKey.values()) {
@@ -576,7 +680,7 @@ export class UserStore {
     }
   }
 
-  async register(usernameInput: string, password: string): Promise<string> {
+  async register(usernameInput: string, password: string, referrerInput?: string): Promise<string> {
     const username = this.validateUsernameOrThrow(usernameInput);
     this.validatePasswordOrThrow(password);
 
@@ -585,14 +689,16 @@ export class UserStore {
       throw new Error('用户名已存在。');
     }
 
+    const referrer = referrerInput ? this.usersByKey.get(this.normalize(referrerInput)) : undefined;
     const salt = randomBytes(16).toString('hex');
+    const now = Date.now();
     const user: StoredUser = {
       username,
       passwordSalt: salt,
       passwordHash: this.hashPassword(password, salt),
       sessionId: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
       rating: DEFAULT_RATING,
       ratingGames: 0,
       points: 0,
@@ -604,8 +710,93 @@ export class UserStore {
     };
 
     this.usersByKey.set(key, user);
+    if (referrer && this.normalize(referrer.username) !== key) {
+      this.referrals.push({
+        invitee: user.username,
+        referrer: referrer.username,
+        registeredAt: now,
+        status: 'pending',
+      });
+    }
     await this.persist();
     return user.username;
+  }
+
+  async recordReferralClick(referrerInput: string): Promise<string | null> {
+    const referrer = this.usersByKey.get(this.normalize(referrerInput));
+    if (!referrer) return null;
+    const key = this.normalize(referrer.username);
+    this.referralClicks.set(key, (this.referralClicks.get(key) ?? 0) + 1);
+    await this.persist();
+    return referrer.username;
+  }
+
+  async activateReferral(
+    inviteeInput: string,
+    gameIdInput: string,
+  ): Promise<'activated' | 'duplicate' | 'ineligible'> {
+    const gameId = gameIdInput.trim();
+    if (!gameId || gameId.length > 64) return 'ineligible';
+    const inviteeKey = this.normalize(inviteeInput);
+    const referral = this.referrals.find((item) => this.normalize(item.invitee) === inviteeKey);
+    if (!referral) return 'ineligible';
+    if (referral.status === 'active') {
+      return referral.activationGameId === gameId ? 'duplicate' : 'ineligible';
+    }
+    if (referral.status !== 'pending') return 'ineligible';
+    const invitee = this.usersByKey.get(inviteeKey);
+    const referrer = this.usersByKey.get(this.normalize(referral.referrer));
+    if (!invitee || !referrer || inviteeKey === this.normalize(referrer.username)) return 'ineligible';
+    referral.status = 'active';
+    referral.activatedAt = Date.now();
+    referral.activationGameId = gameId;
+    invitee.updatedAt = referral.activatedAt;
+    await this.persist();
+    return 'activated';
+  }
+
+  async excludeReferral(inviteeInput: string, reasonInput: string): Promise<boolean> {
+    const referral = this.referrals.find(
+      (item) => this.normalize(item.invitee) === this.normalize(inviteeInput),
+    );
+    if (!referral || referral.status === 'excluded') return false;
+    referral.status = 'excluded';
+    referral.excludedAt = Date.now();
+    referral.exclusionReason = reasonInput.trim().slice(0, 200) || '管理员复核排除';
+    await this.persist();
+    return true;
+  }
+
+  listReferralsForAdmin(): ReferralAdminEntry[] {
+    return this.referrals.map((referral) => ({ ...referral }));
+  }
+
+  getReferralConversion(): ReferralConversion {
+    let clicks = 0;
+    for (const count of this.referralClicks.values()) clicks += count;
+    return {
+      clicks,
+      registrations: this.referrals.length,
+      activations: this.referrals.filter((referral) => referral.status === 'active').length,
+      excluded: this.referrals.filter((referral) => referral.status === 'excluded').length,
+    };
+  }
+
+  getAmbassadorSummary(usernameInput: string): AmbassadorSummary {
+    const key = this.normalize(usernameInput);
+    const activatedCount = this.referrals.filter(
+      (referral) => referral.status === 'active' && this.normalize(referral.referrer) === key,
+    ).length;
+    return { activatedCount, badgeLevel: getAmbassadorBadgeLevel(activatedCount) };
+  }
+
+  listAmbassadorWall(): AmbassadorWallEntry[] {
+    const entries: AmbassadorWallEntry[] = [];
+    for (const user of this.usersByKey.values()) {
+      const summary = this.getAmbassadorSummary(user.username);
+      if (summary.activatedCount > 0) entries.push({ username: user.username, ...summary });
+    }
+    return entries.sort((a, b) => a.username.localeCompare(b.username));
   }
 
   verifyPassword(usernameInput: string, password: string): string | null {
@@ -1036,6 +1227,7 @@ export class UserStore {
       isAdmin: user.isAdmin === true,
       ratingHistory: Array.isArray(user.ratingHistory) ? [...user.ratingHistory] : [],
       github: user.github ? toGithubPublicProfile(user.github, Date.now()) : undefined,
+      ambassador: this.getAmbassadorSummary(user.username),
     };
   }
 
@@ -1190,6 +1382,8 @@ export class UserStore {
     const data: UserFile = {
       users: [...this.usersByKey.values()],
       pointsMigrationVersion: this.pointsMigrationVersion,
+      referrals: this.referrals.map((referral) => ({ ...referral })),
+      referralClicks: Object.fromEntries(this.referralClicks),
     };
     // serialize 同步执行，调用时即拿到状态快照；brotli 压缩惰性执行，
     // 被合并丢弃的排队写不产生压缩开销。

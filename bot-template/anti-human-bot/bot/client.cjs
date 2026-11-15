@@ -2,6 +2,7 @@
 const { BoardState } = require('./state.cjs');
 const { performance } = require('node:perf_hooks');
 const { chooseAction, getDecisionDiagnostics } = require('./policy.cjs');
+const { chooseActions } = require('./multiline.cjs');
 const { createTrashTalk } = require('./trash-talk.cjs');
 const { createSurrenderJudge } = require('./surrender.cjs');
 // 与服务端 src/types.ts 的 MAX_TEAMS 保持一致。
@@ -121,21 +122,24 @@ function attachBot(socket, {
       if (line) { log(`[垃圾话] ${line}`); socket.emit('send_message', { text: line, team: false }); }
     }
     const started = performance.now();
-    const selected = chooseAction(board, params);
+    const primary = chooseAction(board, params);
+    const selections = chooseActions(board, primary, params);
+    const selected = selections[0];
     const elapsed = performance.now() - started;
     metrics.count++; metrics.ms += elapsed; metrics.max = Math.max(metrics.max, elapsed);
     if (previousTurn !== null) metrics.gaps += Math.max(0, board.turn - previousTurn - 1);
     previousTurn = board.turn;
-    if (selected) metrics.sent++; else metrics.idle++;
+    if (selected) metrics.sent += selections.length; else metrics.idle++;
     if (elapsed >= 50) log(`[慢决策] turn=${board.turn} 耗时=${elapsed.toFixed(1)}ms`);
     if (metrics.count >= 20) {
       if (!selected) log(`[空动作诊断] ${JSON.stringify(getDecisionDiagnostics(board))}`);
       log(`[决策统计] turn=${board.turn} 计算=${metrics.count} 发送=${metrics.sent} 空动作=${metrics.idle} 平均=${(metrics.ms/metrics.count).toFixed(2)}ms 最大=${metrics.max.toFixed(2)}ms 更新跳号=${metrics.gaps}（攻击详情每20turn采样，发送不等于执行）`);
       metrics = { count:0, sent:0, idle:0, ms:0, max:0, gaps:0 };
     }
-    if (selected) {
-      const { kind, half, reason: rawReason, ...action } = selected;
+    for (const selected of selections) {
+      const { kind, half, lane, reason: rawReason, ...action } = selected;
       const reason = typeof rawReason === 'string' ? rawReason : JSON.stringify(rawReason);
+      board.enqueue(selected);
       socket.emit(kind, action);
       if (kind === 'build') log(`[建造] turn=${board.turn} ${reason} (${action.x},${action.y})`);
       else if (board.turn % 20 === 0 || board.turn < 10) log(`[决策] turn=${board.turn} ${reason} (${action.x},${action.y})->(${action.dx},${action.dy})`);
