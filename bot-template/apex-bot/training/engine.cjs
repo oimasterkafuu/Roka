@@ -105,10 +105,11 @@ function compileEngine({ synchronous = true } = {}) {
       ['initializeMap', 'void'],
       ['gameTick', 'boolean'],
     ]) {
-      const header = `private async ${name}(): Promise<${result}> {`;
-      const start = source.indexOf(header);
+      const signature = new RegExp(`private async ${name}\\([^)]*\\): Promise<${result}> \\{`);
+      const match = signature.exec(source);
+      const start = match?.index ?? -1;
       const end = source.indexOf('\n  }', start);
-      if (start < 0 || end < 0) throw new Error(`engine interface changed: ${name}`);
+      if (!match || end < 0) throw new Error(`engine interface changed: ${name}`);
       let body = source.slice(start, end);
       const awaitCount = (body.match(/\bawait\b/g) || []).length;
       if (
@@ -117,8 +118,12 @@ function compileEngine({ synchronous = true } = {}) {
       ) {
         throw new Error(`engine async contract changed: ${name}`);
       }
+      const header = match[0];
+      const synchronousHeader = header
+        .replace('private async ', 'private ')
+        .replace(`Promise<${result}>`, result);
       body = body
-        .replace(header, `private ${name}(): ${result} {`)
+        .replace(header, synchronousHeader)
         .replace('await this.sendMap(gameEnd);', 'this.sendMap(gameEnd);');
       source = source.slice(0, start) + body + source.slice(end);
     }
