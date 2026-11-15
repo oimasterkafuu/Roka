@@ -1,0 +1,110 @@
+{
+  "version": "ops-v2",
+  "meta": {
+    "isolated_reinforcement_fix": true,
+    "auto_crown_transfer": true,
+    "width_ratio": 0.5,
+    "height_ratio": 0.5,
+    "city_ratio": 0.9230632486457618,
+    "mountain_ratio": 0.5988715953307393,
+    "swamp_ratio": 0,
+    "speed": 1,
+    "allow_team": false,
+    "fog": false,
+    "multi_line": true,
+    "map_token": "multiline-replay-fixture",
+    "map_mode": "random",
+    "map_region": "china",
+    "player_names": ["alice", "bob"],
+    "player_teams": [1, 2],
+    "map_size_version": 2,
+    "map_size": "normal"
+  },
+  "total_turns": 249,
+  "player_ops": [
+    [
+      {
+        "op": "w",
+        "n": 240
+      },
+      {
+        "op": "q",
+        "actions": [
+          {
+            "kind": "m",
+            "x": 23,
+            "y": 1,
+            "dx": 22,
+            "dy": 1,
+            "mode": 1
+          },
+          {
+            "kind": "m",
+            "x": 23,
+            "y": 1,
+            "dx": 24,
+            "dy": 1,
+            "mode": 2
+          },
+          {
+            "kind": "b",
+            "x": 24,
+            "y": 1
+          },
+          {
+            "kind": "c",
+            "x": 24,
+            "y": 1
+          }
+        ]
+      },
+      {
+        "op": "q",
+        "actions": [
+          {
+            "kind": "m",
+            "x": 22,
+            "y": 1,
+            "dx": 21,
+            "dy": 1,
+            "mode": 2
+          }
+        ]
+      },
+      {
+        "op": "q",
+        "actions": [
+          {
+            "kind": "m",
+            "x": 24,
+            "y": 1,
+            "dx": 23,
+            "dy": 1,
+            "mode": 0
+          },
+          {
+            "kind": "m",
+            "x": 21,
+            "y": 1,
+            "dx": 22,
+            "dy": 1,
+            "mode": 2
+          }
+        ]
+      },
+      {
+        "op": "w",
+        "n": 6
+      }
+    ],
+    [
+      {
+        "op": "w",
+        "n": 248
+      },
+      {
+        "op": "r"
+      }
+    ]
+  ]
+}

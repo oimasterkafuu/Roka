@@ -280,7 +280,18 @@ export interface ReplayPlayerOpCrownTransfer {
   y: number;
 }
 
+/** Successful actions in execution order; one batch consumes exactly one tick. */
+export type ReplayExecutedOp =
+  | { kind: 'm'; x: number; y: number; dx: number; dy: number; mode: MoveMode }
+  | { kind: 'b' | 'c'; x: number; y: number };
+
+export interface ReplayPlayerOpBatch {
+  op: 'q';
+  actions: ReplayExecutedOp[];
+}
+
 export type ReplayPlayerOp =
+  | ReplayPlayerOpBatch
   | ReplayPlayerOpSelect
   | ReplayPlayerOpMove
   | ReplayPlayerOpBuild
@@ -290,7 +301,7 @@ export type ReplayPlayerOp =
   | ReplayPlayerOpCrownTransfer;
 
 export interface ReplayActionData {
-  version: 'ops-v1';
+  version: 'ops-v1' | 'ops-v2';
   meta: ReplayMeta;
   total_turns: number;
   player_ops: ReplayPlayerOp[][];

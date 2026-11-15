@@ -164,7 +164,7 @@ export class ReplayStore {
   }
 
   /**
-   * 读取回放的原始存储文件（ops-v1 操作流，几百字节），用于“下载回放”。
+   * 读取回放的原始存储文件（ops-v1 / ops-v2 操作流），用于“下载回放”。
    */
   async readRawReplay(id: string): Promise<Buffer> {
     return readFile(this.resolveReplayPath(id, REPLAY_EXT));
@@ -212,12 +212,12 @@ export class ReplayStore {
   }
 
   /**
-   * 将上传的原始回放文件（ops-v1 操作流）解码并重建为可观看的回放数据。
+   * 将上传的原始回放文件（ops-v1 / ops-v2 操作流）解码并重建为可观看的回放数据。
    * 版本不符或数据损坏时抛错，由上层返回“不兼容”。
    */
   async buildReplayFromRaw(content: Buffer): Promise<ReplayData> {
     const replay = await decodeReplayBinary<ReplayActionData>(content);
-    if (!replay || replay.version !== 'ops-v1') {
+    if (!replay || (replay.version !== 'ops-v1' && replay.version !== 'ops-v2')) {
       throw new Error('回放版本不兼容。');
     }
     return this.buildReplayFromActions(replay);

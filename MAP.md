@@ -488,3 +488,10 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 独立并行、同格依赖、环与客户端防重发；`training/arena.cjs` 支持真实 v3 多线与
 逐次成功操作计数，`training/multiline-benchmark.cjs` 输出仓库外冻结基线 A/B、
 未决率和源码哈希。参考源码与结果仅本地使用，不入库。
+
+### 多线争锋回放录制与重建
+
+- `src/game-engine.ts` 每 Tick 按实战执行顺序采集所有成功动作，失效出队只通过实时 `lst_moves` 确认；保持全局队列按入度并行与单线每玩家每 Tick 最多一个成功动作的规则。
+- `src/game-engine/replay-turns.ts` 写 `ops-v2`：`q.actions` 是一个 Tick 内成功移动/建造/升级的有序数组（坐标、mode，不写战线编号或实时 seq），空 Tick 用 `w` 压缩。`replay-scheduling.ts` 将其还原为 Tick 批次；重建按记录顺序结算成功动作，不再次拓扑调度已经摘除的队列。单线批次超过一个动作会拒绝。
+- `GameEngine.buildReplayFromActions`（当前回放重建入口）与 `ReplayStore.buildReplayFromRaw` 同时读取旧 `ops-v1` 选择/移动/等待/投降/转让流和新 `ops-v2`。RPB4 编码、浏览器差分消费与 seek 保持原格式；旧 RPB1/RPB2 仍可读（RPB1 无孤军字段）。历史文件中已漏录的并行动作无法推导恢复。
+- `scripts/test-multiline-replay.mjs` / `scripts/fixtures/multiline-replay.json`：固定地图真实引擎对局、正常终局录制，250 帧逐 Tick 比对地图/兵力/孤军/排行榜与正反补丁；覆盖同 Tick 独立动作、链等待、移动后建造升级、失效确认、单线及旧格式。`pnpm run test:multiline-replay` 纳入 `pnpm test`；加 `--browser` 使用临时 Fastify 服务、真实用户鉴权与 `/api/replay-upload` 转码，再用 Playwright/Chromium 加载真实 `static/game.html` 与全部回放脚本，验收 seek/自动播放与旧标量帧。通过 `ROKA_PLAYWRIGHT_MODULE` / `CHROMIUM_PATH` 指定本地浏览器依赖，`ROKA_REPLAY_ARTIFACT_DIR` 可导出原始 `.rpl` 与观看 `.rpb`，`ROKA_REPLAY_SCREENSHOT` 可保存验收截图。无生产请求。
