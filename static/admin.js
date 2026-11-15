@@ -347,6 +347,87 @@ $('#ban-confirm').on('click', async function () {
   }
 });
 
+/* ---------- 聊天审计（所有内容用 text 渲染，网址不自动链接） ---------- */
+var chatBefore = null;
+async function loadChatAudit(older) {
+  if (!older) chatBefore = null;
+  var query = new URLSearchParams({
+    username: $('#chat-user').val().trim(),
+    room: $('#chat-room').val().trim(),
+    candidates: $('#chat-candidates').prop('checked') ? '1' : '0',
+  });
+  if (chatBefore) query.set('before', String(chatBefore));
+  try {
+    var res = await fetch('/api/admin/chat-audit?' + query, { cache: 'no-store' });
+    if (!res.ok) throw new Error('审计查询失败或无权限。');
+    var data = await res.json();
+    var $body = $('#chat-body').empty();
+    data.items.forEach(function (entry) {
+      var $tr = $('<tr></tr>').appendTo($body);
+      $('<td></td>')
+        .text(fullTime(entry.at) + ' / ' + entry.room + ' / ' + (entry.gameId || '-'))
+        .appendTo($tr);
+      $('<td></td>').text(entry.username).appendTo($tr);
+      $('<td></td>').text(entry.text).appendTo($tr);
+      var $review = $('<td></td>').appendTo($tr);
+      if (entry.candidateAt) {
+        $('<p></p>')
+          .text(
+            '进房 ' +
+              fullTime(entry.joinedAt) +
+              '；离开 ' +
+              fullTime(entry.candidateAt) +
+              '；限聊至 ' +
+              fullTime(entry.mutedUntil),
+          )
+          .appendTo($review);
+        if (entry.reviewedAt) {
+          $('<p></p>')
+            .text(entry.reviewedBy + ' 已解除 / 复核 ' + fullTime(entry.reviewedAt))
+            .appendTo($review);
+        } else {
+          $('<button type="button" class="btn btn-secondary btn-sm">解除限聊 / 误判</button>')
+            .on('click', async function () {
+              try {
+                await apiPost('/api/admin/chat-release', { username: entry.username });
+                loadChatAudit(false);
+              } catch (err) {
+                $('#chat-error').text(err.message);
+              }
+            })
+            .appendTo($review);
+        }
+      }
+    });
+    if (data.items.length) chatBefore = data.items[data.items.length - 1].id;
+    $('#chat-older').prop('disabled', data.items.length < 100);
+    $('#chat-error').text(
+      data.items.length ? '本页 ' + data.items.length + ' 条；请勿外传聊天审计内容。' : '无匹配记录。',
+    );
+  } catch (err) {
+    $('#chat-error').text(err.message);
+  }
+}
+$('#chat-release-user').on('click', async function () {
+  var username = $('#chat-user').val().trim();
+  if (!username) {
+    $('#chat-error').text('请先填写精确用户名。');
+    return;
+  }
+  try {
+    await apiPost('/api/admin/chat-release', { username: username });
+    await loadChatAudit(false);
+  } catch (err) {
+    $('#chat-error').text(err.message);
+  }
+});
+$('#chat-search').on('click', function () {
+  loadChatAudit(false);
+});
+$('#chat-older').on('click', function () {
+  loadChatAudit(true);
+});
+
 /* ---------- 策略 Bot（仅超级管理员） ---------- */
 
 var botsCache = [];
@@ -488,6 +569,7 @@ $('#bots-refresh-btn').on('click', loadBots);
 
 loadViewer().then(function (ok) {
   if (ok) {
+    loadChatAudit(false);
     loadUsers().then(function () {
       // viewerIsSuperAdmin 由 loadUsers 填充；超管才展示策略 Bot 分区。
       if (viewerIsSuperAdmin) {

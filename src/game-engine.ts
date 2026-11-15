@@ -812,6 +812,10 @@ export class GameEngine {
     return buildFinalRankTeams(this.buildLeaderboard());
   }
 
+  getCompletionStats(): { turn: number; elapsedMs: number } {
+    return { turn: this.turn, elapsedMs: Math.max(0, Date.now() - this.startAt) };
+  }
+
   private buildGameResult(): GameResultEntry[] {
     const leaderboard = this.buildLeaderboard();
     const sorted = buildFinalRank(leaderboard);
@@ -1275,14 +1279,14 @@ export class GameEngine {
     return true;
   }
 
-  sendMessage(sid: string, data: { text: string; team: boolean }): void {
+  sendMessage(sid: string, data: { text: string; team: boolean }): boolean {
     const id = this.playerSidToIndex.get(sid);
     if (typeof id === 'undefined') {
-      return;
+      return false;
     }
     const text = data.text.trim();
     if (text.length === 0) {
-      return;
+      return false;
     }
     const uid = this.names[id];
     if (data.team) {
@@ -1291,10 +1295,11 @@ export class GameEngine {
           this.chatMessage(this.playerSids[i], 'sid', uid, id + 1, text, true);
         }
       }
-      return;
+      return true;
     }
 
     this.chatMessage(this.gid, 'room', uid, id + 1, text);
+    return true;
   }
 
   private sendSystemMessage(text: string): void {

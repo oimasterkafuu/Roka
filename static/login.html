@@ -96,6 +96,25 @@
     <script>
       var captchaId = '';
 
+      async function captureReferral() {
+        var params = new URLSearchParams(location.search);
+        var referrer = String(params.get('ref') || '');
+        if (!/^[A-Za-z0-9_]{3,20}$/.test(referrer)) return;
+        try {
+          await fetch('/api/referrals/click', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ referrer: referrer }),
+          });
+        } catch (err) {
+          return;
+        } finally {
+          history.replaceState(null, '', '/login');
+        }
+      }
+
+      var referralReady = captureReferral();
+
       async function refreshCaptcha(showErrorMessage) {
         try {
           const res = await fetch('/api/auth/captcha', { cache: 'no-store' });
@@ -134,6 +153,7 @@
           return;
         }
         try {
+          if (action === 'register') await referralReady;
           var website = String($('#auth-website').val() || '').trim();
           const res = await fetch('/api/auth/' + action, {
             method: 'POST',
