@@ -474,7 +474,8 @@ Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/front
 
 - `src/server/chat-moderation.ts`：公开聊天审计与账号聊天限流、早期发网址后迅速离开的候选检测、10 分钟限聊与管理员解除。`data/chat-audit.json` 为 0600 原子覆盖文件，不留备份；只保留必要字段及去除网址秘密的公开消息，7 天 / 2000 条 / 2 MiB 上限，启动与每分钟清理，队聊不存。
 - `src/server.ts`：成功进房、公开发言、退出对局及断线接入审计；游戏内发送通过 `GameEngine.sendMessage` 的 boolean 返回值确认接受后再记录。新增管理员专用 `GET /api/admin/chat-audit`（精确用户/房间/候选筛选、id 游标、100 条上限、no-store）与 `POST /api/admin/chat-release`；原解封同时解除限聊。队聊受账号限流/限聊但不审计。
-- `static/admin.html` / `static/admin.js`：聊天审计查询、候选时间证据与解除复核入口；沿用用户管理进行手动封禁。
+- `static/admin.html` / `static/admin.js`：聊天审计查询、候选时间证据与解除复核入口；沿用用户管理进行手动封禁。`static/styles/admin.css` 的 `.chat-audit` 作用域负责筛选输入、证据/复核状态、桌面固定列宽及 600px 以下逐条记录布局，公开消息仍仅以 text 渲染。
+- `scripts/test-chat-admin-ui.mjs`：`pnpm run test:chat-admin-ui`（纳入 `pnpm test`），Playwright Chromium + 临时静态服务器/合成 API 数据，实测 1440/390px 布局、computedStyle、溢出、pageerror、查询/游标/解除与空态/错误态；先 `pnpm exec playwright install chromium` 准备浏览器。可用 `CHAT_UI_OUTPUT=<目录>` 保存截图/JSON，`CHAT_UI_BASELINE=<git ref>` 采集旧版样式（仅采集，不运行新版布局断言）；`ROKA_PLAYWRIGHT_MODULE` 可指定已有 Playwright 模块。
 - `scripts/test-chat-moderation.mjs`、`scripts/test-chat-moderation-server.mjs`：`pnpm run test:chat-moderation`（纳入 `pnpm test`），临时数据与真实 HTTP/socket 回归策略、存储隐私/上限、权限、限聊/重连与解除、游戏聊天及队聊排除。
 - issue #137：`lobby-service.ts` 的 `lobbyHostActivity` 按房间保存当前非托管房主 sid 与活动时间；准备阶段 15 分钟无操作复用 `kickFromLobby` 清理并迁移房主，每分钟扫描。`recordLobbyActivity` 由 `server.ts` 的聊天/准备/换队/设置有效操作调用，心跳不续期；迁移、换绑、进入对局与终局清理旧期限。`static/game.html` 显示固定规则，`room_kick.reason` 由 `static/main.js` 提示后返回首页。`scripts/test-lobby-host-idle.mjs` 用假时钟驱动真实大厅与引擎覆盖期限、活动、迁移、清理、对局豁免及终局重置；纳入 `pnpm test`。
 
