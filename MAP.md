@@ -451,3 +451,5 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/frontline.cjs` 将其用于运输留守，`bot/campaign.cjs` 按局部预算推进；`test/maze-oscillation.test.cjs` 覆盖误报召回、运输关卡与局部攻城。路径均相对 `bot-template/anti-human-bot/`。
 
 - `scripts/test-asset-versioning-exit.mjs`：真实运行静态资源测试及临时故障副本，验证成功 exit 0、异常与断言失败 exit 1；纳入 `pnpm test`。SW VM 覆盖脚本版本、运行时配置优先及 window load 延迟注册。
+
+- Apex v3 多线（`bot-template/apex-bot/`）：`bot/controller.cjs` 的 `chooseBatch` 保留单线决策入口；`bot/multiline.cjs` 组合独立动作头、预演组合后的驻军安全，保留主攻/回防/经济送兵链并限制副线预算和低力度扩张，直接推冠与 51 建/101 升不设保守前置；`strategy.js` 按全局 seq 维护完整队列与重连 init 同步，换绑缺省模式标记时保留未结束对局的多线模式。`training/long-eval.cjs --multi-line true` 在真实引擎启用并行；`training/engine.cjs` 按真实成功操作统计所有副线动作。回归见 `test/multiline.test.cjs`（含单线真实终局哈希 parity），原 13×17 回放门槛不变。

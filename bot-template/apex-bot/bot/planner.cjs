@@ -445,7 +445,7 @@ function routeGuard(b, action) {
   if (!previewResult.ok || (previewResult.captured === false && b.enemy(to))) {
     return { blocked: false, anchor: -1, cut: -1 };
   }
-  if (crownFinish(b, action, previewResult)) return { blocked: false, anchor: -1, cut: -1 };
+  if ((b.multiLine && previewResult.captured && b.enemy(to) && b.kind(to) === 'crown') || crownFinish(b, action, previewResult)) return { blocked: false, anchor: -1, cut: -1 };
   const after = previewResult.after;
   const cuts = cutAnalysis(after, after.playerId);
   let blocked = false;
@@ -632,7 +632,7 @@ function safeMove(
     const send = computePush(b, from, to, mode);
     if (send <= 0 || (enemy && send <= targetArmy)) continue;
     const action = actionCoordinates(b, from, to, mode);
-    if (b.enemy(to) && b.kind(to) === 'crown' && crownFinish(b, action)) return action;
+    if (b.enemy(to) && b.kind(to) === 'crown' && (b.multiLine || crownFinish(b, action))) return action;
     const left = b.army[from] - send;
     const arrive = enemy ? send - targetArmy : targetArmy + send;
     // Check the payload, not just the source stack or gather phase. A large
@@ -1290,7 +1290,13 @@ function economy(b,m,own,ed,goal) {
         continue;
       }
       const kind = b.kind(at);
-      const need = kind === 'city' ? BUILD_COST : BUILD_COST * 2;
+      const need = b.multiLine
+        ? kind === 'city'
+          ? BUILD_COST * 2 + 1
+          : BUILD_COST + 1
+        : kind === 'city'
+          ? BUILD_COST
+          : BUILD_COST * 2;
       if (b.army[at] >= need) {
         m.buildPlan.stalled = 0;
         return {
@@ -1441,7 +1447,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
       .filter((at) => !reserved.has(at) && frontField && frontField.distance[at] > 0 && frontField.distance[at] <= 5 &&
         ed.distance[at] >= frontDistance && ['plain', 'city'].includes(b.kind(at)))
       .map((at) => {
-        const need = b.kind(at) === 'city' ? BUILD_COST + 1 : BUILD_COST * 2 + 1;
+        const need = (b.multiLine ? (b.kind(at) === 'city' ? BUILD_COST * 2 : BUILD_COST) : b.kind(at) === 'city' ? BUILD_COST : BUILD_COST * 2) + 1;
         const local = field(b, [at], frontCanEnter);
         const localSpare = own.reduce((sum, source) => {
           if (source === at || !Number.isFinite(local.distance[source]) || local.distance[source] > 6) return sum;
@@ -1488,7 +1494,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
             distances.push(distances[h] + 1);
           }
       }
-      if (funds < (b.kind(at) === 'city' ? BUILD_COST + 1 : BUILD_COST * 2 + 1)) continue;
+      if (funds < ((b.multiLine ? (b.kind(at) === 'city' ? BUILD_COST * 2 : BUILD_COST) : b.kind(at) === 'city' ? BUILD_COST : BUILD_COST * 2) + 1)) continue;
       state.site = at;
       state.front = false;
       break;
@@ -1497,7 +1503,7 @@ function sustainEconomy(b, m, own, ed, enemies) {
   if (state.site < 0) return null;
   const at = state.site,
     kind = b.kind(at),
-    need = kind === 'city' ? BUILD_COST + 1 : BUILD_COST * 2 + 1;
+    need = (b.multiLine ? (kind === 'city' ? BUILD_COST * 2 : BUILD_COST) : kind === 'city' ? BUILD_COST : BUILD_COST * 2) + 1;
   let decision;
   if (b.army[at] >= need) {
     decision = {
@@ -1741,6 +1747,7 @@ function chooseCampaign(b,m,own) {
       if (m.blocked && m.blocked.crown === crown && b.turn < m.blocked.until) continue;
       const f=field(b,[crown]);
       for(const at of own)if(b.army[at]>2 && Number.isFinite(f.distance[at])){
+        if (b.multiLine && b.size >= 800 && f.distance[at] > 24 && b.army[at] < Math.max(80, f.distance[at] * 3)) continue;
         const path = route(f, at);
         const resistance = path.slice(1).reduce((sum, cell) => sum + (b.friendly(cell) ? 0 : b.army[cell] + 1), 0);
         const readiness = b.army[at] - resistance;
@@ -2070,6 +2077,12 @@ function plan(b,m) {
       m.musterWaitTurns = 0;
     }
   }
+  if (b.multiLine) {
+    const immediate = tactical(b, own);
+    if (immediate?.branch === 'crown') return immediate;
+    const sever = strategicCut(b, own);
+    if (sever) return sever;
+  }
   const anchorGuard = anchorDefense(b);
   if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
@@ -2237,3 +2250,11 @@ function plan(b,m) {
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
 module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut};
+
+// Independent military lanes keep their own defence delivery cursor. They
+// must never overwrite the main campaign's frozen logistics state.
+function parallelTactics(b, m, own) {
+  const lane = m.parallelDefense || (m.parallelDefense = { threatDistance: Object.create(null) });
+  return [tactical(b, own), strategicCut(b, own), anchorDefense(b), defense(b, lane, own), cutDefense(b, lane, own)].filter(Boolean);
+}
+module.exports.parallelTactics = parallelTactics;

@@ -30,8 +30,12 @@ function kindOf(code) {
   return 'unknown';
 }
 
-function indexOf(m, x, y) { return x * m + y; }
-function coordinates(m, index) { return { x: Math.floor(index / m), y: index % m }; }
+function indexOf(m, x, y) {
+  return x * m + y;
+}
+function coordinates(m, index) {
+  return { x: Math.floor(index / m), y: index % m };
+}
 
 const cutCache = new WeakMap();
 const adjacencyCache = new Map();
@@ -57,7 +61,8 @@ function adjacencyFor(n, m, size) {
     return Object.freeze(next);
   });
   adjacencyCache.set(key, adjacency);
-  while (adjacencyCache.size > ADJACENCY_CACHE_LIMIT) adjacencyCache.delete(adjacencyCache.keys().next().value);
+  while (adjacencyCache.size > ADJACENCY_CACHE_LIMIT)
+    adjacencyCache.delete(adjacencyCache.keys().next().value);
   return adjacency;
 }
 
@@ -72,22 +77,35 @@ function makeBoard(raw, playerId) {
   const army = Array.isArray(raw.army_cnt) ? raw.army_cnt.slice() : raw.army.slice();
   if (grid.length !== size || army.length !== size) throw new Error('incomplete board arrays');
   const fog = Array.isArray(raw.fog) && raw.fog.length === size ? raw.fog.slice() : Array(size).fill(0);
-  const isolated = Array.isArray(raw.isolated) && raw.isolated.length === size ? raw.isolated.slice() : Array(size).fill(0);
-  const teams = raw.teams instanceof Map
-    ? new Map(raw.teams)
-    : new Map((raw.leaderboard || []).map((entry) => [Number(entry.id), Number(entry.team) || Number(entry.id)]));
+  const isolated =
+    Array.isArray(raw.isolated) && raw.isolated.length === size ? raw.isolated.slice() : Array(size).fill(0);
+  const teams =
+    raw.teams instanceof Map
+      ? new Map(raw.teams)
+      : new Map(
+          (raw.leaderboard || []).map((entry) => [Number(entry.id), Number(entry.team) || Number(entry.id)]),
+        );
 
   // A bounded per-board adjacency cache.  The board itself is capped at 100k
   // cells, so retaining four short arrays per cell is predictable and much
   // cheaper than repeatedly allocating neighbour lists in the planner.
   // Derived previews pass the original board's private adjacency cache in
   // `_adjacency`; this avoids rebuilding O(n*m) neighbour arrays per action.
-  const adjacency = Array.isArray(raw._adjacency) && raw._adjacency.length === size
-    ? raw._adjacency
-    : adjacencyFor(n, m, size);
+  const adjacency =
+    Array.isArray(raw._adjacency) && raw._adjacency.length === size
+      ? raw._adjacency
+      : adjacencyFor(n, m, size);
 
   const board = {
-    n, m, size, grid, army, fog, isolated, teams,
+    n,
+    m,
+    size,
+    grid,
+    army,
+    fog,
+    isolated,
+    teams,
+    multiLine: raw.multiLine === true || raw.multi_line === true,
     turn: Number(raw.turn ?? -1),
     playerId: Number(playerId ?? raw.playerId) || 0,
     dead: Boolean(raw.dead),
@@ -130,7 +148,8 @@ function anchorCells(board, owner) {
   const anchors = [];
   for (let at = 0; at < board.size; at += 1) {
     const cellOwner = board.owner(at);
-    if (cellOwner > 0 && board.teamOf(cellOwner) === team && ['city', 'crown'].includes(board.kind(at))) anchors.push(at);
+    if (cellOwner > 0 && board.teamOf(cellOwner) === team && ['city', 'crown'].includes(board.kind(at)))
+      anchors.push(at);
   }
   return anchors;
 }
@@ -190,7 +209,10 @@ function reconstruct(parent, start, goal) {
 function cutAnalysis(board, owner = board.playerId) {
   const key = board.teamOf(owner);
   let byTeam = cutCache.get(board);
-  if (!byTeam) { byTeam = new Map(); cutCache.set(board, byTeam); }
+  if (!byTeam) {
+    byTeam = new Map();
+    cutCache.set(board, byTeam);
+  }
   if (byTeam.has(key)) return byTeam.get(key);
 
   const cells = cellsForTeam(board, owner);
@@ -209,14 +231,16 @@ function cutAnalysis(board, owner = board.playerId) {
   const root = board.size;
   const disc = new Int32Array(board.size + 1);
   const low = new Int32Array(board.size + 1);
-  const parent = new Int32Array(board.size + 1); parent.fill(-1);
+  const parent = new Int32Array(board.size + 1);
+  parent.fill(-1);
   const subLand = new Uint32Array(board.size + 1);
   const subMass = new Float64Array(board.size + 1);
   const tout = new Int32Array(board.size + 1);
   const tin = new Int32Array(board.size + 1);
   let time = 0;
   const stack = [{ v: root, next: 0 }];
-  disc[root] = low[root] = ++time; tin[root] = disc[root];
+  disc[root] = low[root] = ++time;
+  tin[root] = disc[root];
 
   const getNeighbor = (v, pos) => {
     if (v === root) return pos < anchors.length ? anchors[pos] : -1;
@@ -225,7 +249,8 @@ function cutAnalysis(board, owner = board.playerId) {
     if (pos === list.length && anchorSet.has(v)) return root;
     return -1;
   };
-  const degree = (v) => v === root ? anchors.length : board.neighbors(v).length + (anchorSet.has(v) ? 1 : 0);
+  const degree = (v) =>
+    v === root ? anchors.length : board.neighbors(v).length + (anchorSet.has(v) ? 1 : 0);
   const valid = (v) => v === root || cells.has(v);
   while (stack.length) {
     const frame = stack[stack.length - 1];
@@ -267,7 +292,16 @@ function cutAnalysis(board, owner = board.playerId) {
   }
 
   const separates = (removed, at) => {
-    if (!Number.isInteger(removed) || !Number.isInteger(at) || removed === at || removed < 0 || removed >= board.size || at < 0 || at >= board.size) return false;
+    if (
+      !Number.isInteger(removed) ||
+      !Number.isInteger(at) ||
+      removed === at ||
+      removed < 0 ||
+      removed >= board.size ||
+      at < 0 ||
+      at >= board.size
+    )
+      return false;
     const t = tin[at];
     if (!t) return false;
     return intervals[removed].some(([start, end]) => t >= start && t <= end);
@@ -291,7 +325,8 @@ function countOwner(board, owner, kind = null) {
 
 function totalArmy(board, owner) {
   let total = 0;
-  for (let at = 0; at < board.size; at += 1) if (board.owner(at) === owner) total += Math.max(0, board.army[at]);
+  for (let at = 0; at < board.size; at += 1)
+    if (board.owner(at) === owner) total += Math.max(0, board.army[at]);
   return total;
 }
 

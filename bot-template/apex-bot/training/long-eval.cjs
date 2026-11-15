@@ -61,6 +61,7 @@ function config(options = {}) {
     throw new Error('seats must be a nonempty array of booleans');
   return {
     profile,
+    multiLine: String(options.multiLine ?? env.APEX_EVAL_MULTI_LINE ?? 'false') === 'true',
     seeds: integer(options.seeds ?? env.APEX_EVAL_SEEDS, 8, 1, 10000),
     seedOffset: integer(options.seedOffset ?? env.APEX_EVAL_OFFSET, 0, 0, 10000000),
     seedPrefix: String(options.seedPrefix ?? env.APEX_EVAL_PREFIX ?? 'apex-long'),
@@ -93,6 +94,7 @@ function makeJobs(options) {
             for (const swap of options.seats) {
               jobs.push({
                 mode,
+                multiLine: options.multiLine,
                 mapSize,
                 opponent,
                 fog,
@@ -403,6 +405,7 @@ async function evaluate(options = {}) {
 }
 
 const CLI_FIELDS = {
+  'multi-line': 'multiLine',
   seeds: 'seeds',
   offset: 'seedOffset',
   prefix: 'seedPrefix',
@@ -452,6 +455,7 @@ Run deterministic map seeds against the real server engine in worker threads.
 All turn limits and results count server ticks (2 ticks = 1 displayed game turn).
 CLI values override APEX_EVAL_* environment variables.
 
+  --multi-line BOOL  Enable v3 global queue parallel execution (default false)
   --seeds N          Seeds per map (default ${seedDefault}; APEX_EVAL_SEEDS)
   --offset N         First seed index (APEX_EVAL_OFFSET)
   --prefix TEXT      Seed namespace (APEX_EVAL_PREFIX)

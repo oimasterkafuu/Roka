@@ -13,7 +13,10 @@ function run(job) {
   function apexPolicy(seat) {
     const controller = createController(seat + 1);
     controllers[seat] = controller;
-    return (state) => controller.choose(state);
+    return (state) =>
+      controller.chooseBatch
+        ? controller.chooseBatch({ ...state, multiLine: job.multiLine === true })
+        : controller.choose(state);
   }
   policies[ownSeat] = apexPolicy(ownSeat);
   if (opponent === 'simple') {
@@ -24,9 +27,16 @@ function run(job) {
     throw new Error(`unsupported opponent: ${opponent}`);
   }
   const result = runMatch({
-    mapMode: job.mode || 'random', seed: job.seed, maxTurns: job.turns || 600,
-    mapSize: job.mapSize ?? 0.5, fog: Boolean(job.fog), policies, adapters,
-    traceLimit: job.traceLimit ?? 120, decisionTimeoutMs: job.decisionTimeoutMs || 40,
+    mapMode: job.mode || 'random',
+    seed: job.seed,
+    maxTurns: job.turns || 600,
+    mapSize: job.mapSize ?? 0.5,
+    fog: Boolean(job.fog),
+    policies,
+    adapters,
+    engineConfig: { multi_line: job.multiLine === true },
+    traceLimit: job.traceLimit ?? 120,
+    decisionTimeoutMs: job.decisionTimeoutMs || 40,
   });
   const apex = result.decision[ownSeat];
   const opponentMetric = result.decision[1 - ownSeat];
@@ -62,14 +72,15 @@ function run(job) {
   return result;
 }
 
-if (parentPort) parentPort.on('message', (job) => {
-  try {
-    const result = run(job);
-    result.ownWon = result.winner === result.ownSeat;
-    parentPort.postMessage({ ok: true, result });
-  } catch (error) {
-    parentPort.postMessage({ ok: false, error: error instanceof Error ? error.stack : String(error), job });
-  }
-});
+if (parentPort)
+  parentPort.on('message', (job) => {
+    try {
+      const result = run(job);
+      result.ownWon = result.winner === result.ownSeat;
+      parentPort.postMessage({ ok: true, result });
+    } catch (error) {
+      parentPort.postMessage({ ok: false, error: error instanceof Error ? error.stack : String(error), job });
+    }
+  });
 
 module.exports = { run };
