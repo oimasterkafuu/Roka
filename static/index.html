@@ -814,7 +814,9 @@
           );
           items.forEach(function (item, index) {
             var $li = $('<li></li>');
-            $('<span class="lb-rank"></span>').appendTo($li);
+            $('<span class="lb-rank"></span>')
+              .text(index + 1)
+              .appendTo($li);
             var $name = $('<span class="lb-name"></span>').appendTo($li);
             userLink(item.username, item.colorClass, item.title, item.admin, item.banned).appendTo($name);
             var $rating = $('<span class="lb-rating"></span>').appendTo($li);
