@@ -1824,6 +1824,7 @@ const boot = async (): Promise<void> => {
       // 服务端不做 bot/人类分池修正：换队请求按原样生效，由成员自行决定队伍。
 
       let nickname = username;
+      lobbyService.recordLobbyActivity(socket.id);
       player.team = team;
       if (team === 0) {
         player.ready = false;
@@ -1865,6 +1866,7 @@ const boot = async (): Promise<void> => {
 
       for (const player of players) {
         if (player.sid === socket.id) {
+          lobbyService.recordLobbyActivity(socket.id);
           player.ready = player.team !== 0 && Boolean(data.ready);
           break;
         }
@@ -2043,6 +2045,7 @@ const boot = async (): Promise<void> => {
         if (changed.length === 0) {
           // 仅种子自定义标记变化（输入与当前种子相同）：静默保存标记并同步提示状态。
           if (nextConf.map_token_custom !== oldConf.map_token_custom) {
+            lobbyService.recordLobbyActivity(socket.id);
             lobbyService.lobbyConfig.set(gid, nextConf);
             lobbyService.emitRoomUpdate(io, gid);
           }
@@ -2065,6 +2068,7 @@ const boot = async (): Promise<void> => {
           playingCount += 1;
         }
 
+        lobbyService.recordLobbyActivity(socket.id);
         lobbyService.lobbyConfig.set(gid, nextConf);
 
         lobbyService.emitRoomUpdate(io, gid);
@@ -2117,6 +2121,7 @@ const boot = async (): Promise<void> => {
         }
       }
 
+      lobbyService.recordLobbyActivity(socket.id);
       lobbyService.sendSystemMessage(io, lobbyService.getLobbyVal(lobbyId), 'room', uid, color, text);
       lobbyService.relayGlobalChat(io, lobbyService.getLobbyVal(lobbyId), lobbyId, uid, color, text);
     });
