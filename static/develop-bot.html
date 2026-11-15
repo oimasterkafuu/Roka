@@ -315,7 +315,11 @@ socket.on('set_id', (id) => {
           </tr>
           <tr>
             <th><code>room_kick</code></th>
-            <td><code>{}</code>。因心跳或停留限制被移出房间；连接仍保留，可再次进房。</td>
+            <td>
+              <code>{ reason?: string }</code>。因心跳、停留限制或准备阶段房主连续 15
+              分钟无操作被移出房间；reason
+              为提示文案。房主的聊天、准备、换队或设置操作重新计时，机械心跳不续期，对局中不执行。连接仍保留，可再次进房。
+            </td>
           </tr>
           <tr>
             <th><code>deploy_queued</code></th>
