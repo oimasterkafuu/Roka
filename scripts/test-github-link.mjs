@@ -1071,6 +1071,7 @@ async function testIntegration() {
   assert.equal(listedStarredPost.comments[0].authorInfo.starred, starColors.json.colors.bob.starred);
   assert.equal(listedPlainPost.authorInfo.starred, starColors.json.colors.bob.starred);
   assert.equal(listedPlainPost.comments[0].authorInfo.starred, starColors.json.colors.alice.starred);
+  await testGuestFeedStarRefreshBrowser(server.baseUrl, api, starredPost.json.post.id);
   await testProfileStarInitialBrowser(server.baseUrl, true);
 
   const badState = await api('/api/auth/github/callback?code=alice-code&state=definitely-wrong', {
@@ -1239,6 +1240,158 @@ async function testIntegration() {
   log(
     'passed spawned OAuth, public stargazers, signed star webhooks, local refresh, DTO and persistence checks',
   );
+}
+
+async function testGuestFeedStarRefreshBrowser(baseUrl, api, triggerPostId) {
+  const { chromium } = require(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
+  const browser = await chromium.launch({
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+    headless: true,
+    args: ['--no-sandbox'],
+  });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors = [];
+    const profileRequests = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.startsWith('/api/profile/')) {
+        profileRequests.push(request.url());
+      }
+    });
+    const feed = {
+      id: 'guest-star-refresh-post',
+      author: 'alice',
+      authorInfo: {
+        colorClass: 'rt-admin',
+        title: 'Headquarters',
+        admin: true,
+        banned: false,
+        starred: true,
+      },
+      text: 'guest star refresh',
+      html: 'guest star refresh',
+      time: Date.now(),
+      likes: [],
+      comments: [
+        {
+          id: 'guest-star-refresh-comment',
+          author: 'bob',
+          authorInfo: {
+            colorClass: 'rt-green',
+            title: '',
+            admin: false,
+            banned: false,
+            starred: true,
+          },
+          text: 'comment star refresh',
+          html: 'comment star refresh',
+          time: Date.now(),
+          canManage: false,
+        },
+      ],
+      canManage: false,
+    };
+    const fulfillFeed = (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [feed], page: 1, pages: 1 }),
+      });
+    await page.route('**/api/feeds?*', fulfillFeed);
+    await page.route('**/api/leaderboard', (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [] }) }),
+    );
+    await page.route('**/api/online', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ count: 0, items: [] }),
+      }),
+    );
+    const socketConnected = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.status() === 200 &&
+        url.pathname === '/socket.io/' &&
+        url.searchParams.get('transport') === 'polling' &&
+        url.searchParams.has('sid')
+      );
+    });
+    await page.goto(`${baseUrl}/`);
+    const feedAuthor = page.locator('#feed-list .feed-author[data-username="alice"]');
+    const commentAuthor = page.locator('#feed-list .comment-author[data-username="bob"]');
+    await feedAuthor.locator('.username-star-initial').waitFor({ state: 'attached' });
+    await commentAuthor.locator('.username-star-initial').waitFor({ state: 'attached' });
+    await socketConnected;
+    assert.equal(await page.evaluate(() => document.cookie.includes('auth_token=')), false);
+    assert.deepEqual(profileRequests, [], 'cold guest feed rendering must not visit a profile API');
+
+    const assertStar = async (locator, name, starred, colorClass) => {
+      assert.equal(await locator.textContent(), name);
+      assert.match(await locator.getAttribute('class'), new RegExp(`(?:^|\\s)${colorClass}(?:\\s|$)`));
+      const initial = locator.locator('.username-star-initial');
+      assert.equal(await initial.count(), starred ? 1 : 0);
+      if (starred) {
+        assert.equal(await initial.textContent(), name.charAt(0));
+        assert.equal(
+          await initial.evaluate((element) => getComputedStyle(element).color),
+          'rgb(184, 134, 11)',
+        );
+        assert.equal(await locator.evaluate((element) => element.lastChild.nodeType), 3);
+      }
+    };
+    await assertStar(feedAuthor, 'alice', true, 'rt-admin');
+    await assertStar(commentAuthor, 'bob', true, 'rt-green');
+    await feedAuthor.evaluate((element) => element.setAttribute('data-star-node', 'feed'));
+    await commentAuthor.evaluate((element) => element.setAttribute('data-star-node', 'comment'));
+
+    for (const starred of [false, true]) {
+      feed.authorInfo.starred = starred;
+      feed.comments[0].authorInfo.starred = starred;
+      const invalidated = await api('/api/feeds/like', {
+        method: 'POST',
+        user: 'carol',
+        body: { id: triggerPostId },
+      });
+      assert.equal(invalidated.status, 200);
+      for (const locator of [feedAuthor, commentAuthor]) {
+        if (starred) await locator.locator('.username-star-initial').waitFor({ state: 'attached' });
+        else await locator.locator('.username-star-initial').waitFor({ state: 'detached' });
+      }
+      await assertStar(feedAuthor, 'alice', starred, 'rt-admin');
+      await assertStar(commentAuthor, 'bob', starred, 'rt-green');
+      assert.equal(await feedAuthor.getAttribute('data-star-node'), 'feed');
+      assert.equal(await commentAuthor.getAttribute('data-star-node'), 'comment');
+    }
+
+    await page.route('**/api/profile/alice/feeds?*', fulfillFeed);
+    feed.authorInfo.starred = true;
+    feed.comments[0].authorInfo.starred = true;
+    await page.goto(`${baseUrl}/u/alice`);
+    await page.waitForFunction(() => {
+      const main = document.querySelector('#profile-main');
+      return main && getComputedStyle(main).display !== 'none';
+    });
+    await page.evaluate(() => {
+      usernameColorCache = {};
+      return loadFeeds(1);
+    });
+    await assertStar(
+      page.locator('#feed-list .feed-author[data-username="alice"]'),
+      'alice',
+      true,
+      'rt-admin',
+    );
+    await assertStar(
+      page.locator('#feed-list .comment-author[data-username="bob"]'),
+      'bob',
+      true,
+      'rt-green',
+    );
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+  log('passed cold guest feed Star rendering, socket refresh transitions and profile feed DTO consumption');
 }
 
 async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
@@ -1481,7 +1634,7 @@ function testStaticStarInitialPlacement() {
   assert.match(ratingCss, /\.username-star-initial/);
   assert.match(aboutHtml, /Star 支持/);
   assert.match(aboutHtml, /全站公共用户名组件/);
-  assert.match(aboutHtml, /id="stargazers-grid" class="contributors-grid"/);
+  assert.match(aboutHtml, /<div(?=[^>]*\bid="stargazers-grid")(?=[^>]*\bclass="contributors-grid")[^>]*>/);
   assert.equal((aboutHtml.match(/repeat\(auto-fit,/g) ?? []).length, 2);
   assert.match(aboutJs, /暂时还没有 Star，欢迎成为第一位支持者/);
   assert.match(aboutJs, /function aboutStargazerCard/);

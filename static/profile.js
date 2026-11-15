@@ -672,14 +672,8 @@ function createPostElement(post) {
   $item.data('raw-text', post.text);
 
   var $head = $('<div class="feed-item-head"></div>');
-  var $author = userLink(
-    post.author,
-    post.authorInfo && post.authorInfo.colorClass,
-    post.authorInfo && post.authorInfo.title,
-    post.authorInfo && post.authorInfo.admin,
-    post.authorInfo && post.authorInfo.banned,
-  );
-  $author.addClass('feed-author').appendTo($head);
+  var $author = usernameLink(post.author, post.authorInfo || null, 'feed-author');
+  $author.appendTo($head);
   $('<span class="feed-time"></span>')
     .text(relativeTime(post.time))
     .attr('title', fullTime(post.time))
