@@ -554,6 +554,61 @@ body.profile .points-level-next {
   color: #9aa4b2;
   font-size: 11px;
 }
+body.profile .ambassador-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+body.profile .ambassador-badge {
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #fff3c4;
+  color: #806000;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+body.profile .ambassador-summary {
+  margin: 0 0 8px;
+  color: #6b7686;
+  font-size: 13px;
+  line-height: 1.6;
+}
+body.profile .ambassador-wall-link {
+  color: teal;
+  font-size: 13px;
+  text-decoration: none;
+}
+body.profile #referral-share {
+  margin-top: 14px;
+  border-top: 1px solid #eef1f6;
+  padding-top: 12px;
+}
+body.profile .referral-share-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #6b7686;
+  font-size: 12px;
+}
+body.profile .referral-share-row {
+  display: flex;
+  gap: 6px;
+}
+body.profile .referral-share-row input {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+}
+body.profile .referral-share-row .btn {
+  flex-shrink: 0;
+}
+body.profile .referral-share-note {
+  margin: 8px 0 0;
+  color: #9aa4b2;
+  font-size: 11px;
+  line-height: 1.6;
+}
 @media (max-width: 1100px) {
   body.profile .profile-columns {
     grid-template-columns: minmax(0, 1fr);

@@ -22,7 +22,11 @@ interface AuthRequest extends FastifyRequest {
 class AuthService {
   private readonly jwtCookie = 'auth_token';
 
+  private readonly referralCookie = 'roka_referral';
+
   private readonly jwtTtlSeconds = 7 * 24 * 3600;
+
+  private readonly referralTtlSeconds = 30 * 24 * 3600;
 
   private readonly jwtSecret = process.env.JWT_SECRET ?? randomBytes(32).toString('hex');
 
@@ -51,7 +55,8 @@ class AuthService {
       normalizedPathname === '/api/auth/login' ||
       normalizedPathname === '/api/auth/register' ||
       normalizedPathname === '/api/auth/logout' ||
-      normalizedPathname === '/api/auth/captcha'
+      normalizedPathname === '/api/auth/captcha' ||
+      (normalizedPathname === '/api/referrals/click' && normalizedMethod === 'POST')
     ) {
       return true;
     }
@@ -78,6 +83,7 @@ class AuthService {
       '/develop',
       '/develop/bot',
       '/about',
+      '/ambassadors',
       '/tutorial',
       '/tutorial/interactive',
     ]);
@@ -99,6 +105,7 @@ class AuthService {
       '/api/feeds',
       '/api/map-examples',
       '/api/contributors',
+      '/api/ambassadors',
       '/api/version',
     ]);
     if (publicApiPaths.has(normalizedPathname)) {
@@ -119,6 +126,29 @@ class AuthService {
     }
     const cookies = this.parseCookies(cookieHeader);
     return cookies[this.jwtCookie] ?? null;
+  }
+
+  getReferralFromCookie(cookieHeader?: string): string | null {
+    if (!cookieHeader) return null;
+    return this.parseCookies(cookieHeader)[this.referralCookie] ?? null;
+  }
+
+  setReferralCookie(reply: FastifyReply, username: string): void {
+    const parts = [
+      `${this.referralCookie}=${encodeURIComponent(username)}`,
+      'Path=/',
+      `Max-Age=${this.referralTtlSeconds}`,
+      'HttpOnly',
+      'SameSite=Lax',
+    ];
+    if (process.env.NODE_ENV === 'production') parts.push('Secure');
+    this.appendCookie(reply, parts.join('; '));
+  }
+
+  clearReferralCookie(reply: FastifyReply): void {
+    const parts = [`${this.referralCookie}=`, 'Path=/', 'Max-Age=0', 'HttpOnly', 'SameSite=Lax'];
+    if (process.env.NODE_ENV === 'production') parts.push('Secure');
+    this.appendCookie(reply, parts.join('; '));
   }
 
   signAuthToken(username: string, sessionId: string): string {
@@ -175,7 +205,7 @@ class AuthService {
     if (process.env.NODE_ENV === 'production') {
       parts.push('Secure');
     }
-    reply.header('Set-Cookie', parts.join('; '));
+    this.appendCookie(reply, parts.join('; '));
   }
 
   clearAuthCookie(reply: FastifyReply): void {
@@ -183,7 +213,7 @@ class AuthService {
     if (process.env.NODE_ENV === 'production') {
       parts.push('Secure');
     }
-    reply.header('Set-Cookie', parts.join('; '));
+    this.appendCookie(reply, parts.join('; '));
   }
 
   attachSocketServer(io: SocketIOServer): void {
@@ -238,6 +268,12 @@ class AuthService {
       }
       this.ioRef.sockets.sockets.get(id)?.disconnect(true);
     }
+  }
+
+  private appendCookie(reply: FastifyReply, cookie: string): void {
+    const current = reply.getHeader('Set-Cookie');
+    const cookies = Array.isArray(current) ? current.map(String) : current ? [String(current)] : [];
+    reply.header('Set-Cookie', [...cookies, cookie]);
   }
 
   private parseCookies(cookieHeader = ''): Record<string, string> {
