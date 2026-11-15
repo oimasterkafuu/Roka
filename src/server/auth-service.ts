@@ -110,6 +110,7 @@ class AuthService {
       '/api/feeds',
       '/api/map-examples',
       '/api/contributors',
+      '/api/stargazers',
       '/api/ambassadors',
       '/api/version',
     ]);

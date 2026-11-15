@@ -11,7 +11,7 @@ block head
   style.
     .contributors-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
       gap: 12px;
       margin-top: 14px;
     }
@@ -61,7 +61,8 @@ block head
     .contributor-roka-link:hover {
       text-decoration: underline;
     }
-    #contributors-status {
+    #contributors-status,
+    #stargazers-status {
       margin-top: 10px;
       color: #5c6675;
     }
@@ -71,7 +72,7 @@ block head
     }
     @media (max-width: 640px) {
       .contributors-grid {
-        grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
         gap: 8px;
       }
       .contributor-link {
@@ -126,6 +127,11 @@ block content
           rel='noopener noreferrer'
         ) Contributors 完整名单
         | 。
+    section.doc-panel(aria-labelledby='stargazers-title')
+      h2#stargazers-title Star 支持者
+      p 感谢每一位在 GitHub 为 Roka 点亮 Star 的支持者。
+      p#stargazers-status(role='status') 正在加载 Star 支持者名单…
+      #stargazers-grid.contributors-grid
     section.doc-panel
       h2 来源与参考
       p 以下信息用于致谢与许可证合规说明，便于追溯核心玩法、实现参考和协议来源。
