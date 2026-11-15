@@ -497,6 +497,11 @@ class LobbyService {
    * 累计超过 LOBBY_MAX_DWELL_MS 的成员。超限者收到 room_kick 并跳回首页；
    * 对局进行中不打断，待终局回到准备阶段后检查。
    */
+  stopLobbyHeartbeatSweep(): void {
+    clearInterval(this.heartbeatSweepTimer);
+    this.heartbeatSweepTimer = undefined;
+  }
+
   startLobbyHeartbeatSweep(io: SocketIOServer): void {
     if (this.heartbeatSweepTimer) {
       return;
