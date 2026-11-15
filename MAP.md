@@ -458,3 +458,11 @@ Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/front
 
 - `ReplayActionData.afk_surrenders` 是 ops-v1 的可选 `[tick, zero-based player index][]` 事件表；缺省为空，旧 `r` 操作仍在 Tick 前执行。AFK 投降发生在移动/连通之后，单独记录在当前 Tick，避免下一 Tick 未执行时丢失终局事件；重建 `gameTick` 在相同阶段应用事件，不依赖重建时的墙上时间。RPB4 编码与客户端格式不变；新原始文件具有新内容哈希，不复用旧文件的观看缓存。旧文件未记录的 AFK 事件无法恢复。
 - `scripts/test-replay-termination.mjs`：真实引擎 FFA/组队 AFK 终局、中途淘汰与手动投降，逐帧比对地图、兵力、孤军、排行榜与结束标记，并用真实 RPB 解码器验证终局；`scripts/fixtures/replay-143-danrgjM9hfR7.rpl` 为公开原始 ops 证据，断言 Tick 600 未终局且重建至 Tick 2151。
+
+Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局队列与
+`next_seq`/`lst_moves` 摘除确认；`bot/client.cjs` 按开关选择单线或多动作发送；
+`bot/multiline.cjs` 分配独立主攻/截断/回防/建设/扩张预算并保留待确认链资源；
+`bot/planner.cjs` 支持排除已分配源点和目标；`test/multiline.test.cjs` 覆盖协议、
+独立并行、同格依赖、环与客户端防重发；`training/arena.cjs` 支持真实 v3 多线与
+逐次成功操作计数，`training/multiline-benchmark.cjs` 输出仓库外冻结基线 A/B、
+未决率和源码哈希。参考源码与结果仅本地使用，不入库。
