@@ -12,7 +12,7 @@ Bot(2.0) 是基于 [`apex-bot`](../apex-bot/) 的 1v1 策略模板，保留 Apex
 | apex | 128 | 90 / 5 / 33 | **70.3%** |
 | 合计 | 256 | 155 / 37 / 64 | **60.5%** |
 
-完整分地图/尺寸表格、特性说明、改进过程和复现命令见 [`FINAL_REPORT.md`](FINAL_REPORT.md)。原始汇总数据见 [`training/final-baseline.json`](training/final-baseline.json)。
+原始汇总数据见 [`training/final-baseline.json`](training/final-baseline.json)。
 
 ## 主要特性
 

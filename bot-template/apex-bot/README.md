@@ -80,7 +80,7 @@ construction analyses. Candidate expansion scores use the exact send calculation
 without constructing a full preview for every candidate; admitted actions still
 pass the sequential board safety checks. Caches are scoped to board objects and
 are never reused across server frames. Parallel execution alone is not evidence
-of higher win rate; see `REVIEW_FIX_RESULT.md` for the bounded real-engine A/B.
+of higher win rate.
 
 Multi-line campaigns also retain a newly selected post-capture breach instead
 of overwriting it with an empty generic selection. The regression checks that

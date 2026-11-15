@@ -892,6 +892,43 @@ async function testIntegration() {
     assert.deepEqual(Object.keys(appearance).sort(), ['admin', 'banned', 'colorClass', 'starred', 'title']);
   }
   assertNoSensitiveDto(starColors.json);
+
+  const starredPost = await api('/api/feeds', {
+    method: 'POST',
+    user: 'alice',
+    body: { text: 'Starred feed author' },
+  });
+  assert.equal(starredPost.status, 200);
+  assert.equal(starredPost.json.post.authorInfo.starred, starColors.json.colors.alice.starred);
+  const plainComment = await api('/api/feeds/comment', {
+    method: 'POST',
+    user: 'bob',
+    body: { id: starredPost.json.post.id, text: 'Plain feed commenter' },
+  });
+  assert.equal(plainComment.status, 200);
+  assert.equal(plainComment.json.comment.authorInfo.starred, starColors.json.colors.bob.starred);
+  const plainPost = await api('/api/feeds', {
+    method: 'POST',
+    user: 'bob',
+    body: { text: 'Plain feed author' },
+  });
+  assert.equal(plainPost.status, 200);
+  assert.equal(plainPost.json.post.authorInfo.starred, starColors.json.colors.bob.starred);
+  const starredComment = await api('/api/feeds/comment', {
+    method: 'POST',
+    user: 'alice',
+    body: { id: plainPost.json.post.id, text: 'Starred feed commenter' },
+  });
+  assert.equal(starredComment.status, 200);
+  assert.equal(starredComment.json.comment.authorInfo.starred, starColors.json.colors.alice.starred);
+  const feeds = await api('/api/feeds?limit=50');
+  assert.equal(feeds.status, 200);
+  const listedStarredPost = feeds.json.items.find((item) => item.id === starredPost.json.post.id);
+  const listedPlainPost = feeds.json.items.find((item) => item.id === plainPost.json.post.id);
+  assert.equal(listedStarredPost.authorInfo.starred, starColors.json.colors.alice.starred);
+  assert.equal(listedStarredPost.comments[0].authorInfo.starred, starColors.json.colors.bob.starred);
+  assert.equal(listedPlainPost.authorInfo.starred, starColors.json.colors.bob.starred);
+  assert.equal(listedPlainPost.comments[0].authorInfo.starred, starColors.json.colors.alice.starred);
   await testProfileStarInitialBrowser(server.baseUrl, true);
 
   const badState = await api('/api/auth/github/callback?code=alice-code&state=definitely-wrong', {
@@ -979,17 +1016,17 @@ async function testIntegration() {
     '/api/replays',
     '/api/online',
     '/api/users/search?q=',
+    '/api/feeds',
     '/api/profile/alice/feeds',
     '/api/profile/alice/replays',
   ];
   for (const route of publicRoutes) {
     const response = await api(route, { user: route === '/api/admin/users' ? 'alice' : undefined });
     assert.equal(response.status, 200, route);
-    assert.deepEqual(
-      forbiddenDisplayKeys(response.json),
-      [],
-      `${route} unexpectedly exposes GitHub/Star display data`,
+    const exposedKeys = forbiddenDisplayKeys(response.json).filter(
+      (key) => !(route.endsWith('/feeds') && key.endsWith('.authorInfo.starred')),
     );
+    assert.deepEqual(exposedKeys, [], `${route} unexpectedly exposes GitHub/Star display data`);
   }
 
   assert.deepEqual((await api('/api/auth/github/unlink', { method: 'POST', user: 'bob' })).json, {
@@ -1173,7 +1210,13 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
               {
                 id: 1,
                 author: 'alice',
-                authorInfo: { colorClass: 'rt-admin', title: 'Headquarters', admin: true, banned: false },
+                authorInfo: {
+                  colorClass: 'rt-admin',
+                  title: 'Headquarters',
+                  admin: true,
+                  banned: false,
+                  starred: true,
+                },
                 text: 'hello',
                 html: 'hello',
                 time: Date.now(),
@@ -1187,7 +1230,10 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
           }),
         }),
       );
-      await page.evaluate(() => loadFeeds(false));
+      await page.evaluate(() => {
+        delete usernameColorCache.alice;
+        return loadFeeds(false);
+      });
       const feedName = page.locator('#feed-list .feed-author[data-username="alice"]');
       await feedName.locator('.username-star-initial').waitFor();
       assert.equal(await feedName.locator('.username-star-initial').textContent(), 'a');
@@ -1202,6 +1248,15 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
       );
       const link = page.getByRole('link', { name: '前往 GitHub 为 Roka 点 Star →' });
       assert.equal(await link.getAttribute('href'), 'https://github.com/oimasterkafuu/Roka');
+      await Promise.all([
+        page.waitForURL('**/ambassadors'),
+        page.locator('[data-goto="/ambassadors"]').click(),
+      ]);
+      await page.locator('#ambassador-login [data-goto="/login"]').waitFor({ state: 'visible' });
+      await Promise.all([
+        page.waitForURL('**/login'),
+        page.locator('#ambassador-login [data-goto="/login"]').click(),
+      ]);
     }
   } finally {
     await browser.close();

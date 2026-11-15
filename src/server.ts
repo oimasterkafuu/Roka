@@ -24,7 +24,12 @@ import { DEFAULT_MAP_REGION, isMapRegion, normalizeMapRegion } from './map/huaxi
 import { ratingTier } from './rating-color';
 import { encodeReplayPatchBinary } from './replay-patch-binary';
 import { buildReplayStats } from './server/replay-stats';
-import { isReplayIdValid, ReplayStore } from './replay-store';
+import {
+  DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS,
+  isReplayIdValid,
+  ReplayStore,
+  sweepReplayViewCaches,
+} from './replay-store';
 import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText, renderRichTextWithMentions } from './text-render';
 import { FeedComment, FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
@@ -243,6 +248,14 @@ interface DecoratedAnnouncement extends Announcement {
   html: string;
 }
 
+interface FeedAuthorInfo {
+  colorClass: string;
+  title: string;
+  admin: boolean;
+  banned: boolean;
+  starred: boolean;
+}
+
 interface DecoratedFeedComment {
   id: string;
   author: string;
@@ -250,7 +263,7 @@ interface DecoratedFeedComment {
   time: number;
   html: string;
   mentions: string[];
-  authorInfo: { colorClass: string; title: string; admin: boolean; banned: boolean };
+  authorInfo: FeedAuthorInfo;
   canManage: boolean;
 }
 
@@ -263,7 +276,7 @@ interface DecoratedFeedPost {
   comments: DecoratedFeedComment[];
   html: string;
   mentions: string[];
-  authorInfo: { colorClass: string; title: string; admin: boolean; banned: boolean };
+  authorInfo: FeedAuthorInfo;
   canManage: boolean;
 }
 
@@ -294,7 +307,10 @@ const decorateFeedComment = (comment: FeedComment, viewer: string | null): Decor
     ...comment,
     html: rendered.html,
     mentions: rendered.mentions,
-    authorInfo: usernameAppearance(comment.author, rating, ratingGames),
+    authorInfo: {
+      ...usernameAppearance(comment.author, rating, ratingGames),
+      starred: usernameStarred(comment.author),
+    },
     canManage: viewer !== null && (viewer === comment.author || userStore.isAdminUser(viewer)),
   };
 };
@@ -307,7 +323,10 @@ const decorateFeedPost = (post: FeedPost, viewer: string | null): DecoratedFeedP
     comments: post.comments.map((comment) => decorateFeedComment(comment, viewer)),
     html: rendered.html,
     mentions: rendered.mentions,
-    authorInfo: usernameAppearance(post.author, rating, ratingGames),
+    authorInfo: {
+      ...usernameAppearance(post.author, rating, ratingGames),
+      starred: usernameStarred(post.author),
+    },
     canManage: viewer !== null && (viewer === post.author || userStore.isAdminUser(viewer)),
   };
 };
@@ -509,6 +528,22 @@ if (runtimeEnv.createdKeys.length > 0) {
 
 const boot = async (listen = true): Promise<void> => {
   await replayStore.ensureReady();
+  const configuredCacheAge = Number(process.env.ROKA_REPLAY_VIEW_CACHE_MAX_AGE_MS?.trim() || NaN);
+  const cacheMaxAge =
+    Number.isFinite(configuredCacheAge) && configuredCacheAge >= 0
+      ? configuredCacheAge
+      : DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS;
+  const sweepViewCaches = async (): Promise<void> => {
+    try {
+      await sweepReplayViewCaches(path.join(dataDir, 'replays'), cacheMaxAge);
+    } catch (error) {
+      app.log.error({ err: error }, 'replay view cache sweep failed');
+    }
+  };
+  await sweepViewCaches();
+  const replayCacheSweepTimer = setInterval(() => void sweepViewCaches(), 24 * 60 * 60 * 1000);
+  replayCacheSweepTimer.unref();
+  app.addHook('onClose', async () => clearInterval(replayCacheSweepTimer));
   await userStore.ensureReady();
   await feedStore.ensureReady();
   await chatModeration.ensureReady();
@@ -1640,6 +1675,10 @@ const boot = async (listen = true): Promise<void> => {
     serveAssetTemplate(request, reply, 'tutorial.html', 'text/html'),
   );
 
+  app.get('/replays', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'replays.html', 'text/html'),
+  );
+
   app.get('/replays/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!isReplayIdValid(id)) {
@@ -1710,18 +1749,44 @@ const boot = async (listen = true): Promise<void> => {
   });
 
   app.get('/api/replays', { preHandler: replayListRateLimitPreHandler }, async (request, reply) => {
-    const query = request.query as { offset?: unknown; limit?: unknown };
+    const query = request.query as {
+      offset?: unknown;
+      limit?: unknown;
+      username?: unknown;
+      from?: unknown;
+      to?: unknown;
+    };
     const offsetRaw = Number.parseInt(String(query.offset ?? '0'), 10);
     const limitRaw = Number.parseInt(String(query.limit ?? '50'), 10);
     const offset = Number.isNaN(offsetRaw) || offsetRaw < 0 ? 0 : offsetRaw;
     const limit = Number.isNaN(limitRaw) || limitRaw <= 0 ? 50 : Math.min(limitRaw, 50);
 
-    const allItems = await replayStore.listReplays();
+    let allItems = await replayStore.listReplays();
+    if (query.username !== undefined) {
+      const username = typeof query.username === 'string' ? userStore.resolveUsername(query.username) : null;
+      allItems = username
+        ? allItems.filter((item) => Array.isArray(item.rank) && item.rank.includes(username))
+        : [];
+    }
+    const parseTime = (value: unknown): number | undefined =>
+      typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))
+        ? Number(value)
+        : undefined;
+    const from = parseTime(query.from);
+    const to = parseTime(query.to);
+    if (from !== undefined) allItems = allItems.filter((item) => item.time >= from);
+    if (to !== undefined) allItems = allItems.filter((item) => item.time <= to);
     const items = allItems.slice(offset, offset + limit);
     const next_offset = offset + items.length;
     const has_more = next_offset < allItems.length;
 
-    return reply.send({ items, next_offset, has_more, stats: buildReplayStats(allItems) });
+    return reply.send({
+      items,
+      total: allItems.length,
+      next_offset,
+      has_more,
+      stats: buildReplayStats(allItems),
+    });
   });
 
   app.get('/api/rooms', async (_request, reply) => {

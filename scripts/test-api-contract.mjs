@@ -62,11 +62,11 @@ try {
     } catch {}
     await sleep(50);
   }
-  for (const route of ['/rooms', '/replays', '/games']) {
+  for (const route of ['/rooms', '/games']) {
     const response = await fetch(base + route, { headers: { cookie }, redirect: 'manual' });
     assert.equal(response.status, 404, route);
   }
-  for (const route of ['/', '/api/rooms', '/api/replays'])
+  for (const route of ['/', '/replays', '/api/rooms', '/api/replays'])
     assert.equal((await fetch(base + route)).status, 200, route);
   const body = JSON.stringify({ ref: 'refs/heads/other' }, null, 2);
   const headers = {

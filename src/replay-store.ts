@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat, utimes } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
@@ -58,6 +58,25 @@ const REPLAY_FILENAME_REGEX = /^[0-9A-Za-z+-]+$/;
 const REPLAY_EXT = '.rpl';
 const REPLAY_VIEW_EXT = '.rpb.gz';
 const REPLAY_INDEX_BIN = 'index.bin';
+
+export const DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** Only derived viewing caches are eligible; original archives and index stay untouched. */
+export const sweepReplayViewCaches = async (
+  replayDir: string,
+  maxAgeMs = DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS,
+): Promise<void> => {
+  const cutoff = Date.now() - maxAgeMs;
+  for (const entry of await readdir(replayDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(REPLAY_VIEW_EXT)) continue;
+    const cachePath = path.join(replayDir, entry.name);
+    try {
+      if ((await stat(cachePath)).mtimeMs < cutoff) await rm(cachePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+};
 
 interface ReplayStoreOptions {
   buildReplayFromActions: (replay: ReplayActionData) => Promise<ReplayData>;
@@ -197,6 +216,7 @@ export class ReplayStore {
         // 只流式解压前 4 字节，不为校验把几十 MB 的缓存整体解压进内存。
         const raw = await gunzipPrefix(cached, 4);
         if (raw.length >= 4 && raw.toString('latin1') === REPLAY_BINARY_MAGIC) {
+          void utimes(cachePath, new Date(), new Date()).catch(() => {});
           return { gzip: cached, size: cached.readUInt32LE(cached.length - 4) };
         }
       }

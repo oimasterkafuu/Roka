@@ -225,6 +225,7 @@
           </section>
 
           <footer class="home-footer">
+            <a href="/replays">回放</a>
             <a href="/develop">开发</a>
             <span class="dot">·</span>
             <a href="/tutorial">教程</a>
@@ -912,14 +913,8 @@
         $item.data('raw-html', post.html);
 
         var $head = $('<div class="feed-item-head"></div>');
-        var $author = userLink(
-          post.author,
-          post.authorInfo && post.authorInfo.colorClass,
-          post.authorInfo && post.authorInfo.title,
-          post.authorInfo && post.authorInfo.admin,
-          post.authorInfo && post.authorInfo.banned,
-        );
-        $author.addClass('feed-author').appendTo($head);
+        var $author = usernameLink(post.author, post.authorInfo || null, 'feed-author');
+        $author.appendTo($head);
         $('<span class="feed-time"></span>')
           .text(relativeTime(post.time))
           .attr('title', fullTime(post.time))
