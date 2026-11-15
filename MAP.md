@@ -451,3 +451,5 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/frontline.cjs` 将其用于运输留守，`bot/campaign.cjs` 按局部预算推进；`test/maze-oscillation.test.cjs` 覆盖误报召回、运输关卡与局部攻城。路径均相对 `bot-template/anti-human-bot/`。
 
 - `scripts/test-asset-versioning-exit.mjs`：真实运行静态资源测试及临时故障副本，验证成功 exit 0、异常与断言失败 exit 1；纳入 `pnpm test`。SW VM 覆盖脚本版本、运行时配置优先及 window load 延迟注册。
+
+- issue #137：`lobby-service.ts` 的 `lobbyHostActivity` 按房间保存当前非托管房主 sid 与活动时间；准备阶段 15 分钟无操作复用 `kickFromLobby` 清理并迁移房主，每分钟扫描。`recordLobbyActivity` 由 `server.ts` 的聊天/准备/换队/设置有效操作调用，心跳不续期；迁移、换绑、进入对局与终局清理旧期限。`static/game.html` 显示固定规则，`room_kick.reason` 由 `static/main.js` 提示后返回首页。`scripts/test-lobby-host-idle.mjs` 用假时钟驱动真实大厅与引擎覆盖期限、活动、迁移、清理、对局豁免及终局重置；纳入 `pnpm test`。
