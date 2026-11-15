@@ -27,7 +27,7 @@ BOT_TOKEN='你的令牌' node bot.cjs --room=abc
 
 ## 策略
 
-- 每tick只提交一个移动或建造；守城、可获胜斩首先于经济。
+- 单线模式每 tick 提交一个动作；服务器 `multi_line=true` 时按全局队列确认调度独立主攻、截断、回防、扩张与建设，最多八个互不占用资源的动作。
 - 路径搜索使用引擎真实智能分兵公式，支持拓地、汇兵与孤立重连。
 - 建造使用敌军路径距离与预计到达时间、山体阻挡、援军、余兵、回本视野、领土与产能目标，不再使用固定112/62门槛。建造费用50和孤立不可建是引擎硬约束。
 - `bot/params.cjs` 定义14项可调参数及范围；`bot/champion.json` 保存经评估部署的版本；`BOT_PARAMS` 可指定其他JSON文件（顶层 `params`）。
@@ -616,3 +616,29 @@ mazeLike 判定沿用 `mazeMountainRatio` 口径）：
 clusterValue 惩罚贴邻；`test/cutoff.test.cjs`「守军足够不触发」一条按预警
 语义更新为加厚整条走廊）。轻量自检：maze/random 镜像局各 700 tick 决策
 管线无异常、建造/升级/攻击正常产出。
+
+## v3 全局队列与多线争锋
+
+`init_map.multi_line` 决定调度方式，关闭时保留单线策略。`state.cjs` 从
+`next_seq` / `queue_ops` 恢复队列，发送时本地递增序号；每帧仅删除
+`lst_moves` 指定项（可非连续，包含失效丢弃，不代表全部执行成功）。
+不按超时猜测执行，不重新发送未确认指令。重连使用服务器的新队列镜像。
+
+`multiline.cjs` 保留原策略的主攻方向，再分配独立截断、回防、最多两处
+建设和三条扩张/前线运输预算；直接可夺皇冠先行，截断先于普通主攻。
+防御留兵独立审核，全冲不抽干其它邻敌方向；建设用 51/101 硬门槛，
+优先升级。后方补充运输至少八兵，近期反向边和运输环受限，避免碎兵反复搬运。
+待确认移动的两端和建造格保留给原链，新计划不插入这些资源。
+服务器仍负责同格依赖、建造等待和环破锁，客户端不清队列破坏原链。
+
+离线评测须先将当前仓库 `src/` 复制到本地忽略的 `reference/src/`，
+并冻结修改前 `bot/*.cjs` 到仓库外目录；禁止提交 reference、评测输出或训练产物。
+
+```sh
+node training/multiline-benchmark.cjs --reference=/tmp/anti-before --baseline=true --turns=1000 --seeds=2 --output=/tmp/anti-baseline.json
+node training/multiline-benchmark.cjs --reference=/tmp/anti-before --turns=1000 --seeds=2 --output=/tmp/anti-after.json
+```
+
+四类地图、每种子双座位，双方使用同一个真实 v3 多线引擎；基线为冻结原版
+对自身，新版对同一冻结原版。报告将歼灭胜负、未决率与物资比单列，
+物资领先不折算成胜利，记录策略文件及引擎 SHA-256。该评测不覆盖多人或迷雾效果。
