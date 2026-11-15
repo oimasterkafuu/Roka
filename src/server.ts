@@ -29,6 +29,7 @@ import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText, renderRichTextWithMentions } from './text-render';
 import { FeedComment, FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
+import { ChatModeration, CHAT_TEXT_MAX } from './server/chat-moderation';
 import { CaptchaService } from './server/captcha-service';
 import { ContributorsService, handleContributorsRequest } from './server/contributors-service';
 import { EditableLobbyKey, FIXED_SWAMP_RATIO, LobbyService } from './server/lobby-service';
@@ -79,6 +80,7 @@ const replayStore = new ReplayStore(path.join(dataDir, 'replays'), {
 });
 const userStore = new UserStore(dataDir);
 const feedStore = new FeedStore(dataDir);
+const chatModeration = new ChatModeration(dataDir);
 const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const captchaService = new CaptchaService();
@@ -494,6 +496,13 @@ const boot = async (listen = true): Promise<void> => {
   await replayStore.ensureReady();
   await userStore.ensureReady();
   await feedStore.ensureReady();
+  await chatModeration.ensureReady();
+  // Expiry applies even on an idle server; no raw chat is included in error logs.
+  const flushChatAudit = (): void => {
+    void chatModeration.flush().catch((error) => app.log.error({ err: error }, 'chat audit write failed'));
+  };
+  const chatAuditTimer = setInterval(flushChatAudit, 60_000);
+  chatAuditTimer.unref();
   await announcementStore.ensureReady();
   await userStore.initializeHistoricalPoints(await replayStore.listReplays(), feedStore.listAll());
 
@@ -506,6 +515,10 @@ const boot = async (listen = true): Promise<void> => {
     keyGenerator: resolveRateLimitKey,
   });
   app.addHook('onRequest', app.rateLimit(GENERAL_RATE_LIMIT));
+  app.addHook('onClose', async () => {
+    clearInterval(chatAuditTimer);
+    await chatModeration.flush();
+  });
 
   app.addHook('onRequest', async (request, reply) => {
     const pathname = request.url.split('?')[0];
@@ -784,6 +797,36 @@ const boot = async (listen = true): Promise<void> => {
     return serveAssetTemplate(request, reply, 'admin.html', 'text/html');
   });
 
+  app.get('/api/admin/chat-audit', async (request, reply) => {
+    if (!requireAdmin(request, reply)) return;
+    const query = request.query as { username?: string; room?: string; candidates?: string; before?: string };
+    reply.header('Cache-Control', 'no-store');
+    return reply.send({
+      items: chatModeration.list({
+        username: String(query.username ?? '').slice(0, 20),
+        room: String(query.room ?? '').slice(0, 15),
+        candidates: query.candidates === '1',
+        before: String(query.before ?? '').slice(0, 36) || undefined,
+      }),
+    });
+  });
+
+  app.post(
+    '/api/admin/chat-release',
+    { preHandler: adminActionRateLimitPreHandler },
+    async (request, reply) => {
+      const admin = requireAdmin(request, reply);
+      if (!admin) return;
+      const target = String((request.body as { username?: unknown })?.username ?? '').trim();
+      if (!USERNAME_REGEX.test(target) || !userStore.getPublicProfile(target)) {
+        return reply.code(404).send({ error: '用户不存在。' });
+      }
+      chatModeration.release(target, admin.username);
+      await chatModeration.flush();
+      return reply.send({ ok: true });
+    },
+  );
+
   app.get('/api/admin/users', async (request, reply) => {
     const admin = requireAdmin(request, reply);
     if (!admin) {
@@ -863,6 +906,8 @@ const boot = async (listen = true): Promise<void> => {
       return reply.code(404).send({ error: '用户不存在。' });
     }
     await userStore.unbanUser(target);
+    chatModeration.release(target, admin.username);
+    await chatModeration.flush();
     io.emit('home_leaderboard');
     return reply.send({ ok: true });
   });
@@ -1821,6 +1866,7 @@ const boot = async (listen = true): Promise<void> => {
       // 对局进行中的同名参赛玩家视为断线重连：换绑到新 socket 并恢复对局。
       // 传入 isBot 做身份匹配：同名的人类连接不得接管 bot 的席位（反之亦然）。
       if (lobbyService.tryRejoin(io, socket.id, username, room, isBot)) {
+        chatModeration.begin(socket.id, username, room, false);
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         lobbyService.emitHomeRooms(io);
@@ -1845,6 +1891,7 @@ const boot = async (listen = true): Promise<void> => {
           lobbyService.emitHomeRooms(io);
           return;
         }
+        chatModeration.begin(socket.id, username, room);
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         // 观战加入与参战加入文案区分（issue #122）：对局进行中进房或落在
@@ -2203,17 +2250,27 @@ const boot = async (listen = true): Promise<void> => {
     });
 
     socket.on('send_message', (data: { text: string; team: boolean }) => {
-      const text = String(data.text ?? '').trim();
-      if (!text) {
+      if (!data || typeof data.text !== 'string') return;
+      const text = data.text.trim();
+      if (!text || text.length > CHAT_TEXT_MAX || !lobbyService.lobbyOfSid.has(socket.id)) {
         return;
       }
 
+      const blocked = chatModeration.check(username);
+      if (blocked) {
+        socket.emit('error_message', { error: blocked });
+        return;
+      }
       const gid = lobbyService.gameUid.get(socket.id);
       if (gid) {
-        lobbyService.gameInstances.get(gid)?.sendMessage(socket.id, {
+        const accepted = lobbyService.gameInstances.get(gid)?.sendMessage(socket.id, {
           text,
           team: Boolean(data.team),
         });
+        if (accepted && !data.team) {
+          chatModeration.record(socket.id, text, gid);
+          flushChatAudit();
+        }
         return;
       }
 
@@ -2237,6 +2294,8 @@ const boot = async (listen = true): Promise<void> => {
         }
       }
 
+      chatModeration.record(socket.id, text);
+      flushChatAudit();
       lobbyService.recordLobbyActivity(socket.id);
       lobbyService.sendSystemMessage(io, lobbyService.getLobbyVal(lobbyId), 'room', uid, color, text);
       lobbyService.relayGlobalChat(io, lobbyService.getLobbyVal(lobbyId), lobbyId, uid, color, text);
@@ -2251,6 +2310,12 @@ const boot = async (listen = true): Promise<void> => {
     });
 
     const doReturnRoom = (): void => {
+      if (lobbyService.gameUid.has(socket.id)) {
+        chatModeration.end(socket.id);
+        const room = lobbyService.lobbyOfSid.get(socket.id);
+        if (room) chatModeration.begin(socket.id, username, room, false);
+        flushChatAudit();
+      }
       const changed = lobbyService.returnToRoom(io, socket.id);
       if (changed || lobbyService.lobbyOfSid.has(socket.id)) {
         io.to(`sid_${socket.id}`).emit('left', {});
@@ -2260,6 +2325,8 @@ const boot = async (listen = true): Promise<void> => {
     socket.on('return_room', doReturnRoom);
 
     socket.on('disconnect', () => {
+      chatModeration.end(socket.id);
+      flushChatAudit();
       if (!isBot) {
         authService.untrackSocket(username, socket.id);
       }
