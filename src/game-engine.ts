@@ -812,6 +812,10 @@ export class GameEngine {
     return buildFinalRankTeams(this.buildLeaderboard());
   }
 
+  getCompletionStats(): { turn: number; elapsedMs: number } {
+    return { turn: this.turn, elapsedMs: Math.max(0, Date.now() - this.startAt) };
+  }
+
   private buildGameResult(): GameResultEntry[] {
     const leaderboard = this.buildLeaderboard();
     const sorted = buildFinalRank(leaderboard);
