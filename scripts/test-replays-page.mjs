@@ -98,8 +98,8 @@ try {
 
   // Run the actual page controller with inert DOM handles to check URL, local-day and socket semantics.
   const calls = [];
+  const props = [];
   const socketHandlers = {};
-  const dom = { on() { return this; }, val() { return this; }, prop() { return this; }, text() { return this; }, empty() { return this; } };
   const location = { search: '', href: '/replays' };
   let popstate;
   let refreshCallback;
@@ -116,16 +116,37 @@ try {
     setTimeout(callback, delay) { refreshCallback = callback; refreshDelay = delay; return 1; },
     fetch(url) { calls.push(url); return new Promise(() => {}); },
   });
-  function $() { return dom; }
+  function $(selector) {
+    return {
+      on() { return this; },
+      val() { return this; },
+      prop(name, value) { props.push({ selector, name, value }); return this; },
+      text() { return this; },
+      empty() { return this; },
+    };
+  }
+  const paginationHidden = () => props.filter((entry) => entry.selector === '#replays-pagination' && entry.name === 'hidden').at(-1).value;
   vm.runInContext(await readFile(new URL('../static/replays.js', import.meta.url), 'utf8'), context);
-  assert.equal(new URL(calls[0], 'http://localhost').searchParams.get('limit'), '10');
+  let query = new URL(calls[0], 'http://localhost').searchParams;
+  assert.equal(query.get('limit'), '50');
+  assert.equal(query.get('offset'), '0');
+  assert.equal(context.replayState.searching, false);
+  assert.equal(paginationHidden(), false);
   assert.equal(context.replayDateSeconds('2026-10-02', false), String(Math.floor(new Date(2026, 9, 2, 0, 0, 0).getTime() / 1000)));
   assert.equal(context.replayDateSeconds('2026-10-02', true), String(Math.floor(new Date(2026, 9, 2, 23, 59, 59).getTime() / 1000)));
-  context.navigateReplays({ searching: true, username: 'Alice', from: '100', to: '200', page: 2 });
-  assert.equal(location.search, '?username=Alice&from=100&to=200&page=2');
-  let query = new URL(calls.at(-1), 'http://localhost').searchParams;
+  context.navigateReplays({ searching: false, page: 2 });
+  assert.equal(location.search, '?page=2');
+  assert.equal(context.replayState.searching, false);
+  query = new URL(calls.at(-1), 'http://localhost').searchParams;
   assert.equal(query.get('offset'), '50');
   assert.equal(query.get('limit'), '50');
+  assert.equal(paginationHidden(), false);
+  context.navigateReplays({ searching: true, username: 'Alice', from: '100', to: '200', page: 2 });
+  assert.equal(location.search, '?username=Alice&from=100&to=200&page=2');
+  query = new URL(calls.at(-1), 'http://localhost').searchParams;
+  assert.equal(query.get('offset'), '50');
+  assert.equal(query.get('limit'), '50');
+  assert.equal(paginationHidden(), false);
   location.search = '?username=Bob&page=3';
   popstate();
   assert.equal(context.replayState.username, 'Bob');
@@ -141,6 +162,17 @@ try {
   assert.equal(query.get('username'), 'Bob');
   assert.equal(query.get('offset'), '100');
   assert.equal(query.get('limit'), '50');
+  location.search = '?page=2';
+  popstate();
+  assert.equal(context.replayState.searching, false);
+  assert.equal(context.replayState.page, 2);
+  const pagedLatestCallsBeforeRefresh = calls.length;
+  socketHandlers.home_leaderboard();
+  refreshCallback();
+  assert.equal(calls.length, pagedLatestCallsBeforeRefresh + 1);
+  query = new URL(calls.at(-1), 'http://localhost').searchParams;
+  assert.equal(query.get('offset'), '50');
+  assert.equal(query.get('limit'), '50');
   context.navigateReplays({ searching: false });
   assert.equal(location.search, '');
   assert.equal(context.replayState.searching, false);
@@ -150,8 +182,8 @@ try {
   assert.equal(calls.length, latestCallsBeforeRefresh + 1);
   query = new URL(calls.at(-1), 'http://localhost').searchParams;
   assert.equal(query.get('offset'), '0');
-  assert.equal(query.get('limit'), '10');
-  console.log('PASS page controller: latest 10, local-day endpoints, query/page URL, popstate, throttled socket refresh');
+  assert.equal(query.get('limit'), '50');
+  console.log('PASS page controller: latest 50, second-page offset 50, visible pagination, local-day endpoints, query/page URL, popstate, current-page socket refresh');
 
 } finally {
   if (app) await app.close();
