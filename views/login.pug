@@ -1,15 +1,11 @@
 extends layout.pug
 
-block head
-  script(
-    src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}',
-    integrity='sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK',
-    crossorigin='anonymous',
-    referrerpolicy='no-referrer'
-  )
-  title Roka - 登录
+block vars
+  - var bodyClass = 'auth-page'
+  - var currentPage = 'login'
 
-block navigation
+block head
+  title Roka - 登录
 
 block content
   .center.center-tag(style='width: min(92vw, 520px)')

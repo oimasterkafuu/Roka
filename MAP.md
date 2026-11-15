@@ -59,9 +59,10 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── text-render.ts      # Markdown+LaTeX → 消毒 HTML（公告/动态共用）
 │   ├── rating-color.ts     # Codeforces 风格段位配色
 │   └── runtime-env.ts      # .env 引导与密钥自动生成
-├── views/                  # Pug 统一布局与第一批四页模板（构建生成 static/*.html）
+├── views/                  # Pug 统一布局（含共享站点 header）与第一批四页模板（构建生成 static/*.html）
 ├── static/                 # 前端（主体原生 JS；介绍片独立打包）
 │   ├── index.html          # 首页/大厅（脚本基本内联，另加载 /notify.js）
+│   ├── site-header.js      # 四个 Pug 静态页共享登录态、用户名组件与退出逻辑
 │   ├── game.html           # 对局/回放共用骨架
 │   ├── main.js + main/     # 对局/回放主控与模块（加载顺序敏感）
 │   ├── notify.js           # 浏览器通知共享模块（首页与对局页共用）
