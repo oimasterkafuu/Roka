@@ -5,9 +5,9 @@
 ## 范围与源码
 
 - 更新到 origin/main `6996f79fc56a77139843511c3d52d6c7609cf1ea`（含聊天 PR160）；保留 PR163 源码，MAP 冲突保留双方内容。
-- 最终评测源码 SHA256：`594d9ceb4ef6dcbbc1c0cec00cfd3e75248b9d0dde104800c08faf8ac2205b3d`。JSON 的 source.files 保留逐文件哈希，程序复核与提交前工作树一致，评测前后哈希一致。JSON 中 gitHead 是合并 main 的检查点，修复当时尚未提交；发布提交承载相同源码哈希。
+- 最终评测源码 SHA256：`594d9ceb4ef6dcbbc1c0cec00cfd3e75248b9d0dde104800c08faf8ac2205b3d`。JSON 的 source.files 保留逐文件哈希，程序复核与评测完成时工作树及修复提交 154406b 一致，评测前后哈希一致。JSON 中 gitHead 是合并 main 的检查点，修复当时尚未提交；交付树随后仅合并更新的 main，完整树哈希差异见后文。
 - 冻结原版基线：`9aaa39426ccddce3a8a8d7893e28a8e63e0ea86565e3d8a54f01dc8968b00246`；修复前 PR：`703937963daec81f08cbaea8a009db0d2a6394cfc075b8322c40aa80e20f2a19`；同机修复前控制树：`df6f9b1b4ec3cb5021580dc43b1aae4851b767c53c7843b4b08bd20be1d8bc80`。
-- 依用户版本例外，本次没有自行提升 package.json 版本；main 带入的版本为 2.6.2，不抢 GitHub 2.7.0，由主会话合并时决定。
+- 依用户版本例外，本次没有自行提升 package.json 版本；评测时 main 版本为 2.6.2；交付时继承最新 main 的 2.7.0，没有自行递增，后续由主会话合并时决定。
 
 ## 实际原因与修复
 
@@ -101,3 +101,9 @@
 签名提交并推送到原 PR163 feat/apex-multiline 分支；禁止合并/部署，完成推送即停止。
 
 预算备注：20 分钟到点发送终止，进程退出记录为 05:02:55.132 UTC（调度/退出开销约 132 ms）；之后没有继续评测。单线最后缺失的 1 局未推测结果，也未计入完整通过。
+
+## 评测后的 main 同步
+
+评测期间 main 前进到 1dc8d29aa0e86910fbd1b70dbc9d44f46f9c54eb（PR164），交付前已合并。交付完整源码 SHA256：`831eef7ab99f1915a3c22f41b604d6c8c59095e63ef8f3fe14a8c523bca02eb8`；它与评测哈希不同，不冒充同一完整树。程序逐一确认 63 个 Apex/对手/游戏引擎/地图文件与最终评测文件完全一致；变化仅为 package.json、src/auth-store.ts、src/server.ts、src/server/contributors-service.ts、src/server/github-service.ts。最新 main 带入 2.7.0，依赖未变。未再运行对局，重新进行冻结依赖、lint/build 检查。交付哈希和逐文件证明：/tmp/apex-fix-delivery-source.json。
+
+最终同步后的冻结依赖、lint、build、format 均退出 0；构建产物再次还原。`/tmp/apex-fix-verify.cjs` 的完整树哈希断言针对评测提交 `154406b`，交付树的额外差异由 `/tmp/apex-fix-delivery-source.json` 单独校验，不能在新 main 上冒充旧完整树未变化。

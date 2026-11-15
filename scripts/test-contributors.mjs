@@ -25,20 +25,35 @@ function githubResponse(items, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => items };
 }
 
+async function publicContributors(service, resolveRokaUsername) {
+  let payload;
+  const reply = {
+    code(statusCode) {
+      throw new Error(`unexpected contributors status: ${statusCode}`);
+    },
+    send(value) {
+      payload = value;
+      return value;
+    },
+  };
+  await handleContributorsRequest(service, reply, resolveRokaUsername);
+  return payload;
+}
+
 let now = 1_000_000;
 let requestCount = 0;
 let failRequests = false;
 let request;
 const successPayload = [
-  contributor('zoe', 4),
-  contributor('alice', 12, { site_admin: true, node_id: 'private-metadata' }),
-  contributor('dependabot', 100, { type: 'Bot' }),
-  contributor('wrong-profile', 9, { html_url: 'https://github.com/someone-else' }),
+  contributor('zoe', 4, { id: 1202 }),
+  contributor('alice', 12, { id: 1201, site_admin: true, node_id: 'private-metadata' }),
+  contributor('dependabot', 100, { id: 1301, type: 'Bot' }),
+  contributor('wrong-profile', 9, { id: 1302, html_url: 'https://github.com/someone-else' }),
   contributor('query-profile', 9, { html_url: 'https://github.com/query-profile?tab=repos' }),
   contributor('evil-profile', 9, { html_url: 'javascript:alert(1)' }),
   contributor('evil-avatar', 9, { avatar_url: 'https://example.com/avatar.png' }),
   contributor('http-avatar', 9, { avatar_url: 'http://avatars.githubusercontent.com/u/9' }),
-  contributor('bad-login', 9, { login: '<img src=x onerror=alert(1)>' }),
+  contributor('bad-login', 9, { id: 1303, login: '<img src=x onerror=alert(1)>' }),
   contributor('zero', 0),
   { type: 'User', login: null, contributions: 20 },
 ];
@@ -81,9 +96,99 @@ assert.equal(requestCount, 1, 'fresh cache avoids another GitHub request');
 
 now += CONTRIBUTORS_CACHE_TTL_MS + 1;
 failRequests = true;
-assert.deepEqual(await service.getContributors(), first, 'expired cache remains available on failure');
+const cachedFailureResponse = await app.inject({ method: 'GET', url: '/api/contributors' });
+assert.equal(cachedFailureResponse.statusCode, 200);
+assert.deepEqual(cachedFailureResponse.json(), first, 'expired cache remains available on failure');
 assert.equal(requestCount, 2);
 await app.close();
+
+const resolvedIds = [];
+const associatedService = new ContributorsService({
+  fetchImpl: async () =>
+    githubResponse([
+      contributor('alice', 11, { id: 2102 }),
+      contributor('zoe', 10, { id: 2103 }),
+      contributor('unbound', 9, { id: 2104 }),
+      contributor('without-id', 8),
+      contributor('alice', 12, { id: 2101 }),
+      contributor('dependabot', 100, { id: 2201, type: 'Bot' }),
+      contributor('bad-login', 9, { id: 2202, login: '<img src=x onerror=alert(1)>' }),
+    ]),
+});
+const associated = await publicContributors(associatedService, (githubId) => {
+  resolvedIds.push(githubId);
+  if (githubId === 2101) return 'Alice_Roka';
+  if (githubId === 2103) return 'https://evil.example/not-a-username';
+  if (githubId === 2201 || githubId === 2202) return 'Filtered_User';
+  return null;
+});
+assert.deepEqual(associated, [
+  {
+    login: 'alice',
+    html_url: 'https://github.com/alice',
+    avatar_url: 'https://avatars.githubusercontent.com/u/12?v=4',
+    contributions: 12,
+    rokaUsername: 'Alice_Roka',
+  },
+  {
+    login: 'alice',
+    html_url: 'https://github.com/alice',
+    avatar_url: 'https://avatars.githubusercontent.com/u/11?v=4',
+    contributions: 11,
+  },
+  {
+    login: 'zoe',
+    html_url: 'https://github.com/zoe',
+    avatar_url: 'https://avatars.githubusercontent.com/u/10?v=4',
+    contributions: 10,
+  },
+  {
+    login: 'unbound',
+    html_url: 'https://github.com/unbound',
+    avatar_url: 'https://avatars.githubusercontent.com/u/9?v=4',
+    contributions: 9,
+  },
+  {
+    login: 'without-id',
+    html_url: 'https://github.com/without-id',
+    avatar_url: 'https://avatars.githubusercontent.com/u/8?v=4',
+    contributions: 8,
+  },
+]);
+assert.deepEqual(resolvedIds, [2101, 2102, 2103, 2104]);
+assert.equal(
+  associated[1].rokaUsername,
+  undefined,
+  'same login with a different GitHub id must not inherit a Roka binding',
+);
+assert.equal(Object.hasOwn(associated[2], 'rokaUsername'), false, 'invalid resolver value is hidden');
+assert.equal(Object.hasOwn(associated[3], 'rokaUsername'), false, 'unbound id stays unassociated');
+assert.equal(Object.hasOwn(associated[4], 'rokaUsername'), false, 'missing id stays unassociated');
+for (const item of associated.slice(1)) {
+  assert.deepEqual(Object.keys(item), ['login', 'html_url', 'avatar_url', 'contributions']);
+}
+assert.equal(
+  associated.some((item) => item.login === 'dependabot'),
+  false,
+);
+assert.equal(
+  associated.some((item) => item.login.includes('<img')),
+  false,
+);
+
+const pagedRequests = [];
+const pagedService = new ContributorsService({
+  fetchImpl: async (url) => {
+    pagedRequests.push(url);
+    if (pagedRequests.length === 1) {
+      return githubResponse(Array.from({ length: 100 }, (_, index) => contributor(`page-user-${index}`, 1)));
+    }
+    return githubResponse([contributor('last-user', 1)]);
+  },
+});
+const paged = await pagedService.getContributors();
+assert.equal(paged.length, 101);
+assert.deepEqual(pagedRequests, [GITHUB_CONTRIBUTORS_URL, `${GITHUB_CONTRIBUTORS_URL}&page=2`]);
 
 const unavailableApp = Fastify();
 const unavailable = new ContributorsService({
@@ -162,7 +267,7 @@ async function renderFrontend(response) {
 
 const rendered = await renderFrontend(
   githubResponse([
-    contributor('alice', 12),
+    contributor('alice', 12, { rokaUsername: 'Alice_Roka' }),
     contributor('<img src=x onerror=alert(1)>', 99, {
       html_url: 'https://github.com/%3Cimg%20src=x%20onerror=alert(1)%3E',
     }),
@@ -171,7 +276,8 @@ const rendered = await renderFrontend(
 );
 assert.equal(rendered.nodes['contributors-grid'].children.length, 1);
 const card = rendered.nodes['contributors-grid'].children[0];
-const link = card.children[0];
+assert.equal(card.children.length, 2);
+const [link, rokaLink] = card.children;
 const [avatar, name, count] = link.children;
 assert.equal(link.href, 'https://github.com/alice');
 assert.equal(link.target, '_blank');
@@ -181,7 +287,29 @@ assert.equal(avatar.alt, 'alice 的 GitHub 头像');
 assert.equal(avatar.loading, 'lazy');
 assert.equal(name.textContent, 'alice');
 assert.equal(count.textContent, '12 次贡献');
+assert.equal(rokaLink.tagName, 'A');
+assert.equal(rokaLink.href, '/u/Alice_Roka');
+assert.equal(rokaLink.textContent, 'Roka: Alice_Roka');
+assert.equal(link.children.includes(rokaLink), false, 'Roka link must be a sibling of GitHub link');
 assert.equal(rendered.nodes['contributors-status'].hidden, true);
+
+for (const rokaUsername of [
+  'javascript:alert(1)',
+  '../admin',
+  '<img src=x onerror=alert(1)>',
+  'ab',
+  'a'.repeat(21),
+]) {
+  const maliciousRender = await renderFrontend(githubResponse([contributor('alice', 12, { rokaUsername })]));
+  const maliciousCard = maliciousRender.nodes['contributors-grid'].children[0];
+  assert.equal(maliciousCard.children.length, 1, `unsafe Roka username rendered: ${rokaUsername}`);
+  assert.equal(maliciousCard.children[0].className, 'contributor-link');
+  assert.equal(
+    maliciousCard.children.some((child) => child.href?.startsWith('/u/')),
+    false,
+    'unsafe Roka username must not produce a profile link',
+  );
+}
 
 const failedRender = await renderFrontend(githubResponse({}, 503));
 assert.equal(failedRender.nodes['contributors-grid'].children.length, 0);

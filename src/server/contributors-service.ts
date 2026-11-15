@@ -4,6 +4,7 @@ const CONTRIBUTORS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CONTRIBUTORS_FETCH_TIMEOUT_MS = 10_000;
 
 interface Contributor {
+  id?: number;
   login: string;
   html_url: string;
   avatar_url: string;
@@ -57,6 +58,7 @@ function parseContributor(value: unknown): Contributor | null {
   if (!avatarUrl || avatarUrl.pathname === '/') return null;
 
   return {
+    id: Number.isSafeInteger(item.id) && (item.id as number) > 0 ? (item.id as number) : undefined,
     login: item.login,
     html_url: `https://github.com/${item.login}`,
     avatar_url: avatarUrl.toString(),
@@ -106,21 +108,25 @@ class ContributorsService {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.fetchImpl(GITHUB_CONTRIBUTORS_URL, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': 'Roka-Contributors',
-        },
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`GitHub contributors request failed: ${response.status}`);
-      const body: unknown = await response.json();
-      if (!Array.isArray(body)) throw new Error('GitHub contributors response is not an array');
-      return body
-        .map(parseContributor)
-        .filter((item): item is Contributor => item !== null)
-        .sort((a, b) => b.contributions - a.contributions || a.login.localeCompare(b.login));
+      const contributors: Contributor[] = [];
+      for (let page = 1; page <= 100; page += 1) {
+        const url = page === 1 ? GITHUB_CONTRIBUTORS_URL : `${GITHUB_CONTRIBUTORS_URL}&page=${page}`;
+        const response = await this.fetchImpl(url, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'Roka-Contributors',
+          },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`GitHub contributors request failed: ${response.status}`);
+        const body: unknown = await response.json();
+        if (!Array.isArray(body)) throw new Error('GitHub contributors response is not an array');
+        contributors.push(...body.map(parseContributor).filter((item): item is Contributor => item !== null));
+        if (body.length < 100) break;
+        if (page === 100) throw new Error('GitHub contributors pagination limit exceeded');
+      }
+      return contributors.sort((a, b) => b.contributions - a.contributions || a.login.localeCompare(b.login));
     } finally {
       clearTimeout(timeout);
     }
@@ -132,9 +138,27 @@ interface ContributorReply {
   send(payload: unknown): unknown;
 }
 
-async function handleContributorsRequest(service: ContributorsService, reply: ContributorReply) {
+async function handleContributorsRequest(
+  service: ContributorsService,
+  reply: ContributorReply,
+  resolveRokaUsername?: (githubId: number) => string | null,
+) {
   try {
-    return reply.send(await service.getContributors());
+    const contributors = await service.getContributors();
+    return reply.send(
+      contributors.map((contributor) => {
+        const resolved = contributor.id === undefined ? null : resolveRokaUsername?.(contributor.id);
+        const rokaUsername =
+          typeof resolved === 'string' && /^[A-Za-z0-9_]{3,20}$/.test(resolved) ? resolved : null;
+        return {
+          login: contributor.login,
+          html_url: contributor.html_url,
+          avatar_url: contributor.avatar_url,
+          contributions: contributor.contributions,
+          ...(rokaUsername ? { rokaUsername } : {}),
+        };
+      }),
+    );
   } catch {
     return reply.code(503).send({ error: '暂时无法从 GitHub 获取贡献者名单，请稍后重试。' });
   }
