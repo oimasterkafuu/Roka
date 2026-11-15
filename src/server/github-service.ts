@@ -16,6 +16,8 @@ interface OAuthState {
   sid: string;
   verifier: string;
   expiresAt: number;
+  generation: number;
+  controller: AbortController;
 }
 
 interface GithubServiceOptions {
@@ -54,6 +56,8 @@ export class GithubService {
   private readonly tokenKey: Buffer;
   private readonly oauthBaseUrl: string;
   private readonly apiBaseUrl: string;
+  private nextGeneration = 0;
+  private readonly operations = new Map<string, OAuthState>();
   private readonly states = new Map<string, OAuthState>();
   private readonly stateByUser = new Map<string, string>();
   private readonly starRefreshes = new Map<string, Promise<GithubPublicProfile | null>>();
@@ -73,20 +77,25 @@ export class GithubService {
 
   startLink(actor: GithubActor): string {
     if (!this.isConfigured()) throw new GithubServiceError('not-configured');
-    if (!actor.sid) throw new GithubServiceError('state');
+    if (!actor.sid || !this.options.userStore.isSessionValid(actor.username, actor.sid)) {
+      throw new GithubServiceError('state');
+    }
     this.pruneStates();
 
-    const previousState = this.stateByUser.get(actor.username);
-    if (previousState) this.states.delete(previousState);
+    this.cancelLink(actor.username);
     const state = randomBytes(32).toString('base64url');
     const verifier = randomBytes(48).toString('base64url');
     const challenge = createHash('sha256').update(verifier).digest('base64url');
-    this.states.set(state, {
+    const operation: OAuthState = {
       username: actor.username,
       sid: actor.sid,
       verifier,
       expiresAt: this.now() + GITHUB_STATE_TTL_MS,
-    });
+      generation: ++this.nextGeneration,
+      controller: new AbortController(),
+    };
+    this.states.set(state, operation);
+    this.operations.set(actor.username, operation);
     this.stateByUser.set(actor.username, state);
 
     const url = new URL(`${this.oauthBaseUrl}/login/oauth/authorize`);
@@ -119,43 +128,74 @@ export class GithubService {
       !actor.sid ||
       state.sid !== actor.sid
     ) {
+      if (state && this.operations.get(state.username) === state) this.cancelLink(state.username);
       throw new GithubServiceError('state');
     }
-    if (query.error !== undefined) throw new GithubServiceError('denied');
-    if (typeof query.code !== 'string' || !query.code || query.code.length > 512) {
-      throw new GithubServiceError('exchange');
-    }
-
-    const accessToken = await this.exchangeCode(query.code, state.verifier);
-    const identity = await this.fetchIdentity(accessToken);
-    let starred: boolean | null = null;
-    try {
-      starred = await this.fetchStar(accessToken);
-    } catch {
-      // OAuth identity remains valid when the independent Star check is unavailable.
-    }
 
     try {
-      await this.options.userStore.linkGithub(actor.username, {
-        id: identity.id,
-        login: identity.login,
-        linkedAt: this.now(),
-        accessTokenEncrypted: this.encryptToken(accessToken),
-        starred: starred ?? undefined,
-        starVerifiedAt: starred === null ? undefined : this.now(),
-      });
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('已绑定其他')) {
-        throw new GithubServiceError('conflict');
+      if (query.error !== undefined) throw new GithubServiceError('denied');
+      if (typeof query.code !== 'string' || !query.code || query.code.length > 512) {
+        throw new GithubServiceError('exchange');
       }
+      this.assertCurrentOperation(state);
+      const accessToken = await this.exchangeCode(query.code, state.verifier, state.controller.signal);
+      const identity = await this.fetchIdentity(accessToken, state.controller.signal);
+      let starred: boolean | null = null;
+      try {
+        starred = await this.fetchStar(accessToken, state.controller.signal);
+      } catch {
+        // OAuth identity remains valid when the independent Star check is unavailable.
+      }
+
+      this.assertCurrentOperation(state);
+      try {
+        await this.options.userStore.linkGithub(actor.username, {
+          id: identity.id,
+          login: identity.login,
+          linkedAt: this.now(),
+          accessTokenEncrypted: this.encryptToken(accessToken),
+          starred: starred ?? undefined,
+          starVerifiedAt: starred === null ? undefined : this.now(),
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('已绑定其他')) {
+          throw new GithubServiceError('conflict');
+        }
+        throw error;
+      }
+      const profile = this.options.userStore.getGithubPublicProfile(actor.username, this.now());
+      if (!profile) throw new GithubServiceError('identity');
+      return profile;
+    } catch (error) {
+      this.assertCurrentOperation(state);
       throw error;
+    } finally {
+      if (this.operations.get(state.username)?.generation === state.generation) {
+        this.operations.delete(state.username);
+      }
     }
-    const profile = this.options.userStore.getGithubPublicProfile(actor.username, this.now());
-    if (!profile) throw new GithubServiceError('identity');
-    return profile;
+  }
+
+  private assertCurrentOperation(state: OAuthState): void {
+    if (
+      state.controller.signal.aborted ||
+      this.operations.get(state.username)?.generation !== state.generation ||
+      !this.options.userStore.isSessionValid(state.username, state.sid)
+    ) {
+      throw new GithubServiceError('state');
+    }
+  }
+
+  private cancelLink(username: string): void {
+    const stateKey = this.stateByUser.get(username);
+    if (stateKey) this.states.delete(stateKey);
+    this.stateByUser.delete(username);
+    this.operations.get(username)?.controller.abort();
+    this.operations.delete(username);
   }
 
   async unlink(username: string): Promise<boolean> {
+    this.cancelLink(username);
     return this.options.userStore.unlinkGithub(username);
   }
 
@@ -216,69 +256,94 @@ export class GithubService {
     }
   }
 
-  private async exchangeCode(code: string, verifier: string): Promise<string> {
+  private async exchangeCode(code: string, verifier: string, signal: AbortSignal): Promise<string> {
     try {
-      const response = await this.request(`${this.oauthBaseUrl}/login/oauth/access_token`, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'Roka-GitHub-Link',
+      return await this.request(
+        `${this.oauthBaseUrl}/login/oauth/access_token`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'Roka-GitHub-Link',
+          },
+          body: new URLSearchParams({
+            client_id: this.options.clientId as string,
+            client_secret: this.options.clientSecret as string,
+            code,
+            redirect_uri: this.options.redirectUri as string,
+            code_verifier: verifier,
+          }).toString(),
         },
-        body: new URLSearchParams({
-          client_id: this.options.clientId as string,
-          client_secret: this.options.clientSecret as string,
-          code,
-          redirect_uri: this.options.redirectUri as string,
-          code_verifier: verifier,
-        }).toString(),
-      });
-      if (!response.ok) throw new GithubHttpError(response.status);
-      const body: unknown = await response.json();
-      if (!body || typeof body !== 'object') throw new Error('invalid token response');
-      const token = (body as Record<string, unknown>).access_token;
-      if (typeof token !== 'string' || !token || token.length > 4096) {
-        throw new Error('invalid access token');
-      }
-      return token;
+        async (response) => {
+          if (!response.ok) throw new GithubHttpError(response.status);
+          const body: unknown = await response.json();
+          if (!body || typeof body !== 'object') throw new Error('invalid token response');
+          const token = (body as Record<string, unknown>).access_token;
+          if (typeof token !== 'string' || !token || token.length > 4096) {
+            throw new Error('invalid access token');
+          }
+          return token;
+        },
+        signal,
+      );
     } catch {
       throw new GithubServiceError('exchange');
     }
   }
 
-  private async fetchIdentity(accessToken: string): Promise<{ id: number; login: string }> {
+  private async fetchIdentity(
+    accessToken: string,
+    signal: AbortSignal,
+  ): Promise<{ id: number; login: string }> {
     try {
-      const response = await this.request(`${this.apiBaseUrl}/user`, {
-        headers: this.apiHeaders(accessToken),
-      });
-      if (!response.ok) throw new GithubHttpError(response.status);
-      const body: unknown = await response.json();
-      if (!body || typeof body !== 'object') throw new Error('invalid identity response');
-      const { id, login, type } = body as Record<string, unknown>;
-      if (
-        !Number.isSafeInteger(id) ||
-        (id as number) <= 0 ||
-        typeof login !== 'string' ||
-        login.length > 39 ||
-        !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(login) ||
-        login.includes('--') ||
-        type !== 'User'
-      ) {
-        throw new Error('invalid GitHub identity');
-      }
-      return { id: id as number, login };
+      return await this.request(
+        `${this.apiBaseUrl}/user`,
+        {
+          headers: this.apiHeaders(accessToken),
+        },
+        async (response) => {
+          if (!response.ok) throw new GithubHttpError(response.status);
+          const body: unknown = await response.json();
+          if (!body || typeof body !== 'object') throw new Error('invalid identity response');
+          const { id, login, type } = body as Record<string, unknown>;
+          if (
+            !Number.isSafeInteger(id) ||
+            (id as number) <= 0 ||
+            typeof login !== 'string' ||
+            login.length > 39 ||
+            !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(login) ||
+            login.includes('--') ||
+            type !== 'User'
+          ) {
+            throw new Error('invalid GitHub identity');
+          }
+          return { id: id as number, login };
+        },
+        signal,
+      );
     } catch {
       throw new GithubServiceError('identity');
     }
   }
 
-  private async fetchStar(accessToken: string): Promise<boolean> {
-    const response = await this.request(`${this.apiBaseUrl}${GITHUB_REPOSITORY_STARS_PATH}`, {
-      headers: this.apiHeaders(accessToken),
-    });
-    if (response.status === 204) return true;
-    if (response.status === 404) return false;
-    throw new GithubHttpError(response.status);
+  private async fetchStar(accessToken: string, signal?: AbortSignal): Promise<boolean> {
+    return this.request(
+      `${this.apiBaseUrl}${GITHUB_REPOSITORY_STARS_PATH}`,
+      {
+        headers: this.apiHeaders(accessToken),
+      },
+      async (response) => {
+        // Drain even error/404 bodies within the same deadline; discard their contents.
+        if (response.body) {
+          for await (const chunk of response.body) void chunk;
+        }
+        if (response.status === 204) return true;
+        if (response.status === 404) return false;
+        throw new GithubHttpError(response.status);
+      },
+      signal,
+    );
   }
 
   private apiHeaders(accessToken: string): Record<string, string> {
@@ -290,17 +355,25 @@ export class GithubService {
     };
   }
 
-  private async request(url: string, init: RequestInit): Promise<Response> {
+  private async request<T>(
+    url: string,
+    init: RequestInit,
+    consume: (response: Response) => Promise<T>,
+    operationSignal?: AbortSignal,
+  ): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    const signal = operationSignal
+      ? AbortSignal.any([controller.signal, operationSignal])
+      : controller.signal;
+    let response: Response | undefined;
     try {
-      return await this.fetchImpl(url, {
-        ...init,
-        redirect: 'error',
-        signal: controller.signal,
-      });
+      response = await this.fetchImpl(url, { ...init, redirect: 'error', signal });
+      return await consume(response);
     } finally {
       clearTimeout(timeout);
+      // Also release unread error bodies when validation/HTTP status rejects early.
+      if (response?.body && !response.body.locked) await response.body.cancel();
     }
   }
 
@@ -331,7 +404,7 @@ export class GithubService {
     for (const [key, state] of this.states) {
       if (state.expiresAt < this.now()) {
         this.states.delete(key);
-        if (this.stateByUser.get(state.username) === key) this.stateByUser.delete(state.username);
+        if (this.stateByUser.get(state.username) === key) this.cancelLink(state.username);
       }
     }
   }

@@ -57,6 +57,37 @@
         </div>
       </section>
 
+      <section class="card">
+        <h2 class="card-title">聊天审计与广告复核</h2>
+        <p>
+          仅公开聊天，网址仅保留来源域名；最多保留 7 天、2000 条、2 MiB。候选不代表确认广告：进房 30
+          秒内发网址并在发链后 15 秒内离开，仅限聊 10
+          分钟。请结合上下文复核，误判可解除；需封禁时使用上方用户管理。
+        </p>
+        <div class="user-toolbar">
+          <input id="chat-user" placeholder="精确用户名" maxlength="20" />
+          <input id="chat-room" placeholder="精确房间号" maxlength="15" />
+          <label><input id="chat-candidates" type="checkbox" checked />仅候选</label>
+          <button id="chat-release-user" type="button" class="btn btn-secondary btn-sm">
+            解除所填用户限聊
+          </button>
+          <button id="chat-search" type="button" class="btn btn-secondary btn-sm">查询</button>
+          <button id="chat-older" type="button" class="btn btn-ghost btn-sm">更早记录</button>
+        </div>
+        <p id="chat-error" role="status"></p>
+        <table class="mini-table">
+          <thead>
+            <tr>
+              <th>时间 / 房间 / 对局</th>
+              <th>用户</th>
+              <th>公开聊天</th>
+              <th>复核</th>
+            </tr>
+          </thead>
+          <tbody id="chat-body"></tbody>
+        </table>
+      </section>
+
       <!-- 策略 Bot（仅超级管理员） -->
       <section class="card" id="bots-card" style="display: none">
         <h2 class="card-title">策略 Bot</h2>

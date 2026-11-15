@@ -29,6 +29,7 @@ import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText, renderRichTextWithMentions } from './text-render';
 import { FeedComment, FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
+import { ChatModeration, CHAT_TEXT_MAX } from './server/chat-moderation';
 import { CaptchaService } from './server/captcha-service';
 import { ContributorsService, handleContributorsRequest } from './server/contributors-service';
 import { GithubService, GithubServiceError } from './server/github-service';
@@ -80,6 +81,7 @@ const replayStore = new ReplayStore(path.join(dataDir, 'replays'), {
 });
 const userStore = new UserStore(dataDir);
 const feedStore = new FeedStore(dataDir);
+const chatModeration = new ChatModeration(dataDir);
 const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const captchaService = new CaptchaService();
@@ -142,14 +144,7 @@ const MAP_EXAMPLE_MAP_MODES: LobbyConfig['map_mode'][] = [
   'mediterranean',
   'huaxia',
 ];
-const RATE_LIMIT_REAL_IP_HEADERS = [
-  'cf-connecting-ip',
-  'true-client-ip',
-  'x-real-ip',
-  'x-forwarded-for',
-  'x-client-ip',
-  'forwarded',
-] as const;
+
 const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
 // 首页「在线」列表展示条数（参考排行榜前 10，取 8）。
 const ONLINE_LIST_LIMIT = 8;
@@ -372,54 +367,9 @@ const isPrivateOrLoopbackIp = (ip: string): boolean => {
   );
 };
 
-const extractHeaderIpCandidates = (value: unknown): string[] => {
-  const rawValues: string[] = [];
-  if (typeof value === 'string') {
-    rawValues.push(value);
-  } else if (Array.isArray(value)) {
-    for (const item of value) {
-      if (typeof item === 'string') {
-        rawValues.push(item);
-      }
-    }
-  }
-
-  const candidates: string[] = [];
-  for (const rawValue of rawValues) {
-    for (const entry of rawValue.split(',')) {
-      const trimmed = entry.trim();
-      if (!trimmed) {
-        continue;
-      }
-
-      const lowered = trimmed.toLowerCase();
-      if (lowered.includes('for=')) {
-        const segments = trimmed.split(';');
-        const forSegment = segments.find((segment) => segment.trim().toLowerCase().startsWith('for='));
-        if (forSegment) {
-          candidates.push(forSegment.trim());
-          continue;
-        }
-      }
-      candidates.push(trimmed);
-    }
-  }
-  return candidates;
-};
-
 const getRealIpFromHeaders = (request: FastifyRequest): string | null => {
-  const headers = request.headers as Record<string, unknown>;
-
-  for (const header of RATE_LIMIT_REAL_IP_HEADERS) {
-    const candidates = extractHeaderIpCandidates(headers[header]);
-    for (const candidate of candidates) {
-      const normalized = normalizeIpToken(candidate);
-      if (normalized) {
-        return normalized;
-      }
-    }
-  }
-  return null;
+  const value = request.headers['x-real-ip'];
+  return typeof value === 'string' ? normalizeIpToken(value) : null;
 };
 
 const getRemoteIp = (request: FastifyRequest): string | null => {
@@ -445,6 +395,97 @@ const resolveRateLimitKey = (request: FastifyRequest): string => {
   return remoteIp ?? 'unknown';
 };
 
+const REPLAY_DOWNLOAD_STATE_MAX_KEYS = 10_000;
+const REPLAY_WINDOW_MS = 60_000;
+const REPLAY_DOWNLOAD_DISABLED_RETRY_AFTER_SECONDS = 3600;
+const replayDownloadUsage = new Map<string, number[]>();
+const replayActiveDownloads = new Map<string, number>();
+
+const cleanupReplayDownloadState = (now: number): void => {
+  for (const [key, timestamps] of replayDownloadUsage) {
+    const live = timestamps.filter((time) => time > now - REPLAY_WINDOW_MS);
+    if (live.length) replayDownloadUsage.set(key, live);
+    else replayDownloadUsage.delete(key);
+  }
+};
+const replayDownloadStateCleanupTimer = setInterval(
+  () => cleanupReplayDownloadState(Date.now()),
+  REPLAY_WINDOW_MS,
+);
+replayDownloadStateCleanupTimer.unref();
+
+type ReplayDownloadAdmission =
+  { allowed: true; release: () => void } | { allowed: false; retryAfter: number; error: string };
+
+const admitReplayDownload = (request: FastifyRequest): ReplayDownloadAdmission => {
+  const key = resolveRateLimitKey(request);
+  const active = replayActiveDownloads.get(key) ?? 0;
+  if (active >= 2) {
+    return { allowed: false, retryAfter: 1, error: '同时下载回放最多 2 个，请稍后重试。' };
+  }
+  if (active === 0 && replayActiveDownloads.size >= REPLAY_DOWNLOAD_STATE_MAX_KEYS) {
+    return { allowed: false, retryAfter: 60, error: '回放下载繁忙，请稍后重试。' };
+  }
+  const now = Date.now();
+  const usage = (replayDownloadUsage.get(key) ?? []).filter((time) => time > now - REPLAY_WINDOW_MS);
+  const limit = lobbyService.hasActiveGames() ? 6 : 12;
+  if (usage.length >= limit) {
+    replayDownloadUsage.set(key, usage);
+    return {
+      allowed: false,
+      retryAfter: Math.max(1, Math.ceil((usage[usage.length - limit] + REPLAY_WINDOW_MS - now) / 1000)),
+      error: `每个 IP 滚动 60 秒最多下载回放 ${limit} 次，请稍后重试。`,
+    };
+  }
+  if (!replayDownloadUsage.has(key) && replayDownloadUsage.size >= REPLAY_DOWNLOAD_STATE_MAX_KEYS) {
+    cleanupReplayDownloadState(now);
+    if (replayDownloadUsage.size >= REPLAY_DOWNLOAD_STATE_MAX_KEYS) {
+      return { allowed: false, retryAfter: 60, error: '回放下载繁忙，请稍后重试。' };
+    }
+  }
+  usage.push(now);
+  replayDownloadUsage.set(key, usage);
+  replayActiveDownloads.set(key, active + 1);
+  let released = false;
+  return {
+    allowed: true,
+    release: () => {
+      if (released) return;
+      released = true;
+      const count = replayActiveDownloads.get(key) ?? 0;
+      if (count <= 1) replayActiveDownloads.delete(key);
+      else replayActiveDownloads.set(key, count - 1);
+    },
+  };
+};
+
+const handleReplayDownload = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+  download: () => Promise<FastifyReply>,
+): Promise<FastifyReply> => {
+  if (process.env.REPLAY_DOWNLOAD_DISABLED === '1') {
+    return reply
+      .code(503)
+      .header('Retry-After', String(REPLAY_DOWNLOAD_DISABLED_RETRY_AFTER_SECONDS))
+      .send({ error: '回放下载暂时停用，请稍后重试。' });
+  }
+
+  const admission = admitReplayDownload(request);
+  if (admission.allowed === false) {
+    return reply
+      .code(429)
+      .header('Retry-After', String(admission.retryAfter))
+      .send({ error: admission.error });
+  }
+
+  try {
+    return await download();
+  } finally {
+    admission.release();
+  }
+};
+
 const parseJsonObject = (text: string): Record<string, unknown> | null => {
   try {
     const parsed = JSON.parse(text) as unknown;
@@ -461,10 +502,17 @@ if (runtimeEnv.createdKeys.length > 0) {
   app.log.info({ keys: runtimeEnv.createdKeys }, '已自动补全缺失环境变量到 .env。');
 }
 
-const boot = async (): Promise<void> => {
+const boot = async (listen = true): Promise<void> => {
   await replayStore.ensureReady();
   await userStore.ensureReady();
   await feedStore.ensureReady();
+  await chatModeration.ensureReady();
+  // Expiry applies even on an idle server; no raw chat is included in error logs.
+  const flushChatAudit = (): void => {
+    void chatModeration.flush().catch((error) => app.log.error({ err: error }, 'chat audit write failed'));
+  };
+  const chatAuditTimer = setInterval(flushChatAudit, 60_000);
+  chatAuditTimer.unref();
   await announcementStore.ensureReady();
   await userStore.initializeHistoricalPoints(await replayStore.listReplays(), feedStore.listAll());
 
@@ -477,6 +525,10 @@ const boot = async (): Promise<void> => {
     keyGenerator: resolveRateLimitKey,
   });
   app.addHook('onRequest', app.rateLimit(GENERAL_RATE_LIMIT));
+  app.addHook('onClose', async () => {
+    clearInterval(chatAuditTimer);
+    await chatModeration.flush();
+  });
 
   app.addHook('onRequest', async (request, reply) => {
     const pathname = request.url.split('?')[0];
@@ -566,6 +618,17 @@ const boot = async (): Promise<void> => {
 
   const authPageRateLimitPreHandler = app.rateLimit(AUTH_PAGE_RATE_LIMIT);
   const authActionRateLimitPreHandler = app.rateLimit(AUTH_ACTION_RATE_LIMIT);
+  // createRateLimit evaluates independently of the global hook's rateLimitRan marker.
+  const checkReplayListRateLimit = app.createRateLimit({ max: 12, timeWindow: '1 minute' });
+  const replayListRateLimitPreHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    const result = await checkReplayListRateLimit(request);
+    if (result.isAllowed === false && result.isExceeded) {
+      return reply
+        .code(429)
+        .header('Retry-After', String(result.ttlInSeconds))
+        .send({ error: '回放列表每分钟最多访问 12 次。' });
+    }
+  };
 
   app.get('/login', { preHandler: authPageRateLimitPreHandler }, async (request, reply) => {
     const token = authService.getTokenFromCookie(request.headers.cookie);
@@ -813,6 +876,36 @@ const boot = async (): Promise<void> => {
     return serveAssetTemplate(request, reply, 'admin.html', 'text/html');
   });
 
+  app.get('/api/admin/chat-audit', async (request, reply) => {
+    if (!requireAdmin(request, reply)) return;
+    const query = request.query as { username?: string; room?: string; candidates?: string; before?: string };
+    reply.header('Cache-Control', 'no-store');
+    return reply.send({
+      items: chatModeration.list({
+        username: String(query.username ?? '').slice(0, 20),
+        room: String(query.room ?? '').slice(0, 15),
+        candidates: query.candidates === '1',
+        before: String(query.before ?? '').slice(0, 36) || undefined,
+      }),
+    });
+  });
+
+  app.post(
+    '/api/admin/chat-release',
+    { preHandler: adminActionRateLimitPreHandler },
+    async (request, reply) => {
+      const admin = requireAdmin(request, reply);
+      if (!admin) return;
+      const target = String((request.body as { username?: unknown })?.username ?? '').trim();
+      if (!USERNAME_REGEX.test(target) || !userStore.getPublicProfile(target)) {
+        return reply.code(404).send({ error: '用户不存在。' });
+      }
+      chatModeration.release(target, admin.username);
+      await chatModeration.flush();
+      return reply.send({ ok: true });
+    },
+  );
+
   app.get('/api/admin/users', async (request, reply) => {
     const admin = requireAdmin(request, reply);
     if (!admin) {
@@ -892,6 +985,8 @@ const boot = async (): Promise<void> => {
       return reply.code(404).send({ error: '用户不存在。' });
     }
     await userStore.unbanUser(target);
+    chatModeration.release(target, admin.username);
+    await chatModeration.flush();
     io.emit('home_leaderboard');
     return reply.send({ ok: true });
   });
@@ -1323,26 +1418,30 @@ const boot = async (): Promise<void> => {
     });
   });
 
-  app.get('/api/profile/:username/replays', async (request, reply) => {
-    const { username } = request.params as { username: string };
-    const profile = userStore.getPublicProfile(username);
-    if (!profile) {
-      return reply.code(404).send({ error: '用户不存在。' });
-    }
+  app.get(
+    '/api/profile/:username/replays',
+    { preHandler: replayListRateLimitPreHandler },
+    async (request, reply) => {
+      const { username } = request.params as { username: string };
+      const profile = userStore.getPublicProfile(username);
+      if (!profile) {
+        return reply.code(404).send({ error: '用户不存在。' });
+      }
 
-    const query = request.query as { offset?: unknown; limit?: unknown };
-    const offsetRaw = Number.parseInt(String(query.offset ?? '0'), 10);
-    const limitRaw = Number.parseInt(String(query.limit ?? '10'), 10);
-    const offset = Number.isNaN(offsetRaw) || offsetRaw < 0 ? 0 : offsetRaw;
-    const limit = Number.isNaN(limitRaw) || limitRaw <= 0 ? 10 : Math.min(limitRaw, 50);
+      const query = request.query as { offset?: unknown; limit?: unknown };
+      const offsetRaw = Number.parseInt(String(query.offset ?? '0'), 10);
+      const limitRaw = Number.parseInt(String(query.limit ?? '10'), 10);
+      const offset = Number.isNaN(offsetRaw) || offsetRaw < 0 ? 0 : offsetRaw;
+      const limit = Number.isNaN(limitRaw) || limitRaw <= 0 ? 10 : Math.min(limitRaw, 50);
 
-    const allItems = await replayStore.listReplaysByPlayer(profile.username);
-    const items = allItems.slice(offset, offset + limit);
-    const next_offset = offset + items.length;
-    const has_more = next_offset < allItems.length;
+      const allItems = await replayStore.listReplaysByPlayer(profile.username);
+      const items = allItems.slice(offset, offset + limit);
+      const next_offset = offset + items.length;
+      const has_more = next_offset < allItems.length;
 
-    return reply.send({ items, next_offset, has_more });
-  });
+      return reply.send({ items, next_offset, has_more });
+    },
+  );
 
   // 静态资源版本号注入（防浏览器缓存旧版 JS/CSS）：HTML 与少量拼静态 URL 的
   // JS/CSS 中以 {{V}} 占位，启动时统一替换为 package.json version（每次发布必
@@ -1469,43 +1568,47 @@ const boot = async (): Promise<void> => {
     return serveGameHtml(request, reply);
   });
 
-  app.get('/api/getreplay/:id', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    if (!isReplayIdValid(id)) {
-      return reply.code(404).send({ error: '回放不存在。' });
-    }
-    try {
-      // 直接下发 gzip 压缩后的转码二进制（按回放 id 落盘缓存，不再每次重建整场对局）；
-      // X-Replay-Size 告知解压后大小，客户端据此显示下载进度。
-      const view = await replayStore.readReplayViewGzip(id);
-      return reply
-        .header('Content-Encoding', 'gzip')
-        .header('X-Replay-Size', String(view.size))
-        .type('application/octet-stream')
-        .send(view.gzip);
-    } catch {
-      // 加载/重建失败说明该回放已与当前版本不兼容，直接从库中删除。
-      await replayStore.deleteReplay(id);
-      return reply.code(404).send({ error: '回放不存在或已因不兼容被删除。' });
-    }
-  });
+  app.get('/api/getreplay/:id', async (request, reply) =>
+    handleReplayDownload(request, reply, async () => {
+      const { id } = request.params as { id: string };
+      if (!isReplayIdValid(id)) {
+        return reply.code(404).send({ error: '回放不存在。' });
+      }
+      try {
+        // 直接下发 gzip 压缩后的转码二进制（按回放 id 落盘缓存，不再每次重建整场对局）；
+        // X-Replay-Size 告知解压后大小，客户端据此显示下载进度。
+        const view = await replayStore.readReplayViewGzip(id);
+        return reply
+          .header('Content-Encoding', 'gzip')
+          .header('X-Replay-Size', String(view.size))
+          .type('application/octet-stream')
+          .send(view.gzip);
+      } catch {
+        // 加载/重建失败说明该回放已与当前版本不兼容，直接从库中删除。
+        await replayStore.deleteReplay(id);
+        return reply.code(404).send({ error: '回放不存在或已因不兼容被删除。' });
+      }
+    }),
+  );
 
   // 下载回放：直接返回原始 .rpl 存储文件（ops-v1 操作流，通常仅几百字节）。
-  app.get('/api/downloadreplay/:id', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    if (!isReplayIdValid(id)) {
-      return reply.code(404).send({ error: '回放不存在。' });
-    }
-    try {
-      const raw = await replayStore.readRawReplay(id);
-      return reply
-        .header('Content-Disposition', `attachment; filename="roka-replay-${id}.rpl"`)
-        .type('application/octet-stream')
-        .send(raw);
-    } catch {
-      return reply.code(404).send({ error: '回放不存在。' });
-    }
-  });
+  app.get('/api/downloadreplay/:id', async (request, reply) =>
+    handleReplayDownload(request, reply, async () => {
+      const { id } = request.params as { id: string };
+      if (!isReplayIdValid(id)) {
+        return reply.code(404).send({ error: '回放不存在。' });
+      }
+      try {
+        const raw = await replayStore.readRawReplay(id);
+        return reply
+          .header('Content-Disposition', `attachment; filename="roka-replay-${id}.rpl"`)
+          .type('application/octet-stream')
+          .send(raw);
+      } catch {
+        return reply.code(404).send({ error: '回放不存在。' });
+      }
+    }),
+  );
 
   // 上传回放：客户端 POST 原始 .rpl 文件，服务端解码重建并转码为可观看的 RPB 二进制。
   app.post('/api/replay-upload', async (request, reply) => {
@@ -1526,7 +1629,7 @@ const boot = async (): Promise<void> => {
     }
   });
 
-  app.get('/api/replays', async (request, reply) => {
+  app.get('/api/replays', { preHandler: replayListRateLimitPreHandler }, async (request, reply) => {
     const query = request.query as { offset?: unknown; limit?: unknown };
     const offsetRaw = Number.parseInt(String(query.offset ?? '0'), 10);
     const limitRaw = Number.parseInt(String(query.limit ?? '50'), 10);
@@ -1594,6 +1697,16 @@ const boot = async (): Promise<void> => {
     }
   }, PRESENCE_SWEEP_INTERVAL_MS);
   presenceSweepTimer.unref();
+
+  app.addHook('onClose', async () => {
+    clearInterval(presenceSweepTimer);
+    clearInterval(replayDownloadStateCleanupTimer);
+    lobbyService.stopLobbyHeartbeatSweep();
+    if (homeOnlineTimer) {
+      clearTimeout(homeOnlineTimer);
+    }
+    io.close();
+  });
 
   io.use((socket, next) => {
     const fromHandshake =
@@ -1839,6 +1952,7 @@ const boot = async (): Promise<void> => {
       // 对局进行中的同名参赛玩家视为断线重连：换绑到新 socket 并恢复对局。
       // 传入 isBot 做身份匹配：同名的人类连接不得接管 bot 的席位（反之亦然）。
       if (lobbyService.tryRejoin(io, socket.id, username, room, isBot)) {
+        chatModeration.begin(socket.id, username, room, false);
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         lobbyService.emitHomeRooms(io);
@@ -1863,6 +1977,7 @@ const boot = async (): Promise<void> => {
           lobbyService.emitHomeRooms(io);
           return;
         }
+        chatModeration.begin(socket.id, username, room);
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
         // 观战加入与参战加入文案区分（issue #122）：对局进行中进房或落在
@@ -2221,17 +2336,27 @@ const boot = async (): Promise<void> => {
     });
 
     socket.on('send_message', (data: { text: string; team: boolean }) => {
-      const text = String(data.text ?? '').trim();
-      if (!text) {
+      if (!data || typeof data.text !== 'string') return;
+      const text = data.text.trim();
+      if (!text || text.length > CHAT_TEXT_MAX || !lobbyService.lobbyOfSid.has(socket.id)) {
         return;
       }
 
+      const blocked = chatModeration.check(username);
+      if (blocked) {
+        socket.emit('error_message', { error: blocked });
+        return;
+      }
       const gid = lobbyService.gameUid.get(socket.id);
       if (gid) {
-        lobbyService.gameInstances.get(gid)?.sendMessage(socket.id, {
+        const accepted = lobbyService.gameInstances.get(gid)?.sendMessage(socket.id, {
           text,
           team: Boolean(data.team),
         });
+        if (accepted && !data.team) {
+          chatModeration.record(socket.id, text, gid);
+          flushChatAudit();
+        }
         return;
       }
 
@@ -2255,6 +2380,8 @@ const boot = async (): Promise<void> => {
         }
       }
 
+      chatModeration.record(socket.id, text);
+      flushChatAudit();
       lobbyService.recordLobbyActivity(socket.id);
       lobbyService.sendSystemMessage(io, lobbyService.getLobbyVal(lobbyId), 'room', uid, color, text);
       lobbyService.relayGlobalChat(io, lobbyService.getLobbyVal(lobbyId), lobbyId, uid, color, text);
@@ -2269,6 +2396,12 @@ const boot = async (): Promise<void> => {
     });
 
     const doReturnRoom = (): void => {
+      if (lobbyService.gameUid.has(socket.id)) {
+        chatModeration.end(socket.id);
+        const room = lobbyService.lobbyOfSid.get(socket.id);
+        if (room) chatModeration.begin(socket.id, username, room, false);
+        flushChatAudit();
+      }
       const changed = lobbyService.returnToRoom(io, socket.id);
       if (changed || lobbyService.lobbyOfSid.has(socket.id)) {
         io.to(`sid_${socket.id}`).emit('left', {});
@@ -2278,6 +2411,8 @@ const boot = async (): Promise<void> => {
     socket.on('return_room', doReturnRoom);
 
     socket.on('disconnect', () => {
+      chatModeration.end(socket.id);
+      flushChatAudit();
       if (!isBot) {
         authService.untrackSocket(username, socket.id);
       }
@@ -2295,6 +2430,10 @@ const boot = async (): Promise<void> => {
     });
   });
 
+  if (!listen) {
+    return;
+  }
+
   const cliPortIndex = process.argv.indexOf('--port');
   const cliPort = cliPortIndex >= 0 ? Number(process.argv[cliPortIndex + 1]) : Number.NaN;
   const port = Number.isFinite(cliPort) && cliPort > 0 ? cliPort : Number(process.env.PORT) || 23333;
@@ -2311,4 +2450,8 @@ const boot = async (): Promise<void> => {
   );
 };
 
-void boot();
+export { app, boot, lobbyService, cleanupReplayDownloadState };
+
+if (require.main === module) {
+  void boot();
+}

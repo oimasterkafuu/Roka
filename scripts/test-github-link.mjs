@@ -273,7 +273,7 @@ async function testOAuthSuccessAndCrypto() {
     throw new Error(`unexpected request ${url}`);
   };
   const service = makeService(store, fetchImpl, nowRef);
-  const actor = { username: 'alice', sid: 'session-a' };
+  const actor = { username: 'alice', sid: await store.rotateSession('alice') };
   const { authorizationUrl, query } = startQuery(service, actor);
   assert.equal(authorizationUrl.origin, 'https://oauth.unit.test');
   assert.equal(authorizationUrl.pathname, '/login/oauth/authorize');
@@ -341,7 +341,7 @@ async function testOAuthFailures() {
     },
     nowRef,
   );
-  const actor = { username: 'alice', sid: 'sid-a' };
+  const actor = { username: 'alice', sid: await store.rotateSession('alice') };
 
   const unconfigured = new GithubService({
     userStore: store,
@@ -482,7 +482,7 @@ async function createStarCase(username, id, initialStarStatus = 204) {
     throw new Error(`unexpected URL ${target}`);
   };
   fixture.service = makeService(store, fetchImpl, nowRef);
-  fixture.actor = { username, sid: `sid-${username}` };
+  fixture.actor = { username, sid: await store.rotateSession(username) };
   fixture.complete = async () => {
     const attempt = startQuery(fixture.service, fixture.actor, `star-code-${id}`);
     return fixture.service.completeLink(fixture.actor, attempt.query);
@@ -1054,11 +1054,215 @@ function testStaticBadgePlacement() {
   log('passed static Star badge placement checks');
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function within(promise, message, timeoutMs = 3000) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function testOAuthCancellationAndBodyTimeouts() {
+  const { directory, store } = await createStoreWithUsers(['alice']);
+  const nowRef = { value: 30_000_000 };
+  const actor = { username: 'alice', sid: await store.rotateSession('alice') };
+  const paths = {
+    exchange: '/login/oauth/access_token',
+    identity: '/user',
+    star: '/user/starred/oimasterkafuu/Roka',
+  };
+  let held = null;
+  let requestCount = 0;
+  const server = http.createServer((request, response) => {
+    requestCount += 1;
+    request.resume();
+    if (held && request.url === paths[held.stage]) {
+      const fixture = held;
+      fixture.response = response;
+      response.on('close', () => fixture.closed.resolve());
+      response.writeHead(fixture.status, { 'Content-Type': 'application/json' });
+      response.flushHeaders();
+      response.write(fixture.stage === 'star' ? 'pending' : '{');
+      return;
+    }
+    if (request.url === paths.exchange) {
+      response.end(JSON.stringify({ access_token: 'local-http-regression-token' }));
+    } else if (request.url === paths.identity) {
+      response.end(JSON.stringify({ id: 9001, login: 'local-alice', type: 'User' }));
+    } else {
+      response.writeHead(204);
+      response.end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  // This wrapper delegates to native fetch and returns its actual Response. The
+  // HTTP server sends headers immediately but deliberately leaves the body open.
+  const nativeFetch = async (url, init) => {
+    const response = await fetch(url, init);
+    if (held && new URL(url).pathname === paths[held.stage]) {
+      held.signal = init.signal;
+      held.headers.resolve();
+    }
+    return response;
+  };
+  const service = makeService(store, nativeFetch, nowRef, {
+    oauthBaseUrl: baseUrl,
+    apiBaseUrl: baseUrl,
+    timeoutMs: 2000,
+  });
+  const hold = (stage, status = stage === 'star' ? 404 : 200) => {
+    held = { stage, status, headers: deferred(), closed: deferred(), response: null, signal: null };
+    return held;
+  };
+  const assertUnbound = async () => {
+    assert.equal(store.getGithubCredential('alice'), null);
+    assert.equal(store.findUsernameByGithubId(9001), null);
+    const restarted = new UserStore(directory);
+    await restarted.ensureReady();
+    assert.equal(restarted.getGithubCredential('alice'), null, 'no late binding persisted');
+  };
+  try {
+    // Unlink also invalidates an authorization whose callback has not arrived.
+    const pending = startQuery(service, actor);
+    await service.unlink('alice');
+    const before = requestCount;
+    await expectGithubError(() => service.completeLink(actor, pending.query), 'state');
+    assert.equal(requestCount, before, 'cancelled pending state never calls GitHub');
+    await assertUnbound();
+
+    for (const stage of ['exchange', 'identity', 'star']) {
+      const fixture = hold(stage);
+      const attempt = startQuery(service, actor);
+      const completion = service.completeLink(actor, attempt.query);
+      const rejected = expectGithubError(() => completion, 'state');
+      await within(fixture.headers.promise, `missing ${stage} response headers`);
+      assert.equal(fixture.signal.aborted, false);
+      await service.unlink('alice');
+      await within(rejected, `unlink did not cancel ${stage}`);
+      assert.equal(fixture.signal.aborted, true, `unlink aborts native fetch at ${stage}`);
+      await within(fixture.closed.promise, `${stage} HTTP response not closed by abort`);
+      await assertUnbound();
+      held = null;
+    }
+
+    // Starting a newer generation must cancel the old one without its finally
+    // deleting the newer operation, which must still be able to finish.
+    const superseded = hold('exchange');
+    const old = startQuery(service, actor);
+    const oldCompletion = service.completeLink(actor, old.query);
+    const oldRejected = expectGithubError(() => oldCompletion, 'state');
+    await within(superseded.headers.promise, 'old generation headers missing');
+    const replacement = startQuery(service, actor);
+    await within(oldRejected, 'old generation was not cancelled');
+    await within(superseded.closed.promise, 'superseded request not closed');
+    assert.equal(superseded.signal.aborted, true);
+    held = null;
+    assert.equal((await service.completeLink(actor, replacement.query)).login, 'local-alice');
+    await service.unlink('alice');
+
+    // A stale session must be rejected even when username and callback SID match.
+    const oldSid = actor.sid;
+    const stale = startQuery(service, actor);
+    actor.sid = await store.rotateSession('alice');
+    const beforeStale = requestCount;
+    await expectGithubError(
+      () => service.completeLink({ username: 'alice', sid: oldSid }, stale.query),
+      'state',
+    );
+    assert.equal(requestCount, beforeStale);
+
+    // Invalidate the session after native HTTP I/O starts, then let the response
+    // finish normally: only the pre-write session check can prevent persistence.
+    for (const invalidate of ['logout', 'rotate']) {
+      actor.sid = await store.rotateSession('alice');
+      const fixture = hold('star');
+      const attempt = startQuery(service, actor);
+      const completion = service.completeLink(actor, attempt.query);
+      const rejected = expectGithubError(() => completion, 'state');
+      await within(fixture.headers.promise, 'session race response headers missing');
+      if (invalidate === 'logout') await store.clearSession('alice');
+      else await store.rotateSession('alice');
+      fixture.response.end();
+      await within(rejected, `${invalidate} session allowed late binding`);
+      await within(fixture.closed.promise, 'completed response did not close');
+      assert.equal(fixture.signal.aborted, false, 'successful HTTP response reaches pre-write check');
+      await assertUnbound();
+      held = null;
+    }
+
+    actor.sid = await store.rotateSession('alice');
+    const timed = makeService(store, nativeFetch, nowRef, {
+      oauthBaseUrl: baseUrl,
+      apiBaseUrl: baseUrl,
+      timeoutMs: 200,
+    });
+    for (const stage of ['exchange', 'identity']) {
+      const fixture = hold(stage);
+      const attempt = startQuery(timed, actor);
+      const completion = timed.completeLink(actor, attempt.query);
+      const rejected = expectGithubError(() => completion, stage);
+      await within(fixture.headers.promise, `${stage} headers were not received`);
+      assert.equal(fixture.signal.aborted, false, 'headers arrive before deadline');
+      await within(rejected, `${stage} body timeout did not reject`);
+      assert.equal(fixture.signal.aborted, true, `${stage} body timeout aborts real fetch`);
+      await within(fixture.closed.promise, `${stage} body socket remained open`);
+      await assertUnbound();
+      held = null;
+    }
+
+    // Star uses the same full-response deadline, including non-JSON/error bodies.
+    for (const status of [404, 401, 500]) {
+      const fixture = hold('star', status);
+      const attempt = startQuery(timed, actor);
+      const completion = timed.completeLink(actor, attempt.query);
+      await within(fixture.headers.promise, 'Star headers were not received');
+      assert.equal(fixture.signal.aborted, false);
+      const profile = await within(completion, 'initial Star body timeout hangs binding');
+      assert.equal(profile.starred, false, 'incomplete Star response must not award badge');
+      assert.equal(profile.starState, 'unknown');
+      assert.equal(fixture.signal.aborted, true);
+      await within(fixture.closed.promise, 'initial Star timeout did not close HTTP response');
+      const refresh = hold('star', status);
+      const refreshRejected = expectGithubError(() => timed.refreshStar('alice', true), 'star');
+      await within(refresh.headers.promise, 'refresh headers missing');
+      assert.equal(refresh.signal.aborted, false);
+      await within(refreshRejected, 'Star refresh body timeout did not reject');
+      assert.equal(refresh.signal.aborted, true);
+      await within(refresh.closed.promise, 'refresh timeout did not close HTTP response');
+      await service.unlink('alice');
+      await assertUnbound();
+      held = null;
+    }
+    log(
+      'passed native HTTP pending/inflight unlink, generation/session races and exchange/identity/Star body aborts',
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+}
+
 async function main() {
   await testUserStore();
   await testOAuthSuccessAndCrypto();
   await testOAuthFailures();
   await testStarStatesAndCache();
+  await testOAuthCancellationAndBodyTimeouts();
   await testIntegration();
   testStaticBadgePlacement();
   log('all unit, mocked-integration and static tests passed (no live GitHub OAuth was used)');

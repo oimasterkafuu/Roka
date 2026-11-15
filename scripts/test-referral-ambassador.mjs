@@ -178,7 +178,7 @@ const server = spawn(
   process.execPath,
   [
     '-e',
-    "const {CaptchaService}=require('./dist/server/captcha-service.js');CaptchaService.prototype.verifyAndConsume=()=>({ok:true});require('./dist/server.js');",
+    "const {CaptchaService}=require('./dist/server/captcha-service.js');CaptchaService.prototype.verifyAndConsume=()=>({ok:true});require('./dist/server.js').boot().catch((error)=>{console.error(error);process.exit(1);});",
   ],
   {
     cwd: rootDir,
