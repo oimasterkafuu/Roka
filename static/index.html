@@ -868,6 +868,12 @@
       // 单条动态的就地更新（issue #85）：只改有变化的字段，保留评论展开状态、
       // 正在输入的评论框与内联编辑态，避免 home_feeds 失效通知把整页打断重渲染。
       function updatePostElement($item, post) {
+        var authorSeed = {};
+        authorSeed[post.author] = post.authorInfo;
+        post.comments.forEach(function (comment) {
+          authorSeed[comment.author] = comment.authorInfo;
+        });
+        usernameCacheSeed(authorSeed);
         var editing = $item.find('.feed-edit').length > 0;
         if (!editing) {
           $item.data('raw-text', post.text);
