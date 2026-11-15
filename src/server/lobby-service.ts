@@ -410,6 +410,51 @@ class LobbyService {
     return {};
   }
 
+  updateServerBotConfig(
+    io: SocketIOServer,
+    gid: string,
+    uid: string,
+    config: { allowTeam: boolean; allowFog: boolean; allowMultiLine: boolean },
+  ): void {
+    const player = this.lobbyPlayers
+      .get(gid)
+      ?.find((member) => member.uid === uid && member.serverBot === true);
+    if (!player) {
+      return;
+    }
+    player.serverBotAllowTeam = config.allowTeam;
+    player.serverBotAllowFog = config.allowFog;
+    player.serverBotAllowMultiLine = config.allowMultiLine;
+
+    const conf = this.lobbyConfig.get(gid);
+    if (!conf) {
+      return;
+    }
+    const disabled: string[] = [];
+    if (!config.allowTeam && conf.allow_team) {
+      conf.allow_team = false;
+      this.enforceLobbyConstraints(gid);
+      disabled.push('组队模式');
+    }
+    if (!config.allowFog && conf.fog) {
+      conf.fog = false;
+      disabled.push('迷雾远征');
+    }
+    if (!config.allowMultiLine && conf.multi_line) {
+      conf.multi_line = false;
+      disabled.push('多线争锋');
+    }
+    if (disabled.length > 0) {
+      this.sendLobbySystemMessage(
+        io,
+        this.getLobbyVal(gid),
+        `官方策略 Bot 配置已更新，${disabled.join('、')}已关闭。`,
+      );
+    }
+    this.emitRoomUpdate(io, gid);
+    this.emitHomeRooms(io);
+  }
+
   leaveLobby(sid: string, gid: string): string {
     // 官方 Bot 房停留计时结算：所有退出路径（checkLeave/kickFromLobby/断线宽限到期/
     // 对局结束清理）都汇聚到本方法，有计时段则累加进当日桶并清除。

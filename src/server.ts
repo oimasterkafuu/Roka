@@ -1092,6 +1092,58 @@ const boot = async (listen = true): Promise<void> => {
     },
   );
 
+  // 运行中配置：三项许可均要求严格布尔值；写盘成功后才提交内存与房间变更。
+  app.post(
+    '/api/admin/bots/config',
+    { preHandler: adminActionRateLimitPreHandler },
+    async (request, reply) => {
+      const admin = requireSuperAdmin(request, reply);
+      if (!admin) {
+        return;
+      }
+      const body = request.body as {
+        id?: unknown;
+        allowTeam?: unknown;
+        allowFog?: unknown;
+        allowMultiLine?: unknown;
+      };
+      const id = String(body?.id ?? '').trim();
+      const allowTeam = body?.allowTeam;
+      const allowFog = body?.allowFog;
+      const allowMultiLine = body?.allowMultiLine;
+      if (
+        !id ||
+        typeof allowTeam !== 'boolean' ||
+        typeof allowFog !== 'boolean' ||
+        typeof allowMultiLine !== 'boolean'
+      ) {
+        return reply.code(400).send({ error: 'id 必填，allowTeam、allowFog、allowMultiLine 必须是布尔值。' });
+      }
+      try {
+        const bot = serverBotManager.updateConfig(id, { allowTeam, allowFog, allowMultiLine });
+        if (!bot) {
+          return reply.code(404).send({ error: 'Bot 不存在或已停止。' });
+        }
+        const socketId = serverBotManager.getSocketId(id);
+        const botSocket = socketId ? io.sockets.sockets.get(socketId) : undefined;
+        if (botSocket?.data.isServerBot === true) {
+          botSocket.data.serverBotAllowTeam = allowTeam;
+          botSocket.data.serverBotAllowFog = allowFog;
+          botSocket.data.serverBotAllowMultiLine = allowMultiLine;
+        }
+        lobbyService.updateServerBotConfig(io, bot.room, bot.username, {
+          allowTeam,
+          allowFog,
+          allowMultiLine,
+        });
+        return reply.send({ ok: true, bot });
+      } catch (error) {
+        request.log.error(error, 'failed to update server bot config');
+        return reply.code(500).send({ error: '配置保存失败，Bot 仍按原配置运行。' });
+      }
+    },
+  );
+
   // 停止：{ id }。断开 bot 连接并清理其内存令牌。
   app.post('/api/admin/bots/stop', { preHandler: adminActionRateLimitPreHandler }, async (request, reply) => {
     const admin = requireSuperAdmin(request, reply);
@@ -1724,7 +1776,7 @@ const boot = async (listen = true): Promise<void> => {
 
       // 服务端托管策略 Bot：命中管理器生成的内存临时令牌时以指定用户放行，
       // 额外标记 isServerBot（进房不当房主，见 lobby-service.joinLobby）并记录
-      // 启动时的组队、迷雾与多线许可。
+      // 当前的组队、迷雾与多线许可（后台编辑会同步更新已连接 socket）。
       const serverBot = serverBotManager.resolveToken(fromHandshake);
       if (serverBot) {
         socket.data.username = serverBot.username;
