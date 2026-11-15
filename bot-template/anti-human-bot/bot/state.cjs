@@ -4,12 +4,22 @@ class BoardState {
     const { n, m } = init;
     if (!Number.isInteger(n) || !Number.isInteger(m) || n < 1 || m < 1 || n * m > 100000) throw new Error('地图尺寸无效');
     this.n = n; this.m = m;
+    this.multiLine = init.multi_line === true;
+    this.nextSeq = Number.isInteger(init.next_seq) && init.next_seq > 0 ? init.next_seq : 1;
+    this.queue = Array.isArray(init.queue_ops) ? init.queue_ops.map(op => ({ ...op })) : [];
+    this.nextSeq = Math.max(this.nextSeq, ...this.queue.map(op => op.seq + 1));
     this.playerId = (init.player_ids || []).indexOf(clientId) + 1;
     this.grid = Array(n * m).fill(202);
     this.army = Array(n * m).fill(0);
     this.isolated = Array(n * m).fill(0);
     this.fog = Array(n * m).fill(1);
     this.teams = new Map(); this.turn = -1; this.ended = false; this.dead = false;
+  }
+  enqueue(action) {
+    const op = action.kind === 'attack'
+      ? { kind: 'm', x: action.x, y: action.y, dx: action.dx, dy: action.dy, mode: action.mode ?? 0 }
+      : { kind: action.op ?? 'b', x: action.x, y: action.y };
+    this.queue.push({ ...op, seq: this.nextSeq++ });
   }
   apply(payload) {
     if (!Number.isInteger(payload.turn) || payload.turn < this.turn) return false;
@@ -35,7 +45,11 @@ class BoardState {
     Object.assign(this, updates);
     if (!payload.is_diff && payload.fog === undefined) this.fog.fill(0);
     this.turn = payload.turn;
-    this.lastMove = { seqs: payload.lst_moves, turn: payload.turn };
+    const removed = new Set(Array.isArray(payload.lst_moves) ? payload.lst_moves : []);
+    // Receipts acknowledge removal, never execution. Keep every unacknowledged chain.
+    this.removedOps = this.queue.filter(op => removed.has(op.seq));
+    this.queue = this.queue.filter(op => !removed.has(op.seq));
+    this.lastMove = { seqs: [...removed], turn: payload.turn };
     this.ended = Boolean(payload.game_end);
     if (Array.isArray(payload.leaderboard)) {
       this.leaderboard = payload.leaderboard.map((p) => ({ ...p }));

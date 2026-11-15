@@ -45,7 +45,7 @@ exports.chooseMove = function chooseMove(state, params = {}) {
   for (let i = 0; i < size; i++) {
     if (owners[i] !== me) continue;
     if (grid[i] === 100 + me) crowns.push(i);
-    if (!isolated[i] && count(i) > 1) sources.push(i);
+    if (!isolated[i] && count(i) > 1 && !params.blockedSources?.has(i)) sources.push(i);
   }
   if (!sources.length) return null;
 
@@ -82,6 +82,7 @@ exports.chooseMove = function chooseMove(state, params = {}) {
   }
   let best = null;
   function offer(from, to, score, reason) {
+    if (params.blockedTargets?.has(to)) return;
     const amount = push(from, to, count(from));
     if (amount <= 0) return;
     if (crowns.includes(from) && count(from) - amount <= pressure(from, owners[to] !== me ? to : -1)) return;
@@ -91,7 +92,7 @@ exports.chooseMove = function chooseMove(state, params = {}) {
   // 扫描所有源的局部救援/汇兵；远程搜索只选 24 个重要源。
   for (const s of sources) {
     for (const t of neighbors[s]) {
-      if (params.blockedEdges?.has(`${s}:${t}`)) continue;
+      if (params.blockedTargets?.has(t) || params.blockedEdges?.has(`${s}:${t}`)) continue;
       if (!passable(t)) continue;
       const amount = push(s, t, count(s));
       if (owners[t] === me && !isolated[t]) {
@@ -121,7 +122,7 @@ exports.chooseMove = function chooseMove(state, params = {}) {
       budget--;
       if (p.depth >= 18) continue;
       for (const t of neighbors[p.at]) {
-        if (p.depth === 0 && params.blockedEdges?.has(`${source}:${t}`)) continue;
+        if (p.depth === 0 && (params.blockedTargets?.has(t) || params.blockedEdges?.has(`${source}:${t}`))) continue;
         if (seen[t] || !passable(t)) continue;
         const sent = push(p.at, t, p.total, p.prev);
         const ours = owners[t] === me;
