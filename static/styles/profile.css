@@ -133,9 +133,6 @@ body.profile .profile-title {
   color: #9aa4b2;
   margin-left: 8px;
 }
-body.profile .profile-star-initial {
-  color: #b8860b;
-}
 body.profile .profile-github-link,
 body.profile #github-account-link {
   display: block;
