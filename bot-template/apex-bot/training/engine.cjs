@@ -105,7 +105,7 @@ function compileEngine({ synchronous = true } = {}) {
       ['initializeMap', 'void'],
       ['gameTick', 'boolean'],
     ]) {
-      const signature = new RegExp(`private async ${name}\\([^)]*\\): Promise<${result}> \\{`);
+      const signature = new RegExp(`private async ${name}\\([\\s\\S]*?\\): Promise<${result}> \\{`);
       const match = signature.exec(source);
       const start = match?.index ?? -1;
       const end = source.indexOf('\n  }', start);

@@ -1642,6 +1642,20 @@ function rearExpansion(b, m, own, ed, enemies) {
   return action ? { ...action, branch: 'rear-expansion' } : null;
 }
 
+function continuingIsolatedAssault(b, m) {
+  const campaign = m.campaign;
+  const at = campaign?.at;
+  if (!b.multiLine || swampRatio(b, m) > 0.55 || campaign?.phase !== 'attack' || !Number.isInteger(at) ||
+      !b.own(at) || !b.isolated[at] || b.army[at] < 18) return false;
+  let ownTotal = 0;
+  let enemyTotal = 0;
+  for (let at = 0; at < b.size; at += 1) {
+    if (b.own(at)) ownTotal += b.army[at];
+    else if (b.enemy(at) && !b.isolated[at]) enemyTotal += b.army[at];
+  }
+  return ownTotal >= Math.max(350, enemyTotal * 1.35) && ownTotal > enemyTotal + 150;
+}
+
 function chooseCampaign(b,m,own) {
   const crowns=[];
   for(let i=0;i<b.size;i++)if(b.enemy(i)&&b.kind(i)==='crown')crowns.push(i);
@@ -1698,6 +1712,29 @@ function chooseCampaign(b,m,own) {
         if (!b.own(from)) continue;
         const rescue = safeMove(b, from, lostAt, 'cut');
         if (rescue) return { action: rescue, branch: 'rescue' };
+      }
+    }
+    if (continuingIsolatedAssault(b, m) && b.enemy(m.campaign.crown) && b.kind(m.campaign.crown) === 'crown') {
+      const campaign = m.campaign;
+      const targetField = field(b, [campaign.crown]);
+      const isolatedField = field(b, [lostAt]);
+      const replacement = own
+        .filter((at) => b.army[at] >= 18 && Number.isFinite(targetField.distance[at]) &&
+          Number.isFinite(isolatedField.distance[at]))
+        .sort((a, z) => isolatedField.distance[a] - isolatedField.distance[z] ||
+          targetField.distance[a] - targetField.distance[z] || b.army[z] - b.army[a])[0];
+      if (replacement !== undefined) {
+        campaign.at = replacement;
+        campaign.phase = 'attack';
+        campaign.lastAt = replacement;
+        campaign.lastPhase = 'attack';
+        campaign.lastProgress = b.turn;
+        campaign.bestCrownDistance = targetField.distance[replacement];
+        campaign.deliveryBestDistance = Infinity;
+        campaign.musterTurns = 0;
+        campaign.recoveryRebases = (campaign.recoveryRebases || 0) + 1;
+        m.delivery = null;
+        return chooseCampaign(b, m, own);
       }
     }
     // Keep a successful breach together.  When a crown is captured the old

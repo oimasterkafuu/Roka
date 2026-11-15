@@ -327,3 +327,44 @@ test('multi-line campaign retains a captured breach for the next crown', () => {
   assert.equal(decision.action.y, 1);
   assert.equal(decision.action.dy, 2);
 });
+
+test('decisive multi-line assault rebases near an isolated spearhead', () => {
+  const raw = {
+    n: 1, m: 7,
+    grid: [101, 1, 1, 1, 200, 102, 102],
+    army: [500, 1, 200, 80, 0, 20, 20],
+    isolated: [0, 1, 1, 0, 0, 0, 0],
+    turn: 200,
+  };
+  const campaign = { at: 2, crown: 5, phase: 'attack', started: 190, lastProgress: 199 };
+  const first = plan(board(raw), {
+    ...memory(), home: 0, enemyHome: 5, threatDistance: {}, maze: false, campaign,
+  });
+  assert.equal(first.branch, 'march');
+  assert.equal(first.action.y, 3);
+  assert.equal(first.action.dy, 4);
+  assert.equal(campaign.crown, 5);
+  assert.equal(campaign.at, 3);
+
+  const legacy = plan(board({ ...raw, multiLine: false }), {
+    ...memory(), home: 0, enemyHome: 5, threatDistance: {}, maze: false,
+    campaign: { at: 2, crown: 5, phase: 'attack', started: 190, lastProgress: 199 },
+  });
+  assert.equal(legacy.action.y, 0);
+  assert.equal(legacy.action.dy, 1);
+});
+
+test('high-swamp maps keep the original isolated-assault recovery', () => {
+  const raw = {
+    n: 1, m: 7,
+    grid: [101, 151, 151, 151, 204, 102, 102],
+    army: [500, 1, 200, 80, 0, 20, 20],
+    isolated: [0, 1, 1, 0, 0, 0, 0],
+    turn: 200,
+  };
+  const campaign = () => ({ at: 2, crown: 5, phase: 'attack', started: 190, lastProgress: 199 });
+  const state = () => ({ ...memory(), home: 0, enemyHome: 5, threatDistance: {}, maze: false, campaign: campaign() });
+  const multi = plan(board(raw), state());
+  const legacy = plan(board({ ...raw, multiLine: false }), state());
+  assert.deepEqual(multi, legacy);
+});
