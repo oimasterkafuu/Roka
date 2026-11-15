@@ -453,12 +453,6 @@ if (runtimeEnv.createdKeys.length > 0) {
   app.log.info({ keys: runtimeEnv.createdKeys }, '已自动补全缺失环境变量到 .env。');
 }
 
-let chatAuditTimer: NodeJS.Timeout | undefined;
-app.addHook('onClose', async () => {
-  clearInterval(chatAuditTimer);
-  await chatModeration.flush();
-});
-
 const boot = async (): Promise<void> => {
   await replayStore.ensureReady();
   await userStore.ensureReady();
@@ -468,7 +462,7 @@ const boot = async (): Promise<void> => {
   const flushChatAudit = (): void => {
     void chatModeration.flush().catch((error) => app.log.error({ err: error }, 'chat audit write failed'));
   };
-  chatAuditTimer = setInterval(flushChatAudit, 60_000);
+  const chatAuditTimer = setInterval(flushChatAudit, 60_000);
   chatAuditTimer.unref();
   await announcementStore.ensureReady();
   await userStore.initializeHistoricalPoints(await replayStore.listReplays(), feedStore.listAll());
@@ -482,6 +476,10 @@ const boot = async (): Promise<void> => {
     keyGenerator: resolveRateLimitKey,
   });
   app.addHook('onRequest', app.rateLimit(GENERAL_RATE_LIMIT));
+  app.addHook('onClose', async () => {
+    clearInterval(chatAuditTimer);
+    await chatModeration.flush();
+  });
 
   app.addHook('onRequest', async (request, reply) => {
     const pathname = request.url.split('?')[0];
