@@ -882,7 +882,16 @@ async function testIntegration() {
   assert.equal(aliceProfile.json.github.htmlUrl, 'https://github.com/alice-github');
   assert.equal(aliceProfile.json.github.starred, true);
   assert.equal(aliceProfile.json.github.starState, 'starred');
+  assert.equal(aliceProfile.json.starred, true);
   assertNoSensitiveDto(aliceProfile.json);
+  const starColors = await api('/api/user-colors?users=alice,bob,carol');
+  assert.equal(starColors.status, 200);
+  assert.deepEqual(starColors.json.colors.alice.starred, true);
+  assert.deepEqual(starColors.json.colors.bob.starred, false);
+  for (const appearance of Object.values(starColors.json.colors)) {
+    assert.deepEqual(Object.keys(appearance).sort(), ['admin', 'banned', 'colorClass', 'starred', 'title']);
+  }
+  assertNoSensitiveDto(starColors.json);
   await testProfileStarInitialBrowser(server.baseUrl, true);
 
   const badState = await api('/api/auth/github/callback?code=alice-code&state=definitely-wrong', {
@@ -965,7 +974,6 @@ async function testIntegration() {
 
   const publicRoutes = [
     '/api/leaderboard',
-    '/api/user-colors?users=alice,bob,carol',
     '/api/admin/users',
     '/api/contributors',
     '/api/replays',
@@ -1010,7 +1018,12 @@ async function testIntegration() {
   assert.equal(refreshed.json.github.starred, false);
   assert.equal(refreshed.json.github.starState, 'not-starred');
   assertNoSensitiveDto(refreshed.json);
-  assert.equal((await api('/api/profile/alice')).json.github.starred, false);
+  const revokedProfile = await api('/api/profile/alice');
+  assert.equal(revokedProfile.json.github.starred, false);
+  assert.equal(revokedProfile.json.starred, false);
+  const revokedColors = await api('/api/user-colors?users=alice,bob,carol');
+  assert.equal(revokedColors.json.colors.alice.starred, false);
+  assertNoSensitiveDto(revokedColors.json);
   await testProfileStarInitialBrowser(server.baseUrl, false);
   assert.equal((await api('/api/auth/github/star/refresh', { method: 'POST', user: 'bob' })).status, 404);
   assertDiskDoesNotContain(dataDir, secrets);
@@ -1046,29 +1059,66 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
       const name = document.querySelector('#p-name');
       return main && getComputedStyle(main).display !== 'none' && name.textContent === 'alice';
     });
+    await page.evaluate(async () => {
+      window.htmlescape = (value) =>
+        String(value)
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;');
+      delete usernameColorCache.alice;
+      await usernameEnsureColors(['alice']);
+      const host = document.createElement('div');
+      host.id = 'star-public-component-fixtures';
+      host.style.display = 'none';
+      const domLink = usernameLink('alice').attr('id', 'star-dom-component');
+      host.appendChild(domLink[0]);
+      const htmlHost = document.createElement('div');
+      htmlHost.innerHTML = usernameLinkHtml('alice');
+      htmlHost.firstElementChild.id = 'star-html-component';
+      host.appendChild(htmlHost);
+      document.body.appendChild(host);
+    });
+
     const name = page.locator('#p-name');
     assert.match(await name.getAttribute('class'), /(?:^|\s)rt-admin(?:\s|$)/);
     assert.equal(await name.getAttribute('title'), 'Headquarters');
     assert.equal(await name.evaluate((element) => getComputedStyle(element).color), 'rgb(0, 0, 0)');
-    const initial = name.locator('.profile-star-initial');
-    assert.equal(await initial.count(), expectedStarred ? 1 : 0);
-    if (expectedStarred) {
-      assert.equal(await initial.textContent(), 'a');
-      assert.equal(await initial.evaluate((element) => getComputedStyle(element).color), 'rgb(184, 134, 11)');
-    } else {
-      assert.equal(await name.evaluate((element) => element.children.length), 0);
-      for (const starState of ['unknown', 'stale']) {
-        await page.evaluate((state) => {
-          renderGithubProfile({
-            login: 'alice-github',
-            htmlUrl: 'https://github.com/alice-github',
-            starred: true,
-            starState: state,
-            starVerifiedAt: Date.now(),
-          });
-        }, starState);
-        assert.equal(await name.locator('.profile-star-initial').count(), 0, `${starState} must not be gold`);
-        assert.equal(await name.textContent(), 'alice');
+    const components = [name, page.locator('#star-dom-component'), page.locator('#star-html-component')];
+    for (const component of components) {
+      assert.equal(await component.textContent(), 'alice');
+      assert.equal(await component.locator('.username-star-initial').count(), expectedStarred ? 1 : 0);
+      assert.equal(await component.evaluate((element) => getComputedStyle(element).color), 'rgb(0, 0, 0)');
+      if (expectedStarred) {
+        const initial = component.locator('.username-star-initial');
+        assert.equal(await initial.textContent(), 'a');
+        assert.equal(
+          await initial.evaluate((element) => getComputedStyle(element).color),
+          'rgb(184, 134, 11)',
+        );
+      } else {
+        assert.equal(await component.evaluate((element) => element.children.length), 0);
+      }
+    }
+
+    for (const starState of ['not-starred', 'unknown', 'stale']) {
+      await page.evaluate((state) => {
+        renderGithubProfile({
+          login: 'alice-github',
+          htmlUrl: 'https://github.com/alice-github',
+          starred: true,
+          starState: state,
+          starVerifiedAt: Date.now(),
+        });
+      }, starState);
+      for (const component of components) {
+        assert.equal(
+          await component.locator('.username-star-initial').count(),
+          0,
+          `${starState} must not be gold`,
+        );
+        assert.equal(await component.textContent(), 'alice');
+        assert.equal(await component.evaluate((element) => element.children.length), 0);
       }
     }
     assert.deepEqual(errors, []);
@@ -1078,28 +1128,40 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
       );
       await page.goto(`${baseUrl}/about`);
       await page.getByRole('heading', { name: 'Star 支持' }).waitFor();
+      assert.match(
+        await page.locator('.doc-panel').filter({ hasText: 'Star 支持' }).textContent(),
+        /全站公共用户名组件/,
+      );
       const link = page.getByRole('link', { name: '前往 GitHub 为 Roka 点 Star →' });
       assert.equal(await link.getAttribute('href'), 'https://github.com/oimasterkafuu/Roka');
     }
   } finally {
     await browser.close();
   }
-  log(`passed real profile browser UI for ${expectedStarred ? 'starred' : 'not-starred'}`);
+  log(
+    `passed public DOM/HTML components and profile browser UI for ${expectedStarred ? 'starred' : 'not-starred'}`,
+  );
 }
 
 function testStaticStarInitialPlacement() {
   const profileHtml = fs.readFileSync(path.join(rootDir, 'static', 'profile.html'), 'utf8');
   const profileJs = fs.readFileSync(path.join(rootDir, 'static', 'profile.js'), 'utf8');
   const profileCss = fs.readFileSync(path.join(rootDir, 'static', 'styles', 'profile.css'), 'utf8');
+  const usernameJs = fs.readFileSync(path.join(rootDir, 'static', 'username.js'), 'utf8');
+  const ratingCss = fs.readFileSync(path.join(rootDir, 'static', 'styles', 'rating.css'), 'utf8');
   const aboutHtml = fs.readFileSync(path.join(rootDir, 'static', 'about.html'), 'utf8');
-  const starMarker = /github-star|profile-star-initial|starred|starState/i;
+  const starMarker = /github-star|username-star-initial|profile-star-initial|starred|starState/i;
   assert.equal(profileHtml.includes('p-github-star-badge'), false, 'redundant Star badge is removed');
-  assert.match(profileJs, /github\.starred/);
-  assert.match(profileJs, /profile-star-initial/);
-  assert.match(profileCss, /body\.profile \.profile-star-initial/);
+  assert.equal(profileHtml.includes('profile-star-initial'), false);
+  assert.equal(profileJs.includes('renderProfileName'), false, 'profile must reuse the public component');
+  assert.equal(profileCss.includes('profile-star-initial'), false);
+  assert.match(usernameJs, /function usernameTextHtml/);
+  assert.match(usernameJs, /function usernameRenderText/);
+  assert.match(ratingCss, /\.username-star-initial/);
   assert.match(aboutHtml, /Star 支持/);
+  assert.match(aboutHtml, /全站公共用户名组件/);
   assert.match(aboutHtml, /https:\/\/github\.com\/oimasterkafuu\/Roka/);
-  for (const relative of ['username.js', 'about-contributors.js', 'main.js']) {
+  for (const relative of ['about-contributors.js', 'main.js']) {
     const source = fs.readFileSync(path.join(rootDir, 'static', relative), 'utf8');
     assert.equal(
       starMarker.test(source),
@@ -1114,11 +1176,11 @@ function testStaticStarInitialPlacement() {
     const relative = path.relative(rootDir, file).split(path.sep).join('/');
     if (!starMarker.test(fs.readFileSync(file, 'utf8'))) continue;
     assert.ok(
-      /^static\/(?:profile\.(?:js|html)|styles\/profile\.css)$/.test(relative),
-      `Star initial implementation is only allowed in profile HTML/JS/CSS, found ${relative}`,
+      /^static\/(?:username\.js|profile\.(?:js|html)|styles\/(?:profile|rating)\.css)$/.test(relative),
+      `Star initial implementation belongs to the public component, found ${relative}`,
     );
   }
-  log('passed static Star initial scope and about-page explanation checks');
+  log('passed static global Star initial placement and about-page explanation checks');
 }
 
 function deferred() {

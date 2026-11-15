@@ -1,14 +1,15 @@
 // 全站统一用户名渲染组件：带 rating 颜色（rt-* 色阶，与排行榜同源）的可点击用户名链接。
 // 用法：
-//   var $a = usernameLink(name, info);   // info 可选 {colorClass, title, admin, banned}；缺省时查全局缓存
-//   usernameCacheSeed({name: {colorClass, title, admin, banned}});  // 用接口已有数据喂缓存
+//   var $a = usernameLink(name, info);   // info 可选 {colorClass, title, admin, banned, starred}；缺省时查全局缓存
+//   usernameCacheSeed({name: {colorClass, title, admin, banned, starred}});  // 用接口已有数据喂缓存
 //   usernameEnsureColors([name, ...]);   // 批量拉取缺失名字的颜色（/api/user-colors），返回 Promise
-// 缓存回填后，已渲染的链接（带 data-username 标记）会自动刷新颜色与 title。
+// 缓存回填后，已渲染的链接（带 data-username 标记）会自动刷新颜色、title 与 Star 首字母。
 // 有效封禁优先渲染为 rt-banned（棕色正常字重）；未封禁管理员使用 rt-admin
 // （黑色加粗）及 Headquarters tooltip；无可见徽标。
-// 防注入：DOM 版用 .text()，HTML 版转义用户名。
+// 经公开接口确认 starred 时仅首字母染金，其余字符继续继承原颜色。
+// 防注入：DOM 版用 .text()/文本节点，HTML 版转义用户名。
 
-// 用户名 → {colorClass, title, admin, banned} 全局缓存。
+// 用户名 → {colorClass, title, admin, banned, starred} 全局缓存。
 var usernameColorCache = {};
 // 进行中的批量请求去重；失效代数防止旧请求覆盖解除封禁后的新数据。
 var usernameColorInflight = {};
@@ -18,15 +19,43 @@ function usernameColorKey(username) {
   return String(username);
 }
 
+function usernameRenderText($el, username, starred) {
+  var name = String(username);
+  $el.text('');
+  if (starred && name) {
+    $('<span class="username-star-initial"></span>').text(name.charAt(0)).appendTo($el);
+    $el.append(document.createTextNode(name.slice(1)));
+  } else {
+    $el.text(name);
+  }
+}
+
+function usernameTextHtml(username, starred) {
+  var name = String(username);
+  if (!starred || !name) return htmlescape(name);
+  return (
+    '<span class="username-star-initial">' +
+    htmlescape(name.charAt(0)) +
+    '</span>' +
+    htmlescape(name.slice(1))
+  );
+}
+
 // 即使调用方带着旧 rating 信息，有效封禁仍优先于管理员与 rating。
-function usernameNormalizeInfo(info) {
+// 不带 starred 的旧接口保留已核验状态；显式状态必须同时满足 starred 与 starState（若提供）。
+function usernameNormalizeInfo(info, previous) {
   var admin = info.admin === true;
   var banned = info.banned === true;
+  var hasStarred = Object.prototype.hasOwnProperty.call(info, 'starred');
+  var starred = hasStarred
+    ? info.starred === true && (info.starState === undefined || info.starState === 'starred')
+    : !!(previous && previous.starred);
   return {
     colorClass: banned ? 'rt-banned' : admin ? 'rt-admin' : info.colorClass || 'rt-unrated',
     title: banned ? '已封禁' : admin ? 'Headquarters' : info.title || '',
     admin: admin,
     banned: banned,
+    starred: starred,
   };
 }
 
@@ -38,7 +67,8 @@ function usernameCacheSeed(map) {
     if (!Object.prototype.hasOwnProperty.call(map, name)) continue;
     var info = map[name];
     if (!info || !info.colorClass) continue;
-    usernameColorCache[usernameColorKey(name)] = usernameNormalizeInfo(info);
+    var key = usernameColorKey(name);
+    usernameColorCache[key] = usernameNormalizeInfo(info, usernameColorCache[key]);
     seeded = true;
   }
   if (seeded && typeof $ != 'undefined' && $.fn) {
@@ -110,7 +140,7 @@ function usernameColorsInvalidate() {
   usernameEnsureColors(names);
 }
 
-// 缓存回填后刷新已渲染链接的颜色与 tooltip（含管理员权限撤销）。
+// 缓存回填后刷新已渲染链接的颜色、tooltip 与 Star 首字母（含状态撤销）。
 function usernameRefreshRendered() {
   $('[data-username]').each(function () {
     var key = usernameColorKey($(this).attr('data-username'));
@@ -123,12 +153,13 @@ function usernameRefreshRendered() {
     );
     $el.addClass(info.colorClass);
     $el.attr('title', info.title);
+    usernameRenderText($el, key, info.starred);
   });
 }
 
 // HTML 字符串版：与 usernameLink 同源（同一缓存与 rt-* 降级），供每帧全量 innerHTML 重建的
 // 热路径（对局排行榜）使用；用户名经 htmlescape 防注入，输出与 DOM 版一致的 data-username 标记，
-// 缓存批量回填后经 usernameRefreshRendered 统一刷新颜色。
+// 缓存批量回填后经 usernameRefreshRendered 统一刷新颜色与 Star 首字母。
 function usernameLinkHtml(username) {
   var key = usernameColorKey(username);
   var cached = usernameColorCache[key] || null;
@@ -144,27 +175,27 @@ function usernameLinkHtml(username) {
     ' data-username="' +
     htmlescape(username) +
     '">' +
-    htmlescape(username) +
+    usernameTextHtml(key, !!(cached && cached.starred)) +
     '</a>'
   );
 }
 
 // 构建统一用户名链接：<a href="/u/名字" class="rt-*" data-username="名字">名字</a>
 // 封禁为 rt-banned/已封禁；未封禁管理员为 rt-admin/Headquarters，均无可见徽标。
-// info 可选 {colorClass, title, admin, banned}；不传时查全局缓存，未命中按 rt-unrated 降级。
+// info 可选 {colorClass, title, admin, banned, starred}；不传时查全局缓存，未命中按 rt-unrated 降级。
 // extraClass 可选，如调用方自己的样式类（feed-author 等）。
 // opts 可选 {stopPropagation: true}：给链接绑 click 阻止冒泡（用于整行可点的表格，点名字跳主页、点行其余进房间/回放）。
 function usernameLink(username, info, extraClass, opts) {
   var key = usernameColorKey(username);
   if (info && info.colorClass) {
-    usernameColorCache[key] = usernameNormalizeInfo(info);
+    usernameColorCache[key] = usernameNormalizeInfo(info, usernameColorCache[key]);
   }
   var cached = usernameColorCache[key] || null;
   var $a = $('<a></a>')
     .attr('href', '/u/' + encodeURIComponent(username))
     .attr('data-username', username)
-    .addClass((cached && cached.colorClass) || 'rt-unrated')
-    .text(username);
+    .addClass((cached && cached.colorClass) || 'rt-unrated');
+  usernameRenderText($a, key, !!(cached && cached.starred));
   if (cached && cached.title) {
     $a.attr('title', cached.title);
   }
