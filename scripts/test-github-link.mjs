@@ -1165,6 +1165,32 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
       assert.equal(await homeName.locator('.username-star-initial').textContent(), 'a');
       assert.equal(await page.locator('#recently-online-list .username-star-initial').textContent(), 'a');
       assert.equal(await page.evaluate(() => document.cookie.includes('auth_token=')), false);
+      await page.route('**/api/feeds?*', (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            items: [
+              {
+                id: 1,
+                author: 'alice',
+                authorInfo: { colorClass: 'rt-admin', title: 'Headquarters', admin: true, banned: false },
+                text: 'hello',
+                html: 'hello',
+                time: Date.now(),
+                likes: [],
+                comments: [],
+                canManage: false,
+              },
+            ],
+            page: 1,
+            pages: 1,
+          }),
+        }),
+      );
+      await page.evaluate(() => loadFeeds(false));
+      const feedName = page.locator('#feed-list .feed-author[data-username="alice"]');
+      await feedName.locator('.username-star-initial').waitFor();
+      assert.equal(await feedName.locator('.username-star-initial').textContent(), 'a');
       await page.route('**/api/contributors', (route) =>
         route.fulfill({ contentType: 'application/json', body: '[]' }),
       );

@@ -894,10 +894,8 @@
         }
         $item.append($text);
         ensureUsernameColors($text);
-        $('<span class="comment-time"></span>')
-          .text(relativeTime(comment.time))
-          .attr('title', fullTime(comment.time))
-          .appendTo($item);
+        ensureUsernameColors($item);
+        $('<span class="comment-time"></span>').attr('title', fullTime(comment.time)).appendTo($item);
         // 删除入口：与动态删除同风格，作者本人或管理员可见（服务端 canManage 判定）。
         if (comment.canManage) {
           $('<button type="button" class="comment-delete-btn"></button>').text('删除').appendTo($item);
@@ -931,6 +929,7 @@
         var $text = $('<div class="feed-text"></div>').html(post.html).appendTo($wrap);
         ensureUsernameColors($text);
         $wrap.appendTo($item);
+        ensureUsernameColors($item);
 
         var $actions = $('<div class="feed-actions"></div>');
         if (currentUsername) {
