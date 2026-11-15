@@ -240,7 +240,10 @@ export class GameEngine {
 
   private readonly deadOrder: number[];
 
-  private readonly replayTurnMoves: Array<Array<QueuedOp | null>>;
+  private readonly replayTurnMoves: QueuedOp[][][];
+
+  /** Successful actions, in live execution order, including every parallel head. */
+  private executedTurnMoves: QueuedOp[][] = [];
 
   private readonly replayTurnSurrenders: Array<Set<number>>;
 
@@ -478,7 +481,7 @@ export class GameEngine {
   }
 
   static async buildReplayFromActions(replay: ReplayActionData): Promise<ReplayData> {
-    if (!replay || replay.version !== 'ops-v1') {
+    if (!replay || (replay.version !== 'ops-v1' && replay.version !== 'ops-v2')) {
       throw new Error('回放版本不兼容。');
     }
     const dummyPlayerSids = replay.meta.player_names.map((_, index) => `replay_sid_${index}`);
@@ -515,7 +518,7 @@ export class GameEngine {
     await engine.initializeMap();
     engine.selectGenerals();
 
-    const { scheduledMoves, scheduledBuilds, scheduledSurrenders, scheduledTransfers } =
+    const { scheduledBatches, scheduledMoves, scheduledBuilds, scheduledSurrenders, scheduledTransfers } =
       buildScheduledReplayActions(replay);
 
     const afkSurrenders = new Map<number, number[]>();
@@ -558,7 +561,16 @@ export class GameEngine {
         engine.addMove(engine.playerSids[p], move[0], move[1], move[2], move[3], move[4]);
       }
 
-      const gameEnd = await engine.gameTick(afkSurrenders.get(nextTurn));
+      // These are already-executed batches, not pending topology/queue snapshots.
+      const executedPlayers = new Set<number>();
+      for (let p = 0; p < scheduledBatches.length; p += 1) {
+        const actions = scheduledBatches[p].get(nextTurn);
+        if (actions) {
+          executedPlayers.add(p);
+          engine.pmove[p] = actions.map((op, i) => ({ ...op, seq: i + 1 }));
+        }
+      }
+      const gameEnd = await engine.gameTick(afkSurrenders.get(nextTurn), executedPlayers);
       const isFinalFrame = gameEnd || engine.turn >= replay.total_turns;
       const nextFrame = engine.buildReplayFrame(isFinalFrame);
       patches.push(buildReplayPatch(prevFrame, nextFrame));
@@ -797,7 +809,7 @@ export class GameEngine {
   }
 
   private recordReplayTurnMoves(): void {
-    this.replayTurnMoves.push(buildTurnMoves(this.lstMove));
+    this.replayTurnMoves.push(buildTurnMoves(this.executedTurnMoves));
   }
 
   private buildReplayPlayerOps() {
@@ -1648,7 +1660,11 @@ export class GameEngine {
     }
   }
 
-  private async gameTick(replayAfkSurrenders: number[] = []): Promise<boolean> {
+  private async gameTick(
+    replayAfkSurrenders: number[] = [],
+    replayExecuted: ReadonlySet<number> = new Set(),
+  ): Promise<boolean> {
+    this.executedTurnMoves = this.playerSids.map(() => []);
     this.turn += 1;
     const nowMs = Date.now();
 
@@ -1717,7 +1733,8 @@ export class GameEngine {
         for (const op of [...queue]) {
           const key = `${op.x},${op.y}`;
           const eligible =
-            op.kind === 'm' ? !moveTargets.has(key) || op.seq === forcedSeq : !blockedStarts.has(key);
+            replayExecuted.has(p) ||
+            (op.kind === 'm' ? !moveTargets.has(key) || op.seq === forcedSeq : !blockedStarts.has(key));
           if (!eligible) continue;
           const ok =
             op.kind === 'm'
@@ -1730,6 +1747,7 @@ export class GameEngine {
           removed.push(op.seq);
           if (ok) {
             this.lstMove[p] = op;
+            this.executedTurnMoves[p].push(op);
             movedThisTurn[p] = true;
           }
         }
@@ -1760,6 +1778,7 @@ export class GameEngine {
           queue.shift();
           if (ok) {
             this.lstMove[p] = op;
+            this.executedTurnMoves[p].push(op);
             movedThisTurn[p] = true;
             break;
           }
@@ -1941,7 +1960,7 @@ export class GameEngine {
   private async saveHistory(): Promise<string> {
     const replayId = await this.replayStore.saveReplay(
       {
-        version: 'ops-v1',
+        version: 'ops-v2',
         meta: this.replayMeta,
         total_turns: this.turn,
         player_ops: this.buildReplayPlayerOps(),
