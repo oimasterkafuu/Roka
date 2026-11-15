@@ -14,6 +14,7 @@ import {
   GithubService,
   GithubServiceError,
 } from '../dist/server/github-service.js';
+import { StargazerService } from '../dist/server/stargazer-service.js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(rootDir, 'package.json'));
@@ -204,6 +205,7 @@ async function testUserStore() {
 function makeService(store, fetchImpl, nowRef, extra = {}) {
   return new GithubService({
     userStore: store,
+    stargazerService: { isStarred: () => true },
     jwtSecret: JWT_SECRET,
     clientId: 'unit-client-id',
     clientSecret: 'unit-client-secret',
@@ -345,6 +347,7 @@ async function testOAuthFailures() {
 
   const unconfigured = new GithubService({
     userStore: store,
+    stargazerService: { isStarred: () => null },
     jwtSecret: JWT_SECRET,
     fetchImpl: async () => {
       throw new Error('must not fetch');
@@ -447,6 +450,116 @@ async function testOAuthFailures() {
   log('passed OAuth state/expiry/replay/cross-user SID/denied/malformed/upstream failure checks');
 }
 
+async function waitForCondition(predicate, message, timeoutMs = 3000) {
+  await within(
+    (async () => {
+      while (!predicate()) await new Promise((resolve) => setTimeout(resolve, 10));
+    })(),
+    message,
+    timeoutMs,
+  );
+}
+
+async function testStargazerService() {
+  const directory = temporaryDirectory('roka-stargazers-unit-');
+  const filePath = path.join(directory, 'github-stargazers.json');
+  const nowRef = { value: 40_000_000 };
+  const logger = { info() {}, warn() {}, error() {} };
+  const requests = [];
+  const first = {
+    login: 'FirstUser',
+    avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4',
+    starred_at: '2026-01-01T00:00:00Z',
+  };
+  const second = {
+    login: 'SecondUser',
+    avatar_url: 'https://avatars.githubusercontent.com/u/2?v=4',
+    starred_at: '2026-02-01T00:00:00Z',
+  };
+  const service = new StargazerService({
+    filePath,
+    token: 'stargazer-unit-token',
+    apiBaseUrl: 'https://api.unit.test',
+    now: () => nowRef.value,
+    logger,
+    fetchImpl: async (url, init) => {
+      const target = String(url);
+      requests.push({ url: target, init });
+      assert.equal(init.headers.Authorization, 'Bearer stargazer-unit-token');
+      if (!target.includes('page=2')) {
+        return new Response(JSON.stringify([first]), {
+          status: 200,
+          headers: {
+            Link: '<https://api.unit.test/repos/oimasterkafuu/Roka/stargazers?per_page=100&page=2>; rel="next", <https://api.unit.test/repos/oimasterkafuu/Roka/stargazers?per_page=100&page=2>; rel="last"',
+          },
+        });
+      }
+      return jsonResponse(200, [second]);
+    },
+  });
+  assert.equal(service.isStarred('FirstUser'), null);
+  await service.start();
+  await waitForCondition(() => requests.length === 2 && service.getFetchedAt() !== null, 'initial pagination');
+  assert.equal(requests.length, 2);
+  assert.equal(service.isStarred('firstuser'), true);
+  assert.equal(service.isStarred('missing'), false);
+  assert.deepEqual(
+    service.listStargazers().map((item) => item.login),
+    ['SecondUser', 'FirstUser'],
+  );
+  const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  assert.equal(persisted.fetchedAt, nowRef.value);
+  assert.deepEqual(Object.keys(persisted.stars).sort(), ['firstuser', 'seconduser']);
+  assert.equal(fs.existsSync(`${filePath}.tmp`), false);
+  service.stop();
+
+  const originalDisk = fs.readFileSync(filePath, 'utf8');
+  const fallback = new StargazerService({
+    filePath,
+    token: 'stargazer-unit-token',
+    apiBaseUrl: 'https://api.unit.test',
+    logger,
+    fetchImpl: async () => jsonResponse(500, { message: 'limited' }),
+  });
+  await fallback.start();
+  assert.equal(fallback.isStarred('FIRSTUSER'), true, 'old data is available before the refresh finishes');
+  assert.equal(await fallback.refresh(), false);
+  assert.equal(fallback.getFetchedAt(), nowRef.value);
+  assert.equal(fallback.listStargazers().length, 2);
+  assert.match(fallback.getLastError(), /500/);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), originalDisk, 'failed refresh preserves the old table');
+  fallback.stop();
+
+  let attempts = 0;
+  const retry = new StargazerService({
+    filePath: path.join(directory, 'retry.json'),
+    token: 'stargazer-unit-token',
+    apiBaseUrl: 'https://api.unit.test',
+    retryIntervalMs: 25,
+    syncIntervalMs: 60_000,
+    logger,
+    fetchImpl: async () => {
+      attempts += 1;
+      return attempts === 1 ? jsonResponse(500, {}) : jsonResponse(200, [first]);
+    },
+  });
+  await retry.start();
+  await waitForCondition(() => attempts >= 2 && retry.getFetchedAt() !== null, 'failed sync did not retry');
+  assert.equal(retry.getLastError(), null);
+  assert.equal(await retry.handleStarEvent('created', 'ThirdUser', 'https://avatars.githubusercontent.com/u/3'), true);
+  assert.equal(await retry.handleStarEvent('deleted', 'firstuser'), true);
+  const eventDisk = JSON.parse(fs.readFileSync(path.join(directory, 'retry.json'), 'utf8'));
+  assert.equal(eventDisk.stars.firstuser, undefined);
+  assert.equal(eventDisk.stars.thirduser.login, 'ThirdUser');
+  assert.equal(eventDisk.stars.thirduser.avatarUrl, 'https://avatars.githubusercontent.com/u/3');
+  retry.stop();
+  const stoppedAttempts = attempts;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(attempts, stoppedAttempts, 'stop clears the retry timer');
+  assert.equal(fs.readFileSync(filePath, 'utf8').includes('stargazer-unit-token'), false);
+  log('passed stargazer pagination, bearer auth, persistence, failure fallback, retry and event updates');
+}
+
 async function createStarCase(username, id, initialStarStatus = 204) {
   const { directory, store } = await createStoreWithUsers([username]);
   const nowRef = { value: 20_000_000 };
@@ -458,30 +571,27 @@ async function createStarCase(username, id, initialStarStatus = 204) {
     nowRef,
     rawToken,
     starCalls: 0,
-    starStatus: initialStarStatus,
-    starHandler: null,
+    lookupCalls: 0,
+    starStatus: initialStarStatus === 204 ? true : initialStarStatus === 404 ? false : null,
   };
-  const fetchImpl = async (url, init) => {
+  const fetchImpl = async (url) => {
     const target = String(url);
     if (target.endsWith('/login/oauth/access_token')) {
       return jsonResponse(200, { access_token: rawToken, refresh_token: refreshToken });
     }
     if (target.endsWith('/user')) return jsonResponse(200, { id, login: `gh-${id}`, type: 'User' });
-    if (target.endsWith('/user/starred/oimasterkafuu/Roka')) {
-      fixture.starCalls += 1;
-      if (fixture.starHandler) return fixture.starHandler(init.signal);
-      if (fixture.starStatus === 'timeout') {
-        return new Promise((_resolve, reject) => {
-          const rejectTimeout = () => reject(new Error('aborted timeout'));
-          if (init.signal.aborted) rejectTimeout();
-          else init.signal.addEventListener('abort', rejectTimeout, { once: true });
-        });
-      }
-      return emptyResponse(fixture.starStatus);
-    }
+    if (target.endsWith('/user/starred/oimasterkafuu/Roka')) fixture.starCalls += 1;
     throw new Error(`unexpected URL ${target}`);
   };
-  fixture.service = makeService(store, fetchImpl, nowRef);
+  fixture.service = makeService(store, fetchImpl, nowRef, {
+    stargazerService: {
+      isStarred: (login) => {
+        assert.equal(login, `gh-${id}`);
+        fixture.lookupCalls += 1;
+        return fixture.starStatus;
+      },
+    },
+  });
   fixture.actor = { username, sid: await store.rotateSession(username) };
   fixture.complete = async () => {
     const attempt = startQuery(fixture.service, fixture.actor, `star-code-${id}`);
@@ -493,24 +603,14 @@ async function createStarCase(username, id, initialStarStatus = 204) {
 async function testStarStatesAndCache() {
   const starred = await createStarCase('starred', 501, 204);
   assert.equal((await starred.complete()).starred, true);
-  assert.equal(starred.starCalls, 1);
+  assert.equal(starred.starCalls, 0);
+  assert.equal(starred.lookupCalls, 1);
   starred.nowRef.value += GITHUB_STAR_CACHE_TTL_MS - 1;
   await starred.service.refreshStar('starred');
-  assert.equal(starred.starCalls, 1, 'fresh 15-minute result is cached');
+  assert.equal(starred.lookupCalls, 1, 'fresh 15-minute result is cached');
   starred.nowRef.value += 2;
-
-  let releaseStar;
-  starred.starHandler = () =>
-    new Promise((resolve) => {
-      releaseStar = () => resolve(emptyResponse(204));
-    });
-  const firstRefresh = starred.service.refreshStar('starred');
-  const forcedDuplicate = starred.service.refreshStar('starred', true);
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(starred.starCalls, 2, 'expired and forced concurrent refreshes are deduplicated');
-  releaseStar();
-  await Promise.all([firstRefresh, forcedDuplicate]);
-  starred.starHandler = null;
+  await Promise.all([starred.service.refreshStar('starred'), starred.service.refreshStar('starred', true)]);
+  assert.equal(starred.lookupCalls, 2, 'expired and forced concurrent local refreshes are deduplicated');
   assert.equal(starred.store.getGithubPublicProfile('starred', starred.nowRef.value).starred, true);
 
   starred.nowRef.value += GITHUB_STAR_BADGE_MAX_AGE_MS + 1;
@@ -518,40 +618,35 @@ async function testStarStatesAndCache() {
   assert.equal(stale.starred, false);
   assert.equal(stale.starState, 'stale');
 
-  starred.starStatus = 404;
+  starred.starStatus = false;
   const revoked = await starred.service.refreshStar('starred', true);
   assert.equal(revoked.starred, false);
   assert.equal(revoked.starState, 'not-starred');
 
-  starred.starStatus = 500;
-  await expectGithubError(() => starred.service.refreshStar('starred', true), 'star');
-  assert.equal(starred.store.getGithubPublicProfile('starred', starred.nowRef.value).starred, false);
-
-  starred.starStatus = 401;
-  await expectGithubError(() => starred.service.refreshStar('starred', true), 'star');
-  const unknown = starred.store.getGithubPublicProfile('starred', starred.nowRef.value);
+  starred.starStatus = null;
+  const unknown = await starred.service.refreshStar('starred', true);
   assert.equal(unknown.starred, false);
   assert.equal(unknown.starState, 'unknown');
   assert.equal(unknown.starVerifiedAt, null);
+  assert.equal(starred.starCalls, 0);
   assertDiskDoesNotContain(starred.directory, [starred.rawToken, `refresh-star-token-501`]);
 
   const notStarred = await createStarCase('notstarred', 502, 404);
   const notStarredProfile = await notStarred.complete();
   assert.equal(notStarredProfile.starred, false);
   assert.equal(notStarredProfile.starState, 'not-starred');
+  assert.equal(notStarred.starCalls, 0);
 
-  let nextId = 503;
-  for (const status of [401, 403, 429, 500, 'timeout']) {
-    const failure = await createStarCase(`failure${nextId}`, nextId, status);
-    const profile = await failure.complete();
-    assert.equal(profile.starred, false, `initial ${status} must not award a badge`);
-    assert.equal(profile.starState, 'unknown', `initial ${status} has no verified negative result`);
-    assert.equal(profile.starVerifiedAt, null);
-    assert.equal(failure.store.getGithubCredential(`failure${nextId}`).starred, undefined);
-    assertDiskDoesNotContain(failure.directory, [failure.rawToken, `refresh-star-token-${nextId}`]);
-    nextId += 1;
-  }
-  log('passed Star 204/404, initial 401/403/429/500/timeout, 15-minute cache, stale/revoke/unknown checks');
+  const notReady = await createStarCase('notready', 503, null);
+  const notReadyProfile = await notReady.complete();
+  assert.equal(notReadyProfile.starred, false);
+  assert.equal(notReadyProfile.starState, 'unknown');
+  assert.equal(notReadyProfile.starVerifiedAt, null);
+  assert.equal(notReady.store.getGithubCredential('notready').starred, undefined);
+  assert.equal(Object.hasOwn(notReady.store.getGithubCredential('notready'), 'starVerifiedAt'), false);
+  assert.equal(notReady.starCalls, 0);
+  assertDiskDoesNotContain(notReady.directory, [notReady.rawToken, 'refresh-star-token-503']);
+  log('passed local Star true/false/unknown, no per-user API calls, cache, stale and revoke checks');
 }
 
 function findFreePort() {
@@ -578,6 +673,9 @@ async function startGithubMock() {
     stars: new Map(),
     exchanges: [],
     contributors: [],
+    stargazers: [],
+    stargazerRequests: [],
+    userStarCalls: 0,
     port: 0,
     baseUrl: '',
   };
@@ -607,14 +705,12 @@ async function startGithubMock() {
       return sendJson(200, { ...identity, type: 'User' });
     }
     if (request.method === 'GET' && url.pathname === '/user/starred/oimasterkafuu/Roka') {
-      if (!state.tokens.has(token)) return sendJson(401, { message: 'bad credentials' });
-      const status = state.stars.get(token) ?? 404;
-      if (status === 204) {
-        response.writeHead(204, { 'Cache-Control': 'no-store' });
-        response.end();
-        return;
-      }
-      return sendJson(status, { message: `mock star status ${status}` });
+      state.userStarCalls += 1;
+      return sendJson(410, { message: 'per-user star requests are disabled' });
+    }
+    if (request.method === 'GET' && url.pathname === '/repos/oimasterkafuu/Roka/stargazers') {
+      state.stargazerRequests.push({ authorization, page: url.searchParams.get('page') ?? '1' });
+      return sendJson(200, state.stargazers);
     }
     if (request.method === 'GET' && url.pathname === '/repos/oimasterkafuu/Roka/contributors') {
       return sendJson(200, state.contributors);
@@ -636,6 +732,13 @@ function addMockIdentity(mock, code, id, login, starStatus = 204) {
   mock.codes.set(code, token);
   mock.tokens.set(token, { id, login });
   mock.stars.set(token, starStatus);
+  if (starStatus === 204 && !mock.stargazers.some((item) => item.login.toLowerCase() === login.toLowerCase())) {
+    mock.stargazers.push({
+      login,
+      avatar_url: `https://avatars.githubusercontent.com/u/${id}?v=4`,
+      starred_at: '2026-01-01T00:00:00Z',
+    });
+  }
   return { token, refreshToken: `refresh-token-for-${code}` };
 }
 
@@ -673,6 +776,7 @@ function serverEnvironment(dataDir, mock, configured, port) {
     PORT: String(port),
     GITHUB_OAUTH_BASE_URL: mock.baseUrl,
     GITHUB_API_BASE_URL: mock.baseUrl,
+    GITHUB_STARGAZERS_TOKEN: 'stargazer-integration-token',
     GITHUB_CLIENT_ID: configured ? 'integration-client-id' : '',
     GITHUB_CLIENT_SECRET: configured ? 'integration-client-secret' : '',
     GITHUB_REDIRECT_URI: configured ? `http://127.0.0.1:${port}/api/auth/github/callback` : '',
@@ -816,6 +920,24 @@ function assertExchangeVerifier(mock, code, expectedChallenge) {
   );
 }
 
+async function sendStarWebhook(server, action, login, { validSignature = true } = {}) {
+  const body = JSON.stringify({
+    action,
+    sender: { login, avatar_url: `https://avatars.githubusercontent.com/u/${login.length}?v=4` },
+  });
+  const secret = validSignature ? 'github-link-test-webhook-secret' : 'wrong-secret';
+  const response = await fetch(`${server.baseUrl}/postreceive`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-GitHub-Event': 'star',
+      'X-Hub-Signature-256': `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`,
+    },
+    body,
+  });
+  return { status: response.status, json: await response.json() };
+}
+
 async function testIntegration() {
   const dataDir = temporaryDirectory('roka-github-integration-');
   const tokens = await prepareIntegrationUsers(dataDir);
@@ -832,10 +954,12 @@ async function testIntegration() {
   addIdentity('rebind-conflict', 202, 'bob-github', 204);
   addIdentity('carol-code', 303, 'carol-github', 204);
   addIdentity('carol-rebind', 202, 'carol-new-github', 204);
-  const aliceToken = mock.codes.get('alice-code');
 
   const unconfigured = await startServer(dataDir, mock, false);
   let api = createApi(unconfigured, tokens, secrets);
+  const guestStargazers = await api('/api/stargazers');
+  assert.equal(guestStargazers.status, 200);
+  assert.ok(Array.isArray(guestStargazers.json.items));
   for (const [method, route] of [
     ['POST', '/api/auth/github/start'],
     ['GET', '/api/auth/github/callback?code=x&state=x'],
@@ -855,6 +979,24 @@ async function testIntegration() {
 
   const server = await startServer(dataDir, mock, true);
   api = createApi(server, tokens, secrets);
+  await within(
+    (async () => {
+      while (true) {
+        const response = await api('/api/stargazers');
+        assert.equal(response.status, 200);
+        if (response.json.fetchedAt !== null) {
+          assert.equal(response.json.items.length, mock.stargazers.length);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    })(),
+    'spawned server did not finish initial stargazer sync',
+  );
+  assert.ok(mock.stargazerRequests.length >= 2, 'both spawned servers load the full table');
+  assert.ok(
+    mock.stargazerRequests.every((request) => request.authorization === 'Bearer stargazer-integration-token'),
+  );
   const configuredMe = await api('/api/auth/me', { user: 'alice' });
   assert.equal(configuredMe.json.github.configured, true);
 
@@ -1009,10 +1151,29 @@ async function testIntegration() {
     false,
   );
 
+  const deletedBob = await sendStarWebhook(server, 'deleted', 'BOB-GITHUB');
+  assert.equal(deletedBob.status, 200);
+  assert.equal(deletedBob.json.starred, false);
+  assert.equal((await api('/api/profile/bob')).json.github.starState, 'not-starred');
+  assert.equal(
+    (await api('/api/stargazers')).json.items.some((item) => item.login.toLowerCase() === 'bob-github'),
+    false,
+  );
+  assert.equal((await sendStarWebhook(server, 'created', 'bob-github', { validSignature: false })).status, 401);
+  assert.equal((await api('/api/profile/bob')).json.github.starState, 'not-starred');
+  const createdBob = await sendStarWebhook(server, 'created', 'BOB-GITHUB');
+  assert.equal(createdBob.status, 200);
+  assert.equal((await api('/api/profile/bob')).json.github.starred, true);
+  assert.equal((await sendStarWebhook(server, 'created', 'outside-user')).status, 200);
+  const webhookDisk = JSON.parse(fs.readFileSync(path.join(dataDir, 'github-stargazers.json'), 'utf8'));
+  assert.equal(webhookDisk.stars['bob-github'].login, 'BOB-GITHUB');
+  assert.equal(webhookDisk.stars['outside-user'].login, 'outside-user');
+
   const publicRoutes = [
     '/api/leaderboard',
     '/api/admin/users',
     '/api/contributors',
+    '/api/stargazers',
     '/api/replays',
     '/api/online',
     '/api/users/search?q=',
@@ -1048,7 +1209,7 @@ async function testIntegration() {
   );
   assert.equal((await api('/api/profile/carol')).json.github.login, 'carol-new-github');
 
-  mock.stars.set(aliceToken, 404);
+  assert.equal((await sendStarWebhook(server, 'deleted', 'alice-github')).status, 200);
   const refreshed = await api('/api/auth/github/star/refresh', { method: 'POST', user: 'alice' });
   assert.equal(refreshed.status, 200);
   assert.equal(refreshed.json.ok, true);
@@ -1073,9 +1234,10 @@ async function testIntegration() {
   assert.equal(persisted.getGithubCredential('bob'), null);
   assert.equal(persisted.getGithubCredential('carol').id, 202);
   assert.equal(persisted.findUsernameByGithubId(303), null);
+  assert.equal(mock.userStarCalls, 0, 'no binding, profile or refresh path may call /user/starred');
   assertDiskDoesNotContain(dataDir, secrets);
   log(
-    'passed spawned OAuth binding/conflict/rebind/unlink/refresh, contributor mapping, DTO and persistence checks',
+    'passed spawned OAuth, public stargazers, signed star webhooks, local refresh, DTO and persistence checks',
   );
 }
 
@@ -1238,14 +1400,49 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
       await feedName.locator('.username-star-initial').waitFor();
       assert.equal(await feedName.locator('.username-star-initial').textContent(), 'a');
       await page.route('**/api/contributors', (route) =>
-        route.fulfill({ contentType: 'application/json', body: '[]' }),
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify([contributor('layout-contributor', 901, 1)]),
+        }),
+      );
+      await page.route('**/api/stargazers', (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            items: [
+              { login: 'star-supporter', avatarUrl: 'https://avatars.githubusercontent.com/u/902?v=4' },
+            ],
+            fetchedAt: 1,
+          }),
+        }),
       );
       await page.goto(`${baseUrl}/about`);
-      await page.getByRole('heading', { name: 'Star 支持' }).waitFor();
+      await page.getByRole('heading', { name: 'Star 支持', exact: true }).waitFor();
       assert.match(
-        await page.locator('.doc-panel').filter({ hasText: 'Star 支持' }).textContent(),
+        await page.locator('.doc-panel').filter({ hasText: '全站公共用户名组件' }).textContent(),
         /全站公共用户名组件/,
       );
+      await page.locator('#stargazers-grid .stargazer-card').waitFor();
+      const supporterLink = page.locator('#stargazers-grid .contributor-link');
+      assert.equal(await supporterLink.getAttribute('href'), 'https://github.com/star-supporter');
+      assert.match(await supporterLink.getAttribute('rel'), /noopener/);
+      assert.equal(await supporterLink.locator('.contributor-name').textContent(), 'star-supporter');
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const selector of ['#contributors-grid', '#stargazers-grid']) {
+          const metrics = await page.locator(selector).evaluate((grid) => ({
+            gridWidth: grid.getBoundingClientRect().width,
+            cardWidth: grid.querySelector('.contributor-card').getBoundingClientRect().width,
+          }));
+          assert.ok(Math.abs(metrics.gridWidth - metrics.cardWidth) <= 1, `${selector} at ${width}px`);
+        }
+      }
+      await page.unroute('**/api/stargazers');
+      await page.route('**/api/stargazers', (route) =>
+        route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [], fetchedAt: 1 }) }),
+      );
+      await page.goto(`${baseUrl}/about`);
+      await page.getByText('暂时还没有 Star，欢迎成为第一位支持者', { exact: true }).waitFor();
       const link = page.getByRole('link', { name: '前往 GitHub 为 Roka 点 Star →' });
       assert.equal(await link.getAttribute('href'), 'https://github.com/oimasterkafuu/Roka');
       await Promise.all([
@@ -1273,6 +1470,7 @@ function testStaticStarInitialPlacement() {
   const usernameJs = fs.readFileSync(path.join(rootDir, 'static', 'username.js'), 'utf8');
   const ratingCss = fs.readFileSync(path.join(rootDir, 'static', 'styles', 'rating.css'), 'utf8');
   const aboutHtml = fs.readFileSync(path.join(rootDir, 'static', 'about.html'), 'utf8');
+  const aboutJs = fs.readFileSync(path.join(rootDir, 'static', 'about-contributors.js'), 'utf8');
   const starMarker = /github-star|username-star-initial|profile-star-initial|starred|starState/i;
   assert.equal(profileHtml.includes('p-github-star-badge'), false, 'redundant Star badge is removed');
   assert.equal(profileHtml.includes('profile-star-initial'), false);
@@ -1283,15 +1481,14 @@ function testStaticStarInitialPlacement() {
   assert.match(ratingCss, /\.username-star-initial/);
   assert.match(aboutHtml, /Star 支持/);
   assert.match(aboutHtml, /全站公共用户名组件/);
+  assert.match(aboutHtml, /id="stargazers-grid" class="contributors-grid"/);
+  assert.equal((aboutHtml.match(/repeat\(auto-fit,/g) ?? []).length, 2);
+  assert.match(aboutJs, /暂时还没有 Star，欢迎成为第一位支持者/);
+  assert.match(aboutJs, /function aboutStargazerCard/);
+  assert.match(aboutJs, /fetch\('\/api\/stargazers'/);
   assert.match(aboutHtml, /https:\/\/github\.com\/oimasterkafuu\/Roka/);
-  for (const relative of ['about-contributors.js', 'main.js']) {
-    const source = fs.readFileSync(path.join(rootDir, 'static', relative), 'utf8');
-    assert.equal(
-      starMarker.test(source),
-      false,
-      `Star initial implementation leaked into static/${relative}`,
-    );
-  }
+  const mainJs = fs.readFileSync(path.join(rootDir, 'static', 'main.js'), 'utf8');
+  assert.equal(starMarker.test(mainJs), false, 'Star initial implementation leaked into static/main.js');
   const staticFiles = readFilesRecursively(path.join(rootDir, 'static')).filter((file) =>
     /\.(?:js|html|css)$/i.test(file),
   );
@@ -1299,13 +1496,13 @@ function testStaticStarInitialPlacement() {
     const relative = path.relative(rootDir, file).split(path.sep).join('/');
     if (!starMarker.test(fs.readFileSync(file, 'utf8'))) continue;
     assert.ok(
-      /^static\/(?:index\.html|username\.js|profile\.(?:js|html)|styles\/(?:profile|rating)\.css)$/.test(
+      /^static\/(?:index\.html|username\.js|profile\.(?:js|html)|about\.html|about-contributors\.js|styles\/(?:profile|rating)\.css)$/.test(
         relative,
       ),
       `Star initial implementation belongs to the public component, found ${relative}`,
     );
   }
-  log('passed static global Star initial placement and about-page explanation checks');
+  log('passed static global Star initial placement, supporter wall and adaptive grid checks');
 }
 
 function deferred() {
@@ -1337,20 +1534,22 @@ async function testOAuthCancellationAndBodyTimeouts() {
   const paths = {
     exchange: '/login/oauth/access_token',
     identity: '/user',
-    star: '/user/starred/oimasterkafuu/Roka',
   };
   let held = null;
   let requestCount = 0;
   const server = http.createServer((request, response) => {
     requestCount += 1;
     request.resume();
+    if (request.url === '/user/starred/oimasterkafuu/Roka') {
+      throw new Error('per-user Star request is forbidden');
+    }
     if (held && request.url === paths[held.stage]) {
       const fixture = held;
       fixture.response = response;
       response.on('close', () => fixture.closed.resolve());
       response.writeHead(fixture.status, { 'Content-Type': 'application/json' });
       response.flushHeaders();
-      response.write(fixture.stage === 'star' ? 'pending' : '{');
+      response.write('{');
       return;
     }
     if (request.url === paths.exchange) {
@@ -1358,14 +1557,12 @@ async function testOAuthCancellationAndBodyTimeouts() {
     } else if (request.url === paths.identity) {
       response.end(JSON.stringify({ id: 9001, login: 'local-alice', type: 'User' }));
     } else {
-      response.writeHead(204);
+      response.writeHead(404);
       response.end();
     }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  // This wrapper delegates to native fetch and returns its actual Response. The
-  // HTTP server sends headers immediately but deliberately leaves the body open.
   const nativeFetch = async (url, init) => {
     const response = await fetch(url, init);
     if (held && new URL(url).pathname === paths[held.stage]) {
@@ -1379,7 +1576,7 @@ async function testOAuthCancellationAndBodyTimeouts() {
     apiBaseUrl: baseUrl,
     timeoutMs: 2000,
   });
-  const hold = (stage, status = stage === 'star' ? 404 : 200) => {
+  const hold = (stage, status = 200) => {
     held = { stage, status, headers: deferred(), closed: deferred(), response: null, signal: null };
     return held;
   };
@@ -1391,7 +1588,6 @@ async function testOAuthCancellationAndBodyTimeouts() {
     assert.equal(restarted.getGithubCredential('alice'), null, 'no late binding persisted');
   };
   try {
-    // Unlink also invalidates an authorization whose callback has not arrived.
     const pending = startQuery(service, actor);
     await service.unlink('alice');
     const before = requestCount;
@@ -1399,7 +1595,7 @@ async function testOAuthCancellationAndBodyTimeouts() {
     assert.equal(requestCount, before, 'cancelled pending state never calls GitHub');
     await assertUnbound();
 
-    for (const stage of ['exchange', 'identity', 'star']) {
+    for (const stage of ['exchange', 'identity']) {
       const fixture = hold(stage);
       const attempt = startQuery(service, actor);
       const completion = service.completeLink(actor, attempt.query);
@@ -1414,8 +1610,6 @@ async function testOAuthCancellationAndBodyTimeouts() {
       held = null;
     }
 
-    // Starting a newer generation must cancel the old one without its finally
-    // deleting the newer operation, which must still be able to finish.
     const superseded = hold('exchange');
     const old = startQuery(service, actor);
     const oldCompletion = service.completeLink(actor, old.query);
@@ -1429,7 +1623,6 @@ async function testOAuthCancellationAndBodyTimeouts() {
     assert.equal((await service.completeLink(actor, replacement.query)).login, 'local-alice');
     await service.unlink('alice');
 
-    // A stale session must be rejected even when username and callback SID match.
     const oldSid = actor.sid;
     const stale = startQuery(service, actor);
     actor.sid = await store.rotateSession('alice');
@@ -1440,11 +1633,9 @@ async function testOAuthCancellationAndBodyTimeouts() {
     );
     assert.equal(requestCount, beforeStale);
 
-    // Invalidate the session after native HTTP I/O starts, then let the response
-    // finish normally: only the pre-write session check can prevent persistence.
     for (const invalidate of ['logout', 'rotate']) {
       actor.sid = await store.rotateSession('alice');
-      const fixture = hold('star');
+      const fixture = hold('identity');
       const attempt = startQuery(service, actor);
       const completion = service.completeLink(actor, attempt.query);
       const rejected = expectGithubError(() => completion, 'state');
@@ -1478,33 +1669,7 @@ async function testOAuthCancellationAndBodyTimeouts() {
       await assertUnbound();
       held = null;
     }
-
-    // Star uses the same full-response deadline, including non-JSON/error bodies.
-    for (const status of [404, 401, 500]) {
-      const fixture = hold('star', status);
-      const attempt = startQuery(timed, actor);
-      const completion = timed.completeLink(actor, attempt.query);
-      await within(fixture.headers.promise, 'Star headers were not received');
-      assert.equal(fixture.signal.aborted, false);
-      const profile = await within(completion, 'initial Star body timeout hangs binding');
-      assert.equal(profile.starred, false, 'incomplete Star response must not award badge');
-      assert.equal(profile.starState, 'unknown');
-      assert.equal(fixture.signal.aborted, true);
-      await within(fixture.closed.promise, 'initial Star timeout did not close HTTP response');
-      const refresh = hold('star', status);
-      const refreshRejected = expectGithubError(() => timed.refreshStar('alice', true), 'star');
-      await within(refresh.headers.promise, 'refresh headers missing');
-      assert.equal(refresh.signal.aborted, false);
-      await within(refreshRejected, 'Star refresh body timeout did not reject');
-      assert.equal(refresh.signal.aborted, true);
-      await within(refresh.closed.promise, 'refresh timeout did not close HTTP response');
-      await service.unlink('alice');
-      await assertUnbound();
-      held = null;
-    }
-    log(
-      'passed native HTTP pending/inflight unlink, generation/session races and exchange/identity/Star body aborts',
-    );
+    log('passed native HTTP cancellation, generation/session races and exchange/identity body aborts');
   } finally {
     server.closeAllConnections();
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
@@ -1515,6 +1680,7 @@ async function main() {
   await testUserStore();
   await testOAuthSuccessAndCrypto();
   await testOAuthFailures();
+  await testStargazerService();
   await testStarStatesAndCache();
   await testOAuthCancellationAndBodyTimeouts();
   await testIntegration();

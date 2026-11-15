@@ -14,6 +14,7 @@ Roka 是一个实时方格领土战争游戏，玩法类似 generals.io。玩家
 - 用户注册登录、Rating、积分、个人主页、动态、评论和推广大使。
 - 房间聊天、实时在线状态、浏览器通知和管理员后台。
 - 对局回放观看、下载、本地上传，以及按用户和日期查询历史回放。
+- GitHub 绑定与 Star 金色首字母；关于页公开展示贡献者和全部 Star 支持者。
 - 可独立运行或由服务端托管的策略 Bot，协议说明见 `/develop/bot`。
 - 首次访问介绍片、静态资源 CDN 与故障回源。
 
@@ -42,6 +43,13 @@ pnpm run start
 - `ROKA_DATA_DIR`：运行数据目录。
 - `ROKA_STATIC_CDN=0`：关闭静态资源 CDN，使用同源资源。
 - `ROKA_REPLAY_VIEW_CACHE_MAX_AGE_MS`：观看缓存保留时间，默认 1 天。
+- `GITHUB_STARGAZERS_TOKEN`：全量拉取仓库 stargazer 列表所用的 GitHub token；未配置时匿名运行，但限额较低。
+
+## GitHub Star 与支持者墙
+
+服务启动时把仓库完整 stargazer 列表保存到 `data/github-stargazers.json`，每 6 小时全量对账；失败保留旧表并每 5 分钟重试。GitHub `star` webhook 复用 `POST /postreceive` 和原有 HMAC 签名，实时处理加星、退星并更新已绑定用户。OAuth 绑定、个人主页和手动刷新只查询这张本地表，不再逐用户请求 GitHub Star API；表尚未就绪时保持未知状态，不写入新的核验结果。
+
+游客可访问 `GET /api/stargazers`，返回 `{items, fetchedAt}`。关于页的贡献者墙与 Star 支持者墙共用自适应卡片网格，空表会显示支持者招募提示。
 
 ## 检查与测试
 

@@ -38,6 +38,7 @@ import { ChatModeration, CHAT_TEXT_MAX } from './server/chat-moderation';
 import { CaptchaService } from './server/captcha-service';
 import { ContributorsService, handleContributorsRequest } from './server/contributors-service';
 import { GithubService, GithubServiceError } from './server/github-service';
+import { StargazerService } from './server/stargazer-service';
 import { EditableLobbyKey, FIXED_SWAMP_RATIO, LobbyService } from './server/lobby-service';
 import { PresenceService } from './server/presence-service';
 import { ServerBotManager } from './server/server-bot-manager';
@@ -91,8 +92,19 @@ const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const captchaService = new CaptchaService();
 const contributorsService = new ContributorsService();
+const stargazerService = new StargazerService({
+  filePath: path.join(dataDir, 'github-stargazers.json'),
+  token: process.env.GITHUB_STARGAZERS_TOKEN,
+  apiBaseUrl: process.env.GITHUB_API_BASE_URL,
+  logger: {
+    info: (message) => app.log.info(message),
+    warn: (message) => app.log.warn(message),
+    error: (message, error) => app.log.error({ err: error }, message),
+  },
+});
 const githubService = new GithubService({
   userStore,
+  stargazerService,
   jwtSecret: runtimeEnv.jwtSecret,
   clientId: process.env.GITHUB_CLIENT_ID,
   clientSecret: process.env.GITHUB_CLIENT_SECRET,
@@ -555,6 +567,8 @@ const boot = async (listen = true): Promise<void> => {
   chatAuditTimer.unref();
   await announcementStore.ensureReady();
   await userStore.initializeHistoricalPoints(await replayStore.listReplays(), feedStore.listAll());
+  await stargazerService.start();
+  app.addHook('onClose', async () => stargazerService.stop());
 
   // 重启恢复：从落盘的 lastSeenAt 重建在线状态内存表。
   presenceService.seed(userStore.listLastSeen());
@@ -644,13 +658,43 @@ const boot = async (listen = true): Promise<void> => {
           return reply.code(400).send({ error: 'Invalid webhook payload.' });
         }
 
-        if (payload?.ref !== 'refs/heads/main') {
+        if (payload.ref !== 'refs/heads/main') {
           return reply.send({ ok: true, ignored: true, reason: 'non-main push' });
         }
+        const queued = webhookUpdater.requestUpdate();
+        return reply.code(202).send({ ok: true, queued });
       }
 
-      const queued = webhookUpdater.requestUpdate();
-      return reply.code(202).send({ ok: true, queued });
+      if (event === 'star') {
+        const payload = parseJsonObject(rawBody.toString('utf8'));
+        const action = payload?.action;
+        const sender = payload?.sender;
+        if (
+          (action !== 'created' && action !== 'deleted') ||
+          !sender ||
+          typeof sender !== 'object' ||
+          typeof (sender as Record<string, unknown>).login !== 'string'
+        ) {
+          return reply.code(400).send({ error: 'Invalid webhook payload.' });
+        }
+        const login = (sender as Record<string, unknown>).login as string;
+        const avatarUrl = (sender as Record<string, unknown>).avatar_url;
+        const updated = await stargazerService.handleStarEvent(
+          action,
+          login,
+          typeof avatarUrl === 'string' ? avatarUrl : undefined,
+        );
+        if (!updated) return reply.code(400).send({ error: 'Invalid webhook payload.' });
+
+        const username = userStore.findUsernameByGithubLogin(login);
+        const githubId = username ? userStore.getGithubCredential(username)?.id : undefined;
+        if (username && githubId !== undefined) {
+          await userStore.updateGithubStar(username, githubId, action === 'created', Date.now());
+        }
+        return reply.send({ ok: true, event: 'star', starred: action === 'created' });
+      }
+
+      return reply.code(400).send({ error: 'Unsupported webhook event.' });
     };
 
     webhookApp.post('/postreceive', { preHandler: webhookRateLimitPreHandler }, postReceiveHandler);
@@ -1408,6 +1452,10 @@ const boot = async (listen = true): Promise<void> => {
     handleContributorsRequest(contributorsService, reply, (githubId) =>
       userStore.findUsernameByGithubId(githubId),
     ),
+  );
+
+  app.get('/api/stargazers', async (_request, reply) =>
+    reply.send({ items: stargazerService.listStargazers(), fetchedAt: stargazerService.getFetchedAt() }),
   );
 
   // 版本信息（公开）：首页页脚右下角版本号链接到 GitHub 对应 commit。

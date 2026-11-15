@@ -17,7 +17,7 @@
     <style>
       .contributors-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: 12px;
         margin-top: 14px;
       }
@@ -67,7 +67,8 @@
       .contributor-roka-link:hover {
         text-decoration: underline;
       }
-      #contributors-status {
+      #contributors-status,
+      #stargazers-status {
         margin-top: 10px;
         color: #5c6675;
       }
@@ -77,7 +78,7 @@
       }
       @media (max-width: 640px) {
         .contributors-grid {
-          grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
           gap: 8px;
         }
         .contributor-link {
@@ -159,6 +160,13 @@
             >Contributors 完整名单</a
           >。
         </p>
+      </section>
+
+      <section class="doc-panel" aria-labelledby="stargazers-title">
+        <h2 id="stargazers-title">Star 支持者</h2>
+        <p>感谢每一位在 GitHub 为 Roka 点亮 Star 的支持者。</p>
+        <p id="stargazers-status" role="status">正在加载 Star 支持者名单…</p>
+        <div id="stargazers-grid" class="contributors-grid"></div>
       </section>
 
       <section class="doc-panel">

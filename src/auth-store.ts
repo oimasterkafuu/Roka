@@ -864,6 +864,14 @@ export class UserStore {
     return this.usersByGithubId.get(id)?.username ?? null;
   }
 
+  findUsernameByGithubLogin(loginInput: string): string | null {
+    const login = this.normalize(loginInput);
+    for (const user of this.usersByKey.values()) {
+      if (user.github && this.normalize(user.github.login) === login) return user.username;
+    }
+    return null;
+  }
+
   async linkGithub(usernameInput: string, record: GithubLinkRecord): Promise<void> {
     const user = this.usersByKey.get(this.normalize(usernameInput));
     if (!user) throw new Error('用户不存在。');

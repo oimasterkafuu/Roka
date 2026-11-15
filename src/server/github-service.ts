@@ -1,10 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
+import { createCipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { GithubPublicProfile, UserStore } from '../auth-store';
+import { StargazerLookup } from './stargazer-service';
 
 const GITHUB_STATE_TTL_MS = 10 * 60 * 1000;
 export const GITHUB_STAR_CACHE_TTL_MS = 15 * 60 * 1000;
 const GITHUB_REQUEST_TIMEOUT_MS = 10_000;
-const GITHUB_REPOSITORY_STARS_PATH = '/user/starred/oimasterkafuu/Roka';
 
 interface GithubActor {
   username: string;
@@ -22,6 +22,7 @@ interface OAuthState {
 
 interface GithubServiceOptions {
   userStore: UserStore;
+  stargazerService: StargazerLookup;
   jwtSecret: string;
   clientId?: string;
   clientSecret?: string;
@@ -140,12 +141,7 @@ export class GithubService {
       this.assertCurrentOperation(state);
       const accessToken = await this.exchangeCode(query.code, state.verifier, state.controller.signal);
       const identity = await this.fetchIdentity(accessToken, state.controller.signal);
-      let starred: boolean | null = null;
-      try {
-        starred = await this.fetchStar(accessToken, state.controller.signal);
-      } catch {
-        // OAuth identity remains valid when the independent Star check is unavailable.
-      }
+      const starred = this.options.stargazerService.isStarred(identity.login);
 
       this.assertCurrentOperation(state);
       try {
@@ -154,8 +150,7 @@ export class GithubService {
           login: identity.login,
           linkedAt: this.now(),
           accessTokenEncrypted: this.encryptToken(accessToken),
-          starred: starred ?? undefined,
-          starVerifiedAt: starred === null ? undefined : this.now(),
+          ...(starred === null ? {} : { starred, starVerifiedAt: this.now() }),
         });
       } catch (error) {
         if (error instanceof Error && error.message.includes('已绑定其他')) {
@@ -229,31 +224,9 @@ export class GithubService {
     if (!credential || credential.id !== expectedId) {
       return this.options.userStore.getGithubPublicProfile(username, this.now());
     }
-    let accessToken: string;
-    try {
-      accessToken = this.decryptToken(credential.accessTokenEncrypted);
-    } catch {
-      await this.options.userStore.updateGithubStar(username, expectedId, null, this.now());
-      throw new GithubServiceError('star');
-    }
-
-    try {
-      const starred = await this.fetchStar(accessToken);
-      const updated = await this.options.userStore.updateGithubStar(
-        username,
-        expectedId,
-        starred,
-        this.now(),
-      );
-      if (!updated) return this.options.userStore.getGithubPublicProfile(username, this.now());
-      return this.options.userStore.getGithubPublicProfile(username, this.now());
-    } catch (error) {
-      if (error instanceof GithubHttpError && error.status === 401) {
-        await this.options.userStore.updateGithubStar(username, expectedId, null, this.now());
-      }
-      if (error instanceof GithubServiceError) throw error;
-      throw new GithubServiceError('star');
-    }
+    const starred = this.options.stargazerService.isStarred(credential.login);
+    await this.options.userStore.updateGithubStar(username, expectedId, starred, this.now());
+    return this.options.userStore.getGithubPublicProfile(username, this.now());
   }
 
   private async exchangeCode(code: string, verifier: string, signal: AbortSignal): Promise<string> {
@@ -327,25 +300,6 @@ export class GithubService {
     }
   }
 
-  private async fetchStar(accessToken: string, signal?: AbortSignal): Promise<boolean> {
-    return this.request(
-      `${this.apiBaseUrl}${GITHUB_REPOSITORY_STARS_PATH}`,
-      {
-        headers: this.apiHeaders(accessToken),
-      },
-      async (response) => {
-        // Drain even error/404 bodies within the same deadline; discard their contents.
-        if (response.body) {
-          for await (const chunk of response.body) void chunk;
-        }
-        if (response.status === 204) return true;
-        if (response.status === 404) return false;
-        throw new GithubHttpError(response.status);
-      },
-      signal,
-    );
-  }
-
   private apiHeaders(accessToken: string): Record<string, string> {
     return {
       Accept: 'application/vnd.github+json',
@@ -385,19 +339,6 @@ export class GithubService {
     return ['v1', iv.toString('base64url'), tag.toString('base64url'), encrypted.toString('base64url')].join(
       '.',
     );
-  }
-
-  private decryptToken(value: string): string {
-    const [version, ivValue, tagValue, encryptedValue, extra] = value.split('.');
-    if (version !== 'v1' || !ivValue || !tagValue || !encryptedValue || extra !== undefined) {
-      throw new Error('invalid encrypted token');
-    }
-    const decipher = createDecipheriv('aes-256-gcm', this.tokenKey, Buffer.from(ivValue, 'base64url'));
-    decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
-    return Buffer.concat([
-      decipher.update(Buffer.from(encryptedValue, 'base64url')),
-      decipher.final(),
-    ]).toString('utf8');
   }
 
   private pruneStates(): void {

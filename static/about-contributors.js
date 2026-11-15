@@ -96,6 +96,70 @@ async function aboutLoadContributors() {
   }
 }
 
+function aboutStargazerCard(doc, value) {
+  if (!value || typeof value !== 'object') return null;
+  const login = value.login;
+  if (
+    typeof login !== 'string' ||
+    login.length > 39 ||
+    !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(login) ||
+    login.includes('--')
+  ) {
+    return null;
+  }
+  let avatarUrl = aboutContributorUrl(value.avatarUrl, 'avatars.githubusercontent.com');
+  if (!avatarUrl) avatarUrl = aboutContributorUrl(value.avatarUrl, 'github.com');
+  if (!avatarUrl || avatarUrl.pathname === '/') return null;
+
+  const card = doc.createElement('article');
+  card.className = 'contributor-card stargazer-card';
+  const link = doc.createElement('a');
+  link.href = `https://github.com/${login}`;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.className = 'contributor-link';
+
+  const avatar = doc.createElement('img');
+  avatar.src = avatarUrl.toString();
+  avatar.alt = `${login} 的 GitHub 头像`;
+  avatar.loading = 'lazy';
+  avatar.decoding = 'async';
+  avatar.width = 64;
+  avatar.height = 64;
+  avatar.referrerPolicy = 'no-referrer';
+
+  const name = doc.createElement('span');
+  name.className = 'contributor-name';
+  name.textContent = login;
+  link.append(avatar, name);
+  card.append(link);
+  return card;
+}
+
+async function aboutLoadStargazers() {
+  const grid = document.getElementById('stargazers-grid');
+  const status = document.getElementById('stargazers-status');
+  if (!grid || !status) return;
+  status.hidden = false;
+  status.textContent = '正在加载 Star 支持者名单…';
+  try {
+    const response = await fetch('/api/stargazers', { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error('stargazers unavailable');
+    const data = await response.json();
+    if (!data || typeof data !== 'object' || !Array.isArray(data.items)) {
+      throw new Error('invalid stargazers response');
+    }
+    const cards = data.items.map((item) => aboutStargazerCard(document, item)).filter(Boolean);
+    grid.replaceChildren(...cards);
+    status.hidden = cards.length > 0;
+    status.textContent = cards.length ? '' : '暂时还没有 Star，欢迎成为第一位支持者';
+  } catch {
+    grid.replaceChildren();
+    status.hidden = false;
+    status.textContent = '暂时无法加载 Star 支持者名单，请稍后重试。';
+  }
+}
+
 if (typeof document !== 'undefined') {
-  var aboutContributorsReady = aboutLoadContributors();
+  var aboutContributorsReady = Promise.all([aboutLoadContributors(), aboutLoadStargazers()]);
 }
