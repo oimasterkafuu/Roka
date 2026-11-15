@@ -37,6 +37,8 @@ const FIXED_SWAMP_RATIO = 0.5;
 export { FIXED_SWAMP_RATIO };
 const MAP_TOKEN_MAX_LENGTH = 32;
 const RATING_K = 128;
+export const REFERRAL_MIN_TURNS = 60;
+export const REFERRAL_MIN_DURATION_MS = 60_000;
 /** 房间准备阶段的心跳超时：超过 600 秒无心跳的成员被自动移出房间。 */
 const LOBBY_HEARTBEAT_TIMEOUT_MS = 600_000;
 /** 心跳扫描周期：每分钟检查一次全部房间成员的最后心跳时间。 */
@@ -79,6 +81,8 @@ class LobbyService {
   readonly gameInstances = new Map<string, GameEngine>();
   readonly gameLobbyId = new Map<string, string>();
   readonly gamePlayers = new Map<string, Set<string>>();
+
+  private readonly gameHumanPlayers = new Map<string, Set<string>>();
 
   readonly lobbyRoomValue = new Map<string, string>();
   readonly lobbyOfSid = new Map<string, string>();
@@ -829,6 +833,14 @@ class LobbyService {
     const participants = players.filter((player) => player.team !== 0);
     const allAI =
       participants.length > 0 && participants.every((player) => !this.humanVerified.has(player.sid));
+    this.gameHumanPlayers.set(
+      gameId,
+      new Set(
+        participants
+          .filter((player) => player.bot !== true && this.humanVerified.has(player.sid))
+          .map((player) => player.uid.trim().toLowerCase()),
+      ),
+    );
     // 按引擎玩家编号保存身份，避免断线换绑或房间成员移除影响排行榜标记。
     const aiFlags = players.map((player) => !this.humanVerified.has(player.sid));
 
@@ -876,9 +888,17 @@ class LobbyService {
       endGame: (gid, result) => {
         // 回放已在 finishGame 之前写入（saveHistory 被 await）；rating 结算完成后
         // 再广播首页排行榜失效，保证客户端重新 fetch 时拿到新数据。
-        void this.applyGameResult(result).finally(() => {
+        const completedGame = this.gameInstances.get(gid);
+        const humanUsernames = this.gameHumanPlayers.get(gid);
+        void this.applyGameResult(
+          result,
+          completedGame && humanUsernames
+            ? { gameId: gid, ...completedGame.getCompletionStats(), humanUsernames }
+            : undefined,
+        ).finally(() => {
           io.emit('home_leaderboard');
         });
+        this.gameHumanPlayers.delete(gid);
         const lobby = this.gameLobbyId.get(gid);
         const participants = this.gamePlayers.get(gid);
         if (participants) {
@@ -1323,10 +1343,32 @@ class LobbyService {
    * 反映这一点，避免「1 个高分打一堆中分」被视为均势局；
    * 单人队退化为成员自身分。得分按队伍位次线性分布，K = 24。
    */
-  private async applyGameResult(result: GameResultEntry[]): Promise<void> {
+  private async applyGameResult(
+    result: GameResultEntry[],
+    referralGame?: {
+      gameId: string;
+      turn: number;
+      elapsedMs: number;
+      humanUsernames: ReadonlySet<string>;
+    },
+  ): Promise<void> {
     const uniqueResult = [
       ...new Map(result.map((entry) => [entry.uid.trim().toLowerCase(), entry])).values(),
     ].sort((a, b) => a.rank - b.rank);
+    if (
+      referralGame &&
+      referralGame.humanUsernames.size >= 2 &&
+      referralGame.turn >= REFERRAL_MIN_TURNS &&
+      referralGame.elapsedMs >= REFERRAL_MIN_DURATION_MS
+    ) {
+      await Promise.all(
+        uniqueResult
+          .filter((entry) => referralGame.humanUsernames.has(entry.uid.trim().toLowerCase()))
+          .map((entry) =>
+            this.userStore.activateReferral(entry.uid, referralGame.gameId).catch(() => 'ineligible'),
+          ),
+      );
+    }
     await this.userStore
       .applyPointsUpdates(
         uniqueResult.map((entry, index) => ({

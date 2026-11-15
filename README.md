@@ -16,7 +16,7 @@ pnpm run build
 pnpm run start
 ```
 
-其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准；未结束局在失败率中计失败）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）、`pnpm run test:admin-badge`（管理员用户名外观测试）。
+其他常用命令：`pnpm run lint`、`pnpm run format`、`node --test bot-template/apex-bot/test/*.test.cjs`（Apex 规则/控制器单测）、`node bot-template/apex-bot/training/benchmark.cjs`（四地图固定种子真实引擎基准；未结束局在失败率中计失败）、`pnpm run test:bot`（Bot 集成测试）、`pnpm run test:server-bot`（服务端托管策略 Bot 冒烟测试）、`pnpm run test:lobby-guards`（房间与开局守卫回归）、`pnpm run test:deploy-update`（部署更新 UX 回归）、`pnpm run test:presence`（统一在线状态测试）、`pnpm run test:map-generation`（地图生成测试）、`pnpm run test:huaxia-season`（华夏年度窗口边界测试）、`pnpm run test:admin-badge`（管理员用户名外观测试）、`pnpm run test:referral-ambassador`（邀请归因与推广大使回归）。
 
 Apex Bot 可独立运行或由服务端托管：
 
@@ -85,6 +85,7 @@ node training/long-eval.cjs --help
 
 - 「动态」：类似推特的 feed，支持点赞、评论、编辑与删除（管理员可管理全部），评论同样可删除（评论作者本人或管理员），支持 Markdown 与服务端渲染的 LaTeX；发布有 30 秒冷却；URL 带页码可分享翻页位置。动态与评论正文支持 @提及：输入 `@` 弹出用户名候选（大小写不敏感前缀匹配，上下键选择、回车/Tab 插入），解析结果随动态/评论落库；渲染为带 rating 颜色、可点击跳个人主页的用户名链接（复用 `static/username.js` 组件），提及不存在或已改名的用户时降级为普通文本，不报错。
 - 个人主页 `/u/<用户名>`：与首页一致的三栏布局，展示最高 Rating、级数/积分进度、注册天数、Rating 排名、Rating 历史曲线、其动态与参与的对局回放；积分排名不在个人页展示，游客可读取资料、动态和回放，登录后显示已有互动入口。
+- **推广大使**：登录用户可在自己的个人主页复制 `/login?ref=<用户名>` 邀请链接。浏览器记录首个有效邀请入口，后续入口不覆盖；只有经该入口完成新注册才建立固定归因，已有账号登录、自邀、无邀请或清除 Cookie 后未重新进入邀请链接的注册均不归因，注册/登录成功会清除邀请 Cookie。受邀新玩家与至少另一名真人完成至少 60 Tick 且 60 秒的有效对局后激活，点击、注册和重复终局回调本身不激活，同局可激活多名新玩家。奖励只有资料卡大使徽章与独立感谢墙 `/ambassadors`，不增加 Rating 或积分，不影响匹配和胜负结算。公开 `GET /api/ambassadors` 仅返回全局点击/注册/激活/排除聚合及按用户名排序的大使汇总，不公开邀请者与受邀者对应关系；管理员可通过 `GET /api/admin/referrals` 复核，并以 `POST /api/admin/referrals/exclude` 撤销异常归因，撤销后不可重新激活。归因与转化数据随 `users.bin` 原子持久化，重启保持一致。
 - 房间内支持观战；非观战成员按已验证真人与 AI（未通过真人校验的连接）分别统计，每个非空组准备人数须达到 ceil(该组人数 / 2)，空组自动满足；两组均达标且总参赛人数至少 2 人才自动开局。组队模式下若所有参赛者处于同一队伍，服务端拒绝开局并在房间消息中提示调整队伍（否则对局一开始就只有一支存活队伍，会立即终局）。观战中（含战败后）底部显示「下局模式」选择器，可提前切换下一局的观战/参与身份，避免对局结束后被瞬间重开的下一局拉进场；战败弹窗在对局进行中显示「观战」（仅关闭弹窗继续观战），对局彻底结束后变为「返回房间」，正在观战的用户在终局时也会再次弹出结算弹窗提示返回房间。
 - **真人客户端验证与 [AI] 标记**：已登录网页从游戏页 HTML 注入的 `roka-session-stamp` meta 获得会话戳（不再经 `/api/auth/me` 等 JSON 接口下发——任何 JWT 持有者都能调 JSON 接口自取戳伪造验证，socket 直连的第三方 bot 拿不到页面注入的戳），与服务端 `set_id` 下发的连接 id 计算派生签名，在进房前先发送 `client_verify`，同一连接事件按序处理，首次 `room_update` 即正确识别真人；`room_heartbeat` 携带签名为补充路径；验证落地时若连接已在房内会立即重发 `room_update` 刷新标记。未通过真人客户端校验的连接自动显示「[AI]」，包括普通账号 JWT 登录的第三方 bot，无需管理员配置名单。房间标记实时依据 `humanVerified`，对局排行榜按开局玩家编号保存身份快照，补验、断线换绑或成员移除不改变本局标记。全 AI 参赛时强制 4x 并提示，已验证真人参战时沿用房间速度；观战席不计。准备门槛按已验证真人与 AI 分组分别计算，各组为 ceil(组内参赛人数/2)，观战席不计，非空组都达标且总参赛人数至少 2 人才开局；房间快照和房间列表只提供 ready_counts 分组计数。房主排序按真人、普通 AI、托管 Bot 三档，晚到真人验证也会重排。处罚豁免仍按原有鉴权 bot 标志判断，未验证 JWT 连接不会因此获得豁免。
 - **非官方 AI 官方 Bot 房每日停留上限**：AI 身份与房间 [AI] 标记完全同口径——未通过 `humanVerified` 真人校验且非官方托管 Bot，不看 JWT、`ROKA_BOT_TOKENS` 或其他登录方式。此类连接每日（服务器本地日历日）在官方 Bot 房间（进房时房内已有服务端托管 Bot）累计停留不得超过 4 小时；准备阶段到限会被自动移出并跳回首页，当日也无法再进入任何官方 Bot 房间（进房被拒并在房间内提示）。对局进行中不打断，终局回到准备阶段时立即检查；对局中断线重连不丢计时段，补验真人后停止 AI 计时。统计为内存态，服务器重启清零。

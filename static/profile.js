@@ -161,10 +161,51 @@ async function loadProfile() {
           (level.nextLevelPoints - level.points),
   );
   $('#profile-main').show();
+  renderAmbassador(p);
   renderRatingChanges(p.ratingHistory || []);
   renderRatingChart(p.ratingHistory || []);
   return true;
 }
+
+function renderAmbassador(profile) {
+  var ambassador = profile.ambassador || { activatedCount: 0, badgeLevel: 0 };
+  var count = Number.isFinite(ambassador.activatedCount) ? ambassador.activatedCount : 0;
+  var level = Number.isFinite(ambassador.badgeLevel) ? ambassador.badgeLevel : 0;
+  $('#ambassador-badge')
+    .toggle(level > 0)
+    .text(level > 0 ? '推广大使 · Lv ' + level : '');
+  $('#ambassador-summary').text(
+    count > 0 ? '已感谢 ' + count + ' 位新玩家完成首次有效对局。' : '还没有有效邀请。',
+  );
+  var ownProfile =
+    currentUsername && currentUsername.toLowerCase() === String(profile.username).toLowerCase();
+  $('#referral-share').toggle(Boolean(ownProfile));
+  if (ownProfile) {
+    $('#referral-link').val(location.origin + '/login?ref=' + encodeURIComponent(profile.username));
+  }
+}
+
+$('#referral-copy').on('click', async function () {
+  var input = $('#referral-link')[0];
+  if (!input || !input.value) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(input.value);
+    } else {
+      input.select();
+      document.execCommand('copy');
+    }
+    $(this).text('已复制');
+    var $button = $(this);
+    setTimeout(function () {
+      $button.text('复制');
+    }, 1500);
+  } catch (e) {
+    input.focus();
+    input.select();
+    $(this).text('请手动复制');
+  }
+});
 
 // 新手期未定型时，在当前 Rating 右侧加「?」提示。
 function setRatingWithProvisional($el, rating, provisional) {

@@ -570,6 +570,19 @@ const boot = async (): Promise<void> => {
     return reply.send(captchaService.createChallenge());
   });
 
+  app.post('/api/referrals/click', { preHandler: authActionRateLimitPreHandler }, async (request, reply) => {
+    const existing = authService.getReferralFromCookie(request.headers.cookie);
+    if (existing && userStore.resolveUsername(existing)) {
+      return reply.send({ ok: true });
+    }
+    const body = request.body as { referrer?: unknown };
+    const referrer = userStore.resolveUsername(String(body?.referrer ?? ''));
+    if (!referrer) return reply.send({ ok: false });
+    await userStore.recordReferralClick(referrer);
+    authService.setReferralCookie(reply, referrer);
+    return reply.send({ ok: true });
+  });
+
   app.post('/api/auth/register', { preHandler: authActionRateLimitPreHandler }, async (request, reply) => {
     const body = request.body as {
       username?: string;
@@ -594,10 +607,12 @@ const boot = async (): Promise<void> => {
     }
 
     try {
-      const username = await userStore.register(usernameRaw, password);
+      const referrer = authService.getReferralFromCookie(request.headers.cookie) ?? undefined;
+      const username = await userStore.register(usernameRaw, password, referrer);
       const sessionId = await userStore.rotateSession(username);
       authService.disconnectUserSockets(username);
       const token = authService.signAuthToken(username, sessionId);
+      authService.clearReferralCookie(reply);
       authService.setAuthCookie(reply, token);
       return reply.send({ username });
     } catch (error) {
@@ -644,6 +659,7 @@ const boot = async (): Promise<void> => {
     authService.disconnectUserSockets(username);
 
     const token = authService.signAuthToken(username, sessionId);
+    authService.clearReferralCookie(reply);
     authService.setAuthCookie(reply, token);
     return reply.send({ username });
   });
@@ -687,6 +703,28 @@ const boot = async (): Promise<void> => {
     }
     return authUser;
   };
+
+  app.get('/api/admin/referrals', async (request, reply) => {
+    const admin = requireAdmin(request, reply);
+    if (!admin) return;
+    return reply.send({ items: userStore.listReferralsForAdmin() });
+  });
+
+  app.post(
+    '/api/admin/referrals/exclude',
+    { preHandler: adminActionRateLimitPreHandler },
+    async (request, reply) => {
+      const admin = requireAdmin(request, reply);
+      if (!admin) return;
+      const body = request.body as { invitee?: unknown; reason?: unknown };
+      const excluded = await userStore.excludeReferral(
+        String(body?.invitee ?? ''),
+        String(body?.reason ?? ''),
+      );
+      if (!excluded) return reply.code(404).send({ error: '没有可排除的邀请归因。' });
+      return reply.send({ ok: true });
+    },
+  );
 
   app.get('/admin', async (request, reply) => {
     const authUser = (request as AuthRequest).authUser;
@@ -1160,6 +1198,13 @@ const boot = async (): Promise<void> => {
     return reply.send({ count: presenceService.countOnline(), items });
   });
 
+  app.get('/api/ambassadors', async (_request, reply) => {
+    return reply.send({
+      conversion: userStore.getReferralConversion(),
+      items: userStore.listAmbassadorWall(),
+    });
+  });
+
   app.get('/api/profile/:username', async (request, reply) => {
     const { username } = request.params as { username: string };
     const profile = userStore.getPublicProfile(username);
@@ -1320,6 +1365,9 @@ const boot = async (): Promise<void> => {
   );
 
   app.get('/about', async (request, reply) => serveAssetTemplate(request, reply, 'about.html', 'text/html'));
+  app.get('/ambassadors', async (request, reply) =>
+    serveAssetTemplate(request, reply, 'ambassadors.html', 'text/html'),
+  );
   app.get('/tutorial', async (request, reply) =>
     serveAssetTemplate(request, reply, 'tutorial-text.html', 'text/html'),
   );
