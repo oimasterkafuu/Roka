@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>回放 - Roka</title>
+    <link rel="icon" href="/icons/favicon.ico?v={{V}}" />
+    <link rel="stylesheet" href="/main.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/home.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/docs.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/rating.css?v={{V}}" />
+    <style>
+      .replay-query,
+      .replay-pagination {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: end;
+      }
+      .replay-query label {
+        display: grid;
+        gap: 6px;
+      }
+      .replay-query input {
+        padding: 8px;
+        border: 1px solid #c6dddd;
+        border-radius: 6px;
+        max-width: 100%;
+      }
+      .replay-table-wrap {
+        overflow-x: auto;
+        margin: 14px 0;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+      }
+      th,
+      td {
+        padding: 12px 8px;
+        border-bottom: 1px solid #e3eeee;
+      }
+      tbody tr {
+        cursor: pointer;
+      }
+      tbody tr:hover {
+        background: #effafa;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+    <script src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"></script>
+    <script src="/username.js?v={{V}}"></script>
+    <script defer src="/replays.js?v={{V}}"></script>
+  </head>
+  <body class="home">
+    <main id="app">
+      <header class="home-topbar">
+        <h1 class="doc-title">回放</h1>
+        <a href="/">返回首页</a>
+      </header>
+      <section class="doc-panel">
+        <h2>查询回放</h2>
+        <form id="replay-query" class="replay-query">
+          <label>用户名<input id="query-username" name="username" autocomplete="off" /></label>
+          <label>开始日期<input id="query-from" name="from" type="date" /></label>
+          <label>结束日期<input id="query-to" name="to" type="date" /></label>
+          <button class="btn btn-primary" type="submit">查询</button>
+        </form>
+      </section>
+      <section class="doc-panel">
+        <h2 id="replays-heading">最新回放</h2>
+        <p id="replays-status" role="status" aria-live="polite"></p>
+        <div class="replay-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>回合</th>
+                <th>结果</th>
+              </tr>
+            </thead>
+            <tbody id="replays-body"></tbody>
+          </table>
+        </div>
+        <div id="replays-pagination" class="replay-pagination" hidden>
+          <button id="replays-prev" class="btn btn-secondary" type="button">上一页</button>
+          <span id="replays-page"></span>
+          <button id="replays-next" class="btn btn-secondary" type="button">下一页</button>
+          <button id="replays-latest" class="btn btn-ghost" type="button">返回最新</button>
+        </div>
+      </section>
+      <section class="doc-panel">
+        <h2>上传 RPL</h2>
+        <p id="replay-login">登录后可上传并查看回放 · <a href="/login">登录</a></p>
+        <div id="replay-upload" hidden>
+          <label>选择回放文件 <input id="replay-upload-file" type="file" accept=".rpl" /></label>
+          <button id="replay-upload-view" class="btn btn-primary" type="button" disabled>查看</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

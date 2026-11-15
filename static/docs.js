@@ -21,7 +21,15 @@ async function docsLoadUser() {
 
 function docsWireNav() {
   // 固定白名单：仅允许以下路径，未命中一律拒绝（不跳转）
-  const allowedPaths = ['/', '/tutorial', '/develop', '/develop/bot', '/tutorial/interactive'];
+  const allowedPaths = [
+    '/',
+    '/tutorial',
+    '/develop',
+    '/develop/bot',
+    '/tutorial/interactive',
+    '/ambassadors',
+    '/login',
+  ];
   document.querySelectorAll('[data-goto]').forEach((el) => {
     el.addEventListener('click', () => {
       const target = el.getAttribute('data-goto');

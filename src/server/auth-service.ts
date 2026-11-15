@@ -88,6 +88,7 @@ class AuthService {
       '/develop/bot',
       '/about',
       '/ambassadors',
+      '/replays',
       '/tutorial',
       '/tutorial/interactive',
     ]);
