@@ -28,7 +28,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 关键事实：
 
 - 后端 TypeScript（`src/`）经 `pnpm run build` 编译到 `dist/` 运行；`dist/` 不手工编辑。
-- 前端主体无构建流程，`static/` 基本原样下发；介绍片由 `scripts/intro/build-intro.mjs` 单独打包至 `static/intro/player.js`；例外是含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
+- 前端主体使用原生 JS，`static/` 基本原样下发；`scripts/build-pages.mjs` 在 `pnpm run build` 最前将 `views/` 的 Pug 模板渲染为 `static/*.html`（第一批 replays/ambassadors/about/login，生成 HTML 入库），介绍片由 `scripts/intro/build-intro.mjs` 单独打包至 `static/intro/player.js`；含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
 - 静态资源发布：`src/server/static-assets.ts` 启动时批量读取 Git 历史，按文件最后修改 SHA 改写 HTML/preload/Worker，CDN 去除整站 v；注入 `static/asset-runtime.js` 处理逐文件 URL、有序脚本、完整性校验与 CDN 回退，并递归下载 CSS/字体/图片为 blob，避免依赖继承父文件 SHA；首屏内联加载提示等待样式，CSS 图超过 4 秒改用同源原生样式（再等最多 8 秒），默认独立 CDN 优先。未知文件单独回源，ROKA_STATIC_COMMIT 可全文件覆盖。动态接口不经 CDN。
 - 玩家身份 = socket.id（sid）；对局协议与格子编码的权威文档是 `static/develop-bot.html`。
 
@@ -59,6 +59,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── text-render.ts      # Markdown+LaTeX → 消毒 HTML（公告/动态共用）
 │   ├── rating-color.ts     # Codeforces 风格段位配色
 │   └── runtime-env.ts      # .env 引导与密钥自动生成
+├── views/                  # Pug 统一布局与第一批四页模板（构建生成 static/*.html）
 ├── static/                 # 前端（主体原生 JS；介绍片独立打包）
 │   ├── index.html          # 首页/大厅（脚本基本内联，另加载 /notify.js）
 │   ├── game.html           # 对局/回放共用骨架
@@ -247,14 +248,14 @@ _一句话：共享类型/协议定义汇总。_
 
 ## 前端源码地图（static/）
 
-无构建的原生 JS + jQuery。页面分两类：
+原生 JS + jQuery；replays/ambassadors/about/login 四页 HTML 由 `views/*.pug` 构建生成，其余页面仍直接维护 `static/*.html`。页面分两类：
 
 - **内容/文档页**（about、develop、develop-bot、tutorial-text）：共享 `styles/docs.css` 统一样式与 `docs.js`（登录态展示、`data-goto` 导航、KaTeX 公式渲染，含数学内容的页面引入 `vendor/katex/` 的 katex.min.js + auto-render.min.js）；页面特有样式保留内联。
 - **功能页**：index.html / profile.js（REST 交互，socket `home_*` 失效通知驱动刷新）；game.html + main.js + main/\*（对局与回放共用一套骨架，**脚本全局化、加载顺序敏感**）。
 
 ### 功能页
 
-**static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「在线」列表。回放列表名次列按队伍合并展示：索引项带 `teams`（终局队伍分组，组序=队伍名次序）时同队一组（组内 `, `、组间 `›`，不展示玩家配色色块），旧数据无 `teams` 回退 `rank` 平铺；名次列成员名与房间列表房主名统一走 `username.js` 组件（rating 颜色 + 点击跳主页，接口不带颜色时经 `/api/user-colors` 批量补色）。
+**static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「在线」列表。回放板块固定显示最新 10 条，无分页与统计图，上传操作区提供「全部回放」入口。回放列表名次列按队伍合并展示：索引项带 `teams`（终局队伍分组，组序=队伍名次序）时同队一组（组内 `, `、组间 `›`，不展示玩家配色色块），旧数据无 `teams` 回退 `rank` 平铺；名次列成员名与房间列表房主名统一走 `username.js` 组件（rating 颜色 + 点击跳主页，接口不带颜色时经 `/api/user-colors` 批量补色）。
 数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds/home_online` 失效通知（事件无 payload）。顶栏在线人数与右栏「在线」列表（排行榜下方，按最后活动倒序的前 8 位用户及其相对活动时间，含自己与当前在线者）由 `/api/online` 驱动。`home_online` 收到后对比在线人数快照，增加时经 `notify.js` 弹「有玩家上线」后台通知；`home_rooms` 收到后对比房间号快照，出现新房间时弹「有新的房间」后台通知。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态列表为就地增量渲染（issue #85）：刷新时已存在的动态在原 DOM 上只更新变化字段并按序重排，新帖插入、消失帖移除，评论展开态与正在输入的评论框/内联编辑态不被打断；动态原文与渲染 HTML 分别存 `$item.data('raw-text'/'raw-html')` 供编辑回填与变更检测；动态正文/评论渲染后经 `ensureUsernameColors` 为服务端注入的 @提及链接（`data-username`）批量补 rating 颜色，发帖框与评论框带 `data-mention` 由 mention-autocomplete.js 提供 @提及补全；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
@@ -297,7 +298,7 @@ _一句话：#map 容器级闪烁相位时钟，三种周期。_
 _一句话：个人主页逻辑：积分等级/进度、Rating 排名与 SVG Rating 图 + 动态/回放。_
 推广大使资料卡只读 `ambassador` 汇总并展示独立徽章，不改用户名 rating 外观；仅当前登录用户查看自己的主页时显示邀请链接与复制按钮，链接为 `/invite/<规范用户名>`。`static/login.html` 把有效 ref 上报服务端固定首个入口，注册提交前等待该请求完成。
 
-**static/ambassadors.html / ambassadors.js** — 独立推广大使感谢墙 `/ambassadors`（公开，与 about 的 GitHub 贡献墙分离）：展示全局点击/归因注册/激活/排除聚合和大使徽章汇总，按用户名排序、不设竞技名次；DOM 全部经 `textContent` 与属性 API 构建，不渲染或接收受邀玩家对应关系，含真实空状态与失败提示；登录后可直接复制自己的 `/invite/<用户名>` 链接，未登录保留登录并分享按钮。
+**views/ambassadors.pug → static/ambassadors.html + ambassadors.js** — 独立推广大使感谢墙 `/ambassadors`（公开，与 about 的 GitHub 贡献墙分离）：展示全局点击/归因注册/激活/排除聚合和大使徽章汇总，按用户名排序、不设竞技名次；整卡仍跳个人主页，卡内名字由 `usernameLink(..., {element:'span'})` 渲染并批量补色，避免嵌套链接；其余 DOM 经 `textContent` 与属性 API 构建，不渲染或接收受邀玩家对应关系，含真实空状态与失败提示；登录后可直接复制自己的 `/invite/<用户名>` 链接，未登录保留登录并分享按钮。
 
 **static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态）分页展示（每页 20 条，前端即时过滤），顶部搜索框按用户名子串即时筛选并显示用户总数/匹配数；封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框 / 策略 Bot），便于扩展新管理模块。「策略 Bot」分区仅超管可见（`viewerIsSuperAdmin` 门控 + 服务端 403 兜底）：初始化时拉取 `GET /api/admin/bot-templates` 自动填充模板下拉框（无可托管模板时禁用启动按钮并提示），输入用户名 + 房间号、选择模板并勾选是否允许组队后启动（成功后仅清空房间输入），表格展示运行中 bot（用户名/房间/模板/启动时间/连接状态），三项许可以复选框就地编辑并通过 `POST /api/admin/bots/config` 一次保存，无需重启 bot，也可手动停止。
 _一句话：后台管理页：用户封禁、管理员权限分配与策略 Bot 托管。_
@@ -323,7 +324,7 @@ _一句话：关于、贡献者致谢与来源许可证静态页。_
 **static/crown.js** — 全局 `crown_html`：主城皇冠内联 SVG（颜色跟随玩家配色）。
 _一句话：皇冠 SVG 字符串常量（crown_html）。_
 
-**static/username.js** — 全站统一用户名渲染组件（首页/个人主页/后台/对局页均加载）：`usernameLink(name, info?, extraClass?, opts?)` 构建带 rating 颜色（rt-*）+ 点击跳 `/u/:username` 的链接；`usernameLinkHtml(name)` 为同源 HTML 字符串版（热路径 innerHTML 重建用，用户名经 htmlescape）；`usernameCacheSeed(map)` 用接口已有 colorClass 数据喂全局缓存（用户名→{colorClass,title,admin,banned}）；`usernameEnsureColors(names)` 批量调 `GET /api/user-colors` 补齐缺失颜色（inflight 去重，未上榜/未定级降级 rt-unrated），回填后经 `data-username` 标记自动刷新已渲染链接；`usernameColorsInvalidate()` 在 rating 结算或封禁/解封/管理员权限变更后（服务端广播 `home_leaderboard`，首页/个人页/对局页均监听）清空颜色缓存并为当前页所有已渲染链接重拉颜色，保证等级色跨面板及时更新（issue #84）。所有公开用户名外观出口附 `banned`（由 `userStore.getBanStatus` 判定有效封禁）及 `admin`；有效封禁优先返回 rt-banned（棕色、正常字重、中性 tooltip），未封禁管理员为 rt-admin（黑色加粗）及 Headquarters，首页和个人页不再展示重复管理员标签（issue #97）；`usernameRefreshRendered` 褪旧档列表含 rt-admin/rt-banned，并同步更新颜色与 tooltip。DOM 用 `.text()`，HTML 版用转义防注入。与局内配色 `.cN` 职责分开：色块/底色=.cN，名字颜色=本组件。
+**static/username.js** — 全站统一用户名渲染组件（首页/个人主页/后台/对局页均加载）：`usernameLink(name, info?, extraClass?, opts?)` 构建带 rating 颜色（rt-*）+ 点击跳 `/u/:username` 的链接，`opts.element='span'` 为整卡链接内提供同源纯文本节点；`usernameLinkHtml(name)` 为同源 HTML 字符串版（热路径 innerHTML 重建用，用户名经 htmlescape）；`usernameCacheSeed(map)` 用接口已有 colorClass 数据喂全局缓存（用户名→{colorClass,title,admin,banned}）；`usernameEnsureColors(names)` 批量调 `GET /api/user-colors` 补齐缺失颜色（inflight 去重，未上榜/未定级降级 rt-unrated），回填后经 `data-username` 标记自动刷新已渲染链接；`usernameColorsInvalidate()` 在 rating 结算或封禁/解封/管理员权限变更后（服务端广播 `home_leaderboard`，首页/个人页/对局页均监听）清空颜色缓存并为当前页所有已渲染链接重拉颜色，保证等级色跨面板及时更新（issue #84）。所有公开用户名外观出口附 `banned`（由 `userStore.getBanStatus` 判定有效封禁）及 `admin`；有效封禁优先返回 rt-banned（棕色、正常字重、中性 tooltip），未封禁管理员为 rt-admin（黑色加粗）及 Headquarters，首页和个人页不再展示重复管理员标签（issue #97）；`usernameRefreshRendered` 褪旧档列表含 rt-admin/rt-banned，并同步更新颜色与 tooltip。DOM 用 `.text()`，HTML 版用转义防注入。与局内配色 `.cN` 职责分开：色块/底色=.cN，名字颜色=本组件。
 _一句话：统一用户名链接组件 + rating 颜色全局缓存。_
 
 **static/mention-autocomplete.js** — @提及输入补全（首页与个人主页共用，无构建全局脚本）。
@@ -364,7 +365,9 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 ## 配置 / CI / 脚本 / bot 模板
 
-- **package.json** — 脚本入口（dev=tsx 直跑 src、build=tsc、lint、format、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+- **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+
+- **scripts/build-pages.mjs / test-build-pages.mjs** — 用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出到 `static/*.html`；测试连续两次构建字节一致，并检查四页必要 id、favicon/`{{V}}` 资源、socket 与用户名组件引用，纳入 `pnpm test`。
 
 - **scripts/test-referral-ambassador.mjs** — `pnpm run test:referral-ambassador`（纳入 `pnpm test`）：UserStore 覆盖邀请注册、自邀/旧账号/无邀请、重复与并发激活、同局多新玩家、异常撤销、徽章阈值、公开字段和文件重启一致；LobbyService 覆盖真人/60 Tick/60 秒门槛及 Rating/积分不变；真实 dist HTTP 服务（仅验证码为测试桩）覆盖首入口 Cookie、注册/登录清理、匿名聚合、管理员权限与撤销；DOM 桩验证感谢墙安全渲染、登录态邀请链接与复制成功/降级/失败；HTTP 覆盖游客邀请入口的 302、大小写归一与 404 提示。需先 `pnpm run build`。
 
@@ -506,6 +509,6 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 
 ### 回放查询与缓存维护
 
-- `static/replays.html` / `static/replays.js`：公开回放查询页，最新列表、用户名/日期过滤、地址栏分页状态及登录上传。
+- `views/replays.pug → static/replays.html` / `static/replays.js`：公开回放查询页，最新列表、用户名/日期过滤、地址栏分页状态及登录上传；`?home=1` socket 监听 `home_leaderboard`，两秒节流后保持当前查询与页码刷新，默认最新 10 条同样生效。
 - `src/replay-store.ts`：观看缓存命中更新时间及 `sweepReplayViewCaches` 过期缓存扫描；`src/server.ts` 在启动和每日调度，关闭时释放计时器，同时提供 `/replays` 页面及扩展查询 API。
-- `scripts/test-replays-page.mjs`：观看缓存保留/清理、公开页面及回放查询过滤与分页回归测试。
+- `scripts/test-replays-page.mjs`：观看缓存保留/清理、公开页面、回放查询过滤与分页、两秒节流 socket 刷新回归测试。

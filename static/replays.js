@@ -1,4 +1,4 @@
-/* global $, usernameLink, usernameEnsureColors */
+/* global $, io, usernameLink, usernameEnsureColors */
 function pad2(value) {
   return String(value).padStart(2, '0');
 }
@@ -221,5 +221,16 @@ async function loadReplayAuth() {
     /* Keep the guest login prompt. */
   }
 }
+var replayRefreshTimer = null;
+function scheduleReplayRefresh() {
+  if (replayRefreshTimer !== null) return;
+  replayRefreshTimer = setTimeout(function () {
+    replayRefreshTimer = null;
+    loadReplaysPage();
+  }, 2000);
+}
+var replaySocket = io({ query: { home: '1' } });
+replaySocket.on('home_leaderboard', scheduleReplayRefresh);
+
 loadReplaysPage();
 loadReplayAuth();

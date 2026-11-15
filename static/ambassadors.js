@@ -12,6 +12,7 @@ async function loadAmbassadorWall() {
       element.textContent = Number.isFinite(value) && value >= 0 ? String(Math.floor(value)) : '0';
     }
     var items = Array.isArray(data.items) ? data.items : [];
+    var names = [];
     grid.replaceChildren();
     for (var item of items) {
       if (
@@ -22,12 +23,11 @@ async function loadAmbassadorWall() {
       ) {
         continue;
       }
+      names.push(item.username);
       var link = document.createElement('a');
       link.className = 'ambassador-card';
       link.href = '/u/' + encodeURIComponent(item.username);
-      var name = document.createElement('span');
-      name.className = 'ambassador-name';
-      name.textContent = item.username;
+      var name = usernameLink(item.username, null, 'ambassador-name', { element: 'span' })[0];
       var level = document.createElement('span');
       level.className = 'ambassador-level';
       level.textContent = '推广大使 · Lv ' + Math.max(1, Math.floor(item.badgeLevel || 1));
@@ -37,6 +37,7 @@ async function loadAmbassadorWall() {
       link.append(name, level, count);
       grid.append(link);
     }
+    usernameEnsureColors(names);
     status.hidden = grid.children.length > 0;
     if (grid.children.length === 0) status.textContent = '还没有有效激活，第一位推广大使可能就是你。';
   } catch (error) {

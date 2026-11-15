@@ -68,7 +68,9 @@ function aboutContributorCard(doc, value) {
     const rokaLink = doc.createElement('a');
     rokaLink.className = 'contributor-roka-link';
     rokaLink.href = `/u/${encodeURIComponent(rokaUsername)}`;
-    rokaLink.textContent = `Roka: ${rokaUsername}`;
+    rokaLink.textContent = 'Roka: ';
+    rokaLink.append(usernameLink(rokaUsername, null, null, { element: 'span' })[0]);
+    usernameEnsureColors([rokaUsername]);
     card.append(rokaLink);
   }
   return card;

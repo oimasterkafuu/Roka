@@ -36,6 +36,8 @@ pnpm run build
 pnpm run start
 ```
 
+`pnpm run build` 会先用 Pug 将 `views/` 中的页面模板渲染到 `static/`，再构建介绍片和 TypeScript。
+
 运行数据默认保存在 `data/`。环境配置示例见 `.env.example`；常用变量包括：
 
 - `PORT`：HTTP 监听端口。
@@ -73,7 +75,7 @@ pnpm run test:guest-access
 
 ## 回放查询与缓存
 
-`/replays` 是公开回放查询页。游客可查看最新 10 条回放，或按用户名、日期范围查询；查询结果每页 50 条，条件和页码保留在地址栏。登录后可上传 `.rpl` 文件观看。
+`/replays` 是公开回放查询页。游客可查看最新 10 条回放，或按用户名、日期范围查询；查询结果每页 50 条，条件和页码保留在地址栏。对局结算后页面会通过 socket 在两秒节流后刷新当前视图，连接失败不影响手动查询。登录后可上传 `.rpl` 文件观看。
 
 `GET /api/replays` 支持 `offset`、`limit`（最多 50）以及可选的 `username`、`from`、`to`。时间参数使用 Unix 秒并包含端点；响应中的 `total` 是过滤后、分页前的记录数。
 
@@ -82,6 +84,7 @@ pnpm run test:guest-access
 ## 项目结构
 
 - `src/`：TypeScript 服务端、游戏引擎和持久化存储。
+- `views/`：Pug 页面模板，构建期生成 `static/` 下对应 HTML。
 - `static/`：网页、客户端脚本与样式。
 - `scripts/`：构建工具、 fixtures 和回归测试。
 - `bot-template/`：可独立运行或服务端托管的 Bot 模板。

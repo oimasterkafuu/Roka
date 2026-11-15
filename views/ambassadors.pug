@@ -1,0 +1,121 @@
+extends layout.pug
+
+block vars
+  - var bodyStyle = 'overflow: auto; height: auto'
+
+block head
+  link(rel='stylesheet', href='/styles/docs.css?v={{V}}')
+  link(rel='stylesheet', href='/styles/rating.css?v={{V}}')
+  style.
+    .invite-controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    #ambassador-invite-link {
+      flex: 1;
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid teal;
+      border-radius: 6px;
+    }
+    .ambassador-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .ambassador-stat {
+      padding: 12px;
+      border-radius: 8px;
+      background: #f3f8f8;
+      text-align: center;
+    }
+    .ambassador-stat strong {
+      display: block;
+      color: teal;
+      font-size: 24px;
+    }
+    .ambassador-stat span {
+      color: #6b7686;
+      font-size: 12px;
+    }
+    .ambassador-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+      gap: 10px;
+    }
+    .ambassador-card {
+      display: block;
+      padding: 14px;
+      border: 1px solid #e3e8f0;
+      border-radius: 8px;
+      background: #fffdf4;
+      color: #253042;
+      text-decoration: none;
+    }
+    .ambassador-card:hover {
+      border-color: #d4a017;
+    }
+    .ambassador-name {
+      display: block;
+      overflow-wrap: anywhere;
+      font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+    }
+    .ambassador-level,
+    .ambassador-count {
+      display: block;
+      margin-top: 4px;
+      color: #6b7686;
+      font-size: 13px;
+    }
+    #ambassadors-status {
+      color: #6b7686;
+    }
+    @media (max-width: 560px) {
+      .ambassador-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  title Roka - 推广大使感谢墙
+
+block content
+  #app
+    h1.doc-title 推广大使感谢墙
+    p.doc-subtitle 感谢把 Roka 分享给新玩家的社区成员。这里只展示有效激活的汇总，不公开新玩家与邀请者的对应关系。
+    section.doc-panel
+      h2 邀请转化
+      .ambassador-stats
+        .ambassador-stat
+          strong#referral-clicks -
+          span 有效邀请入口
+        .ambassador-stat
+          strong#referral-registrations -
+          span 归因注册
+        .ambassador-stat
+          strong#referral-activations -
+          span 有效激活
+        .ambassador-stat
+          strong#referral-excluded -
+          span 复核排除
+      p.tips 首个有效邀请入口优先；只有新玩家注册后完成首次有效对局才激活。徽章与感谢墙不参与 Rating、积分、匹配或胜负结算。
+    section.doc-panel(aria-labelledby='ambassador-wall-title')
+      h2#ambassador-wall-title 社区致谢
+      p#ambassadors-status(role='status') 正在加载感谢墙…
+      #ambassador-grid.ambassador-grid
+    section.doc-panel
+      h2 成为推广大使
+      p#ambassador-share-hint 登录后进入自己的个人主页，即可复制专属邀请链接。大使等级仅用于纪念与致谢。
+      #ambassador-share(hidden)
+        label(for='ambassador-invite-link') 我的邀请链接
+        .invite-controls
+          input#ambassador-invite-link(type='text', readonly)
+          button#ambassador-invite-copy.small 复制
+      #ambassador-login.cta-row
+        button.small.inverted(data-goto='/login') 登录并分享 →
+
+block scripts
+  script(src='/docs.js?v={{V}}')
+  script(src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}')
+  script(src='/username.js?v={{V}}')
+  script(src='/ambassadors.js?v={{V}}')

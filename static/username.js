@@ -184,17 +184,20 @@ function usernameLinkHtml(username) {
 // 封禁为 rt-banned/已封禁；未封禁管理员为 rt-admin/Headquarters，均无可见徽标。
 // info 可选 {colorClass, title, admin, banned, starred}；不传时查全局缓存，未命中按 rt-unrated 降级。
 // extraClass 可选，如调用方自己的样式类（feed-author 等）。
-// opts 可选 {stopPropagation: true}：给链接绑 click 阻止冒泡（用于整行可点的表格，点名字跳主页、点行其余进房间/回放）。
+// opts.stopPropagation 给链接绑 click 阻止冒泡；opts.element='span' 用于已有整卡链接内的纯文本名字。
 function usernameLink(username, info, extraClass, opts) {
   var key = usernameColorKey(username);
   if (info && info.colorClass) {
     usernameColorCache[key] = usernameNormalizeInfo(info, usernameColorCache[key]);
   }
   var cached = usernameColorCache[key] || null;
-  var $a = $('<a></a>')
-    .attr('href', '/u/' + encodeURIComponent(username))
+  var isLink = !opts || opts.element !== 'span';
+  var $a = $(isLink ? '<a></a>' : '<span></span>')
     .attr('data-username', username)
     .addClass((cached && cached.colorClass) || 'rt-unrated');
+  if (isLink) {
+    $a.attr('href', '/u/' + encodeURIComponent(username));
+  }
   usernameRenderText($a, key, !!(cached && cached.starred));
   if (cached && cached.title) {
     $a.attr('title', cached.title);

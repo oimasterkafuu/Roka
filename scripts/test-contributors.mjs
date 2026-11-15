@@ -258,6 +258,16 @@ async function renderFrontend(response) {
     console,
     document,
     URL,
+    usernameLink: (username, _info, _extraClass, options) => {
+      assert.equal(options.element, 'span');
+      const element = new FakeElement('span');
+      element.textContent = username;
+      element.attributes['data-username'] = username;
+      return [element];
+    },
+    usernameEnsureColors: (names) => {
+      document.colorNames = [...(document.colorNames || []), ...names];
+    },
     fetch: async () => response,
   });
   vm.runInContext(frontendSource, context, { filename: 'static/about-contributors.js' });
@@ -289,7 +299,11 @@ assert.equal(name.textContent, 'alice');
 assert.equal(count.textContent, '12 次贡献');
 assert.equal(rokaLink.tagName, 'A');
 assert.equal(rokaLink.href, '/u/Alice_Roka');
-assert.equal(rokaLink.textContent, 'Roka: Alice_Roka');
+assert.equal(rokaLink.textContent, 'Roka: ');
+assert.equal(rokaLink.children[0].tagName, 'SPAN');
+assert.equal(rokaLink.children[0].textContent, 'Alice_Roka');
+assert.equal(rokaLink.children[0].attributes['data-username'], 'Alice_Roka');
+assert.deepEqual(rendered.colorNames, ['Alice_Roka']);
 assert.equal(link.children.includes(rokaLink), false, 'Roka link must be a sibling of GitHub link');
 assert.equal(rendered.nodes['contributors-status'].hidden, true);
 

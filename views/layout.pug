@@ -1,0 +1,22 @@
+block vars
+doctype html
+html(lang=htmlLang)
+  head
+    meta(charset='utf-8')
+    link(rel='icon', href='/icons/favicon.ico?v={{V}}', sizes='any')
+    link(rel='icon', type='image/png', sizes='32x32', href='/icons/icon-32.png?v={{V}}')
+    link(rel='icon', type='image/png', sizes='192x192', href='/icons/icon-192.png?v={{V}}')
+    link(rel='apple-touch-icon', href='/icons/icon-180.png?v={{V}}')
+    meta(
+      name='viewport',
+      content='width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0'
+    )
+    link(rel='stylesheet', href='/main.css?v={{V}}')
+    block head
+  body(class=bodyClass, style=bodyStyle)
+    block navigation
+      div(style='position: fixed; top: 12px; left: 12px; z-index: 20')
+        button.small(data-goto='/') 返回首页
+    block content
+    block footer
+    block scripts
