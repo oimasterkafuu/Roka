@@ -364,14 +364,14 @@ async function loadChatAudit(older) {
     var $body = $('#chat-body').empty();
     data.items.forEach(function (entry) {
       var $tr = $('<tr></tr>').appendTo($body);
-      $('<td></td>')
+      $('<td class="chat-audit-meta" data-label="时间 / 房间 / 对局"></td>')
         .text(fullTime(entry.at) + ' / ' + entry.room + ' / ' + (entry.gameId || '-'))
         .appendTo($tr);
-      $('<td></td>').text(entry.username).appendTo($tr);
-      $('<td></td>').text(entry.text).appendTo($tr);
-      var $review = $('<td></td>').appendTo($tr);
+      $('<td class="chat-audit-user" data-label="用户"></td>').text(entry.username).appendTo($tr);
+      $('<td class="chat-audit-text" data-label="公开聊天"></td>').text(entry.text).appendTo($tr);
+      var $review = $('<td class="chat-audit-review" data-label="复核"></td>').appendTo($tr);
       if (entry.candidateAt) {
-        $('<p></p>')
+        $('<p class="chat-audit-evidence"></p>')
           .text(
             '进房 ' +
               fullTime(entry.joinedAt) +
@@ -382,7 +382,7 @@ async function loadChatAudit(older) {
           )
           .appendTo($review);
         if (entry.reviewedAt) {
-          $('<p></p>')
+          $('<p class="chat-audit-reviewed"></p>')
             .text(entry.reviewedBy + ' 已解除 / 复核 ' + fullTime(entry.reviewedAt))
             .appendTo($review);
         } else {

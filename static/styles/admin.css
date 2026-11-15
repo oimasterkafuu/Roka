@@ -282,3 +282,166 @@ body.admin .dialog-actions {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* 聊天审计：独立作用域，输入框包含未声明 type 的文本输入。 */
+body.admin .chat-audit {
+  line-height: 1.6;
+}
+body.admin .chat-audit-hint {
+  margin: 0 0 16px;
+  color: #6b7686;
+  font-size: 13px;
+}
+body.admin .chat-audit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+body.admin .chat-audit input[placeholder] {
+  flex: 1 1 180px;
+  width: 180px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 9px 12px;
+  box-sizing: border-box;
+  border: 1px solid #d5dce6 !important;
+  border-radius: 8px;
+  background-color: #fff;
+  color: #253042;
+  font-size: 15px;
+}
+body.admin .chat-audit input[placeholder]::placeholder {
+  color: #6b7686;
+  opacity: 1;
+}
+body.admin .chat-audit-candidates {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+body.admin .chat-audit-candidates input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: teal;
+}
+body.admin .chat-audit .btn {
+  min-height: 44px;
+  min-width: 44px;
+  white-space: normal;
+  line-height: 1.5;
+  cursor: pointer;
+}
+body.admin .chat-audit .btn:disabled {
+  cursor: default;
+}
+body.admin .chat-audit :is(input, button):focus-visible {
+  outline: 2px solid teal;
+  outline-offset: 3px;
+}
+body.admin .chat-audit #chat-error {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #d5dce6;
+  border-radius: 8px;
+  background: #f3f5f9;
+  color: #39485e;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+body.admin .chat-audit #chat-error:empty {
+  display: none;
+}
+body.admin .chat-audit-table {
+  table-layout: fixed;
+}
+body.admin .chat-audit-table th:nth-child(1) {
+  width: 21%;
+}
+body.admin .chat-audit-table th:nth-child(2) {
+  width: 15%;
+}
+body.admin .chat-audit-table th:nth-child(3) {
+  width: 32%;
+}
+body.admin .chat-audit-table th {
+  color: #6b7686;
+  white-space: normal;
+}
+body.admin .chat-audit-table td {
+  padding: 12px 8px;
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+body.admin .chat-audit-meta {
+  color: #6b7686;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+body.admin .chat-audit-user {
+  font-weight: 700;
+}
+body.admin .chat-audit-text {
+  white-space: pre-wrap;
+}
+body.admin .chat-audit-review p {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+body.admin .chat-audit-evidence {
+  padding: 8px;
+  border-left: 3px solid #b78019;
+  background: #fff7e6;
+  color: #79520e;
+}
+body.admin .chat-audit-reviewed {
+  color: #006e6e;
+  font-weight: 700;
+}
+@media (max-width: 600px) {
+  body.admin .chat-audit-toolbar input[placeholder] {
+    flex-basis: 100%;
+    width: 100%;
+  }
+  body.admin .chat-audit-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  body.admin .chat-audit-table,
+  body.admin .chat-audit-table tbody,
+  body.admin .chat-audit-table tr,
+  body.admin .chat-audit-table td {
+    display: block;
+    width: auto;
+  }
+  body.admin .chat-audit-table tr {
+    margin-top: 12px;
+    padding: 8px 12px;
+    border: 1px solid #d5dce6;
+    border-radius: 8px;
+  }
+  body.admin .chat-audit-table td {
+    padding: 8px 0;
+    border: 0;
+  }
+  body.admin .chat-audit-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    color: #6b7686;
+    font-size: 12px;
+    font-weight: 400;
+  }
+}
