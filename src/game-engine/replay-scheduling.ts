@@ -1,5 +1,5 @@
 import { MOVE_DX, MOVE_DY } from '../map/map-core';
-import { MoveMode, ReplayActionData, ReplayMoveDirection } from '../types';
+import { MoveMode, ReplayActionData, ReplayMoveDirection, ReplayExecutedOp } from '../types';
 
 type Move = [number, number, number, number, MoveMode];
 
@@ -10,6 +10,7 @@ interface ScheduledBuild {
 }
 
 interface ScheduledReplayActions {
+  scheduledBatches: Array<Map<number, ReplayExecutedOp[]>>;
   scheduledMoves: Array<Map<number, Move>>;
   scheduledBuilds: Array<Map<number, ScheduledBuild>>;
   scheduledSurrenders: Array<Set<number>>;
@@ -17,6 +18,7 @@ interface ScheduledReplayActions {
 }
 
 const buildScheduledReplayActions = (replay: ReplayActionData): ScheduledReplayActions => {
+  const scheduledBatches = replay.player_ops.map(() => new Map<number, ReplayExecutedOp[]>());
   const scheduledMoves = replay.player_ops.map(() => new Map<number, Move>());
   const scheduledBuilds = replay.player_ops.map(() => new Map<number, ScheduledBuild>());
   const scheduledSurrenders = replay.player_ops.map(() => new Set<number>());
@@ -28,6 +30,15 @@ const buildScheduledReplayActions = (replay: ReplayActionData): ScheduledReplayA
     let selected: [number, number] | null = null;
 
     for (const op of ops) {
+      if (op.op === 'q') {
+        if (!replay.meta.multi_line && op.actions.length > 1) {
+          throw new Error('Single-line replay contains multiple actions in one tick.');
+        }
+        scheduledBatches[p].set(cursorTurn, op.actions);
+        cursorTurn += 1;
+        selected = null;
+        continue;
+      }
       if (op.op === 'w') {
         cursorTurn += Math.max(0, op.n);
         continue;
@@ -68,6 +79,7 @@ const buildScheduledReplayActions = (replay: ReplayActionData): ScheduledReplayA
   }
 
   return {
+    scheduledBatches,
     scheduledMoves,
     scheduledBuilds,
     scheduledSurrenders,
