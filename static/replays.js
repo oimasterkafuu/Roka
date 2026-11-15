@@ -52,7 +52,7 @@ function readReplayState() {
   var params = new URLSearchParams(location.search);
   var page = Number(params.get('page'));
   return {
-    searching: ['username', 'from', 'to', 'page'].some(function (key) {
+    searching: ['username', 'from', 'to'].some(function (key) {
       return params.has(key);
     }),
     username: params.get('username') || '',
@@ -78,8 +78,8 @@ function navigateReplays(state) {
     ['username', 'from', 'to'].forEach(function (key) {
       if (state[key]) params.set(key, state[key]);
     });
-    params.set('page', String(state.page));
   }
+  if (state.searching || state.page > 1) params.set('page', String(state.page));
   history.pushState(null, '', '/replays' + (params.size ? '?' + params : ''));
   loadReplaysPage();
 }
@@ -91,14 +91,14 @@ async function loadReplaysPage() {
   $('#query-from').val(replayDate(state.from));
   $('#query-to').val(replayDate(state.to));
   $('#replays-heading').text(state.searching ? '查询结果' : '最新回放');
-  $('#replays-pagination').prop('hidden', !state.searching);
+  $('#replays-pagination').prop('hidden', false);
   $('#replays-prev, #replays-next').prop('disabled', true);
   $('#replays-page').text('第 ' + state.page + ' 页');
   $('#replays-body').empty();
   $('#replays-status').text('加载中…');
   var params = new URLSearchParams({
-    limit: state.searching ? '50' : '10',
-    offset: String(state.searching ? (state.page - 1) * 50 : 0),
+    limit: '50',
+    offset: String((state.page - 1) * 50),
   });
   ['username', 'from', 'to'].forEach(function (key) {
     if (state[key]) params.set(key, state[key]);
