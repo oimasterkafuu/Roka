@@ -50,6 +50,11 @@
   text-decoration: none;
 }
 
+/* 已核验 Star 仅改变首字母，其余字符继承 rating、身份或局内颜色。 */
+.username-star-initial {
+  color: #b8860b !important;
+}
+
 a.rt-unrated:hover,
 a.rt-gray:hover,
 a.rt-green:hover,

@@ -147,14 +147,13 @@ function normalizeGithubProfile(value) {
   }
 }
 
-function renderProfileName(github) {
-  var $name = $('#p-name').empty();
-  if (github && github.starred && profileUsername) {
-    $('<span class="profile-star-initial"></span>').text(profileUsername.charAt(0)).appendTo($name);
-    $name.append(document.createTextNode(profileUsername.slice(1)));
-  } else {
-    $name.text(profileUsername);
-  }
+function syncProfileStar(github) {
+  var previous = usernameColorCache[profileUsername] || {};
+  previous.starred = !!(github && github.starred && github.starState === 'starred');
+  previous.starState = github ? github.starState : 'unknown';
+  var seed = {};
+  seed[profileUsername] = previous;
+  usernameCacheSeed(seed);
 }
 
 function setGithubActionStatus(message) {
@@ -170,7 +169,7 @@ function setGithubActionBusy(busy) {
 function renderGithubProfile(value) {
   var github = normalizeGithubProfile(value);
   var own = isOwnProfile();
-  renderProfileName(github);
+  syncProfileStar(github);
   $('#p-github-link').hide().attr('href', '#').text('');
   if (github) {
     $('#p-github-link')

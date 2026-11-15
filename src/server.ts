@@ -282,6 +282,11 @@ const usernameAppearance = (username: string, rating: number, ratingGames: numbe
   };
 };
 
+const usernameStarred = (username: string) => {
+  const github = userStore.getGithubPublicProfile(username);
+  return github?.starred === true && github.starState === 'starred';
+};
+
 const decorateFeedComment = (comment: FeedComment, viewer: string | null): DecoratedFeedComment => {
   const { rating, ratingGames } = userStore.getDisplayRating(comment.author);
   const rendered = renderRichTextWithMentions(comment.text, resolveFeedMention);
@@ -1399,9 +1404,8 @@ const boot = async (listen = true): Promise<void> => {
     return reply.send({ items });
   });
 
-  // 按用户名批量查询颜色与头衔（用户名 → colorClass/title），供前端统一用户名组件
-  // 为「接口原本不带颜色」的位置（回放列表、对局排行榜、聊天等）补色；一次请求批量查，
-  // 避免每个名字单独发请求。users 为逗号分隔的用户名（去重、限量防滥用）。
+  // 按用户名批量查询公开外观，供前端统一用户名组件为接口原本不带外观的位置补齐。
+  // starred 仅由公开 GitHub DTO 的新鲜已核验状态产生，不暴露 token 或其他绑定字段。
   app.get('/api/user-colors', async (request, reply) => {
     const query = request.query as { users?: unknown };
     const names = String(query.users ?? '')
@@ -1409,11 +1413,17 @@ const boot = async (listen = true): Promise<void> => {
       .map((name) => name.trim())
       .filter(Boolean)
       .slice(0, 100);
-    const colors: Record<string, { colorClass: string; title: string; admin: boolean; banned: boolean }> = {};
+    const colors: Record<
+      string,
+      { colorClass: string; title: string; admin: boolean; banned: boolean; starred: boolean }
+    > = {};
     for (const name of names) {
       if (Object.prototype.hasOwnProperty.call(colors, name)) continue;
       const { rating, ratingGames } = userStore.getDisplayRating(name);
-      colors[name] = usernameAppearance(name, rating, ratingGames);
+      colors[name] = {
+        ...usernameAppearance(name, rating, ratingGames),
+        starred: usernameStarred(name),
+      };
     }
     return reply.send({ colors });
   });
@@ -1447,6 +1457,7 @@ const boot = async (listen = true): Promise<void> => {
     return reply.send({
       ...profile,
       ...usernameAppearance(profile.username, profile.rating, profile.ratingGames),
+      starred: usernameStarred(profile.username),
       registeredDays: Math.floor((Date.now() - profile.createdAt) / 86400000),
     });
   });
