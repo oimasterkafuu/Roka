@@ -64,3 +64,25 @@ node training/long-eval.cjs --seeds 1 --workers 6 --turns 1200 --sizes 0.5,1 --o
 ```
 
 动作统计逐条计入真实执行成功的操作，避免只看服务器 `lstMove` 而遗漏并行操作。`test/multiline.test.cjs` 覆盖真实引擎同 Tick 执行、端点互斥、建设阈值、单线兼容与重连序号同步。
+
+### Focused large-board and batch optimization
+
+On multi-line boards of at least 800 cells, an active campaign retains priority
+before optional strategic cuts; auxiliary cuts cannot withdraw reserved campaign,
+defence or economy convoys. Direct crown captures retain their immediate priority.
+Campaign selection can consider distant modest stacks instead of discarding them
+with a fixed distance/army gate. Construction still requires 51 troops for a
+foundation and 101 for an upgrade. Small-board lane ordering and single-line
+planning remain unchanged.
+
+Multi-line batches reuse frame-local previews, route guards and pure tactical /
+construction analyses. Candidate expansion scores use the exact send calculation
+without constructing a full preview for every candidate; admitted actions still
+pass the sequential board safety checks. Caches are scoped to board objects and
+are never reused across server frames. Parallel execution alone is not evidence
+of higher win rate; see `REVIEW_FIX_RESULT.md` for the bounded real-engine A/B.
+
+Multi-line campaigns also retain a newly selected post-capture breach instead
+of overwriting it with an empty generic selection. The regression checks that
+the same spearhead marches toward the next crown; this fix does not change the
+legacy single-line campaign selector.

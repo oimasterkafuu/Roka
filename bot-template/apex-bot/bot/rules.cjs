@@ -103,8 +103,14 @@ function previewBuild(board, action) {
   return { ok: true, index: at, op, grid, army, isolated: board.isolated.slice(), after: makeBoard({ ...board, grid, army }, board.playerId) };
 }
 
+const previewCache = new WeakMap();
 function preview(board, action) {
-  return action?.kind === 'build' ? previewBuild(board, action) : previewAttack(board, action);
+  if (!board.multiLine) return action?.kind === 'build' ? previewBuild(board, action) : previewAttack(board, action);
+  let cache = previewCache.get(board);
+  if (!cache) { cache = new Map(); previewCache.set(board, cache); }
+  const key = JSON.stringify([action?.kind, action?.x, action?.y, action?.dx, action?.dy, action?.mode ?? (action?.half ? 1 : 0), action?.op || 'b']);
+  if (!cache.has(key)) cache.set(key, action?.kind === 'build' ? previewBuild(board, action) : previewAttack(board, action));
+  return cache.get(key);
 }
 
 function connectedAfter(board, result, owner = board.playerId) {

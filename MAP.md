@@ -482,3 +482,6 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 独立并行、同格依赖、环与客户端防重发；`training/arena.cjs` 支持真实 v3 多线与
 逐次成功操作计数，`training/multiline-benchmark.cjs` 输出仓库外冻结基线 A/B、
 未决率和源码哈希。参考源码与结果仅本地使用，不入库。
+
+- Apex PR163 聚焦修复：`bot-template/apex-bot/bot/rules.cjs`、`bot/planner.cjs` 为多线 board 对象缓存预演、路线安全与纯战术分析；`bot/multiline.cjs` 只为入选副线预演，保护大图主攻送兵链。大图主计划不再让可选截断抢占持续进攻，并取消远距兵堆硬排除；单线规划保持原路径。`test/multiline.test.cjs` 增加大图送兵链保护和跨帧/多线预演隔离回归；根 `REVIEW_FIX_RESULT.md` 记录本次限时验收和剩余阻断项。
+- Apex `planner.cjs` 的多线夺冠续攻在选定突破口后直接继续该计划，避免被尚为空的通用候选覆盖；单线保留旧路径，回归断言下一座皇冠和实际前进方向。

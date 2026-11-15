@@ -274,3 +274,56 @@ test('rebind init preserves multi-line mode but a new single-line game resets it
   assert.equal(bot.state.multiLine, false);
   bot.stop();
 });
+
+test('large-board auxiliary cuts cannot withdraw a reserved campaign convoy', () => {
+  const grid = Array(800).fill(201);
+  const army = Array(800).fill(0);
+  for (const [at, tile, troops] of [[0, 101, 200], [1, 1, 70], [2, 52, 1], [799, 102, 20]]) {
+    grid[at] = tile;
+    army[at] = troops;
+  }
+  const b = board({ n: 1, m: 800, grid, army });
+  const state = {
+    ...memory(),
+    campaign: { at: 0 },
+    delivery: { at: 1, root: 0, edges: [[1, 0]] },
+  };
+  assert.ok(parallelActions(b, state, {}).every((a) => b.idx(a.x, a.y) !== 1));
+});
+
+test('multi-line previews keep frames and independent lane results isolated', () => {
+  const b = board();
+  const original = b.army.slice();
+  const move = actionCoordinates(b, 1, 2, 2);
+  const building = { kind: 'build', x: 1, y: 0, op: 'b' };
+  const first = preview(b, move);
+  const built = preview(b, building);
+  const combined = preview(first.after, building);
+  assert.equal(built.after.army[4], 20);
+  assert.equal(combined.after.army[4], 20);
+  assert.equal(combined.after.owner(2), 1);
+  assert.equal(built.after.owner(2), 0);
+  assert.deepEqual(b.army, original);
+  const next = board({ army: [30, 40, 0, 10, 70, 20, 0, 1] });
+  assert.equal(preview(next, move).send, 39);
+  assert.equal(first.send, 19);
+});
+
+test('multi-line campaign retains a captured breach for the next crown', () => {
+  const b = board({
+    n: 1, m: 10,
+    grid: [101, 1, 1, 1, 1, 1, 1, 1, 102, 102],
+    army: [500, 200, 1, 1, 1, 1, 1, 1, 20, 20],
+    turn: 200,
+  });
+  const state = {
+    ...memory(), home: 0, enemyHome: 9, threatDistance: {}, maze: false,
+    campaign: { at: 1, crown: 1, phase: 'attack', started: 199, lastProgress: 199 },
+  };
+  const decision = plan(b, state);
+  assert.equal(state.campaign.at, 1);
+  assert.equal(state.campaign.crown, 9);
+  assert.equal(decision.branch, 'march');
+  assert.equal(decision.action.y, 1);
+  assert.equal(decision.action.dy, 2);
+});

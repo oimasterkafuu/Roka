@@ -138,7 +138,7 @@ function localGuard(b, crown, ownField = field(b, [crown], (at) => b.own(at) && 
 // while saving a border stack, that investment can turn a defendable crown
 // into a one-turn target.  Hold construction until the stack is intercepted
 // or the nearby garrison has grown back above the projected attack.
-function constructionThreat(b, own, enemies) {
+function constructionThreatUncached(b, own, enemies) {
   const crowns = own.filter((at) => b.kind(at) === 'crown');
   const buildSites = own.filter((at) => b.kind(at) === 'plain' || b.kind(at) === 'city');
   for (const crown of crowns) {
@@ -438,7 +438,7 @@ function crownFinish(b, action, result = preview(b, action)) {
   return true;
 }
 
-function routeGuard(b, action) {
+function routeGuardUncached(b, action) {
   if (!action || action.kind !== 'attack') return { blocked: false, anchor: -1, cut: -1 };
   const to = b.idx(action.dx, action.dy);
   const previewResult = preview(b, action);
@@ -692,7 +692,7 @@ function repairSupply(b, at) {
   return null;
 }
 
-function anchorDefense(b) {
+function anchorDefenseUncached(b) {
   const threats = enemyAnchorThreats(b)
     .sort((a, z) => Number(z.fatal) - Number(a.fatal) || z.detachedMass - a.detachedMass || z.send - a.send);
   for (const threat of threats) {
@@ -971,7 +971,7 @@ function mazeOpening(b, m, own, enemyDistance) {
   return options[0] || opening(b, m, own, enemyDistance);
 }
 
-function tactical(b, own) {
+function tacticalUncached(b, own) {
   const options = [];
   for (const from of own) for (const to of b.neighbors(from)) {
     if (!b.enemy(to)) continue;
@@ -1044,7 +1044,7 @@ function emergencyProbe(b, own) {
   return null;
 }
 
-function strategicCut(b, own) {
+function strategicCutUncached(b, own) {
   const options = [];
   const cache = new Map();
   for (const from of own) {
@@ -1740,6 +1740,10 @@ function chooseCampaign(b,m,own) {
           deliveryBestDistance: Infinity,
           bestCrownDistance: next.distance,
         };
+        // The generic selector below otherwise overwrites this breach with
+        // its still-null `best`. Keep multi-line assaults on their next crown;
+        // legacy single-line selection remains byte-for-byte on the old path.
+        if (b.multiLine) return chooseCampaign(b, m, own);
       }
     }
     let best=null;
@@ -1747,7 +1751,6 @@ function chooseCampaign(b,m,own) {
       if (m.blocked && m.blocked.crown === crown && b.turn < m.blocked.until) continue;
       const f=field(b,[crown]);
       for(const at of own)if(b.army[at]>2 && Number.isFinite(f.distance[at])){
-        if (b.multiLine && b.size >= 800 && f.distance[at] > 24 && b.army[at] < Math.max(80, f.distance[at] * 3)) continue;
         const path = route(f, at);
         const resistance = path.slice(1).reduce((sum, cell) => sum + (b.friendly(cell) ? 0 : b.army[cell] + 1), 0);
         const readiness = b.army[at] - resistance;
@@ -2080,8 +2083,12 @@ function plan(b,m) {
   if (b.multiLine) {
     const immediate = tactical(b, own);
     if (immediate?.branch === 'crown') return immediate;
-    const sever = strategicCut(b, own);
-    if (sever) return sever;
+    // On large boards keep an established assault ahead of optional cuts.
+    // Small-board lane ordering retains the shipped behavior.
+    if (b.size < 800) {
+      const sever = strategicCut(b, own);
+      if (sever) return sever;
+    }
   }
   const anchorGuard = anchorDefense(b);
   if (anchorGuard) return anchorGuard;
@@ -2258,3 +2265,41 @@ function parallelTactics(b, m, own) {
   return [tactical(b, own), strategicCut(b, own), anchorDefense(b), defense(b, lane, own), cutDefense(b, lane, own)].filter(Boolean);
 }
 module.exports.parallelTactics = parallelTactics;
+
+const tacticalCache = new WeakMap();
+function tactical(b, own) {
+  if (!b.multiLine) return tacticalUncached(b, own);
+  if (!tacticalCache.has(b)) tacticalCache.set(b, tacticalUncached(b, own));
+  return tacticalCache.get(b);
+}
+
+const strategicCutCache = new WeakMap();
+function strategicCut(b, own) {
+  if (!b.multiLine) return strategicCutUncached(b, own);
+  if (!strategicCutCache.has(b)) strategicCutCache.set(b, strategicCutUncached(b, own));
+  return strategicCutCache.get(b);
+}
+
+const anchorDefenseCache = new WeakMap();
+function anchorDefense(b) {
+  if (!b.multiLine) return anchorDefenseUncached(b);
+  if (!anchorDefenseCache.has(b)) anchorDefenseCache.set(b, anchorDefenseUncached(b));
+  return anchorDefenseCache.get(b);
+}
+
+const constructionThreatCache = new WeakMap();
+function constructionThreat(b, own, enemies) {
+  if (!b.multiLine) return constructionThreatUncached(b, own, enemies);
+  if (!constructionThreatCache.has(b)) constructionThreatCache.set(b, constructionThreatUncached(b, own, enemies));
+  return constructionThreatCache.get(b);
+}
+
+const routeGuardCache = new WeakMap();
+function routeGuard(b, action) {
+  if (!b.multiLine) return routeGuardUncached(b, action);
+  let cache = routeGuardCache.get(b);
+  if (!cache) { cache = new Map(); routeGuardCache.set(b, cache); }
+  const key = JSON.stringify([action?.kind, action?.x, action?.y, action?.dx, action?.dy, action?.mode ?? (action?.half ? 1 : 0)]);
+  if (!cache.has(key)) cache.set(key, routeGuardUncached(b, action));
+  return cache.get(key);
+}

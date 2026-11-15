@@ -1,7 +1,7 @@
 'use strict';
 
 const { distanceField } = require('./board.cjs');
-const { preview } = require('./rules.cjs');
+const { preview, computePush } = require('./rules.cjs');
 const { safeMove, secureDecision, parallelTactics, constructionThreat } = require('./planner.cjs');
 
 function reserveDelivery(reserved, delivery) {
@@ -39,7 +39,8 @@ function parallelActions(board, memory, primary) {
     const to = action.kind === 'attack' ? board.idx(action.dx, action.dy) : from;
     if (occupied.has(from) || occupied.has(to)) return false;
     const urgent = /cut|crown|defen|intercept|anchor/.test(decision.branch || '');
-    if (!main && !urgent && (reserved.has(from) || reserved.has(to))) return false;
+    if (!main && (board.size >= 800 ? decision.branch !== 'crown' : !urgent) &&
+        (reserved.has(from) || reserved.has(to))) return false;
     if (action.kind === 'build' && after.army[from] < (action.op === 'c' ? 101 : 51)) return false;
     const secure = secureDecision(after, decision);
     // A repair belongs to a different lane; evaluate it on the next frame.
@@ -73,7 +74,8 @@ function parallelActions(board, memory, primary) {
   reserveDelivery(reserved, memory.parallelDefense?.delivery);
   const crowns = own.filter((at) => board.kind(at) === 'crown');
   if (crowns.length === 1 && enemyDistance[crowns[0]] <= 36 && board.turn >= 40) reserved.add(crowns[0]);
-  const canBuild = !constructionThreat(after, own, enemies);
+  let canBuild;
+  const buildingSafe = () => canBuild ?? (canBuild = !constructionThreat(after, own, enemies));
   // Do not let auxiliary lanes withdraw any active convoy. Only fresh neutral
   // captures and already-funded construction are eligible; no rear shuttles.
   const candidates = [];
@@ -84,11 +86,11 @@ function parallelActions(board, memory, primary) {
     const near = enemyDistance[from];
     const pressure = hostilePressure(from);
     if (
-      canBuild &&
       ['plain', 'city'].includes(board.kind(from)) &&
       near >= 4 &&
       board.army[from] >= (board.kind(from) === 'city' ? 101 : 51) &&
-      board.army[from] - 50 > pressure
+      board.army[from] - 50 > pressure &&
+      buildingSafe()
     ) {
       candidates.push({
         action: { kind: 'build', ...board.xy(from), op: board.kind(from) === 'city' ? 'c' : 'b' },
@@ -106,9 +108,8 @@ function parallelActions(board, memory, primary) {
       const modes = near <= 8 ? [2, 0, 1] : distant ? [1] : [1, 0];
       const action = safeMove(board, from, to, 'move', modes);
       if (!action) continue;
-      const result = preview(board, action);
-      const arrival = result.send - board.army[to];
-      if (!result.ok || (near <= 8 && arrival < 8) || arrival <= hostilePressure(to, from) + 1) continue;
+      const arrival = computePush(board, from, to, action.mode) - board.army[to];
+      if ((near <= 8 && arrival < 8) || arrival <= hostilePressure(to, from) + 1) continue;
       candidates.push({
         action,
         branch: 'parallel-expand',
@@ -120,7 +121,10 @@ function parallelActions(board, memory, primary) {
     }
   }
   candidates.sort((a, b) => b.score - a.score);
-  for (const candidate of candidates) add(candidate);
+  for (const candidate of candidates) {
+    if (actions.length >= 6) break;
+    add(candidate);
+  }
   for (const action of actions) {
     if (action.kind === 'attack') {
       recent.set(`${board.idx(action.x, action.y)}:${board.idx(action.dx, action.dy)}`, board.turn);
