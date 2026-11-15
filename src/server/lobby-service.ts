@@ -44,6 +44,8 @@ const LOBBY_HEARTBEAT_SWEEP_MS = 60_000;
 /** 房间停留上限：成员（含观战）单次在房累计超过 12 小时即移出（对局进行中除外），
  * 防止挂着的浏览器标签页靠心跳长期占用房间席位并维持在线状态。 */
 const LOBBY_MAX_DWELL_MS = 12 * 3600_000;
+/** 准备阶段房主连续 15 分钟无操作后释放席位；机械心跳不续期。 */
+const LOBBY_HOST_IDLE_MS = 15 * 60_000;
 
 /** 非官方 AI（与房间 AI 标记一致：未通过 humanVerified 且非托管 Bot）每日
  *（服务器本地日历日）在官方 Bot 房间的累计停留上限；达到上限后自动移出，
@@ -106,6 +108,7 @@ class LobbyService {
    * 用于进房时的房主排序与客户端验证兼容，不作为 AI 判定依据。
    */
   readonly humanVerified = new Set<string>();
+  private readonly lobbyHostActivity = new Map<string, { sid: string; sinceMs: number }>();
   private heartbeatSweepTimer?: NodeJS.Timeout;
 
   /** 对局全部结束时触发（例如让推迟中的自动更新继续执行）。 */
@@ -395,6 +398,7 @@ class LobbyService {
       }
     }
     players.splice(insertIndex, 0, player);
+    this.syncLobbyHostActivity(gid);
     if (isUnofficialAi && isServerBotRoom) {
       // 非官方 AI 进入官方 Bot 房：开始计时段（退出时由 leaveLobby 结算进当日桶）。
       this.botDwell.set(sid, { uid, gid, sinceMs: Date.now() });
@@ -415,6 +419,7 @@ class LobbyService {
       return '';
     }
     const [removed] = players.splice(index, 1);
+    this.syncLobbyHostActivity(gid);
     return removed.uid;
   }
 
@@ -518,6 +523,25 @@ class LobbyService {
     }
   }
 
+  /** 房主迁移、换绑或进入对局时丢弃旧期限，新任房主获得完整讨论时间。 */
+  private syncLobbyHostActivity(gid: string): void {
+    const host = this.lobbyPlayers.get(gid)?.[0];
+    if (!host || host.serverBot || this.isLobbyGameRunning(gid)) {
+      this.lobbyHostActivity.delete(gid);
+    } else if (this.lobbyHostActivity.get(gid)?.sid !== host.sid) {
+      this.lobbyHostActivity.set(gid, { sid: host.sid, sinceMs: Date.now() });
+    }
+  }
+
+  /** 仅有效房内操作续期；心跳、验证、其他成员活动均不能替房主续期。 */
+  recordLobbyActivity(sid: string): void {
+    const gid = this.lobbyOfSid.get(sid);
+    if (!gid) return;
+    this.syncLobbyHostActivity(gid);
+    const activity = this.lobbyHostActivity.get(gid);
+    if (activity?.sid === sid) activity.sinceMs = Date.now();
+  }
+
   private sweepInactiveLobbyMembers(io: SocketIOServer): void {
     this.sweepBotDwellLimits(io);
     const now = Date.now();
@@ -539,6 +563,13 @@ class LobbyService {
       }
       this.kickFromLobby(io, sid, lobbyId);
     }
+    for (const gid of this.lobbyPlayers.keys()) {
+      this.syncLobbyHostActivity(gid);
+      const activity = this.lobbyHostActivity.get(gid);
+      if (activity && now - activity.sinceMs >= LOBBY_HOST_IDLE_MS) {
+        this.kickFromLobby(io, activity.sid, gid, '因准备阶段连续 15 分钟无操作，');
+      }
+    }
   }
 
   /**
@@ -555,7 +586,9 @@ class LobbyService {
     const kickSeat = this.lobbySeatName(lobbyId, sid);
     const uid = this.leaveLobby(sid, lobbyId);
     this.resetLobbyConfigIfOnlyBots(io, lobbyId);
-    io.to(`sid_${sid}`).emit('room_kick', {});
+    io.to(`sid_${sid}`).emit('room_kick', {
+      reason: reason ? `${reason}已被移出房间。` : '因长时间未活跃，已被移出房间。',
+    });
     this.emitRoomUpdate(io, lobbyId);
     if (uid) {
       const kickVerb = reason ? `${reason}被移出了${kickSeat}。` : `因长时间未活跃被移出了${kickSeat}。`;
@@ -653,6 +686,7 @@ class LobbyService {
     });
     if (sorted.some((player, index) => player.sid !== players[index]?.sid)) {
       players.splice(0, players.length, ...sorted);
+      this.syncLobbyHostActivity(gid);
     }
   }
 
@@ -773,6 +807,7 @@ class LobbyService {
   }
 
   emitRoomUpdate(io: SocketIOServer, gid: string): void {
+    this.syncLobbyHostActivity(gid);
     io.to(`game_${this.getLobbyVal(gid)}`).emit('room_update', this.generateRoomConfig(gid));
   }
 
@@ -910,6 +945,7 @@ class LobbyService {
         }
 
         if (lobby) {
+          this.lobbyHostActivity.delete(lobby);
           const lobbyConf = this.lobbyConfig.get(lobby);
           if (lobbyConf) {
             // 自定义种子（issue #86）沿用到下一局，不重新随机；随机种子照旧每局重随机。
@@ -940,6 +976,7 @@ class LobbyService {
 
     game.startGame();
     this.gameInstances.set(gameId, game);
+    this.syncLobbyHostActivity(lobbyId);
     this.gameLobbyId.set(gameId, lobbyId);
     this.gamePlayers.set(gameId, activePlayers);
     this.emitHomeRooms(io);
@@ -1132,6 +1169,7 @@ class LobbyService {
       this.botDwell.set(sid, botDwellRecord);
     }
 
+    this.syncLobbyHostActivity(room);
     if (!game.rebindPlayer(oldSid, sid)) {
       return false;
     }

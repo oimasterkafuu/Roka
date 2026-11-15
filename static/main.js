@@ -949,9 +949,10 @@ socket.on('connect', function () {
 socket.on('connect_error', function () {
   location.href = '/login';
 });
-// 房间准备阶段超过 600 秒无心跳，被服务器移出房间：重定向回首页。
-socket.on('room_kick', function () {
+// 房间准备阶段因心跳、停留或房主空闲限制被移出：提示原因后回首页。
+socket.on('room_kick', function (data) {
   stopRoomHeartbeat();
+  if (data && data.reason) alert(data.reason);
   location.href = '/';
 });
 socket.on('disconnect', function (reason) {

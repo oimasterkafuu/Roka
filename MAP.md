@@ -458,3 +458,9 @@ Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/front
 - `src/server.ts`：成功进房、公开发言、退出对局及断线接入审计；游戏内发送通过 `GameEngine.sendMessage` 的 boolean 返回值确认接受后再记录。新增管理员专用 `GET /api/admin/chat-audit`（精确用户/房间/候选筛选、id 游标、100 条上限、no-store）与 `POST /api/admin/chat-release`；原解封同时解除限聊。队聊受账号限流/限聊但不审计。
 - `static/admin.html` / `static/admin.js`：聊天审计查询、候选时间证据与解除复核入口；沿用用户管理进行手动封禁。
 - `scripts/test-chat-moderation.mjs`、`scripts/test-chat-moderation-server.mjs`：`pnpm run test:chat-moderation`（纳入 `pnpm test`），临时数据与真实 HTTP/socket 回归策略、存储隐私/上限、权限、限聊/重连与解除、游戏聊天及队聊排除。
+- issue #137：`lobby-service.ts` 的 `lobbyHostActivity` 按房间保存当前非托管房主 sid 与活动时间；准备阶段 15 分钟无操作复用 `kickFromLobby` 清理并迁移房主，每分钟扫描。`recordLobbyActivity` 由 `server.ts` 的聊天/准备/换队/设置有效操作调用，心跳不续期；迁移、换绑、进入对局与终局清理旧期限。`static/game.html` 显示固定规则，`room_kick.reason` 由 `static/main.js` 提示后返回首页。`scripts/test-lobby-host-idle.mjs` 用假时钟驱动真实大厅与引擎覆盖期限、活动、迁移、清理、对局豁免及终局重置；纳入 `pnpm test`。
+
+### 回放终局 AFK 事件（issue #143）
+
+- `ReplayActionData.afk_surrenders` 是 ops-v1 的可选 `[tick, zero-based player index][]` 事件表；缺省为空，旧 `r` 操作仍在 Tick 前执行。AFK 投降发生在移动/连通之后，单独记录在当前 Tick，避免下一 Tick 未执行时丢失终局事件；重建 `gameTick` 在相同阶段应用事件，不依赖重建时的墙上时间。RPB4 编码与客户端格式不变；新原始文件具有新内容哈希，不复用旧文件的观看缓存。旧文件未记录的 AFK 事件无法恢复。
+- `scripts/test-replay-termination.mjs`：真实引擎 FFA/组队 AFK 终局、中途淘汰与手动投降，逐帧比对地图、兵力、孤军、排行榜与结束标记，并用真实 RPB 解码器验证终局；`scripts/fixtures/replay-143-danrgjM9hfR7.rpl` 为公开原始 ops 证据，断言 Tick 600 未终局且重建至 Tick 2151。
