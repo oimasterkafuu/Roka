@@ -133,6 +133,78 @@ body.profile .profile-title {
   color: #9aa4b2;
   margin-left: 8px;
 }
+body.profile .profile-github-star-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 10px;
+  padding: 3px 8px;
+  border: 1px solid #ead083;
+  border-radius: 99px;
+  background: #fff8dc;
+  color: #765b00;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-decoration: none;
+  vertical-align: middle;
+}
+body.profile .profile-github-star-badge:hover {
+  background: #fff2bd;
+  color: #765b00;
+}
+body.profile .profile-github-star-badge span {
+  color: #d4a017;
+}
+body.profile .profile-github-link,
+body.profile #github-account-link {
+  display: block;
+  margin-top: 8px;
+  color: teal;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+body.profile .profile-github-link:hover,
+body.profile #github-account-link:hover {
+  text-decoration: underline;
+}
+body.profile .github-link-note {
+  margin: 8px 0;
+  color: #6b7686;
+  font-size: 13px;
+  line-height: 1.6;
+}
+body.profile .github-link-meta {
+  margin: 4px 0 0;
+  color: #9aa4b2;
+  font-size: 11px;
+}
+body.profile .github-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+body.profile .github-repo-link {
+  display: inline-block;
+  margin-top: 12px;
+  color: teal;
+  font-size: 13px;
+  text-decoration: none;
+}
+body.profile .github-repo-link:hover {
+  text-decoration: underline;
+}
+body.profile .github-action-status {
+  margin: 12px 0 0;
+  color: #6b7686;
+  font-size: 13px;
+  line-height: 1.5;
+}
+body.profile .github-action-status:empty {
+  display: none;
+}
 body.profile .profile-stats {
   display: flex;
   gap: 10px;

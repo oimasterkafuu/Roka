@@ -70,6 +70,31 @@ node training/long-eval.cjs --help
 - **地图种子**：房间可设置（仅房主可改）。留空时每局自动生成随机种子且不保留；房主输入自定义种子后，对局结束回到准备阶段时种子沿用不重随机（同一人数下每局生成相同地图），此时种子输入框高亮并显示「正在使用自定义种子」提示，清空输入框即可恢复每局随机。种子语义由房主控制，普通成员仅查看提示。
 - **华夏系列地图**：新增 `huaxia` 模式，可选秦、汉、唐、辽、宋、元、明、中国、台湾省九个地区，并支持 `map_region` 协议字段；公开请求仅接受当前地区名，缺省为中国，非法值拒绝。中国视口约为东经 73..135°、北纬 18..54°，用于覆盖中国大陆和台湾附近的自然地图视口，不代表精确国界。每个地区有独立的代表时期经纬度矩形（矩形面积仅是完整视口面积，不冒充历史疆域面积；可靠历史边界矢量未纳入，疆域面积明确为未知）。视口内整块矩形使用仓库内由 [Natural Earth 1:50m land v4.0.0](https://naturalearth.s3.amazonaws.com/50m_physical/ne_50m_land.zip) 转换的真实 WGS84 陆地多边形，来源为 [Natural Earth 公共领域许可](https://www.naturalearthdata.com/about/terms-of-use/)，因此西部陆地不会因超出某个中国轮廓而变海，离岸岛屿也保留并正常渲染；只有最大陆地连通块的平原加入出生池，其他陆块仍可见但不会出生。山脉/关隘是有地理依据的游戏化近似，除河西走廊、潼关、雁门关、剑门关、梅关外，还固定开放井陉、武关、子午道、大散关、夔门、湘桂走廊等小半径山间通道，避免整条山系被削平。`scripts/generate-huaxia-land.py` 保留下载、版本、URL、许可和简化过程，可再生小型数据文件。地貌和尺寸不读取种子，随机种子只影响既有 `selectRandomGenerals` 出生点选择。
 
+## GitHub 账号绑定与 Star 徽章
+
+在个人主页可绑定或换绑真实 GitHub 账号。站点只通过 GitHub OAuth 获取身份，不接受手填用户名；一个 GitHub 数字 ID 只能绑定一个 Roka 账号，解绑后才可绑定给其他账号。
+
+1. 在 GitHub 创建 OAuth App，将 **Authorization callback URL** 设置为 `https://<站点域名>/api/auth/github/callback`。
+2. 参考 `.env.example` 配置以下变量并重启服务：
+
+   ```dotenv
+   GITHUB_CLIENT_ID=<OAuth App Client ID>
+   GITHUB_CLIENT_SECRET=<OAuth App Client Secret>
+   GITHUB_REDIRECT_URI=https://<站点域名>/api/auth/github/callback
+   ```
+
+   三项未全部配置时，个人页会明确显示未配置，绑定接口返回 503，不会进入伪造的授权流程。`GITHUB_OAUTH_BASE_URL` 与 `GITHUB_API_BASE_URL` 仅用于本地 mock 测试，生产环境不要设置。
+
+3. 授权只申请 `read:user`。state 绑定当前 Roka 用户和会话、10 分钟过期且一次性使用，PKCE 使用 S256；回调经 GitHub `/user` 重新核验数字 ID 和用户名。换绑在新身份核验成功后才替换旧记录，冲突或网络异常不会丢失旧绑定。
+
+OAuth access token 仅用于身份与 Star 核验，经 AES-256-GCM 加密后存入现有 `users.bin` 原子持久化，不保存 refresh token、邮箱或 GitHub 密码，也不会出现在 JWT、日志、URL、前端存储或公开 API。更换 `JWT_SECRET` 会使既有密文无法解密，需要重新绑定；若 OAuth App 启用令牌过期，过期后同样需要重新绑定。解绑只删除本站记录，不会代替用户在 GitHub 撤销 OAuth 授权。
+
+Star 徽章只显示在个人主页，不进入排行榜、关于页贡献者、动态或对局。服务端使用绑定账号的令牌调用 `GET /user/starred/oimasterkafuu/Roka`：仅 204 认定为已 Star，404 认定为未 Star 并撤销徽章；401、限流、超时和其他 API 故障均不会首次授予徽章。核验结果缓存 15 分钟，个人页读取会自动刷新过期结果，本人也可手动刷新；故障期间旧的已验证状态最多展示 1 小时，之后隐藏，直至重新核验。点击仓库 Star 链接只是导航，不能作为已 Star 凭证。
+
+关于页仍只展示 GitHub 返回的真实 contributors。只有 contributors 条目中的 GitHub 数字 ID 与已绑定账号一致时，才附加对应 Roka 个人页链接；未绑定或不匹配的用户不会进入名单。GitHub 贡献者数据沿用 6 小时缓存与故障回退，本地绑定关联不写入该缓存。
+
+运行 `pnpm run build && pnpm run test:github-link` 可执行 OAuth、CSRF、唯一性、Star 真伪/缓存/撤销和隐私的单元及本地 HTTP mock 集成测试；`pnpm run test:contributors` 覆盖贡献者关联。没有真实 GitHub OAuth 凭据时，这些测试不构成线上 OAuth 实测。
+
 ## 平台功能
 
 - 用户系统（注册 / 登录）；首个注册用户自动成为超级管理员（唯一，不可剥夺、不可封禁），可在后台管理页授予/撤销其他用户的管理员权限。未封禁管理员（含超管）用户名统一显示为黑色加粗，鼠标悬停显示「Headquarters」头衔，无 rating 档色或额外管理员标签；有效封禁的用户名（包括管理员）优先显示为棕色 #a52a2a、正常字重，不显示 rating 头衔；普通用户保持原 rating 颜色与头衔。对局排行榜名字仍遵循局内白字可读规则。

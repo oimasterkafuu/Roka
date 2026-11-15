@@ -2,6 +2,9 @@
 
 var currentUsername = '';
 var profileUsername = '';
+var viewerGithubConfigured = false;
+var githubActionBusy = false;
+var githubCallbackMessage = '';
 
 /* ---------- 基础工具 ---------- */
 
@@ -94,22 +97,209 @@ async function apiPost(url, payload) {
   return data;
 }
 
+/* ---------- GitHub 绑定与 Star ---------- */
+
+function isOwnProfile() {
+  return (
+    !!currentUsername && !!profileUsername && currentUsername.toLowerCase() === profileUsername.toLowerCase()
+  );
+}
+
+function normalizeGithubProfile(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  var login = value.login;
+  if (
+    typeof login !== 'string' ||
+    login.length > 39 ||
+    !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(login) ||
+    login.indexOf('--') !== -1 ||
+    typeof value.htmlUrl !== 'string'
+  ) {
+    return null;
+  }
+  try {
+    var url = new URL(value.htmlUrl);
+    if (
+      url.protocol !== 'https:' ||
+      url.hostname !== 'github.com' ||
+      url.username ||
+      url.password ||
+      url.port ||
+      url.search ||
+      url.hash ||
+      url.pathname !== '/' + encodeURIComponent(login)
+    ) {
+      return null;
+    }
+    return {
+      login: login,
+      htmlUrl: url.toString(),
+      starred: value.starred === true,
+      starState: ['starred', 'not-starred', 'unknown', 'stale'].includes(value.starState)
+        ? value.starState
+        : 'unknown',
+      starVerifiedAt: Number.isFinite(value.starVerifiedAt) ? value.starVerifiedAt : null,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function setGithubActionStatus(message) {
+  $('#github-action-status').text(message || '');
+}
+
+function setGithubActionBusy(busy) {
+  githubActionBusy = busy;
+  $('#github-bind-btn').prop('disabled', busy || !viewerGithubConfigured);
+  $('#github-star-refresh-btn, #github-unlink-btn').prop('disabled', busy);
+}
+
+function renderGithubProfile(value) {
+  var github = normalizeGithubProfile(value);
+  var own = isOwnProfile();
+  $('#p-github-link').hide().attr('href', '#').text('');
+  $('#p-github-star-badge').hide();
+  if (github) {
+    $('#p-github-link')
+      .attr('href', github.htmlUrl)
+      .text('GitHub：' + github.login)
+      .show();
+    $('#p-github-star-badge').toggle(github.starred);
+  }
+
+  $('#github-link-card').toggle(own);
+  if (!own) {
+    return;
+  }
+
+  $('#github-not-configured').toggle(!viewerGithubConfigured);
+  $('#github-linked-view').toggle(!!github);
+  $('#github-unlinked-view').toggle(!github);
+  $('#github-repo-link').toggle(!!github);
+  $('#github-bind-btn')
+    .text(github ? '换绑 GitHub' : '绑定 GitHub')
+    .prop('disabled', githubActionBusy || !viewerGithubConfigured);
+  $('#github-star-refresh-btn, #github-unlink-btn').toggle(!!github).prop('disabled', githubActionBusy);
+
+  if (!github) {
+    $('#github-account-link').hide().attr('href', '#').text('');
+    $('#github-star-state, #github-star-verified').text('');
+    return;
+  }
+
+  var starText = {
+    starred: '已确认你 Star 了 Roka。',
+    'not-starred': '尚未确认你 Star 了 Roka，欢迎前往仓库支持我们。',
+    unknown: '暂时无法确认 Star 状态，请稍后手动刷新。',
+    stale: 'Star 状态可能已过期，请手动刷新。',
+  };
+  $('#github-account-link')
+    .attr('href', github.htmlUrl)
+    .text('已绑定 GitHub：' + github.login)
+    .show();
+  $('#github-star-state').text(starText[github.starState]);
+  $('#github-star-verified').text(
+    github.starVerifiedAt ? '最近核验：' + fullTime(github.starVerifiedAt) : '',
+  );
+}
+
+function consumeGithubCallbackMessage() {
+  var params = new URLSearchParams(location.search);
+  var code = params.get('github');
+  if (code === null) {
+    return '';
+  }
+  var messages = {
+    linked: 'GitHub 账号绑定成功。',
+    'not-configured': '管理员尚未配置 GitHub OAuth，暂不能绑定。',
+    state: 'GitHub 绑定状态已失效，请重新发起绑定。',
+    denied: '你已取消 GitHub 授权，账号绑定未变更。',
+    exchange: 'GitHub 授权交换失败，请稍后重试。',
+    identity: '无法确认 GitHub 账号身份，请稍后重试。',
+    conflict: '该 GitHub 账号已绑定其他 Roka 账号，请先解绑或更换账号。',
+    failed: 'GitHub 绑定失败，请稍后重试。',
+  };
+  params.delete('github');
+  var search = params.toString();
+  history.replaceState(null, '', location.pathname + (search ? '?' + search : '') + location.hash);
+  return messages[code] || '';
+}
+
+$('#github-bind-btn').on('click', async function () {
+  if (githubActionBusy || !viewerGithubConfigured) {
+    return;
+  }
+  setGithubActionBusy(true);
+  setGithubActionStatus('正在跳转到 GitHub 授权…');
+  try {
+    var data = await apiPost('/api/auth/github/start', {});
+    if (!data || typeof data.url !== 'string' || !data.url) {
+      throw new Error('GitHub 授权地址无效，请稍后重试。');
+    }
+    location.assign(data.url);
+  } catch (err) {
+    setGithubActionBusy(false);
+    setGithubActionStatus(err.message);
+  }
+});
+
+$('#github-unlink-btn').on('click', async function () {
+  if (githubActionBusy || !confirm('确定解绑 GitHub 账号吗？')) {
+    return;
+  }
+  setGithubActionBusy(true);
+  setGithubActionStatus('');
+  try {
+    await apiPost('/api/auth/github/unlink', {});
+    renderGithubProfile(null);
+    setGithubActionStatus('GitHub 账号已解绑。');
+  } catch (err) {
+    setGithubActionStatus(err.message);
+  } finally {
+    setGithubActionBusy(false);
+  }
+});
+
+$('#github-star-refresh-btn').on('click', async function () {
+  if (githubActionBusy) {
+    return;
+  }
+  setGithubActionBusy(true);
+  setGithubActionStatus('正在刷新 Star 状态…');
+  try {
+    var data = await apiPost('/api/auth/github/star/refresh', {});
+    renderGithubProfile(data.github);
+    setGithubActionStatus('Star 状态已刷新。');
+  } catch (err) {
+    setGithubActionStatus(err.message);
+  } finally {
+    setGithubActionBusy(false);
+  }
+});
+
 /* ---------- 顶部 chrome ---------- */
 
 async function loadViewer() {
+  viewerGithubConfigured = false;
   try {
     var res = await fetch('/api/auth/me');
     if (!res.ok) {
+      currentUsername = '';
       $('#account-name').hide();
       $('#login-btn').show();
       return false;
     }
     var data = await res.json();
     currentUsername = data.username;
+    viewerGithubConfigured = !!(data.github && data.github.configured === true);
     $('#account-name').replaceWith(usernameLink(currentUsername));
     usernameEnsureColors([currentUsername]);
     return true;
   } catch (e) {
+    currentUsername = '';
     $('#account-name').hide();
     $('#login-btn').show();
     return false;
@@ -161,6 +351,13 @@ async function loadProfile() {
           (level.nextLevelPoints - level.points),
   );
   $('#profile-main').show();
+  renderGithubProfile(p.github);
+  if (githubCallbackMessage) {
+    if (isOwnProfile()) {
+      setGithubActionStatus(githubCallbackMessage);
+    }
+    githubCallbackMessage = '';
+  }
   renderRatingChanges(p.ratingHistory || []);
   renderRatingChart(p.ratingHistory || []);
   return true;
@@ -791,6 +988,8 @@ var match = location.pathname.match(/^\/u\/([^/]+)\/?$/);
 if (match) {
   profileUsername = decodeURIComponent(match[1]);
 }
+
+githubCallbackMessage = consumeGithubCallbackMessage();
 
 if (!profileUsername) {
   $('#profile-not-found').show();

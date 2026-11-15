@@ -37,6 +37,23 @@ export interface DisciplineRecord {
   playerCount?: number;
 }
 
+export interface GithubLinkRecord {
+  id: number;
+  login: string;
+  linkedAt: number;
+  accessTokenEncrypted: string;
+  starred?: boolean;
+  starVerifiedAt?: number;
+}
+
+export interface GithubPublicProfile {
+  login: string;
+  htmlUrl: string;
+  starred: boolean;
+  starState: 'starred' | 'not-starred' | 'unknown' | 'stale';
+  starVerifiedAt: number | null;
+}
+
 interface StoredUser {
   username: string;
   passwordSalt: string;
@@ -66,6 +83,7 @@ interface StoredUser {
   // 最后比赛时间：最近一次对局结算（applyRatingUpdates）的时间。排行榜活跃口径只认
   // 本字段——登录/上线不再续命。旧数据无此字段，读取时按 undefined 处理（向后兼容）。
   lastGameAt?: number;
+  github?: GithubLinkRecord;
 }
 
 export interface PublicProfile {
@@ -80,6 +98,7 @@ export interface PublicProfile {
   createdAt: number;
   isAdmin: boolean;
   ratingHistory: RatingHistoryPoint[];
+  github?: GithubPublicProfile;
 }
 
 export interface UserLevelProgress {
@@ -333,6 +352,64 @@ const toDisciplineRecord = (value: unknown): DisciplineRecord | null => {
   };
 };
 
+export const GITHUB_STAR_BADGE_MAX_AGE_MS = 60 * 60 * 1000;
+
+const toGithubLinkRecord = (value: unknown): GithubLinkRecord | null => {
+  if (!isRecord(value)) return null;
+  if (
+    !Number.isSafeInteger(value.id) ||
+    (value.id as number) <= 0 ||
+    typeof value.login !== 'string' ||
+    value.login.length > 39 ||
+    !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(value.login) ||
+    value.login.includes('--') ||
+    typeof value.linkedAt !== 'number' ||
+    !Number.isFinite(value.linkedAt) ||
+    typeof value.accessTokenEncrypted !== 'string' ||
+    !value.accessTokenEncrypted
+  ) {
+    return null;
+  }
+  return {
+    id: value.id as number,
+    login: value.login,
+    linkedAt: value.linkedAt,
+    accessTokenEncrypted: value.accessTokenEncrypted,
+    starred: typeof value.starred === 'boolean' ? value.starred : undefined,
+    starVerifiedAt:
+      typeof value.starVerifiedAt === 'number' && Number.isFinite(value.starVerifiedAt)
+        ? value.starVerifiedAt
+        : undefined,
+  };
+};
+
+const toGithubPublicProfile = (github: GithubLinkRecord, now: number): GithubPublicProfile => {
+  const verifiedAt =
+    typeof github.starVerifiedAt === 'number' && Number.isFinite(github.starVerifiedAt)
+      ? github.starVerifiedAt
+      : null;
+  const fresh =
+    verifiedAt !== null &&
+    verifiedAt > 0 &&
+    verifiedAt <= now &&
+    now - verifiedAt <= GITHUB_STAR_BADGE_MAX_AGE_MS;
+  const starred = github.starred === true && fresh;
+  const starState = starred
+    ? 'starred'
+    : github.starred === true && verifiedAt !== null
+      ? 'stale'
+      : github.starred === false
+        ? 'not-starred'
+        : 'unknown';
+  return {
+    login: github.login,
+    htmlUrl: `https://github.com/${encodeURIComponent(github.login)}`,
+    starred,
+    starState,
+    starVerifiedAt: verifiedAt,
+  };
+};
+
 const toStoredUser = (value: unknown): StoredUser | null => {
   if (!isRecord(value)) {
     return null;
@@ -407,6 +484,7 @@ const toStoredUser = (value: unknown): StoredUser | null => {
       typeof value.lastGameAt === 'number' && Number.isFinite(value.lastGameAt)
         ? value.lastGameAt
         : undefined,
+    github: toGithubLinkRecord(value.github) ?? undefined,
   };
 };
 
@@ -436,6 +514,8 @@ export class UserStore {
   private readonly binaryFilePath: string;
 
   private usersByKey = new Map<string, StoredUser>();
+
+  private usersByGithubId = new Map<number, StoredUser>();
 
   private pointsMigrationVersion = 0;
 
@@ -577,6 +657,66 @@ export class UserStore {
     const key = this.normalize(usernameInput);
     const user = this.usersByKey.get(key);
     return Boolean(user && user.sessionId && user.sessionId === sessionId);
+  }
+
+  getGithubCredential(usernameInput: string): GithubLinkRecord | null {
+    const github = this.usersByKey.get(this.normalize(usernameInput))?.github;
+    return github ? { ...github } : null;
+  }
+
+  getGithubPublicProfile(usernameInput: string, now: number = Date.now()): GithubPublicProfile | null {
+    const github = this.usersByKey.get(this.normalize(usernameInput))?.github;
+    return github ? toGithubPublicProfile(github, now) : null;
+  }
+
+  findUsernameByGithubId(id: number): string | null {
+    return this.usersByGithubId.get(id)?.username ?? null;
+  }
+
+  async linkGithub(usernameInput: string, record: GithubLinkRecord): Promise<void> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) throw new Error('用户不存在。');
+    const occupiedBy = this.usersByGithubId.get(record.id);
+    if (occupiedBy && occupiedBy !== user) {
+      throw new Error('该 GitHub 账号已绑定其他 Roka 账号。');
+    }
+
+    const previous = user.github;
+    if (previous && previous.id !== record.id) {
+      this.usersByGithubId.delete(previous.id);
+    }
+    user.github = {
+      ...record,
+      linkedAt: previous?.id === record.id ? previous.linkedAt : record.linkedAt,
+    };
+    this.usersByGithubId.set(record.id, user);
+    user.updatedAt = Date.now();
+    await this.persist();
+  }
+
+  async unlinkGithub(usernameInput: string): Promise<boolean> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user?.github) return false;
+    this.usersByGithubId.delete(user.github.id);
+    user.github = undefined;
+    user.updatedAt = Date.now();
+    await this.persist();
+    return true;
+  }
+
+  async updateGithubStar(
+    usernameInput: string,
+    expectedGithubId: number,
+    starred: boolean | null,
+    verifiedAt: number,
+  ): Promise<boolean> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user?.github || user.github.id !== expectedGithubId) return false;
+    user.github.starred = starred ?? undefined;
+    user.github.starVerifiedAt = starred === null ? undefined : verifiedAt;
+    user.updatedAt = Date.now();
+    await this.persist();
+    return true;
   }
 
   getRating(usernameInput: string): { rating: number; ratingGames: number } {
@@ -895,6 +1035,7 @@ export class UserStore {
       createdAt: user.createdAt,
       isAdmin: user.isAdmin === true,
       ratingHistory: Array.isArray(user.ratingHistory) ? [...user.ratingHistory] : [],
+      github: user.github ? toGithubPublicProfile(user.github, Date.now()) : undefined,
     };
   }
 
@@ -1020,7 +1161,20 @@ export class UserStore {
   }
 
   private replaceUsers(users: StoredUser[]): void {
-    this.usersByKey = new Map(users.map((user) => [this.normalize(user.username), { ...user }]));
+    this.usersByKey = new Map(
+      users.map((user) => [
+        this.normalize(user.username),
+        { ...user, github: user.github ? { ...user.github } : undefined },
+      ]),
+    );
+    this.usersByGithubId = new Map();
+    for (const user of this.usersByKey.values()) {
+      if (!user.github) continue;
+      if (this.usersByGithubId.has(user.github.id)) {
+        throw new Error('users.bin 中存在重复的 GitHub 账号绑定。');
+      }
+      this.usersByGithubId.set(user.github.id, user);
+    }
   }
 
   private async loadFromBinary(): Promise<UserFile> {
