@@ -2,6 +2,7 @@ extends layout.pug
 
 block vars
   - var bodyStyle = 'overflow: auto; height: auto'
+  - var currentPage = 'ambassadors'
 
 block head
   link(rel='stylesheet', href='/styles/docs.css?v={{V}}')
@@ -116,6 +117,4 @@ block content
 
 block scripts
   script(src='/docs.js?v={{V}}')
-  script(src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}')
-  script(src='/username.js?v={{V}}')
   script(src='/ambassadors.js?v={{V}}')

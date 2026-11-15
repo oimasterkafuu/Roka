@@ -1,0 +1,176 @@
+.site-header {
+  position: relative;
+  z-index: 20;
+  width: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid #e3e8f0;
+  background: #ffffff;
+}
+
+.site-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  box-sizing: border-box;
+}
+
+.site-brand {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  color: teal;
+  text-decoration: none;
+}
+
+.site-brand .brand-icon {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+.site-brand .brand-name {
+  color: teal;
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+  font-size: 30px;
+}
+
+.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.site-nav-link {
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: #5c6675;
+  font-size: 14px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.site-nav-link:hover {
+  background: #f3f5f9;
+  color: teal;
+}
+
+.site-nav-link[aria-current='page'] {
+  background: #e6f3f3;
+  color: teal;
+  font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+}
+
+.site-account {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.site-account [hidden] {
+  display: none !important;
+}
+
+.site-account-name {
+  min-width: 0;
+  max-width: 180px;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  text-decoration: none;
+}
+
+.site-header .btn {
+  display: inline-block;
+  margin: 0;
+  padding: 6px 14px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  box-shadow: none;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.site-header .btn-primary {
+  background: teal;
+  color: #ffffff;
+}
+
+.site-header .btn-primary:hover {
+  background: #006e6e;
+  box-shadow: none;
+}
+
+.site-header .btn-ghost {
+  border: 1px solid #d5dce6 !important;
+  background: transparent;
+  color: #6b7686;
+}
+
+.site-header .btn-ghost:hover {
+  background: #f3f5f9;
+  color: #253042;
+  box-shadow: none;
+}
+
+body.auth-page {
+  position: static;
+  height: auto;
+  min-height: 100vh;
+  overflow: auto;
+}
+
+body.auth-page .center {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  margin: 48px auto;
+}
+
+@media (max-width: 640px) {
+  .site-header-inner {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 10px 12px;
+  }
+
+  .site-brand {
+    gap: 8px;
+  }
+
+  .site-brand .brand-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .site-brand .brand-name {
+    font-size: 26px;
+  }
+
+  .site-account {
+    margin-left: auto;
+  }
+
+  .site-account-name {
+    max-width: 140px;
+  }
+
+  .site-nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  body.auth-page .center {
+    margin: 32px auto;
+  }
+}

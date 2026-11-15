@@ -12,11 +12,30 @@ html(lang=htmlLang)
       content='width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0'
     )
     link(rel='stylesheet', href='/main.css?v={{V}}')
+    link(rel='stylesheet', href='/styles/site-header.css?v={{V}}')
+    script(src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}')
+    script(src='/username.js?v={{V}}')
+    script(defer, src='/site-header.js?v={{V}}')
     block head
   body(class=bodyClass, style=bodyStyle)
     block navigation
-      div(style='position: fixed; top: 12px; left: 12px; z-index: 20')
-        button.small(data-goto='/') 返回首页
+      header.site-header
+        .site-header-inner
+          a.site-brand(href='/', aria-label='Roka 首页')
+            img.brand-icon(
+              src='/icons/icon-48.png?v={{V}}',
+              srcset='/icons/icon-48.png?v={{V}} 1x, /icons/icon-192.png?v={{V}} 2x',
+              alt='Roka 图标'
+            )
+            span.brand-name Roka
+          nav.site-nav(aria-label='站点导航')
+            a.site-nav-link(href='/', aria-current=(currentPage === 'home' ? 'page' : undefined)) 首页
+            a.site-nav-link(href='/replays', aria-current=(currentPage === 'replays' ? 'page' : undefined)) 回放
+            a.site-nav-link(href='/about', aria-current=(currentPage === 'about' ? 'page' : undefined)) 关于
+          .site-account(aria-label='账号')
+            span#site-account-name.site-account-name(hidden)
+            a#site-login.btn.btn-primary.btn-sm(href='/login') 登录
+            button#site-logout.btn.btn-ghost.btn-sm(type='button', hidden) 退出登录
     block content
     block footer
     block scripts

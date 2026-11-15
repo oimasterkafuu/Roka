@@ -11,15 +11,34 @@
       content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
     />
     <link rel="stylesheet" href="/main.css?v={{V}}" />
-    <script
-      src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"
-      integrity="sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK"
-      crossorigin="anonymous"
-      referrerpolicy="no-referrer"
-    ></script>
+    <link rel="stylesheet" href="/styles/site-header.css?v={{V}}" />
+    <script src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"></script>
+    <script src="/username.js?v={{V}}"></script>
+    <script defer src="/site-header.js?v={{V}}"></script>
     <title>Roka - 登录</title>
   </head>
-  <body>
+  <body class="auth-page">
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-brand" href="/" aria-label="Roka 首页"
+          ><img
+            class="brand-icon"
+            src="/icons/icon-48.png?v={{V}}"
+            srcset="/icons/icon-48.png?v={{V}} 1x, /icons/icon-192.png?v={{V}} 2x"
+            alt="Roka 图标"
+          /><span class="brand-name">Roka</span></a
+        >
+        <nav class="site-nav" aria-label="站点导航">
+          <a class="site-nav-link" href="/">首页</a><a class="site-nav-link" href="/replays">回放</a
+          ><a class="site-nav-link" href="/about">关于</a>
+        </nav>
+        <div class="site-account" aria-label="账号">
+          <span class="site-account-name" id="site-account-name" hidden></span
+          ><a class="btn btn-primary btn-sm" id="site-login" href="/login">登录</a
+          ><button class="btn btn-ghost btn-sm" id="site-logout" type="button" hidden>退出登录</button>
+        </div>
+      </div>
+    </header>
     <div class="center center-tag" style="width: min(92vw, 520px)">
       <div class="background" style="padding: 18px 20px">
         <h2 style="margin: 4px 0 12px; font-family: Quicksand-Bold, HYMaQiDuo-Bold">账号登录</h2>
