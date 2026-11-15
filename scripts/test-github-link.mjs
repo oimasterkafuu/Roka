@@ -1123,6 +1123,48 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
     }
     assert.deepEqual(errors, []);
     if (expectedStarred) {
+      await page.route('**/api/leaderboard', (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            items: [
+              {
+                username: 'alice',
+                colorClass: 'rt-admin',
+                title: 'Headquarters',
+                admin: true,
+                banned: false,
+                rating: 1500,
+                provisional: false,
+              },
+            ],
+          }),
+        }),
+      );
+      await page.route('**/api/online', (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            count: 1,
+            items: [
+              {
+                username: 'alice',
+                colorClass: 'rt-admin',
+                title: 'Headquarters',
+                admin: true,
+                banned: false,
+                lastSeenAt: Date.now(),
+              },
+            ],
+          }),
+        }),
+      );
+      await page.goto(`${baseUrl}/`);
+      const homeName = page.locator('#leaderboard-list [data-username="alice"]');
+      await homeName.locator('.username-star-initial').waitFor();
+      assert.equal(await homeName.locator('.username-star-initial').textContent(), 'a');
+      assert.equal(await page.locator('#recently-online-list .username-star-initial').textContent(), 'a');
+      assert.equal(await page.evaluate(() => document.cookie.includes('auth_token=')), false);
       await page.route('**/api/contributors', (route) =>
         route.fulfill({ contentType: 'application/json', body: '[]' }),
       );
@@ -1176,7 +1218,9 @@ function testStaticStarInitialPlacement() {
     const relative = path.relative(rootDir, file).split(path.sep).join('/');
     if (!starMarker.test(fs.readFileSync(file, 'utf8'))) continue;
     assert.ok(
-      /^static\/(?:index\.html|username\.js|profile\.(?:js|html)|styles\/(?:profile|rating)\.css)$/.test(relative),
+      /^static\/(?:index\.html|username\.js|profile\.(?:js|html)|styles\/(?:profile|rating)\.css)$/.test(
+        relative,
+      ),
       `Star initial implementation belongs to the public component, found ${relative}`,
     );
   }

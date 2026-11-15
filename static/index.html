@@ -807,11 +807,14 @@
           var $list = $('#leaderboard-list');
           $list.empty();
           $('#leaderboard-empty').toggle(items.length === 0);
+          usernameEnsureColors(
+            items.map(function (item) {
+              return item.username;
+            }),
+          );
           items.forEach(function (item, index) {
             var $li = $('<li></li>');
-            $('<span class="lb-rank"></span>')
-              .text(index + 1)
-              .appendTo($li);
+            $('<span class="lb-rank"></span>').appendTo($li);
             var $name = $('<span class="lb-name"></span>').appendTo($li);
             userLink(item.username, item.colorClass, item.title, item.admin, item.banned).appendTo($name);
             var $rating = $('<span class="lb-rating"></span>').appendTo($li);
@@ -845,6 +848,11 @@
           var $list = $('#recently-online-list');
           $list.empty();
           $('#recently-online-empty').toggle(items.length === 0);
+          usernameEnsureColors(
+            items.map(function (item) {
+              return item.username;
+            }),
+          );
           items.forEach(function (item) {
             var $li = $('<li></li>');
             var $name = $('<span class="lb-name"></span>').appendTo($li);
