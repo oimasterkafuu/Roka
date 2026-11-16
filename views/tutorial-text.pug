@@ -2,7 +2,14 @@ extends layout.pug
 
 block vars
   - var bodyStyle = 'overflow: auto; height: auto'
-  - var currentPage = 'tutorial'
+  - var withSiteHeader = false
+
+block navigation
+  div(style='position: fixed; top: 12px; left: 12px; z-index: 20')
+    button.small(data-goto='/') 返回首页
+  div(style='position: fixed; top: 12px; right: 12px; z-index: 20')
+    span#account-name(style='margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold')
+    a#login-btn(href='/login') 登录
 
 block head
   link(rel='stylesheet', href='/styles/docs.css?v={{V}}')

@@ -28,7 +28,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 关键事实：
 
 - 后端 TypeScript（`src/`）经 `pnpm run build` 编译到 `dist/` 运行；`dist/` 不手工编辑。
-- 前端主体使用原生 JS，`static/` 基本原样下发；`scripts/build-pages.mjs` 在 `pnpm run build` 最前将 `views/` 的 Pug 模板渲染为 `static/*.html`（replays/ambassadors/about/login/tutorial-text/develop 六页，生成 HTML 入库），介绍片由 `scripts/intro/build-intro.mjs` 单独打包至 `static/intro/player.js`；含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
+- 前端主体使用原生 JS，`static/` 基本原样下发；`scripts/build-pages.mjs` 在 `pnpm run build` 最前自动枚举 `views/` 的同名 Pug 模板并渲染全部 13 个 `static/*.html`（生成 HTML 入库，不手工维护），介绍片由 `scripts/intro/build-intro.mjs` 单独打包至 `static/intro/player.js`；含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
 - 静态资源发布：`src/server/static-assets.ts` 启动时批量读取 Git 历史，按文件最后修改 SHA 改写 HTML/preload/Worker，CDN 去除整站 v；注入 `static/asset-runtime.js` 处理逐文件 URL、有序脚本、完整性校验与 CDN 回退，并递归下载 CSS/字体/图片为 blob，避免依赖继承父文件 SHA；首屏内联加载提示等待样式，CSS 图超过 4 秒改用同源原生样式（再等最多 8 秒），默认独立 CDN 优先。未知文件单独回源，ROKA_STATIC_COMMIT 可全文件覆盖。动态接口不经 CDN。
 - 玩家身份 = socket.id（sid）；对局协议与格子编码的权威文档是 `static/develop-bot.html`。
 
@@ -59,10 +59,10 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── text-render.ts      # Markdown+LaTeX → 消毒 HTML（公告/动态共用）
 │   ├── rating-color.ts     # Codeforces 风格段位配色
 │   └── runtime-env.ts      # .env 引导与密钥自动生成
-├── views/                  # Pug 统一布局（含共享站点 header）与六页模板（构建生成 static/*.html）
-├── static/                 # 前端（主体原生 JS；介绍片独立打包）
+├── views/                  # Pug 基础布局（含可选共享站点 header）与 13 页同名模板（构建生成 static/*.html）
+├── static/                 # 前端（主体原生 JS；全部 HTML 为 Pug 生成物；介绍片独立打包）
 │   ├── index.html          # 首页/大厅（脚本基本内联，另加载 /notify.js）
-│   ├── site-header.js      # 六个 Pug 静态页共享登录态、用户名组件与退出逻辑
+│   ├── site-header.js      # 五个内容/认证页共享登录态、用户名组件与退出逻辑
 │   ├── game.html           # 对局/回放共用骨架
 │   ├── main.js + main/     # 对局/回放主控与模块（加载顺序敏感）
 │   ├── notify.js           # 浏览器通知共享模块（首页与对局页共用）
@@ -72,8 +72,8 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── profile.html|.js    # 个人主页（含推广大使徽章与邀请分享）
 │   ├── ambassadors.html|.js # 独立推广大使感谢墙与转化聚合
 │   ├── admin.html|.js      # 后台管理页（用户列表/封禁/权限分配）
-│   ├── tutorial*           # 文字教程（tutorial-text.html 为 Pug 生成物）+ 互动教程（本地迷你引擎）
-│   ├── develop*.html       # 开发指南（develop.html 为 Pug 生成物）+ bot 协议权威文档
+│   ├── tutorial*           # 文字教程 + 互动教程（本地迷你引擎），均为同名 Pug 生成物
+│   ├── develop*.html       # 开发指南 + bot 协议权威文档，均为同名 Pug 生成物
 │   ├── login.html / about.html
 │   ├── styles/             # 样式表（按页面切分，main.css 聚合入口）
 │   ├── vendor/katex/       # 本地化 KaTeX（公式渲染）
@@ -251,18 +251,18 @@ _一句话：共享类型/协议定义汇总。_
 
 ## 前端源码地图（static/）
 
-原生 JS + jQuery；replays/ambassadors/about/login/tutorial-text/develop 六页 HTML 由 `views/*.pug` 构建生成，其余页面仍直接维护 `static/*.html`。页面分两类：
+原生 JS + jQuery；全部 13 个 HTML 均由 `views/` 中的同名 Pug 模板构建生成，不直接维护 `static/*.html`。共享 Header 仅用于 about、ambassadors、login、develop、develop-bot 五页；index、game、tutorial、tutorial-text、replays 保留专用布局与控件，profile、admin、updating 也使用专用或独立结构，以上八页均不加载共享 Header 及其资源。
 
 - **内容/文档页**（about、develop、develop-bot、tutorial-text）：共享 `styles/docs.css` 统一样式与 `docs.js`（登录态展示、`data-goto` 导航、KaTeX 公式渲染，含数学内容的页面引入 `vendor/katex/` 的 katex.min.js + auto-render.min.js）；页面特有样式保留内联。
 - **功能页**：index.html / profile.js（REST 交互，socket `home_*` 失效通知驱动刷新）；game.html + main.js + main/\*（对局与回放共用一套骨架，**脚本全局化、加载顺序敏感**）。
 
 ### 功能页
 
-**static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「在线」列表。回放板块固定显示最新 10 条，无分页与统计图，上传操作区提供「全部回放」入口。回放列表名次列按队伍合并展示：索引项带 `teams`（终局队伍分组，组序=队伍名次序）时同队一组（组内 `, `、组间 `›`，不展示玩家配色色块），旧数据无 `teams` 回退 `rank` 平铺；名次列成员名与房间列表房主名统一走 `username.js` 组件（rating 颜色 + 点击跳主页，接口不带颜色时经 `/api/user-colors` 批量补色）。
+**views/index.pug → static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「在线」列表。回放板块固定显示最新 10 条，无分页与统计图，上传操作区提供「全部回放」入口。回放列表名次列按队伍合并展示：索引项带 `teams`（终局队伍分组，组序=队伍名次序）时同队一组（组内 `, `、组间 `›`，不展示玩家配色色块），旧数据无 `teams` 回退 `rank` 平铺；名次列成员名与房间列表房主名统一走 `username.js` 组件（rating 颜色 + 点击跳主页，接口不带颜色时经 `/api/user-colors` 批量补色）。
 数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds/home_online` 失效通知（事件无 payload）。顶栏在线人数与右栏「在线」列表（排行榜下方，按最后活动倒序的前 8 位用户及其相对活动时间，含自己与当前在线者）由 `/api/online` 驱动。排行榜与在线条目把完整外观 DTO 直接传给 `usernameLink(item.username, item)`，首次渲染即写入含 `starred` 的缓存并显示 Star 首字母，不依赖个人页或 `/api/user-colors` 二次请求。`home_online` 收到后对比在线人数快照，增加时经 `notify.js` 弹「有玩家上线」后台通知；`home_rooms` 收到后对比房间号快照，出现新房间时弹「有新的房间」后台通知。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态列表为就地增量渲染（issue #85）：刷新时已存在的动态在原 DOM 上只更新变化字段并按序重排，新帖插入、消失帖移除，评论展开态与正在输入的评论框/内联编辑态不被打断；最新动态与评论 `authorInfo` 经 `usernameCacheSeed` 同步到既有用户名节点，含 Star 首字母授予与撤销；动态原文与渲染 HTML 分别存 `$item.data('raw-text'/'raw-html')` 供编辑回填与变更检测；动态正文/评论渲染后经 `ensureUsernameColors` 为服务端注入的 @提及链接（`data-username`）批量补 rating 颜色，发帖框与评论框带 `data-mention` 由 mention-autocomplete.js 提供 @提及补全；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
-**static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。
+**views/game.pug → static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。
 按序加载 crown.js → sw-register → username.js → core-globals → notify.js → replay-binary → replay-cache → room-controls → replay-controls → replay-stats → render-update → blink-clock → main.js（顺序敏感）。另加载 `/styles/rating.css`（rt-* 用户名 rating 颜色，对局排行榜/聊天/房间成员名经 username.js 组件使用）。关键 DOM：`#disconnect-banner`（断线横幅）、`#map`、`#menu`、`#status-alert`（按钮按下标访问，改结构需同步 main.js）、`#surrender-alert`（投降确认）、`#spectate-mode`/`#tabs-spectate-mode`（观战中的「下局模式」选择器，仅观战时显示；其容器内另有 `#spectate-view-section`/`#tabs-spectate-view` 观战视角选择器，仅迷雾对局的观战者显示）、`#replay-loading(-bar/-text)`、`#replay-error-alert`、`#replay-view-section`/`#tabs-replay-view`（回放视角选择器，仅迷雾对局回放显示）、`#replay-title`（回放参赛者标题区）、`#replay-stats`/`#tabs-replay-stats`/`#replay-stats-canvas`（回放局势统计图）。
 
 _一句话：对局/回放页骨架与脚本加载顺序。_
@@ -297,13 +297,13 @@ _一句话：房间设置 tabs、链接复制、队伍与聊天前缀。_
 **static/main/blink-clock.js** — 全局闪烁时钟：在 `#map` 容器上周期切换 `blink-slow`（1s 衰减期）/`blink-fast`（0.4s 宽限期）/`pulse-soft`（1.2s 教程目标），单元格只挂声明 class，相位统一驱动。
 _一句话：#map 容器级闪烁相位时钟，三种周期。_
 
-**static/profile.html / profile.js** — 个人主页 `/u/:username`：与首页一致的三栏资料卡/积分等级进度、最高 Rating、分段 Rating 排名、最近 rating 变更、手写 SVG rating 历史折线图（峰值金色高亮）、TA 的动态与回放；不展示积分排名。本人 GitHub 卡片支持 OAuth 绑定/换绑、解绑、Star 手动刷新及未配置/回调异常提示；公开绑定主页链接只在本页展示，仅经 API 确认且未过期的 `starred=true` 把个人页用户名首字母染金，其余字符继续继承 rating/封禁/管理员颜色；not-starred/unknown/stale 均不染金，仓库 Star 链接仅导航。动态部分与首页代码平行（数据源换 `/api/profile/:u/feeds`），游客保留只读展示，登录用户显示已有互动；动态作者/评论与回放名次列的用户名统一走 `username.js` 组件（完整消费 `authorInfo`，含 rating 颜色、Star 首字母与点击跳主页），正文 @提及链接同样经 `ensureUsernameColors` 补色，评论框带 `data-mention` 支持 @提及补全。另以 `?home=1` socket 监听 `home_leaderboard`（rating 结算广播）触发 `usernameColorsInvalidate()` 刷新名字颜色（issue #84）。
+**views/profile.pug → static/profile.html / profile.js** — 个人主页 `/u/:username`：与首页一致的三栏资料卡/积分等级进度、最高 Rating、分段 Rating 排名、最近 rating 变更、手写 SVG rating 历史折线图（峰值金色高亮）、TA 的动态与回放；不展示积分排名。本人 GitHub 卡片支持 OAuth 绑定/换绑、解绑、Star 手动刷新及未配置/回调异常提示；公开绑定主页链接只在本页展示，仅经 API 确认且未过期的 `starred=true` 把个人页用户名首字母染金，其余字符继续继承 rating/封禁/管理员颜色；not-starred/unknown/stale 均不染金，仓库 Star 链接仅导航。动态部分与首页代码平行（数据源换 `/api/profile/:u/feeds`），游客保留只读展示，登录用户显示已有互动；动态作者/评论与回放名次列的用户名统一走 `username.js` 组件（完整消费 `authorInfo`，含 rating 颜色、Star 首字母与点击跳主页），正文 @提及链接同样经 `ensureUsernameColors` 补色，评论框带 `data-mention` 支持 @提及补全。另以 `?home=1` socket 监听 `home_leaderboard`（rating 结算广播）触发 `usernameColorsInvalidate()` 刷新名字颜色（issue #84）。
 _一句话：个人主页逻辑：积分等级/进度、Rating 排名与 SVG Rating 图 + 动态/回放。_
 推广大使资料卡只读 `ambassador` 汇总并展示独立徽章，不改用户名 rating 外观；仅当前登录用户查看自己的主页时显示邀请链接与复制按钮，链接为 `/invite/<规范用户名>`。`static/login.html` 把有效 ref 上报服务端固定首个入口，注册提交前等待该请求完成。
 
 **views/ambassadors.pug → static/ambassadors.html + ambassadors.js** — 独立推广大使感谢墙 `/ambassadors`（公开，与 about 的 GitHub 贡献墙分离）：展示全局点击/归因注册/激活/排除聚合和大使徽章汇总，按用户名排序、不设竞技名次；整卡仍跳个人主页，卡内名字由 `usernameLink(..., {element:'span'})` 渲染并批量补色，避免嵌套链接；其余 DOM 经 `textContent` 与属性 API 构建，不渲染或接收受邀玩家对应关系，含真实空状态与失败提示；登录后可直接复制自己的 `/invite/<用户名>` 链接，未登录保留登录并分享按钮。
 
-**static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态）分页展示（每页 20 条，前端即时过滤），顶部搜索框按用户名子串即时筛选并显示用户总数/匹配数；封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框 / 策略 Bot），便于扩展新管理模块。「策略 Bot」分区仅超管可见（`viewerIsSuperAdmin` 门控 + 服务端 403 兜底）：初始化时拉取 `GET /api/admin/bot-templates` 自动填充模板下拉框（无可托管模板时禁用启动按钮并提示），输入用户名 + 房间号、选择模板并勾选是否允许组队后启动（成功后仅清空房间输入），表格展示运行中 bot（用户名/房间/模板/启动时间/连接状态），三项许可以复选框就地编辑并通过 `POST /api/admin/bots/config` 一次保存，无需重启 bot，也可手动停止。
+**views/admin.pug → static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态）分页展示（每页 20 条，前端即时过滤），顶部搜索框按用户名子串即时筛选并显示用户总数/匹配数；封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框 / 策略 Bot），便于扩展新管理模块。「策略 Bot」分区仅超管可见（`viewerIsSuperAdmin` 门控 + 服务端 403 兜底）：初始化时拉取 `GET /api/admin/bot-templates` 自动填充模板下拉框（无可托管模板时禁用启动按钮并提示），输入用户名 + 房间号、选择模板并勾选是否允许组队后启动（成功后仅清空房间输入），表格展示运行中 bot（用户名/房间/模板/启动时间/连接状态），三项许可以复选框就地编辑并通过 `POST /api/admin/bots/config` 一次保存，无需重启 bot，也可手动停止。
 _一句话：后台管理页：用户封禁、管理员权限分配与策略 Bot 托管。_
 
 **static/login.html** — 登录/注册表单 + 图形验证码 + 离屏蜜罐字段。
@@ -312,10 +312,10 @@ _一句话：登录/注册表单 + 验证码 + 蜜罐。_
 **views/tutorial-text.pug → static/tutorial-text.html** — 文字版规则教程 + 「地图示例」生成器（走 `/api/map-examples`，用与对局相同的 grid_type 编码渲染）；HTML 为 Pug 生成物。
 _一句话：文字规则教程 + 示例地图生成器。_
 
-**static/tutorial.html / tutorial.js** — 互动教程 `/tutorial/interactive`：纯本地迷你引擎（复刻正式规则：推兵、队列、连通/孤军、灭主城）+ 15 步引导流程。
+**views/tutorial.pug → static/tutorial.html / tutorial.js** — 互动教程 `/tutorial/interactive`：纯本地迷你引擎（复刻正式规则：推兵、队列、连通/孤军、灭主城）+ 15 步引导流程。
 _一句话：互动教程本地迷你引擎 + 15 步引导。_
 
-**static/develop-bot.html** — **bot 协议权威文档**：握手鉴权、`set_id`、顶号与 10 秒断线宽限、房间/对局事件、grid_type 编码表、操作集。**协议改动必须同步更新此页。**
+**views/develop-bot.pug → static/develop-bot.html** — **bot 协议权威文档**：握手鉴权、`set_id`、顶号与 10 秒断线宽限、房间/对局事件、grid_type 编码表、操作集。**协议改动必须同步更新此模板。**
 _一句话：bot 协议权威文档，改协议需同步。_
 
 **views/develop.pug → static/develop.html** — 网站贡献指南（与 AGENTS.md/README 呼应，改流程需同步）；HTML 为 Pug 生成物。
@@ -370,7 +370,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 - **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 
-- **scripts/build-pages.mjs / test-build-pages.mjs** — 用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出到 `static/*.html`；测试连续两次构建字节一致，并检查六页必要 id、共享/私有 header、favicon/`{{V}}` 资源、socket 与用户名组件引用，纳入 `pnpm test`。
+- **scripts/build-pages.mjs / test-build-pages.mjs** — 自动枚举并用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出全部 13 个同名 `static/*.html`；测试断言 Pug/HTML 同名集合完全相等、连续两次构建字节一致，检查各页关键 DOM、脚本顺序、favicon/`{{V}}` 资源及 standards/quirks 模式，并断言共享 Header 仅用于指定五页、其余八页无共享 Header 资源且保留专用控件，纳入 `pnpm test`。
 
 - **scripts/test-referral-ambassador.mjs** — `pnpm run test:referral-ambassador`（纳入 `pnpm test`）：UserStore 覆盖邀请注册、自邀/旧账号/无邀请、重复与并发激活、同局多新玩家、异常撤销、徽章阈值、公开字段和文件重启一致；LobbyService 覆盖真人/60 Tick/60 秒门槛及 Rating/积分不变；真实 dist HTTP 服务（仅验证码为测试桩）覆盖首入口 Cookie、注册/登录清理、匿名聚合、管理员权限与撤销；DOM 桩验证感谢墙安全渲染、登录态邀请链接与复制成功/降级/失败；HTTP 覆盖游客邀请入口的 302、大小写归一与 404 提示。需先 `pnpm run build`。
 
