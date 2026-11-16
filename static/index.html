@@ -271,16 +271,6 @@
         );
       }
 
-      // 带 rating 颜色的用户名链接：统一走 /username.js 组件（全局缓存 + 批量补色）。
-      function userLink(username, colorClass, title, admin, banned) {
-        return usernameLink(
-          username,
-          colorClass
-            ? { colorClass: colorClass, title: title, admin: admin === true, banned: banned === true }
-            : null,
-        );
-      }
-
       // 服务端渲染出的 @提及链接只带 data-username，这里批量补 rating 颜色。
       function ensureUsernameColors($scope) {
         var names = [];
@@ -686,18 +676,13 @@
           var $list = $('#leaderboard-list');
           $list.empty();
           $('#leaderboard-empty').toggle(items.length === 0);
-          usernameEnsureColors(
-            items.map(function (item) {
-              return item.username;
-            }),
-          );
           items.forEach(function (item, index) {
             var $li = $('<li></li>');
             $('<span class="lb-rank"></span>')
               .text(index + 1)
               .appendTo($li);
             var $name = $('<span class="lb-name"></span>').appendTo($li);
-            userLink(item.username, item.colorClass, item.title, item.admin, item.banned).appendTo($name);
+            usernameLink(item.username, item).appendTo($name);
             var $rating = $('<span class="lb-rating"></span>').appendTo($li);
             setRatingWithProvisional($rating, item.rating, item.provisional);
             $list.append($li);
@@ -729,15 +714,10 @@
           var $list = $('#recently-online-list');
           $list.empty();
           $('#recently-online-empty').toggle(items.length === 0);
-          usernameEnsureColors(
-            items.map(function (item) {
-              return item.username;
-            }),
-          );
           items.forEach(function (item) {
             var $li = $('<li></li>');
             var $name = $('<span class="lb-name"></span>').appendTo($li);
-            userLink(item.username, item.colorClass, item.title, item.admin, item.banned).appendTo($name);
+            usernameLink(item.username, item).appendTo($name);
             $('<span class="lb-time"></span>')
               .text(relativeTime(item.lastSeenAt))
               .attr('title', fullTime(item.lastSeenAt))
