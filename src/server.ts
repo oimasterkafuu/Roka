@@ -295,6 +295,11 @@ interface DecoratedFeedPost {
 // @提及解析：用户名存在时返回规范形式，不存在/改名后由渲染层降级为普通文本。
 const resolveFeedMention = (token: string): string | null => userStore.resolveUsername(token);
 
+const usernameStarred = (username: string) => {
+  const github = userStore.getGithubPublicProfile(username);
+  return github?.starred === true && github.starState === 'starred';
+};
+
 const usernameAppearance = (username: string, rating: number, ratingGames: number) => {
   const admin = userStore.isAdminUser(username);
   const banned = userStore.getBanStatus(username).banned;
@@ -304,12 +309,8 @@ const usernameAppearance = (username: string, rating: number, ratingGames: numbe
     title: banned ? '已封禁' : admin ? 'Headquarters' : tier.title,
     admin,
     banned,
+    starred: usernameStarred(username),
   };
-};
-
-const usernameStarred = (username: string) => {
-  const github = userStore.getGithubPublicProfile(username);
-  return github?.starred === true && github.starState === 'starred';
 };
 
 const decorateFeedComment = (comment: FeedComment, viewer: string | null): DecoratedFeedComment => {
@@ -319,10 +320,7 @@ const decorateFeedComment = (comment: FeedComment, viewer: string | null): Decor
     ...comment,
     html: rendered.html,
     mentions: rendered.mentions,
-    authorInfo: {
-      ...usernameAppearance(comment.author, rating, ratingGames),
-      starred: usernameStarred(comment.author),
-    },
+    authorInfo: usernameAppearance(comment.author, rating, ratingGames),
     canManage: viewer !== null && (viewer === comment.author || userStore.isAdminUser(viewer)),
   };
 };
@@ -335,10 +333,7 @@ const decorateFeedPost = (post: FeedPost, viewer: string | null): DecoratedFeedP
     comments: post.comments.map((comment) => decorateFeedComment(comment, viewer)),
     html: rendered.html,
     mentions: rendered.mentions,
-    authorInfo: {
-      ...usernameAppearance(post.author, rating, ratingGames),
-      starred: usernameStarred(post.author),
-    },
+    authorInfo: usernameAppearance(post.author, rating, ratingGames),
     canManage: viewer !== null && (viewer === post.author || userStore.isAdminUser(viewer)),
   };
 };
@@ -1520,10 +1515,7 @@ const boot = async (listen = true): Promise<void> => {
     for (const name of names) {
       if (Object.prototype.hasOwnProperty.call(colors, name)) continue;
       const { rating, ratingGames } = userStore.getDisplayRating(name);
-      colors[name] = {
-        ...usernameAppearance(name, rating, ratingGames),
-        starred: usernameStarred(name),
-      };
+      colors[name] = usernameAppearance(name, rating, ratingGames);
     }
     return reply.send({ colors });
   });
@@ -1557,7 +1549,6 @@ const boot = async (listen = true): Promise<void> => {
     return reply.send({
       ...profile,
       ...usernameAppearance(profile.username, profile.rating, profile.ratingGames),
-      starred: usernameStarred(profile.username),
       registeredDays: Math.floor((Date.now() - profile.createdAt) / 86400000),
     });
   });

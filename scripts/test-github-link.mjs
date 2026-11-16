@@ -762,6 +762,11 @@ async function prepareIntegrationUsers(directory) {
     const sid = await store.rotateSession(username);
     tokens[username] = jwt.sign({ sub: username, sid }, JWT_SECRET, { expiresIn: '1h' });
   }
+  await store.applyRatingUpdates([
+    { username: 'alice', delta: 0 },
+    { username: 'bob', delta: 0 },
+    { username: 'carol', delta: 0 },
+  ]);
   return tokens;
 }
 
@@ -1035,6 +1040,25 @@ async function testIntegration() {
   }
   assertNoSensitiveDto(starColors.json);
 
+  const assertPublicStarAppearance = (items, label, expectedNames = ['alice', 'bob', 'carol']) => {
+    for (const username of expectedNames) {
+      const item = items.find((entry) => entry.username === username);
+      assert.ok(item, `${label} includes ${username}`);
+      assert.equal(typeof item.starred, 'boolean', `${label} ${username} starred is a direct boolean`);
+      assert.equal(item.starred, username === 'alice', `${label} ${username} Star appearance`);
+    }
+  };
+  const leaderboard = await api('/api/leaderboard');
+  assert.equal(leaderboard.status, 200);
+  assertPublicStarAppearance(leaderboard.json.items, 'anonymous leaderboard');
+  assert.equal((await api('/api/auth/me', { user: 'bob' })).status, 200);
+  const online = await api('/api/online');
+  assert.equal(online.status, 200);
+  assertPublicStarAppearance(online.json.items, 'anonymous online list', ['alice', 'bob']);
+  const userSearch = await api('/api/users/search?q=');
+  assert.equal(userSearch.status, 200);
+  assertPublicStarAppearance(userSearch.json.items, 'anonymous user search');
+
   const starredPost = await api('/api/feeds', {
     method: 'POST',
     user: 'alice',
@@ -1071,6 +1095,7 @@ async function testIntegration() {
   assert.equal(listedStarredPost.comments[0].authorInfo.starred, starColors.json.colors.bob.starred);
   assert.equal(listedPlainPost.authorInfo.starred, starColors.json.colors.bob.starred);
   assert.equal(listedPlainPost.comments[0].authorInfo.starred, starColors.json.colors.alice.starred);
+  await testGuestHomeStarAppearanceBrowser(server.baseUrl);
   await testGuestFeedStarRefreshBrowser(server.baseUrl, api, starredPost.json.post.id);
   await testProfileStarInitialBrowser(server.baseUrl, true);
 
@@ -1185,9 +1210,7 @@ async function testIntegration() {
   for (const route of publicRoutes) {
     const response = await api(route, { user: route === '/api/admin/users' ? 'alice' : undefined });
     assert.equal(response.status, 200, route);
-    const exposedKeys = forbiddenDisplayKeys(response.json).filter(
-      (key) => !(route.endsWith('/feeds') && key.endsWith('.authorInfo.starred')),
-    );
+    const exposedKeys = forbiddenDisplayKeys(response.json).filter((key) => !key.endsWith('.starred'));
     assert.deepEqual(exposedKeys, [], `${route} unexpectedly exposes GitHub/Star display data`);
   }
 
@@ -1240,6 +1263,106 @@ async function testIntegration() {
   log(
     'passed spawned OAuth, public stargazers, signed star webhooks, local refresh, DTO and persistence checks',
   );
+}
+
+async function testGuestHomeStarAppearanceBrowser(baseUrl) {
+  const { chromium } = require(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
+  const browser = await chromium.launch({
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+    headless: true,
+    args: ['--no-sandbox'],
+  });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors = [];
+    const profileRequests = [];
+    const userColorRequests = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('request', (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith('/api/profile/')) profileRequests.push(request.url());
+      if (pathname === '/api/user-colors') userColorRequests.push(request.url());
+    });
+    const starredAppearance = {
+      colorClass: 'rt-admin',
+      title: 'Headquarters',
+      admin: true,
+      banned: false,
+      starred: true,
+    };
+    const plainAppearance = {
+      colorClass: 'rt-green',
+      title: 'Newbie',
+      admin: false,
+      banned: false,
+      starred: false,
+    };
+    await page.route('**/api/leaderboard', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [
+            { username: 'alice', ...starredAppearance, rating: 1500, provisional: false },
+            { username: 'bob', ...plainAppearance, rating: 1100, provisional: false },
+          ],
+        }),
+      }),
+    );
+    await page.route('**/api/online', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          count: 2,
+          items: [
+            { username: 'alice', ...starredAppearance, lastSeenAt: Date.now() },
+            { username: 'bob', ...plainAppearance, lastSeenAt: Date.now() },
+          ],
+        }),
+      }),
+    );
+    await page.route('**/api/feeds?*', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [], page: 1, pages: 1 }),
+      }),
+    );
+    await page.route('**/api/user-colors?*', (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify({ colors: {} }) }),
+    );
+    await page.goto(`${baseUrl}/`);
+
+    const assertHomeName = async (listSelector, username, starred, colorClass, parentColor) => {
+      const link = page.locator(`${listSelector} [data-username="${username}"]`);
+      await link.waitFor({ state: 'attached' });
+      assert.equal(await link.textContent(), username);
+      assert.match(await link.getAttribute('class'), new RegExp(`(?:^|\\s)${colorClass}(?:\\s|$)`));
+      assert.equal(await link.evaluate((element) => getComputedStyle(element).color), parentColor);
+      const initial = link.locator('.username-star-initial');
+      assert.equal(await initial.count(), starred ? 1 : 0, `${listSelector} ${username} first render`);
+      if (starred) {
+        assert.equal(await initial.textContent(), username.charAt(0));
+        assert.equal(
+          await initial.evaluate((element) => getComputedStyle(element).color),
+          'rgb(184, 134, 11)',
+        );
+        assert.equal(await link.evaluate((element) => element.lastChild.nodeType), 3);
+        assert.equal(await link.evaluate((element) => element.lastChild.textContent), username.slice(1));
+      } else {
+        assert.equal(await link.evaluate((element) => element.children.length), 0);
+      }
+    };
+    for (const listSelector of ['#leaderboard-list', '#recently-online-list']) {
+      await assertHomeName(listSelector, 'alice', true, 'rt-admin', 'rgb(0, 0, 0)');
+      await assertHomeName(listSelector, 'bob', false, 'rt-green', 'rgb(0, 128, 0)');
+    }
+    assert.equal(await page.evaluate(() => document.cookie.includes('auth_token=')), false);
+    assert.deepEqual(profileRequests, [], 'cold guest home rendering must not visit a profile API');
+    assert.deepEqual(userColorRequests, [], 'complete home DTOs must not need a second appearance request');
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+  log('passed cold guest home leaderboard/online Star and non-Star first rendering');
 }
 
 async function testGuestFeedStarRefreshBrowser(baseUrl, api, triggerPostId) {
@@ -1486,6 +1609,7 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
                 title: 'Headquarters',
                 admin: true,
                 banned: false,
+                starred: true,
                 rating: 1500,
                 provisional: false,
               },
@@ -1505,6 +1629,7 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
                 title: 'Headquarters',
                 admin: true,
                 banned: false,
+                starred: true,
                 lastSeenAt: Date.now(),
               },
             ],
