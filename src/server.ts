@@ -1449,9 +1449,18 @@ const boot = async (listen = true): Promise<void> => {
     ),
   );
 
-  app.get('/api/stargazers', async (_request, reply) =>
-    reply.send({ items: stargazerService.listStargazers(), fetchedAt: stargazerService.getFetchedAt() }),
-  );
+  app.get('/api/stargazers', async (_request, reply) => {
+    const items = stargazerService.listStargazers().map((item) => {
+      const resolved = userStore.findUsernameByGithubLogin(item.login);
+      const rokaUsername = typeof resolved === 'string' && USERNAME_REGEX.test(resolved) ? resolved : null;
+      return {
+        login: item.login,
+        avatarUrl: item.avatarUrl,
+        ...(rokaUsername ? { rokaUsername } : {}),
+      };
+    });
+    return reply.send({ items, fetchedAt: stargazerService.getFetchedAt() });
+  });
 
   // 版本信息（公开）：首页页脚右下角版本号链接到 GitHub 对应 commit。
   app.get('/api/version', async (_request, reply) => {
