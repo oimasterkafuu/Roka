@@ -1,0 +1,623 @@
+extends layout.pug
+
+block vars
+  - var bodyStyle = 'overflow: auto; height: auto'
+  - var currentPage = 'tutorial'
+
+block head
+  link(rel='stylesheet', href='/styles/docs.css?v={{V}}')
+  link(rel='stylesheet', href='/vendor/katex/katex.min.css?v={{V}}')
+  title Roka - 文字版教程
+  style.
+    .doc-panel ul.terrain-list {
+      margin: 8px 0 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .terrain-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 0 0 8px 0;
+    }
+    .terrain-icon-cell {
+      width: 28px;
+      height: 28px;
+      flex: none;
+      margin-top: 1px;
+      border: 1px solid black;
+      background-position: center;
+      background-repeat: no-repeat;
+      background-size: 20px 20px;
+      box-sizing: border-box;
+    }
+    .terrain-icon-cell.plain {
+      background-color: gray;
+    }
+    .terrain-icon-cell.general {
+      background-color: red;
+      background-image: url('/crown.png');
+    }
+    .terrain-icon-cell.city {
+      background-color: gray;
+      background-image: url('/city.png');
+    }
+    .terrain-icon-cell.mountain {
+      background-color: #dcdcdc;
+      background-image: url('/mountain.png');
+    }
+    .terrain-icon-cell.swamp {
+      background-color: gray;
+      background-image: url('/swamp.png');
+    }
+    .terrain-text {
+      margin: 0;
+      line-height: 1.6;
+    }
+    .map-example-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .map-example-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .map-example-control select {
+      height: 30px;
+      min-width: 110px;
+      padding: 0 8px;
+      border: 1px solid #d5dce6;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #253042;
+      font-family: Quicksand, HYMaQiDuo;
+    }
+    .map-example-status {
+      font-size: 13px;
+      opacity: 0.86;
+    }
+    .map-example-single {
+      margin-top: 12px;
+      border: 1px solid #e3e8f0;
+      border-radius: 8px;
+      background: #f7f9fb;
+      padding: 10px;
+    }
+    .map-example-single h4 {
+      margin: 0;
+      font-size: 16px;
+      font-family: Quicksand-Bold, HYMaQiDuo-Bold;
+    }
+    .map-example-meta {
+      margin-top: 4px;
+      font-size: 12px;
+      opacity: 0.86;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+    .map-example-board-wrap {
+      margin-top: 8px;
+      border: 1px solid #e3e8f0;
+      background: #ffffff;
+      overflow: hidden;
+      max-width: 100%;
+      padding: 6px;
+    }
+    .map-example-board {
+      width: max-content;
+      min-width: 100%;
+    }
+    .map-example-board table {
+      border-spacing: 0;
+    }
+    .map-example-board td {
+      background-position: center;
+      background-repeat: no-repeat;
+      position: relative;
+      border: 1px solid black;
+      text-align: center;
+      text-shadow: 0 0 2px black;
+      padding: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      color: white;
+      user-select: none;
+      box-sizing: border-box;
+      width: var(--cell-size, 12px);
+      height: var(--cell-size, 12px);
+      max-width: var(--cell-size, 12px);
+      max-height: var(--cell-size, 12px);
+      min-width: var(--cell-size, 12px);
+      min-height: var(--cell-size, 12px);
+      background-size: var(--icon-size, 10px) var(--icon-size, 10px);
+      font-size: var(--font-size, 10px);
+    }
+
+block content
+  #app
+    h1.doc-title Roka 文字版教程
+    p.doc-subtitle 本页完整介绍 Roka 的全部规则。建议先通读本页，再进入互动教程上手实操。
+
+    .cta-row
+      button.inverted(data-goto='/tutorial/interactive') 进入互动教程 →
+
+    section.doc-panel
+      h2 目标与胜负
+      ul
+        li 每位玩家拥有 1 座主城（皇冠），目标是成为最后存活的玩家/队伍。
+        li 失去所有主城即出局；攻下敌方最后一座主城即可将其淘汰。
+        li
+          | 玩家出局后，其残余领土
+          b 不再转移
+          | 给攻击方：主城/指挥所全部拆除为普通地块，兵力按断链规则减半（1 兵保持为 1，减半后归零的格子直接变为中立），随后沦为孤军并按孤军规则逐渐衰减消亡。
+
+    section.doc-panel
+      h2 地图与地形
+      ul.terrain-list
+        li.terrain-item
+          span.terrain-icon-cell.plain(aria-hidden='true')
+          p.terrain-text
+            b 普通地块
+            | ：可占领、可驻兵、可建造的基本地形。
+        li.terrain-item
+          span.terrain-icon-cell.mountain(aria-hidden='true')
+          p.terrain-text
+            b 山脉
+            | ：不可通行、不可占领，会阻挡扩张路线。
+        li.terrain-item
+          span.terrain-icon-cell.swamp(aria-hidden='true')
+          p.terrain-text
+            b 沼泽
+            | ：可占领、可驻兵并参与连通，但永不产兵、不可建造，常用于保持连通与卡位。
+        li.terrain-item
+          span.terrain-icon-cell.general(aria-hidden='true')
+          p.terrain-text
+            b 主城（皇冠）
+            | ：玩家核心据点，每 Tick +1 兵力；失守全部主城即出局。可由指挥所升级而来（见下文建造）。组队对局中，有效推兵进入存活队友的主城会累兵；若对方此时拥有多座主城（至少两座），该主城还会自动转属出兵者并为其产兵。对方最后一座主城只累兵、不转属；单纯点击或空推兵无效。
+        li.terrain-item
+          span.terrain-icon-cell.city(aria-hidden='true')
+          p.terrain-text
+            b 指挥所（城市）
+            | ：只能由玩家消耗 50 兵力建造的战略据点；与普通地块一样每 50 Tick +1 兵力（不享受爆发期加成），同时是连通锚点。
+      .tips 默认不开启迷雾远征，开启前全图对所有玩家开放可见。
+
+    section.doc-panel
+      h2 地图示例
+      p 如果觉得地图的名字晦涩难懂，可以生成一张示例地图参考。
+      p
+        | 房间地图尺寸有
+        b 标准
+        | 与
+        b 大地图
+        | ；房主可设置种子以复现地图。华夏系列仅在中国时区每年 10 月 1 日至 10 月 7 日开放，地区选项随活动期显示。
+      .map-example-toolbar
+        label.map-example-control
+          | 地图类型：
+          select#map-example-mode
+            option(value='random') 标准地图
+            option(value='maze') 峡谷回廊
+            option(value='archipelago') 群岛要塞
+            option(value='mediterranean') 地中海
+            option(value='huaxia') 华夏系列
+        label#map-example-region-control.map-example-control(style='display: none')
+          | 地区：
+          select#map-example-region
+            option(value='china') 中国
+            option(value='qin') 秦
+            option(value='han') 汉
+            option(value='tang') 唐
+            option(value='liao') 辽
+            option(value='song') 宋
+            option(value='yuan') 元
+            option(value='ming') 明
+            option(value='taiwan') 台湾省
+        label.map-example-control
+          | 人数：
+          select#map-example-players
+        button#generate-map-example-btn.small 生成地图
+        span#map-example-status.map-example-status
+      article#map-example-single.map-example-single
+        h4#map-example-title 地图示例
+        #map-example-meta.map-example-meta
+        .map-example-board-wrap
+          #map-example-board.map-example-board
+
+    section.doc-panel
+      h2 回合与兵力生产
+      ul
+        li
+          | 1 Tick = 0.5 秒（1x 速度）。顶部回合以“半回合”显示：
+          span.kbd 回合 1
+          |  →&#32;
+          span.kbd 回合 1.
+          |  →&#32;
+          span.kbd 回合 2
+          | ，无点与有点是同一整回合的两个阶段。
+        li 主城每 Tick +1 兵力。
+        li 正常状态的普通地块与指挥所每 50 Tick +1 兵力（指挥所不享受爆发期加成）。
+        li
+          | 第 26~50 Tick 为全局
+          b 爆发期
+          | ：正常状态的普通地块每 Tick 额外 +1 兵力；地图外圈会出现逐渐减弱的红边提示。
+        li 房间速度可选 0.5x–4x；速度只缩放 Tick 间隔，不改变规则计数。
+        li 孤军、沼泽、中立格不生产兵力；兵力无上限。
+
+    section.doc-panel
+      h2 迷雾远征（可选）
+      ul
+        li
+          | 房主可在房间设置的「迷雾远征」开关中开启（默认关闭；房间内有不支持迷雾的 Bot——第三方 Bot 或未允许迷雾的托管 Bot——时不可用）。开启后，你只能看到己方（含队友）任意格子
+          b 周围一圈
+          | 内的格子。
+        li
+          b 视野外
+          | ：山脉与沼泽保持原样显示（沼泽不暴露归属），其余一切格子一律显示为空地并盖上
+          b 暗色遮罩
+          | ——视野外的真实地形、归属与兵力都不会揭示。
+        li
+          b 视野内
+          | 的地形、归属、兵力以及敌方建筑身份正常显示，包括敌方指挥所与主城；中立城市也照常显示。观战始终全图可见。
+        li
+          | 迷雾对局的
+          b 回放
+          | 默认为全知视角（全图可见）；回放控制条上提供「视角」选择器，可切换为任一 参赛队伍视角，只显示该队伍当时视野内的内容，随时可切回全知。
+
+    section.doc-panel
+      h2 多线争锋（可选）
+      ul
+        li
+          | 房主可在房间设置的「多线争锋」开关中开启（默认关闭；房间内有不支持多线的 Bot 参战时不可用）。开启后战线
+          b 条数不设上限
+          | ：指令按出发格自动归入战线——同一出发点、 同一方向的指令并入同一条战线；同一出发点、不同方向的指令
+          b 分兵
+          | 各自成线； 系统每 Tick 并行调度所有战线（每条非空战线各执行一条），操作方式与单线完全相同。
+        li
+          | 每条战线跟踪自己的
+          b 起始点
+          | 并随执行沿指令链推进。新指令的出发格若已是某条战线的 到达格（而非起始点），会
+          b 挂到该战线队尾
+          | 等待接续——连点画链即可：先发 「从 A 移到 B」再发「从 B 移到 C」，两条指令依次入队同一战线，A→B 执行后 B→C 自动接续执行，与单线局手动排队完全一致。
+        li
+          | 界面与普通对局完全一致：没有战线切换按键，所有待发指令的箭头一视同仁；地图上可能同时 存在多组待发箭头，一次结算的移动数也可能更多。
+          span.kbd Q
+          |  清空整个操作队列，
+          span.kbd E
+          |  撤回
+          b 全局最后一条
+          | 指令（按入队时间序）。
+
+    section.doc-panel
+      h2 推兵与队列
+      h3 选中与视角
+      ul
+        li 鼠标左键点击己方格：选中；点击空白背景：取消选中；拖动地图平移，滚轮缩放。
+        li
+          span.kbd 空格
+          | ：跳转选中到曼哈顿距离最近的己方主城。
+      h3 推兵（移动/进攻）
+      ul
+        li
+          span.kbd W/A/S/D
+          |  或方向键：从选中格向对应方向推兵。默认
+          b 全兵
+          | 推出（只留 1 兵看守）。
+        li
+          span.kbd Z
+          |  + 方向：下一步
+          b 半兵
+          | （50%，一次性，执行后失效）。
+        li
+          span.kbd Shift
+          |  + 方向：
+          b 智能分兵
+          | ——为其他方向的威胁保留兵力。设起点兵力为 \(A\)，其余三个方向相邻格中「非山脉且非己方」格子的驻军之和为 \(B\)： \[ B = \sum_{\text{威胁方向}} (\text{兵力} - 1), \qquad push = \max(0,\ A - B - 1) \] 不消耗 Z。
+        li 推兵进入操作队列，每 Tick 每名玩家最多执行一条队列操作。
+      h3 建造
+      ul
+        li
+          span.kbd X
+          | ：在选中的己方正常普通地块上排队建造指挥所，消耗 50 兵力。
+        li
+          span.kbd C
+          | ：将己方指挥所排队升级为主城，消耗 50 兵力；在普通地块上按键 会自动连排“建指挥所 + 升级主城”两步。
+        li 建造与推兵共用同一队列；执行时条件不满足会自动跳过，不产生消耗。沼泽/山脉上禁止建造。
+      h3 其他
+      ul
+        li
+          span.kbd Q
+          |  /&#32;
+          span.kbd E
+          | ：清空操作队列 / 撤回最后一步（不分模式）。
+        li
+          span.kbd Enter
+          | ：公屏聊天；
+          span.kbd T
+          | ：队伍聊天；
+          span.kbd Esc
+          | ：打开/关闭投降确认。
+
+    section.doc-panel
+      h2 攻击与占领
+      ul
+        li
+          | 攻击兵力必须
+          b 严格大于
+          | 防守兵力才能占领目标格。
+        li 未严格大于（含相等）时进攻失败，但双方互损：进攻方损失全部推出兵力，防守方等量减兵（最低到 0），归属与建筑不变。
+        li
+          | 占领有损耗：占领成功后，目标格新兵力 =&#32;
+          b 攻击兵力 − 守军兵力
+          | ；被占领的指挥所/主城会被摧毁（降级为普通地块）。
+        li 向己方格推兵是调兵：兵力直接叠加。向队友格推兵也会累兵；若目标是存活队友的主城，且对方当时至少有两座主城，该主城会自动转属出兵者；最后一座主城只累兵、不转属。
+
+    section.doc-panel
+      h2 连通与孤军
+      ul
+        li
+          | 己方格经由连续己方格（普通地块或己方沼泽）四方向连通到己方任意主城/指挥所，即为正常领土；组队时只把队内
+          b 存活成员
+          | 的格子和锚点纳入连通计算。只要队伍仍有存活成员拥有锚点，全队连通领土都可操控；否则成为
+          b 孤军
+          | （闪烁提示）。
+        li
+          | 断链瞬间兵力立即减半：\(n' = \lfloor n / 2 \rfloor\)（1 兵保持为 1）。
+        li
+          | 断链后前&#32;
+          b 10 Tick
+          | 为宽限期：孤军快速闪烁，兵力暂不衰减。
+        li 第 11 Tick 起进入衰减期，每 2 Tick： \[ n \leftarrow n - \max\left(1, \lceil 0.05\, n \rceil\right) \] 兵力归零后变为中立格。
+        li 孤军不可选中、不可推兵、不可建造、不产兵、无爆发加成。
+        li 孤军重新连通回己方（或同队存活成员）主城/指挥所时立即恢复正常，且每格兵力翻倍（\(n \leftarrow 2n\)）。
+      .tips 攻下敌方最后一座主城后，其所有残余领土不转移归属：锚点全部拆除、兵力按断链规则减半后沦为孤军，随后逐渐衰减至中立。扩张时务必保持连通。
+      .tips 投降（Esc）= 立即放弃所有控制权：若队内仍有其他存活成员，全部领土（含兵力）转移给编号最小的存活队友，主城降级为指挥所；否则主城与所有指挥所被拆除为普通空地，领土兵力减半后沦为孤军，进入自然衰减。
+
+    section.doc-panel
+      h2 快捷键
+      ul
+        li
+          span.kbd W/A/S/D
+          |  或方向键推兵；
+          span.kbd Z
+          |  半兵；
+          span.kbd Shift
+          |  智能分兵。
+        li
+          span.kbd X
+          |  建指挥所；
+          span.kbd C
+          |  升级主城；
+          span.kbd Q
+          |  清空队列；
+          span.kbd E
+          |  撤销队尾。
+        li
+          span.kbd 空格
+          | 跳到最近主城；
+          span.kbd Enter
+          | 公屏；
+          span.kbd T
+          | 队伍聊天；
+          span.kbd Esc
+          | 投降确认。
+
+    section.doc-panel
+      h2 实战建议与状态
+      ul
+        li 先扩张并保持主城/指挥所连通，再把兵力集中到突破口；不要把前线变成孤军。
+        li 对局速度为 0.5x–4x；房间准备阶段长时间无心跳会被视为 AFK。对局掉线有 10 秒宽限期，及时回到同一房间可恢复；超时会自动投降并转为观战。
+        li 标准与大地图使用不同尺寸；需要复盘或测试时设置种子。华夏地图只在中国时区 10 月 1 日至 7 日活动期开放。
+        li 未通过真人校验的非官方 AI 每日在官方 Bot 房间内累计停留不得超过 4 小时。 准备阶段超限会自动移出，当日也无法再进入；对局中不打断，终局后检查。
+
+    .cta-row
+      button.inverted(data-goto='/tutorial/interactive') 进入互动教程 →
+
+block scripts
+  script(src='/vendor/katex/katex.min.js?v={{V}}')
+  script(src='/vendor/katex/auto-render.min.js?v={{V}}')
+  script(src='/docs.js?v={{V}}')
+  script.
+    let lastMapExampleData = null;
+    let resizeTimer = 0;
+
+    function mapModeLabel(mapMode) {
+      if (mapMode === 'huaxia') return '华夏系列';
+      if (mapMode === 'maze') return '峡谷回廊';
+      if (mapMode === 'archipelago') return '群岛要塞';
+      if (mapMode === 'mediterranean') return '地中海';
+      return '标准地图';
+    }
+
+    function resolveScaleClass(cellSize) {
+      if (cellSize <= 20) return 1;
+      if (cellSize <= 25) return 2;
+      if (cellSize <= 32) return 3;
+      if (cellSize <= 40) return 4;
+      if (cellSize <= 50) return 5;
+      return 6;
+    }
+
+    function buildCellHtml(code, army, scaleClass) {
+      let cls = `s${scaleClass}`;
+      let txt = '';
+      let isGeneral = false;
+      if (code < 200) {
+        if (code < 50) {
+          cls += ` c${code}`;
+        } else if (code < 100) {
+          cls += ` c${code - 50} city`;
+        } else if (code < 150) {
+          cls += ` c${code - 100} general`;
+          isGeneral = true;
+        } else {
+          cls += ` c${code - 150} swamp`;
+        }
+        // 皇冠格只展示皇冠图案，不渲染兵力数字；其他格子数字照常。
+        if (!isGeneral && (army || code === 50)) {
+          txt = String(army);
+        }
+      } else if (code === 200) {
+        cls += ' empty';
+      } else if (code === 201) {
+        cls += ' mountain empty';
+      } else if (code === 204) {
+        cls += ' swamp';
+      }
+      if (txt.length > 0 && scaleClass === 1) {
+        txt = `<div class="txt">${txt}</div>`;
+      }
+      return `<td class="${cls}">${txt}</td>`;
+    }
+
+    function renderExampleBoard(container, example) {
+      const wrap = container.parentElement;
+      const availableWidth = Math.max(40, wrap.clientWidth - 2);
+      const cellSize = Math.max(4, Math.floor(availableWidth / example.m));
+      const scaleClass = resolveScaleClass(cellSize);
+      container.style.setProperty('--cell-size', `${cellSize}px`);
+      container.style.setProperty('--icon-size', `${Math.max(3, Math.floor(cellSize * 0.8))}px`);
+      container.style.setProperty('--font-size', `${Math.max(6, Math.floor(cellSize * 0.45))}px`);
+
+      let html = '<table><tbody>';
+      for (let i = 0; i < example.n; i += 1) {
+        html += '<tr>';
+        for (let j = 0; j < example.m; j += 1) {
+          const idx = i * example.m + j;
+          html += buildCellHtml(example.grid_type[idx], example.army_cnt[idx], scaleClass);
+        }
+        html += '</tr>';
+      }
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function syncMapExampleRegionControl() {
+      const mode = getSelectedMapMode();
+      document.getElementById('map-example-region-control').style.display = mode === 'huaxia' ? '' : 'none';
+    }
+
+    function renderMapExample(data) {
+      if (!data || !data.example) {
+        return;
+      }
+      lastMapExampleData = data;
+      const example = data.example;
+      document.getElementById('map-example-title').textContent = mapModeLabel(example.map_mode);
+      const regionText = example.region_name ? ` · ${example.region_name}` : '';
+      const seedText = data.seed ? ` · 种子 ${data.seed}` : '';
+      document.getElementById('map-example-meta').textContent =
+        `${example.n} x ${example.m} · ${data.players} 人` + regionText + seedText;
+      document.getElementById('map-example-mode').value = String(example.map_mode || 'random');
+      document.getElementById('map-example-region').value = String(example.map_region || 'china');
+      syncMapExampleRegionControl();
+      document.getElementById('map-example-players').value = String(data.players);
+      renderExampleBoard(document.getElementById('map-example-board'), example);
+    }
+
+    function rerenderMapExamplesForResize() {
+      if (!lastMapExampleData || !lastMapExampleData.example) {
+        return;
+      }
+      renderExampleBoard(document.getElementById('map-example-board'), lastMapExampleData.example);
+    }
+
+    function setMapExampleStatus(text) {
+      document.getElementById('map-example-status').textContent = text;
+    }
+
+    function getSelectedMapMode() {
+      return String(document.getElementById('map-example-mode').value || 'random');
+    }
+
+    function getSelectedMapPlayers() {
+      const parsed = Number.parseInt(
+        String(document.getElementById('map-example-players').value || '4'),
+        10,
+      );
+      if (!Number.isFinite(parsed)) {
+        return 4;
+      }
+      return Math.max(2, Math.min(16, parsed));
+    }
+
+    function initMapPlayerOptions() {
+      const select = document.getElementById('map-example-players');
+      let html = '';
+      for (let i = 2; i <= 16; i += 1) {
+        html += `<option value="${i}">${i}</option>`;
+      }
+      select.innerHTML = html;
+      select.value = '4';
+    }
+
+    function isHuaxiaSeasonActive() {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(new Date());
+      const month = Number(parts.find((part) => part.type === 'month').value);
+      const day = Number(parts.find((part) => part.type === 'day').value);
+      return month === 10 && day >= 1 && day <= 7;
+    }
+
+    function refreshHuaxiaOption() {
+      const option = document.querySelector('#map-example-mode option[value="huaxia"]');
+      const active = isHuaxiaSeasonActive();
+      option.hidden = !active;
+      if (!active && getSelectedMapMode() === 'huaxia') {
+        document.getElementById('map-example-mode').value = 'random';
+      }
+      syncMapExampleRegionControl();
+    }
+
+    async function loadMapExample() {
+      refreshHuaxiaOption();
+      setMapExampleStatus('加载中…');
+      const mode = getSelectedMapMode();
+      syncMapExampleRegionControl();
+      const params = new URLSearchParams({
+        map_mode: mode,
+        map_region: String(document.getElementById('map-example-region').value || 'china'),
+        players: String(getSelectedMapPlayers()),
+      });
+      const res = await fetch(`/api/map-examples?${params.toString()}`, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error('load map example failed');
+      }
+      const data = await res.json();
+      renderMapExample(data);
+      setMapExampleStatus('');
+    }
+
+    document.getElementById('map-example-mode').addEventListener('change', syncMapExampleRegionControl);
+
+    document.getElementById('generate-map-example-btn').addEventListener('click', async function () {
+      try {
+        await loadMapExample();
+      } catch {
+        setMapExampleStatus('加载失败，请稍后重试。');
+      }
+    });
+
+    window.addEventListener('resize', function () {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(rerenderMapExamplesForResize, 120);
+    });
+
+    async function main() {
+      initMapPlayerOptions();
+      refreshHuaxiaOption();
+      window.setInterval(refreshHuaxiaOption, 60 * 1000);
+      try {
+        await loadMapExample();
+      } catch {
+        setMapExampleStatus('加载失败，请稍后重试。');
+      }
+    }
+
+    main();
