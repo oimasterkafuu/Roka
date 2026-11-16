@@ -101,7 +101,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "meshoptimizer": "^1.3.0",
-    "playwright": "1.63.0",
+    "playwright": "1.65.0",
     "prettier": "^3.9.10",
     "pug": "^3.0.4",
     "three": "0.187.0",
