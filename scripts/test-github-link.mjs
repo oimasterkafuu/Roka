@@ -1015,6 +1015,15 @@ async function testIntegration() {
   );
   assertCallback(aliceCallback, 'alice', 'linked');
   assertExchangeVerifier(mock, 'alice-code', aliceStart.challenge);
+  const linkedStargazers = await api('/api/stargazers');
+  assert.equal(linkedStargazers.status, 200);
+  const boundSupporter = linkedStargazers.json.items.find((item) => item.login === 'alice-github');
+  const unboundSupporter = linkedStargazers.json.items.find((item) => item.login === 'bob-github');
+  assert.equal(boundSupporter.rokaUsername, 'alice');
+  assert.deepEqual(Object.keys(boundSupporter).sort(), ['avatarUrl', 'login', 'rokaUsername']);
+  assert.equal(Object.hasOwn(unboundSupporter, 'rokaUsername'), false);
+  assert.deepEqual(Object.keys(unboundSupporter).sort(), ['avatarUrl', 'login']);
+  assertNoSensitiveDto(linkedStargazers.json);
   const replay = await api(
     `/api/auth/github/callback?code=alice-code&state=${encodeURIComponent(aliceStart.state)}`,
     {
@@ -1688,7 +1697,15 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
           contentType: 'application/json',
           body: JSON.stringify({
             items: [
-              { login: 'star-supporter', avatarUrl: 'https://avatars.githubusercontent.com/u/902?v=4' },
+              {
+                login: 'star-supporter',
+                avatarUrl: 'https://avatars.githubusercontent.com/u/902?v=4',
+                rokaUsername: 'alice',
+              },
+              {
+                login: 'unbound-supporter',
+                avatarUrl: 'https://avatars.githubusercontent.com/u/903?v=4',
+              },
             ],
             fetchedAt: 1,
           }),
@@ -1700,11 +1717,39 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
         await page.locator('.doc-panel').filter({ hasText: '全站公共用户名组件' }).textContent(),
         /全站公共用户名组件/,
       );
-      await page.locator('#stargazers-grid .stargazer-card').waitFor();
-      const supporterLink = page.locator('#stargazers-grid .contributor-link');
+      await page.locator('#stargazers-grid .stargazer-card').nth(1).waitFor();
+      const supporterCards = page.locator('#stargazers-grid .stargazer-card');
+      assert.equal(await supporterCards.count(), 2);
+      const supporterLink = supporterCards.nth(0).locator('.contributor-link');
       assert.equal(await supporterLink.getAttribute('href'), 'https://github.com/star-supporter');
       assert.match(await supporterLink.getAttribute('rel'), /noopener/);
       assert.equal(await supporterLink.locator('.contributor-name').textContent(), 'star-supporter');
+      const rokaLink = supporterCards.nth(0).locator('.contributor-roka-link');
+      assert.equal(await rokaLink.getAttribute('href'), '/u/alice');
+      assert.equal(await rokaLink.textContent(), 'Roka: alice');
+      const rokaUsername = rokaLink.locator('[data-username="alice"]');
+      assert.equal(await rokaUsername.count(), 1);
+      assert.equal(await rokaUsername.evaluate((element) => element.tagName), 'SPAN');
+      assert.equal(await supporterCards.nth(1).locator('.contributor-roka-link').count(), 0);
+      assert.equal(
+        await supporterCards.nth(1).locator('.contributor-name').textContent(),
+        'unbound-supporter',
+      );
+
+      await page.unroute('**/api/stargazers');
+      await page.route('**/api/stargazers', (route) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            items: [
+              { login: 'star-supporter', avatarUrl: 'https://avatars.githubusercontent.com/u/902?v=4' },
+            ],
+            fetchedAt: 1,
+          }),
+        }),
+      );
+      await page.goto(`${baseUrl}/about`);
+      await page.locator('#stargazers-grid .stargazer-card').waitFor();
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 900 });
         for (const selector of ['#contributors-grid', '#stargazers-grid']) {
