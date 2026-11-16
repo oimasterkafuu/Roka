@@ -28,7 +28,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 关键事实：
 
 - 后端 TypeScript（`src/`）经 `pnpm run build` 编译到 `dist/` 运行；`dist/` 不手工编辑。
-- 前端主体使用原生 JS，`static/` 基本原样下发；`scripts/build-pages.mjs` 在 `pnpm run build` 最前将 `views/` 的 Pug 模板渲染为 `static/*.html`（第一批 replays/ambassadors/about/login，生成 HTML 入库），介绍片由 `scripts/intro/build-intro.mjs` 单独打包至 `static/intro/player.js`；含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
+- 前端主体使用原生 JS，`static/` 基本原样下发；`scripts/build-pages.mjs` 在 `pnpm run build` 最前将 `views/` 的 Pug 模板渲染为 `static/*.html`（replays/ambassadors/about/login/tutorial-text/develop 六页，生成 HTML 入库），介绍片由 `scripts/intro/build-intro.mjs` 单独打包至 `static/intro/player.js`；含 `{{V}}` 占位符的文件（全部 HTML、`main.css`、`main.js`、`sw.js`、`sw-register.js`）由服务端替换为 package.json 版本号后发出（静态资源版本号注入，防浏览器缓存旧版 JS/CSS），协议/格式改动需前后端同步（见文末速查表）。
 - 静态资源发布：`src/server/static-assets.ts` 启动时批量读取 Git 历史，按文件最后修改 SHA 改写 HTML/preload/Worker，CDN 去除整站 v；注入 `static/asset-runtime.js` 处理逐文件 URL、有序脚本、完整性校验与 CDN 回退，并递归下载 CSS/字体/图片为 blob，避免依赖继承父文件 SHA；首屏内联加载提示等待样式，CSS 图超过 4 秒改用同源原生样式（再等最多 8 秒），默认独立 CDN 优先。未知文件单独回源，ROKA_STATIC_COMMIT 可全文件覆盖。动态接口不经 CDN。
 - 玩家身份 = socket.id（sid）；对局协议与格子编码的权威文档是 `static/develop-bot.html`。
 
@@ -59,10 +59,10 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── text-render.ts      # Markdown+LaTeX → 消毒 HTML（公告/动态共用）
 │   ├── rating-color.ts     # Codeforces 风格段位配色
 │   └── runtime-env.ts      # .env 引导与密钥自动生成
-├── views/                  # Pug 统一布局（含共享站点 header）与第一批四页模板（构建生成 static/*.html）
+├── views/                  # Pug 统一布局（含共享站点 header）与六页模板（构建生成 static/*.html）
 ├── static/                 # 前端（主体原生 JS；介绍片独立打包）
 │   ├── index.html          # 首页/大厅（脚本基本内联，另加载 /notify.js）
-│   ├── site-header.js      # 四个 Pug 静态页共享登录态、用户名组件与退出逻辑
+│   ├── site-header.js      # 六个 Pug 静态页共享登录态、用户名组件与退出逻辑
 │   ├── game.html           # 对局/回放共用骨架
 │   ├── main.js + main/     # 对局/回放主控与模块（加载顺序敏感）
 │   ├── notify.js           # 浏览器通知共享模块（首页与对局页共用）
@@ -72,8 +72,8 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── profile.html|.js    # 个人主页（含推广大使徽章与邀请分享）
 │   ├── ambassadors.html|.js # 独立推广大使感谢墙与转化聚合
 │   ├── admin.html|.js      # 后台管理页（用户列表/封禁/权限分配）
-│   ├── tutorial*           # 文字教程 + 互动教程（本地迷你引擎）
-│   ├── develop*.html       # 开发指南 + bot 协议权威文档
+│   ├── tutorial*           # 文字教程（tutorial-text.html 为 Pug 生成物）+ 互动教程（本地迷你引擎）
+│   ├── develop*.html       # 开发指南（develop.html 为 Pug 生成物）+ bot 协议权威文档
 │   ├── login.html / about.html
 │   ├── styles/             # 样式表（按页面切分，main.css 聚合入口）
 │   ├── vendor/katex/       # 本地化 KaTeX（公式渲染）
@@ -95,7 +95,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 **src/server.ts** — HTTP+WebSocket 总装入口，全部路由与 socket 事件在此。
 服务端公开 `GET /invite/:username` 将有效用户名规范化后重定向到 `/login?ref=`；`/invite` 与不存在的用户名返回 404 简洁提示页，均使用认证页面限流。
 `boot()` 依次：`ensureRuntimeEnv()` 补全 `.env` → 四个 Store `ensureReady()` → 全局限流（`resolveRateLimitKey` 处理反代真实 IP）→ 认证钩子（AuthService.isPublicPath 按 HTTP method 白名单放行公开页面与只读 GET API，/games/:game_id 与写接口仍保护；首页 guest socket 仅接收全局失效通知）→ REST 路由（认证/动态/公告/排行榜/在线状态/用户搜索/后台管理/回放/房间/地图示例/贡献者/stargazer/版本）→ `SocketIOServer`。贡献者接口 `GET /api/contributors`（公开、匿名只读）由 `contributors-service.ts` 提供安全字段、缓存与故障回退。版本接口 `GET /api/version`（公开）返回 `{version, commit}`：version 读 package.json，commit 为启动时 `git rev-parse HEAD` 缓存（非 git 环境为空字符串），供首页页脚版本号链接。静态资源版本号注入：`renderAssetTemplate`/`serveAssetTemplate` 把含 `{{V}}` 占位符的静态文本文件（全部 HTML 页面路由与 `/main.css`、`/main.js`、`/sw.js`、`/sw-register.js` 显式路由）在启动时替换为 package.json version 并缓存，带 ETag + `Cache-Control: public, max-age=0`（与原 @fastify/static sendFile 语义一致，If-None-Match 命中回 304）；其余静态文件仍由 @fastify/static 直发并忽略未知 query（`?v=` 兜底安全）。后台管理：`GET /admin` 页面与 `GET /api/admin/users`、`POST /api/admin/ban|unban|set-admin` 接口经 `requireAdmin` 统一校验管理员身份（非管理员 403/重定向），`set-admin` 再校验超管；策略 Bot 接口 `GET /api/admin/bots`、`GET /api/admin/bot-templates`、`POST /api/admin/bots/start|config|stop` 经 `requireSuperAdmin`（requireAdmin + 超管），`bot-templates` 返回 `serverBotManager.listTemplates()` 自动枚举的可托管模板，`start` 接收 `{username, room, template, allowTeam, allowFog, allowMultiLine}` 并校验用户存在且未封禁、房间号长度 1~15、模板可托管，由 `serverBotManager` 在进程内按模板启动（同用户/同房间唯一，冲突 409）；`config` 接收 `{id, allowTeam, allowFog, allowMultiLine}`，三项许可严格要求 JSON 布尔值，未知 bot 返回 404，持久化失败返回 500 且不改变运行状态；登录路由在密码校验后检查封禁状态（403 拒绝），封禁成功即 `clearSession` + `disconnectUserSockets` 踢下线。socket 中间件支持 cookie JWT、`ROKA_BOT_TOKENS` bot 令牌（命中时置 `socket.data.isBot` 并加入心跳豁免集）与托管 bot 内存临时令牌（`serverBotManager.resolveToken` 命中时置 `isBot` + `isServerBot` + `serverBotAllowTeam` + `serverBotAllowFog` + `serverBotAllowMultiLine`，`join_game_room` 传给 `lobbyService.joinLobby`）；所有 bot 连接（isBot）不参与单连接互斥（不顶号、不被顶号、不计入 userSocketIds）；`?home=1` 连接只做全局通知、不参与单连接互斥。统一在线状态由 `presenceService`（presence-service.ts）承担：已认证 HTTP 请求的 onRequest 钩子（`/api/online` 自身除外）与 socket 连接 + `socket.use` 入站事件拦截（对局操作/聊天等，机械保活的 `room_heartbeat` 除外——它只在处理器里经 `hasLobbyMember` 判定确为房内成员时才计入，房外 socket 的心跳不刷新在线）统一经 `recordPresence` 刷新用户活动时间，bot 连接不刷新；离线→在线转换与 30 秒周期 sweep 判出的在线→离线转换经 2 秒节流广播 `home_online`；`GET /api/online` 返回在线人数（在线窗口内去重用户）与「在线」列表（前 8，全员含当前在线者与查询者自己，按最后活动倒序）；后台管理 `GET /api/admin/users` 的 `lastSeenAt` 以 presence 内存表叠加返回。对局指令（`attack`/`build`/`clear_queue`/`pop_queue`/`surrender`）经 `lobbyService.gameUid` 路由到对局实例；`spectate_view`（观战视角切换，仅迷雾对局）经 `lobbyOfSid` 定位对局后调 `game.setSpectatorView`；`join_game_room` **先 `tryRejoin` 尝试断线重连换绑**（身份匹配：bot 与人类同名连接互不接管席位），否则正常进房/观战；`room_heartbeat` 记录房间心跳（准备阶段 600 秒无心跳、或在房停留累计超 12 小时被踢并收到 `room_kick`），且仅房内成员的心跳计入 presence；真人客户端验证由连接作用域内共用的 `markHumanVerified` 完成——`client_verify`（进房前的提前验证，消除开局时序竞态）与 `room_heartbeat` 携带的 sig 经同一 `authService.verifyClientSig(sessionSid, md5(socket.id), sig)` 校验，命中即把 socket.id 加入 `lobbyService.humanVerified`（按真人、普通 AI、托管 Bot 三档排序，晚到验证也重排；房间列表的 `ai` 标记依据 `!humanVerified.has(sid)`，对局排行榜按开局玩家编号快照此判定；未验证 JWT 第三方 bot 自动标记，无需管理员配置名单）；`disconnect` 调 `checkLeave(..., username, isBot)` 走宽限期挂起。回放路由：`/api/getreplay/:id` 发 gzip 缓存 + `X-Replay-Size` 进度头（加载失败删库）；`/api/downloadreplay/:id` 发原始 `.rpl`；两个下载路由经 `handleReplayDownload` 共用每 IP 滚动 60 秒合计 6 次（`lobbyService.hasActiveGames()` 为假时动态放宽到 12 次，切换保留计数）与并发 2 的进程内限额，先检查并发再计尝试，finally 释放，429/503 不计，状态 Map 定时清理且最多 10000 键；`REPLAY_DOWNLOAD_DISABLED=1` 在读取/删库前统一 503 JSON + `Retry-After`。`/api/replays` 与 `/api/profile/:username/replays` 使用独立 `createRateLimit` 检查，避免全局标记跳过列表限流，每 IP 12 次/分钟；`scripts/test-replay-quota.mjs` 经 `boot(false)` + Fastify inject 验证上述限制与普通路由不受影响。`/api/replay-upload` 转码上传文件。`usernameAppearance` 统一返回 `{colorClass,title,admin,banned,starred}`，其中 `starred` 只经 `usernameStarred` 判定；排行榜、在线、用户搜索、个人资料与后台用户列表均直接复用该外观。`GET /api/user-colors?users=a,b,c` 按用户名批量返回同一完整外观（未上榜/未定级降级 rt-unrated，限量 100 个/次），供前端 username.js 组件为回放列表/对局排行榜/聊天等接口原本不带外观的位置补齐；`GET /api/users/search?q=前缀&limit=n` 按前缀返回用户名候选（`userStore.searchUsernames`，空 q 返回前若干），供 @提及补全。动态装饰（`decorateFeedPost`/`decorateFeedComment`）给帖子与评论作者都附同一完整 `authorInfo`，并经 `renderRichTextWithMentions` + `userStore.resolveUsername` 把正文 @提及渲染为用户名链接、返回 `mentions` 列表（不存在的提及降级为普通文本）。
-GitHub 绑定路由 `/api/auth/github/start|callback|unlink|star/refresh` 由 GithubService 处理；个人页按公开 DTO 显示 GitHub 链接并保留本人刷新，真实 Star 状态经统一 `usernameAppearance` 接入 `/api/user-colors`、个人页、排行榜、在线、搜索与动态作者外观，只把首字母染金。`boot()` 在用户 Store 就绪后启动 StargazerService 并注册 onClose 清理。`GET /api/stargazers` 是游客公开只读接口，返回 `{items: [{login, avatarUrl}], fetchedAt}`，未就绪为 `{items: [], fetchedAt: null}`。`POST /postreceive` 按 `x-github-event` 分发：push 保留部署状态机，ping 原样响应，star 的 created/deleted 先原子持久化全量表增量，再经 `UserStore.findUsernameByGithubLogin()` 大小写不敏感找到绑定用户并按数字 ID 调用 `updateGithubStar()`；未绑定仅更新表，其他事件拒绝且不触发部署。
+GitHub 绑定路由 `/api/auth/github/start|callback|unlink|star/refresh` 由 GithubService 处理；个人页按公开 DTO 显示 GitHub 链接并保留本人刷新，真实 Star 状态经统一 `usernameAppearance` 接入 `/api/user-colors`、个人页、排行榜、在线、搜索与动态作者外观，只把首字母染金。`boot()` 在用户 Store 就绪后启动 StargazerService 并注册 onClose 清理。`GET /api/stargazers` 是游客公开只读接口，返回 `{items: [{login, avatarUrl, rokaUsername?}], fetchedAt}`；仅 `findUsernameByGithubLogin()` 找到符合用户名规则的绑定时附加 `rokaUsername`，不改持久化 Star 表，未就绪为 `{items: [], fetchedAt: null}`。`POST /postreceive` 按 `x-github-event` 分发：push 保留部署状态机，ping 原样响应，star 的 created/deleted 先原子持久化全量表增量，再经 `UserStore.findUsernameByGithubLogin()` 大小写不敏感找到绑定用户并按数字 ID 调用 `updateGithubStar()`；未绑定仅更新表，其他事件拒绝且不触发部署。
 
 **src/server/lobby-service.ts** — 房间/对局状态机 + 断线宽限期 + 房间心跳踢出 + rating 结算 + 托管 bot 房长保留。
 推广大使激活复用真实 `endGame → applyGameResult`：`gameHumanPlayers` 按开局快照记录真人参赛者，至少两名真人、60 Tick 且 60 秒才调用 `UserStore.activateReferral`；同局多名受邀新玩家可分别激活，重复终局或后续对局不重复计数，激活不改变既有 Rating/积分结算。邀请点击走 `POST /api/referrals/click`，公开聚合走 `GET /api/ambassadors`，管理员复核走 `GET /api/admin/referrals` 与 `POST /api/admin/referrals/exclude`。
@@ -251,7 +251,7 @@ _一句话：共享类型/协议定义汇总。_
 
 ## 前端源码地图（static/）
 
-原生 JS + jQuery；replays/ambassadors/about/login 四页 HTML 由 `views/*.pug` 构建生成，其余页面仍直接维护 `static/*.html`。页面分两类：
+原生 JS + jQuery；replays/ambassadors/about/login/tutorial-text/develop 六页 HTML 由 `views/*.pug` 构建生成，其余页面仍直接维护 `static/*.html`。页面分两类：
 
 - **内容/文档页**（about、develop、develop-bot、tutorial-text）：共享 `styles/docs.css` 统一样式与 `docs.js`（登录态展示、`data-goto` 导航、KaTeX 公式渲染，含数学内容的页面引入 `vendor/katex/` 的 katex.min.js + auto-render.min.js）；页面特有样式保留内联。
 - **功能页**：index.html / profile.js（REST 交互，socket `home_*` 失效通知驱动刷新）；game.html + main.js + main/\*（对局与回放共用一套骨架，**脚本全局化、加载顺序敏感**）。
@@ -309,7 +309,7 @@ _一句话：后台管理页：用户封禁、管理员权限分配与策略 Bot
 **static/login.html** — 登录/注册表单 + 图形验证码 + 离屏蜜罐字段。
 _一句话：登录/注册表单 + 验证码 + 蜜罐。_
 
-**static/tutorial-text.html** — 文字版规则教程 + 「地图示例」生成器（走 `/api/map-examples`，用与对局相同的 grid_type 编码渲染）。
+**views/tutorial-text.pug → static/tutorial-text.html** — 文字版规则教程 + 「地图示例」生成器（走 `/api/map-examples`，用与对局相同的 grid_type 编码渲染）；HTML 为 Pug 生成物。
 _一句话：文字规则教程 + 示例地图生成器。_
 
 **static/tutorial.html / tutorial.js** — 互动教程 `/tutorial/interactive`：纯本地迷你引擎（复刻正式规则：推兵、队列、连通/孤军、灭主城）+ 15 步引导流程。
@@ -318,10 +318,10 @@ _一句话：互动教程本地迷你引擎 + 15 步引导。_
 **static/develop-bot.html** — **bot 协议权威文档**：握手鉴权、`set_id`、顶号与 10 秒断线宽限、房间/对局事件、grid_type 编码表、操作集。**协议改动必须同步更新此页。**
 _一句话：bot 协议权威文档，改协议需同步。_
 
-**static/develop.html** — 网站贡献指南（与 AGENTS.md/README 呼应，改流程需同步）。
-_一句话：网站贡献指南静态页。_
+**views/develop.pug → static/develop.html** — 网站贡献指南（与 AGENTS.md/README 呼应，改流程需同步）；HTML 为 Pug 生成物。
+_一句话：网站贡献指南 Pug 模板与生成页。_
 
-**static/about.html / about-contributors.js** — 项目说明 + 来源/许可证致谢；许可证致谢之前依次展示 GitHub 贡献者墙和「Star 支持者」墙，另有简短 Star 说明与仓库链接。`about-contributors.js` 并行匿名读取 `/api/contributors` 与 `/api/stargazers`，以 DOM `textContent`/属性 API 渲染懒加载头像、GitHub 个人页链接（target=_blank + noopener）及贡献次数，并再次校验 login 和 URL；可选 `rokaUsername` 仅用于贡献者卡片。两墙共用 `contributors-grid/contributor-card/contributor-link` 样式，桌面与手机均用 `repeat(auto-fit, minmax(..., 1fr))`，单卡或不满一行也拉伸填满；Star 空态为「暂时还没有 Star，欢迎成为第一位支持者」，两墙各自提供加载失败提示，不影响页面其他内容。
+**views/about.pug → static/about.html / about-contributors.js** — 项目说明 + 来源/许可证致谢；许可证致谢之前依次展示 GitHub 贡献者墙和「Star 支持者」墙，另有简短 Star 说明与仓库链接。`about-contributors.js` 并行匿名读取 `/api/contributors` 与 `/api/stargazers`，以 DOM `textContent`/属性 API 渲染懒加载头像、GitHub 个人页链接（target=_blank + noopener）及贡献次数，并再次校验 login 和 URL；可选 `rokaUsername` 用于贡献者与 Star 卡片，经统一用户名组件生成 `/u/<username>` 链接。两墙共用 `contributors-grid/contributor-card/contributor-link` 样式，桌面与手机均用 `repeat(auto-fit, minmax(..., 1fr))`，单卡或不满一行也拉伸填满；Star 空态为「暂时还没有 Star，欢迎成为第一位支持者」，两墙各自提供加载失败提示，不影响页面其他内容。
 _一句话：关于、贡献者/Star 支持者致谢与来源许可证静态页。_
 
 **static/crown.js** — 全局 `crown_html`：主城皇冠内联 SVG（颜色跟随玩家配色）。
@@ -370,13 +370,13 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 - **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 
-- **scripts/build-pages.mjs / test-build-pages.mjs** — 用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出到 `static/*.html`；测试连续两次构建字节一致，并检查四页必要 id、favicon/`{{V}}` 资源、socket 与用户名组件引用，纳入 `pnpm test`。
+- **scripts/build-pages.mjs / test-build-pages.mjs** — 用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出到 `static/*.html`；测试连续两次构建字节一致，并检查六页必要 id、共享/私有 header、favicon/`{{V}}` 资源、socket 与用户名组件引用，纳入 `pnpm test`。
 
 - **scripts/test-referral-ambassador.mjs** — `pnpm run test:referral-ambassador`（纳入 `pnpm test`）：UserStore 覆盖邀请注册、自邀/旧账号/无邀请、重复与并发激活、同局多新玩家、异常撤销、徽章阈值、公开字段和文件重启一致；LobbyService 覆盖真人/60 Tick/60 秒门槛及 Rating/积分不变；真实 dist HTTP 服务（仅验证码为测试桩）覆盖首入口 Cookie、注册/登录清理、匿名聚合、管理员权限与撤销；DOM 桩验证感谢墙安全渲染、登录态邀请链接与复制成功/降级/失败；HTTP 覆盖游客邀请入口的 302、大小写归一与 404 提示。需先 `pnpm run build`。
 
 - **scripts/test-contributors.mjs** — `pnpm run test:contributors`（纳入 `pnpm test`）：真实 Fastify 路由与 DOM 桩聚焦回归——无关联响应仅含四个展示字段、贡献次数排序、Bot/非法用户名/非法主页与头像 URL 过滤、分页、6 小时缓存避免重复请求、临时失败回退旧缓存、无缓存失败 503、请求超时、匿名 GET 与拒绝 POST；数字 ID 匹配才附 Roka 用户名，同 login 不同 ID/非法关联不输出。前端覆盖头像/链接/中文贡献次数/懒加载、兄弟 Roka 链接、失败保留提示与静态 GitHub 链接、恶意字段不进入 DOM 且禁用 innerHTML。需先 `pnpm run build`。
 
-- **scripts/test-github-link.mjs** — `pnpm run test:github-link`（纳入 `pnpm test`）：UserStore、GithubService 与 StargazerService 单测 + 真实 dist 服务进程和独立本地 HTTP GitHub mock；覆盖 OAuth/PKCE/state/CSRF/重放/会话、加密 token 与 DTO 隐私、本地 Star true/false/null 与缓存/过期/撤销，断言无 `/user/starred` 请求；全量表覆盖 Link 分页、Bearer 鉴权、原子持久化、失败保留旧表、短间隔重试和停止清理。真实服务覆盖游客 `/api/stargazers`、匿名排行榜/在线/搜索的 Star 与非 Star 布尔外观、签名 star webhook created/deleted、大小写不敏感绑定同步及未绑定事件；Playwright 检查金色首字母各状态、游客首页排行榜与在线列表首次完整 DTO 渲染（不访问个人详情或二次补色，非 Star 无金色节点）、游客冷启动 feed、真实 `home_feeds` 触发已有动态/评论节点 Star 授予与撤销、profile feed 完整消费 `authorInfo`，以及 Star 卡片安全链接/空态和两墙在 1280/390px 下单卡填满整行。仅 mock，不代表真实线上 OAuth 实测。需先 `pnpm run build`。
+- **scripts/test-github-link.mjs** — `pnpm run test:github-link`（纳入 `pnpm test`）：UserStore、GithubService 与 StargazerService 单测 + 真实 dist 服务进程和独立本地 HTTP GitHub mock；覆盖 OAuth/PKCE/state/CSRF/重放/会话、加密 token 与 DTO 隐私、本地 Star true/false/null 与缓存/过期/撤销，断言无 `/user/starred` 请求；全量表覆盖 Link 分页、Bearer 鉴权、原子持久化、失败保留旧表、短间隔重试和停止清理。真实服务覆盖游客 `/api/stargazers` 的绑定/未绑定 Roka 用户名 DTO、匿名排行榜/在线/搜索的 Star 与非 Star 布尔外观、签名 star webhook created/deleted、大小写不敏感绑定同步及未绑定事件；Playwright 检查金色首字母各状态、游客首页排行榜与在线列表首次完整 DTO 渲染（不访问个人详情或二次补色，非 Star 无金色节点）、游客冷启动 feed、真实 `home_feeds` 触发已有动态/评论节点 Star 授予与撤销、profile feed 完整消费 `authorInfo`，以及 Star 卡片安全链接、Roka 关联/未绑定卡片、空态和两墙在 1280/390px 下单卡填满整行。仅 mock，不代表真实线上 OAuth 实测。需先 `pnpm run build`。
 
 - **.env.example** — 既有 JWT/webhook 密钥占位、`GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET/GITHUB_REDIRECT_URI` OAuth 示例及 `GITHUB_STARGAZERS_TOKEN` 全量表鉴权配置；OAuth 三项缺失时禁用绑定，stargazer token 缺失时匿名同步并提示低限额。base URL 覆盖仅供本地 mock。
 

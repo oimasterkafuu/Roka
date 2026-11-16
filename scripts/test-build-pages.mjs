@@ -12,6 +12,20 @@ const pages = {
   'ambassadors.html': ['app', 'ambassador-grid', 'ambassadors-status', 'ambassador-invite-link'],
   'about.html': ['app', 'contributors-grid', 'contributors-title'],
   'login.html': ['auth-username', 'auth-password', 'auth-captcha', 'captcha-image', 'login-btn'],
+  'tutorial-text.html': [
+    'app',
+    'map-example-mode',
+    'map-example-region-control',
+    'map-example-region',
+    'map-example-players',
+    'generate-map-example-btn',
+    'map-example-status',
+    'map-example-single',
+    'map-example-title',
+    'map-example-meta',
+    'map-example-board',
+  ],
+  'develop.html': ['app'],
 };
 const sharedHeaderIds = ['site-account-name', 'site-login', 'site-logout'];
 
@@ -66,7 +80,7 @@ for (const [name, ids] of Object.entries(pages)) {
   normalizedHeaders.push(header.replace(/ aria-current="page"/g, '').replace(/\s+/g, ''));
 }
 for (const header of normalizedHeaders) {
-  assert.equal(header, normalizedHeaders[0], 'all four pages must render the same shared header structure');
+  assert.equal(header, normalizedHeaders[0], 'all six pages must render the same shared header structure');
 }
 
 const replays = readFileSync(path.join(rootDir, 'static/replays.html'), 'utf8');
@@ -80,6 +94,26 @@ const about = readFileSync(path.join(rootDir, 'static/about.html'), 'utf8');
 assert.ok(!about.includes('id="account-name"'), 'about must not render its former account component');
 assert.ok(!about.includes('id="login-btn"'), 'about must not render its former fixed login link');
 assert.ok(!about.includes('position: fixed; top: 12px; right: 12px'));
+assert.ok(!about.includes('Closed-source（闭源，未发布源码）'));
+
+for (const name of ['tutorial-text.html', 'develop.html']) {
+  const html = readFileSync(path.join(rootDir, 'static', name), 'utf8');
+  assert.ok(html.includes('/styles/docs.css?v={{V}}'), `${name}: shared docs CSS`);
+  assert.ok(html.includes('/docs.js?v={{V}}'), `${name}: shared docs JS`);
+  assert.ok(!html.includes('id="account-name"'), `${name}: former private account component`);
+  assert.ok(!html.includes('id="login-btn"'), `${name}: former private login link`);
+  assert.ok(!html.includes('返回首页'), `${name}: former private home button`);
+  assert.ok(!html.includes('position: fixed; top: 12px; left: 12px'));
+  assert.ok(!html.includes('position: fixed; top: 12px; right: 12px'));
+}
+const tutorial = readFileSync(path.join(rootDir, 'static/tutorial-text.html'), 'utf8');
+for (const asset of [
+  '/vendor/katex/katex.min.css?v={{V}}',
+  '/vendor/katex/katex.min.js?v={{V}}',
+  '/vendor/katex/auto-render.min.js?v={{V}}',
+]) {
+  assert.ok(tutorial.includes(asset), `tutorial-text.html: ${asset}`);
+}
 
 async function runAccountState(authenticated) {
   const calls = [];
@@ -154,5 +188,5 @@ assert.equal(user.calls[1].url, '/api/auth/logout');
 assert.equal(user.calls[1].options.method, 'POST');
 assert.equal(user.location.href, '/login');
 
-console.log('PASS build-pages: shared header on four pages, no private headers, versioned assets, idempotent output');
+console.log('PASS build-pages: shared header on six pages, no private headers, versioned assets, idempotent output');
 console.log('PASS site-header account: guest login, component-rendered user with color refresh, POST logout');

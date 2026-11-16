@@ -11,6 +11,10 @@
       content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
     />
     <link rel="stylesheet" href="/main.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/site-header.css?v={{V}}" />
+    <script src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"></script>
+    <script src="/username.js?v={{V}}"></script>
+    <script defer src="/site-header.js?v={{V}}"></script>
     <link rel="stylesheet" href="/styles/docs.css?v={{V}}" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css?v={{V}}" />
     <title>Roka - 文字版教程</title>
@@ -145,24 +149,34 @@
       }
     </style>
   </head>
-
   <body style="overflow: auto; height: auto">
-    <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
-      <button data-goto="/" class="small">返回首页</button>
-    </div>
-    <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
-      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span
-      ><a id="login-btn" href="/login">登录</a>
-    </div>
-
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-brand" href="/" aria-label="Roka 首页"
+          ><img
+            class="brand-icon"
+            src="/icons/icon-48.png?v={{V}}"
+            srcset="/icons/icon-48.png?v={{V}} 1x, /icons/icon-192.png?v={{V}} 2x"
+            alt="Roka 图标"
+          /><span class="brand-name">Roka</span></a
+        >
+        <nav class="site-nav" aria-label="站点导航">
+          <a class="site-nav-link" href="/">首页</a><a class="site-nav-link" href="/replays">回放</a
+          ><a class="site-nav-link" href="/about">关于</a>
+        </nav>
+        <div class="site-account" aria-label="账号">
+          <span class="site-account-name" id="site-account-name" hidden></span
+          ><a class="btn btn-primary btn-sm" id="site-login" href="/login">登录</a
+          ><button class="btn btn-ghost btn-sm" id="site-logout" type="button" hidden>退出登录</button>
+        </div>
+      </div>
+    </header>
     <div id="app">
       <h1 class="doc-title">Roka 文字版教程</h1>
       <p class="doc-subtitle">本页完整介绍 Roka 的全部规则。建议先通读本页，再进入互动教程上手实操。</p>
-
       <div class="cta-row">
-        <button data-goto="/tutorial/interactive" class="inverted">进入互动教程 →</button>
+        <button class="inverted" data-goto="/tutorial/interactive">进入互动教程 →</button>
       </div>
-
       <section class="doc-panel">
         <h2>目标与胜负</h2>
         <ul>
@@ -174,7 +188,6 @@
           </li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>地图与地形</h2>
         <ul class="terrain-list">
@@ -209,7 +222,6 @@
         </ul>
         <div class="tips">默认不开启迷雾远征，开启前全图对所有玩家开放可见。</div>
       </section>
-
       <section class="doc-panel">
         <h2>地图示例</h2>
         <p>如果觉得地图的名字晦涩难懂，可以生成一张示例地图参考。</p>
@@ -219,18 +231,15 @@
         </p>
         <div class="map-example-toolbar">
           <label class="map-example-control"
-            >地图类型：
-            <select id="map-example-mode">
+            >地图类型：<select id="map-example-mode">
               <option value="random">标准地图</option>
               <option value="maze">峡谷回廊</option>
               <option value="archipelago">群岛要塞</option>
               <option value="mediterranean">地中海</option>
               <option value="huaxia">华夏系列</option>
-            </select>
-          </label>
-          <label class="map-example-control" id="map-example-region-control" style="display: none"
-            >地区：
-            <select id="map-example-region">
+            </select></label
+          ><label class="map-example-control" id="map-example-region-control" style="display: none"
+            >地区：<select id="map-example-region">
               <option value="china">中国</option>
               <option value="qin">秦</option>
               <option value="han">汉</option>
@@ -240,31 +249,28 @@
               <option value="yuan">元</option>
               <option value="ming">明</option>
               <option value="taiwan">台湾省</option>
-            </select>
-          </label>
-          <label class="map-example-control"
-            >人数：
-            <select id="map-example-players"></select>
-          </label>
-          <button id="generate-map-example-btn" class="small">生成地图</button>
-          <span id="map-example-status" class="map-example-status"></span>
+            </select></label
+          ><label class="map-example-control">人数：<select id="map-example-players"></select></label
+          ><button class="small" id="generate-map-example-btn">生成地图</button
+          ><span class="map-example-status" id="map-example-status"></span>
         </div>
-        <article id="map-example-single" class="map-example-single">
+        <article class="map-example-single" id="map-example-single">
           <h4 id="map-example-title">地图示例</h4>
-          <div id="map-example-meta" class="map-example-meta"></div>
+          <div class="map-example-meta" id="map-example-meta"></div>
           <div class="map-example-board-wrap">
-            <div id="map-example-board" class="map-example-board"></div>
+            <div class="map-example-board" id="map-example-board"></div>
           </div>
         </article>
       </section>
-
       <section class="doc-panel">
         <h2>回合与兵力生产</h2>
         <ul>
           <li>
-            1 Tick = 0.5 秒（1x 速度）。顶部回合以“半回合”显示：<span class="kbd">回合 1</span> →
-            <span class="kbd">回合 1.</span> →
-            <span class="kbd">回合 2</span>，无点与有点是同一整回合的两个阶段。
+            1 Tick = 0.5 秒（1x 速度）。顶部回合以“半回合”显示：<span class="kbd">回合 1</span> →&#32;<span
+              class="kbd"
+              >回合 1.</span
+            >
+            →&#32;<span class="kbd">回合 2</span>，无点与有点是同一整回合的两个阶段。
           </li>
           <li>主城每 Tick +1 兵力。</li>
           <li>正常状态的普通地块与指挥所每 50 Tick +1 兵力（指挥所不享受爆发期加成）。</li>
@@ -276,7 +282,6 @@
           <li>孤军、沼泽、中立格不生产兵力；兵力无上限。</li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>迷雾远征（可选）</h2>
         <ul>
@@ -299,7 +304,6 @@
           </li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>多线争锋（可选）</h2>
         <ul>
@@ -316,12 +320,14 @@
           </li>
           <li>
             界面与普通对局完全一致：没有战线切换按键，所有待发指令的箭头一视同仁；地图上可能同时
-            存在多组待发箭头，一次结算的移动数也可能更多。<span class="kbd">Q</span> 清空整个操作队列，
-            <span class="kbd">E</span> 撤回<b>全局最后一条</b>指令（按入队时间序）。
+            存在多组待发箭头，一次结算的移动数也可能更多。<span class="kbd">Q</span> 清空整个操作队列，<span
+              class="kbd"
+              >E</span
+            >
+            撤回<b>全局最后一条</b>指令（按入队时间序）。
           </li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>推兵与队列</h2>
         <h3>选中与视角</h3>
@@ -355,15 +361,16 @@
         <h3>其他</h3>
         <ul>
           <li>
-            <span class="kbd">Q</span> / <span class="kbd">E</span>：清空操作队列 / 撤回最后一步（不分模式）。
+            <span class="kbd">Q</span> /&#32;<span class="kbd">E</span>：清空操作队列 /
+            撤回最后一步（不分模式）。
           </li>
           <li>
-            <span class="kbd">Enter</span>：公屏聊天；<span class="kbd">T</span>：队伍聊天；
-            <span class="kbd">Esc</span>：打开/关闭投降确认。
+            <span class="kbd">Enter</span>：公屏聊天；<span class="kbd">T</span>：队伍聊天；<span class="kbd"
+              >Esc</span
+            >：打开/关闭投降确认。
           </li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>攻击与占领</h2>
         <ul>
@@ -373,15 +380,14 @@
             0），归属与建筑不变。
           </li>
           <li>
-            占领有损耗：占领成功后，目标格新兵力 =
-            <b>攻击兵力 − 守军兵力</b>；被占领的指挥所/主城会被摧毁（降级为普通地块）。
+            占领有损耗：占领成功后，目标格新兵力 =&#32;<b>攻击兵力 − 守军兵力</b
+            >；被占领的指挥所/主城会被摧毁（降级为普通地块）。
           </li>
           <li>
             向己方格推兵是调兵：兵力直接叠加。向队友格推兵也会累兵；若目标是存活队友的主城，且对方当时至少有两座主城，该主城会自动转属出兵者；最后一座主城只累兵、不转属。
           </li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>连通与孤军</h2>
         <ul>
@@ -389,7 +395,7 @@
             己方格经由连续己方格（普通地块或己方沼泽）四方向连通到己方任意主城/指挥所，即为正常领土；组队时只把队内<b>存活成员</b>的格子和锚点纳入连通计算。只要队伍仍有存活成员拥有锚点，全队连通领土都可操控；否则成为<b>孤军</b>（闪烁提示）。
           </li>
           <li>断链瞬间兵力立即减半：\(n' = \lfloor n / 2 \rfloor\)（1 兵保持为 1）。</li>
-          <li>断链后前 <b>10 Tick</b>为宽限期：孤军快速闪烁，兵力暂不衰减。</li>
+          <li>断链后前&#32;<b>10 Tick</b>为宽限期：孤军快速闪烁，兵力暂不衰减。</li>
           <li>
             第 11 Tick 起进入衰减期，每 2 Tick： \[ n \leftarrow n - \max\left(1, \lceil 0.05\, n
             \rceil\right) \] 兵力归零后变为中立格。
@@ -408,7 +414,6 @@
           立即放弃所有控制权：若队内仍有其他存活成员，全部领土（含兵力）转移给编号最小的存活队友，主城降级为指挥所；否则主城与所有指挥所被拆除为普通空地，领土兵力减半后沦为孤军，进入自然衰减。
         </div>
       </section>
-
       <section class="doc-panel">
         <h2>快捷键</h2>
         <ul>
@@ -431,7 +436,6 @@
           </li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>实战建议与状态</h2>
         <ul>
@@ -450,12 +454,10 @@
           </li>
         </ul>
       </section>
-
       <div class="cta-row">
-        <button data-goto="/tutorial/interactive" class="inverted">进入互动教程 →</button>
+        <button class="inverted" data-goto="/tutorial/interactive">进入互动教程 →</button>
       </div>
     </div>
-
     <script src="/vendor/katex/katex.min.js?v={{V}}"></script>
     <script src="/vendor/katex/auto-render.min.js?v={{V}}"></script>
     <script src="/docs.js?v={{V}}"></script>
