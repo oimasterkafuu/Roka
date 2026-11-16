@@ -1,4 +1,5 @@
 block vars
+- var renderSiteHeader = typeof withSiteHeader === 'undefined' || withSiteHeader
 doctype html
 html(lang=htmlLang)
   head
@@ -12,10 +13,12 @@ html(lang=htmlLang)
       content='width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0'
     )
     link(rel='stylesheet', href='/main.css?v={{V}}')
-    link(rel='stylesheet', href='/styles/site-header.css?v={{V}}')
+    if renderSiteHeader
+      link(rel='stylesheet', href='/styles/site-header.css?v={{V}}')
     script(src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}')
     script(src='/username.js?v={{V}}')
-    script(defer, src='/site-header.js?v={{V}}')
+    if renderSiteHeader
+      script(defer, src='/site-header.js?v={{V}}')
     block head
   body(class=bodyClass, style=bodyStyle)
     block navigation

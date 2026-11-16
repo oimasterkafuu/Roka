@@ -20,20 +20,20 @@
     <link rel="stylesheet" href="/styles/admin.css?v={{V}}" />
     <title>Roka - 后台管理</title>
   </head>
-
   <body class="admin">
     <div class="admin-wrap">
       <header class="admin-topbar">
-        <button id="back-home-btn" type="button" class="btn btn-ghost btn-sm">← 返回首页</button>
-        <a id="account-name" href="#"></a>
+        <button class="btn btn-ghost btn-sm" id="back-home-btn" type="button">← 返回首页</button
+        ><a id="account-name" href="#"></a>
       </header>
-
-      <!-- 用户管理 -->
+      <!--用户管理-->
       <section class="card">
         <h2 class="card-title">用户管理</h2>
         <div class="user-toolbar">
-          <input type="text" id="user-search" placeholder="按用户名搜索" maxlength="20" />
-          <span id="users-total" class="users-total"></span>
+          <input id="user-search" type="text" placeholder="按用户名搜索" maxlength="20" /><span
+            class="users-total"
+            id="users-total"
+          ></span>
         </div>
         <table class="mini-table">
           <thead>
@@ -49,32 +49,32 @@
           </thead>
           <tbody id="users-body"></tbody>
         </table>
-        <p id="users-empty" class="panel-empty" style="display: none">暂无用户。</p>
-        <div id="users-pagination" class="users-pagination" style="display: none">
-          <button id="users-prev" type="button" class="btn btn-ghost btn-sm">上一页</button>
-          <span id="users-page-info" class="users-page-info"></span>
-          <button id="users-next" type="button" class="btn btn-ghost btn-sm">下一页</button>
+        <p class="panel-empty" id="users-empty" style="display: none">暂无用户。</p>
+        <div class="users-pagination" id="users-pagination" style="display: none">
+          <button class="btn btn-ghost btn-sm" id="users-prev" type="button">上一页</button
+          ><span class="users-page-info" id="users-page-info"></span
+          ><button class="btn btn-ghost btn-sm" id="users-next" type="button">下一页</button>
         </div>
       </section>
-
       <section class="card chat-audit" id="chat-audit" aria-labelledby="chat-audit-title">
         <h2 class="card-title" id="chat-audit-title">聊天审计与广告复核</h2>
         <p class="chat-audit-hint">
-          仅公开聊天，网址仅保留来源域名；最多保留 7 天、2000 条、2 MiB。候选不代表确认广告：进房 30
+          &#32;仅公开聊天，网址仅保留来源域名；最多保留 7 天、2000 条、2 MiB。候选不代表确认广告：进房 30
           秒内发网址并在发链后 15 秒内离开，仅限聊 10
-          分钟。请结合上下文复核，误判可解除；需封禁时使用上方用户管理。
+          分钟。请结合上下文复核，误判可解除；需封禁时使用上方用户管理。&#32;
         </p>
         <div class="chat-audit-toolbar">
-          <input id="chat-user" placeholder="精确用户名" aria-label="精确用户名" maxlength="20" />
-          <input id="chat-room" placeholder="精确房间号" aria-label="精确房间号" maxlength="15" />
-          <label class="chat-audit-candidates"
-            ><input id="chat-candidates" type="checkbox" checked />仅候选</label
-          >
-          <button id="chat-release-user" type="button" class="btn btn-secondary btn-sm">
-            解除所填用户限聊
-          </button>
-          <button id="chat-search" type="button" class="btn btn-secondary btn-sm">查询</button>
-          <button id="chat-older" type="button" class="btn btn-ghost btn-sm">更早记录</button>
+          <input id="chat-user" placeholder="精确用户名" aria-label="精确用户名" maxlength="20" /><input
+            id="chat-room"
+            placeholder="精确房间号"
+            aria-label="精确房间号"
+            maxlength="15"
+          /><label class="chat-audit-candidates"
+            ><input id="chat-candidates" type="checkbox" checked="checked" />仅候选</label
+          ><button class="btn btn-secondary btn-sm" id="chat-release-user" type="button">
+            &#32;解除所填用户限聊&#32;</button
+          ><button class="btn btn-secondary btn-sm" id="chat-search" type="button">查询</button
+          ><button class="btn btn-ghost btn-sm" id="chat-older" type="button">更早记录</button>
         </div>
         <p id="chat-error" role="status"></p>
         <table class="mini-table chat-audit-table">
@@ -89,29 +89,31 @@
           <tbody id="chat-body"></tbody>
         </table>
       </section>
-
-      <!-- 策略 Bot（仅超级管理员） -->
+      <!--策略 Bot（仅超级管理员）-->
       <section class="card" id="bots-card" style="display: none">
         <h2 class="card-title">策略 Bot</h2>
         <p class="bot-hint">
-          在服务器进程内运行所选模板的策略
+          &#32;在服务器进程内运行所选模板的策略
           Bot：以指定用户身份自动登录（跳过验证码）进入房间并自动准备，对局结束后自动重新准备。
           支持多个模板（由服务端自动枚举 bot-template/ 目录）；同一用户名最多运行一个
           Bot，同一房间也只能运行一个 Bot。 Bot 进房不会成为房主，房主保留给后续进房的人类用户或第三方
           Bot；不允许组队的 Bot 会强制关闭房间组队，允许组队的 Bot 则由房主决定是否开启组队。
-          运行中可直接编辑组队、迷雾与多线许可，无需重启 Bot；改为不允许会立即关闭对应房间开关。
+          运行中可直接编辑组队、迷雾与多线许可，无需重启 Bot；改为不允许会立即关闭对应房间开关。&#32;
         </p>
         <div class="bot-form">
-          <input type="text" id="bot-username" placeholder="Bot 使用的用户名" maxlength="20" />
-          <input type="text" id="bot-room" placeholder="房间号" maxlength="15" />
-          <select id="bot-template"></select>
-          <label><input type="checkbox" id="bot-allow-team" /> 允许组队</label>
-          <label><input type="checkbox" id="bot-allow-fog" /> 允许迷雾远征</label>
-          <label><input type="checkbox" id="bot-allow-multi-line" /> 允许多线争锋</label>
-          <button id="bot-start-btn" type="button" class="btn btn-secondary btn-sm">启动</button>
-          <button id="bots-refresh-btn" type="button" class="btn btn-ghost btn-sm">刷新</button>
+          <input id="bot-username" type="text" placeholder="Bot 使用的用户名" maxlength="20" /><input
+            id="bot-room"
+            type="text"
+            placeholder="房间号"
+            maxlength="15"
+          /><select id="bot-template"></select
+          ><label><input id="bot-allow-team" type="checkbox" />&#32;允许组队</label
+          ><label><input id="bot-allow-fog" type="checkbox" />&#32;允许迷雾远征</label
+          ><label><input id="bot-allow-multi-line" type="checkbox" />&#32;允许多线争锋</label
+          ><button class="btn btn-secondary btn-sm" id="bot-start-btn" type="button">启动</button
+          ><button class="btn btn-ghost btn-sm" id="bots-refresh-btn" type="button">刷新</button>
         </div>
-        <p id="bot-error" class="dialog-error" style="display: none"></p>
+        <p class="dialog-error" id="bot-error" style="display: none"></p>
         <table class="mini-table" id="bots-table">
           <thead>
             <tr>
@@ -128,17 +130,16 @@
           </thead>
           <tbody id="bots-body"></tbody>
         </table>
-        <p id="bots-empty" class="panel-empty" style="display: none">暂无运行中的 Bot。</p>
+        <p class="panel-empty" id="bots-empty" style="display: none">暂无运行中的 Bot。</p>
       </section>
     </div>
-
-    <!-- 封禁对话框 -->
-    <div id="ban-dialog-mask" class="dialog-mask" style="display: none">
+    <!--封禁对话框-->
+    <div class="dialog-mask" id="ban-dialog-mask" style="display: none">
       <div class="dialog">
-        <h3 class="dialog-title">封禁用户 <span id="ban-target"></span></h3>
+        <h3 class="dialog-title">封禁用户&#32;<span id="ban-target"></span></h3>
         <div class="dialog-field">
-          <label for="ban-duration">封禁时长</label>
-          <select id="ban-duration">
+          <label for="ban-duration">封禁时长</label
+          ><select id="ban-duration">
             <option value="3600000">1 小时</option>
             <option value="86400000">1 天</option>
             <option value="604800000">7 天</option>
@@ -147,26 +148,25 @@
           </select>
         </div>
         <div class="dialog-field" id="ban-custom-field" style="display: none">
-          <label for="ban-custom-hours">自定义时长（小时）</label>
-          <input type="number" id="ban-custom-hours" min="1" step="1" value="24" />
+          <label for="ban-custom-hours">自定义时长（小时）</label
+          ><input id="ban-custom-hours" type="number" min="1" step="1" value="24" />
         </div>
         <div class="dialog-field">
-          <label for="ban-reason">封禁理由</label>
-          <select id="ban-reason">
+          <label for="ban-reason">封禁理由</label
+          ><select id="ban-reason">
             <option value="管理员手动封禁">管理员手动封禁</option>
             <option value="消极游戏">消极游戏</option>
             <option value="连续挂机">连续挂机</option>
             <option value="发布不当言论">发布不当言论</option>
           </select>
         </div>
-        <p id="ban-error" class="dialog-error" style="display: none"></p>
+        <p class="dialog-error" id="ban-error" style="display: none"></p>
         <div class="dialog-actions">
-          <button id="ban-cancel" type="button" class="btn btn-ghost btn-sm">取消</button>
-          <button id="ban-confirm" type="button" class="btn btn-danger btn-sm">确认封禁</button>
+          <button class="btn btn-ghost btn-sm" id="ban-cancel" type="button">取消</button
+          ><button class="btn btn-danger btn-sm" id="ban-confirm" type="button">确认封禁</button>
         </div>
       </div>
     </div>
-
     <script src="/username.js?v={{V}}"></script>
     <script src="/admin.js?v={{V}}"></script>
   </body>

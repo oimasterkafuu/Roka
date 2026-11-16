@@ -3,7 +3,7 @@ extends layout.pug
 block vars
   - var htmlLang = 'zh-CN'
   - var bodyClass = 'home'
-  - var currentPage = 'replays'
+  - var withSiteHeader = false
 
 block head
   title 回放 - Roka
@@ -54,9 +54,13 @@ block head
   script(src='/vendor/socket.io/socket.io-4.0.1.js?v={{V}}')
   script(defer, src='/replays.js?v={{V}}')
 
+block navigation
+
 block content
   main#app
-    h1.doc-title 回放
+    header.home-topbar
+      h1.doc-title 回放
+      a(href='/') 返回首页
     section.doc-panel
       h2 查询回放
       form#replay-query.replay-query

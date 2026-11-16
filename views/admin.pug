@@ -1,0 +1,139 @@
+html
+  head
+    meta(charset='utf-8')
+    link(rel='icon', href='/icons/favicon.ico?v={{V}}', sizes='any')
+    link(rel='icon', type='image/png', sizes='32x32', href='/icons/icon-32.png?v={{V}}')
+    link(rel='icon', type='image/png', sizes='192x192', href='/icons/icon-192.png?v={{V}}')
+    link(rel='apple-touch-icon', href='/icons/icon-180.png?v={{V}}')
+    meta(
+      name='viewport',
+      content='width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0'
+    )
+    script(
+      src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}',
+      integrity='sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK',
+      crossorigin='anonymous',
+      referrerpolicy='no-referrer'
+    )
+    link(rel='stylesheet', href='/main.css?v={{V}}')
+    link(rel='stylesheet', href='/styles/rating.css?v={{V}}')
+    link(rel='stylesheet', href='/styles/admin.css?v={{V}}')
+    title Roka - 后台管理
+  body.admin
+    div.admin-wrap
+      header.admin-topbar
+        button#back-home-btn.btn.btn-ghost.btn-sm(type='button') ← 返回首页
+        a#account-name(href='#')
+      //
+         用户管理
+      section.card
+        h2.card-title 用户管理
+        div.user-toolbar
+          input#user-search(type='text', placeholder='按用户名搜索', maxlength='20')
+          span#users-total.users-total
+        table.mini-table
+          thead
+            tr
+              th 用户名
+              th Rating
+              th 注册时间
+              th 最后在线
+              th 角色
+              th 封禁详情
+              th 操作
+          tbody#users-body
+        p#users-empty.panel-empty(style='display: none') 暂无用户。
+        div#users-pagination.users-pagination(style='display: none')
+          button#users-prev.btn.btn-ghost.btn-sm(type='button') 上一页
+          span#users-page-info.users-page-info
+          button#users-next.btn.btn-ghost.btn-sm(type='button') 下一页
+      section#chat-audit.card.chat-audit(aria-labelledby='chat-audit-title')
+        h2#chat-audit-title.card-title 聊天审计与广告复核
+        p.chat-audit-hint
+          | &#32;仅公开聊天，网址仅保留来源域名；最多保留 7 天、2000 条、2 MiB。候选不代表确认广告：进房 30 秒内发网址并在发链后 15 秒内离开，仅限聊 10 分钟。请结合上下文复核，误判可解除；需封禁时使用上方用户管理。&#32;
+        div.chat-audit-toolbar
+          input#chat-user(placeholder='精确用户名', aria-label='精确用户名', maxlength='20')
+          input#chat-room(placeholder='精确房间号', aria-label='精确房间号', maxlength='15')
+          label.chat-audit-candidates
+            input#chat-candidates(type='checkbox', checked)
+            | 仅候选
+          button#chat-release-user.btn.btn-secondary.btn-sm(type='button')
+            | &#32;解除所填用户限聊&#32;
+          button#chat-search.btn.btn-secondary.btn-sm(type='button') 查询
+          button#chat-older.btn.btn-ghost.btn-sm(type='button') 更早记录
+        p#chat-error(role='status')
+        table.mini-table.chat-audit-table
+          thead
+            tr
+              th(scope='col') 时间 / 房间 / 对局
+              th(scope='col') 用户
+              th(scope='col') 公开聊天
+              th(scope='col') 复核
+          tbody#chat-body
+      //
+         策略 Bot（仅超级管理员）
+      section#bots-card.card(style='display: none')
+        h2.card-title 策略 Bot
+        p.bot-hint
+          | &#32;在服务器进程内运行所选模板的策略 Bot：以指定用户身份自动登录（跳过验证码）进入房间并自动准备，对局结束后自动重新准备。 支持多个模板（由服务端自动枚举 bot-template/ 目录）；同一用户名最多运行一个 Bot，同一房间也只能运行一个 Bot。 Bot 进房不会成为房主，房主保留给后续进房的人类用户或第三方 Bot；不允许组队的 Bot 会强制关闭房间组队，允许组队的 Bot 则由房主决定是否开启组队。 运行中可直接编辑组队、迷雾与多线许可，无需重启 Bot；改为不允许会立即关闭对应房间开关。&#32;
+        div.bot-form
+          input#bot-username(type='text', placeholder='Bot 使用的用户名', maxlength='20')
+          input#bot-room(type='text', placeholder='房间号', maxlength='15')
+          select#bot-template
+          label
+            input#bot-allow-team(type='checkbox')
+            | &#32;允许组队
+          label
+            input#bot-allow-fog(type='checkbox')
+            | &#32;允许迷雾远征
+          label
+            input#bot-allow-multi-line(type='checkbox')
+            | &#32;允许多线争锋
+          button#bot-start-btn.btn.btn-secondary.btn-sm(type='button') 启动
+          button#bots-refresh-btn.btn.btn-ghost.btn-sm(type='button') 刷新
+        p#bot-error.dialog-error(style='display: none')
+        table#bots-table.mini-table
+          thead
+            tr
+              th 用户名
+              th 房间
+              th 模板
+              th 组队
+              th 迷雾远征
+              th 多线争锋
+              th 启动时间
+              th 连接状态
+              th 操作
+          tbody#bots-body
+        p#bots-empty.panel-empty(style='display: none') 暂无运行中的 Bot。
+    //
+       封禁对话框
+    div#ban-dialog-mask.dialog-mask(style='display: none')
+      div.dialog
+        h3.dialog-title
+          | 封禁用户&#32;
+          span#ban-target
+        div.dialog-field
+          label(for='ban-duration') 封禁时长
+          select#ban-duration
+            option(value='3600000') 1 小时
+            option(value='86400000') 1 天
+            option(value='604800000') 7 天
+            option(value='custom') 自定义
+            option(value='permanent') 永久
+        div#ban-custom-field.dialog-field(style='display: none')
+          label(for='ban-custom-hours') 自定义时长（小时）
+          input#ban-custom-hours(type='number', min='1', step='1', value='24')
+        div.dialog-field
+          label(for='ban-reason') 封禁理由
+          select#ban-reason
+            option(value='管理员手动封禁') 管理员手动封禁
+            option(value='消极游戏') 消极游戏
+            option(value='连续挂机') 连续挂机
+            option(value='发布不当言论') 发布不当言论
+        p#ban-error.dialog-error(style='display: none')
+        div.dialog-actions
+          button#ban-cancel.btn.btn-ghost.btn-sm(type='button') 取消
+          button#ban-confirm.btn.btn-danger.btn-sm(type='button') 确认封禁
+    script(src='/username.js?v={{V}}')
+    script(src='/admin.js?v={{V}}')

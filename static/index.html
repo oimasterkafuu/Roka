@@ -22,7 +22,7 @@
       referrerpolicy="no-referrer"
     ></script>
     <script src="/notify.js?v={{V}}"></script>
-    <script defer src="/intro.js?v={{V}}" data-version="{{V}}"></script>
+    <script defer="" src="/intro.js?v={{V}}" data-version="{{V}}"></script>
     <script src="/sw-register.js?v={{V}}"></script>
     <script src="/username.js?v={{V}}"></script>
     <script src="/mention-autocomplete.js?v={{V}}"></script>
@@ -33,7 +33,6 @@
     <link rel="stylesheet" href="/styles/intro.css?v={{V}}" />
     <title>Roka</title>
   </head>
-
   <body class="home">
     <div class="home-wrap">
       <header class="home-topbar">
@@ -43,28 +42,27 @@
             src="/icons/icon-48.png?v={{V}}"
             srcset="/icons/icon-48.png?v={{V}} 1x, /icons/icon-192.png?v={{V}} 2x"
             alt="Roka 图标"
-          />
-          <span class="brand-name">Roka</span>
+          /><span class="brand-name">Roka</span>
         </div>
         <div class="account">
-          <span id="online-count" class="online-count" title="当前在线用户数（不含 bot）"></span>
-          <a id="account-name" href="#"></a>
-          <a id="login-btn" href="/login" class="btn btn-primary btn-sm" style="display: none">登录</a>
-          <a id="admin-entry" href="/admin" class="btn btn-ghost btn-sm" style="display: none"> 后台管理 </a>
-          <button id="logout-btn" type="button" class="btn btn-ghost btn-sm" style="display: none">
-            退出登录
+          <span class="online-count" id="online-count" title="当前在线用户数（不含 bot）"></span
+          ><a id="account-name" href="#"></a
+          ><a class="btn btn-primary btn-sm" id="login-btn" href="/login" style="display: none">登录</a
+          ><a class="btn btn-ghost btn-sm" id="admin-entry" href="/admin" style="display: none"
+            >&#32;后台管理&#32;</a
+          ><button class="btn btn-ghost btn-sm" id="logout-btn" type="button" style="display: none">
+            &#32;退出登录&#32;
           </button>
         </div>
       </header>
-
       <div class="home-grid">
-        <!-- 左栏 -->
+        <!--左栏-->
         <div class="home-col">
           <section class="card" id="me-card">
             <h2 class="card-title">个人信息</h2>
             <div>
-              <a id="me-name" class="profile-card-name" href="#"></a>
-              <span id="me-title" class="profile-card-title"></span>
+              <a class="profile-card-name" id="me-name" href="#"></a
+              ><span class="profile-card-title" id="me-title"></span>
             </div>
             <div class="profile-stats">
               <div class="profile-stat">
@@ -80,15 +78,14 @@
                 <div class="profile-stat-label">注册天数</div>
               </div>
             </div>
-            <a id="me-profile-link" class="profile-card-link" href="#">查看我的主页 →</a>
-            <p id="me-guest" class="panel-empty" style="display: none">登录后查看个人积分、等级与排名。</p>
+            <a class="profile-card-link" id="me-profile-link" href="#">查看我的主页 →</a>
+            <p class="panel-empty" id="me-guest" style="display: none">登录后查看个人积分、等级与排名。</p>
           </section>
-
           <section class="card">
             <h2 class="card-title">房间</h2>
             <div class="room-row">
-              <input type="text" id="room-input" placeholder="请输入房间号" value="" />
-              <button id="enter-room" type="button" class="btn btn-primary btn-sm">进入</button>
+              <input id="room-input" type="text" placeholder="请输入房间号" value="" />
+              <button class="btn btn-primary btn-sm" id="enter-room" type="button">进入</button>
             </div>
             <table class="mini-table">
               <thead>
@@ -101,9 +98,8 @@
               </thead>
               <tbody id="rooms-body"></tbody>
             </table>
-            <p id="rooms-empty" class="panel-empty" style="display: none">当前没有可加入的房间。</p>
+            <p class="panel-empty" id="rooms-empty" style="display: none">当前没有可加入的房间。</p>
           </section>
-
           <section class="card">
             <h2 class="card-title">回放</h2>
             <table class="mini-table">
@@ -116,108 +112,99 @@
               </thead>
               <tbody id="replays-body"></tbody>
             </table>
-            <p id="replays-empty" class="panel-empty" style="display: none">暂无回放。</p>
+            <p class="panel-empty" id="replays-empty" style="display: none">暂无回放。</p>
             <div class="replay-upload">
               <input
-                type="file"
                 id="replay-upload-file"
+                type="file"
                 accept=".rpl,application/octet-stream"
                 style="display: none"
-              />
-              <button id="replay-upload-pick" type="button" class="btn btn-secondary btn-sm">
-                选择回放文件
-              </button>
-              <span id="replay-upload-name" class="replay-upload-name"></span>
-              <button id="replay-upload-view" type="button" class="btn btn-primary btn-sm" disabled>
-                查看
-              </button>
-              <a href="/replays" class="btn btn-ghost btn-sm">全部回放 →</a>
+              /><button class="btn btn-secondary btn-sm" id="replay-upload-pick" type="button">
+                &#32;选择回放文件&#32;</button
+              ><span class="replay-upload-name" id="replay-upload-name"></span
+              ><button
+                class="btn btn-primary btn-sm"
+                id="replay-upload-view"
+                type="button"
+                disabled="disabled"
+              >
+                &#32;查看&#32;</button
+              ><a class="btn btn-ghost btn-sm" href="/replays">全部回放 →</a>
             </div>
           </section>
         </div>
-
-        <!-- 中栏：动态 -->
+        <!--中栏：动态-->
         <div class="home-col">
           <section class="card feed-card">
             <h2 class="card-title">动态</h2>
             <div class="composer">
-              <div id="feed-guest" class="panel-empty" style="display: none">
-                游客可以浏览动态；<a href="/login">登录后即可发布、点赞和评论。</a>
+              <div class="panel-empty" id="feed-guest" style="display: none">
+                &#32;游客可以浏览动态；<a href="/login">登录后即可发布、点赞和评论。</a>
               </div>
-              <textarea id="feed-input" maxlength="300" data-mention placeholder="分享点什么…"></textarea>
+              <textarea id="feed-input" maxlength="300" data-mention="" placeholder="分享点什么…"></textarea>
               <div class="composer-hint">支持 Markdown 与 LaTeX 语法（如 $x^2$）。</div>
               <div class="composer-footer">
-                <span id="feed-count" class="feed-count">0/300</span>
-                <span>
-                  <span id="feed-cooldown" class="feed-cooldown" style="display: none"></span>
-                  <button id="feed-post-btn" type="button" class="btn btn-primary btn-sm">发布</button>
-                </span>
+                <span class="feed-count" id="feed-count">0/300</span
+                ><span
+                  ><span class="feed-cooldown" id="feed-cooldown" style="display: none"></span
+                  ><button class="btn btn-primary btn-sm" id="feed-post-btn" type="button">发布</button></span
+                >
               </div>
             </div>
             <div id="feed-list"></div>
-            <div id="feed-empty" class="feed-empty" style="display: none">还没有动态，来发第一条吧。</div>
-            <div id="feed-pager" class="feed-pager" style="display: none"></div>
+            <div class="feed-empty" id="feed-empty" style="display: none">还没有动态，来发第一条吧。</div>
+            <div class="feed-pager" id="feed-pager" style="display: none"></div>
           </section>
         </div>
-
-        <!-- 右栏 -->
+        <!--右栏-->
         <div class="home-col">
           <section class="card">
             <h2 class="card-title">
-              公告
-              <button
+              &#32;公告&#32;<button
+                class="btn btn-ghost btn-sm"
                 id="announcement-edit-btn"
                 type="button"
-                class="btn btn-ghost btn-sm"
                 style="display: none"
               >
-                编辑
+                &#32;编辑&#32;
               </button>
             </h2>
             <div id="announcement-view">
-              <div id="announcement-text" class="announcement-text"></div>
-              <div id="announcement-meta" class="announcement-meta"></div>
+              <div class="announcement-text" id="announcement-text"></div>
+              <div class="announcement-meta" id="announcement-meta"></div>
             </div>
-            <div id="announcement-edit" class="announcement-edit" style="display: none">
+            <div class="announcement-edit" id="announcement-edit" style="display: none">
               <textarea id="announcement-input" maxlength="2000"></textarea>
               <div class="announcement-edit-actions">
-                <button id="announcement-save" type="button" class="btn btn-primary btn-sm">保存</button>
-                <button id="announcement-cancel" type="button" class="btn btn-ghost btn-sm">取消</button>
+                <button class="btn btn-primary btn-sm" id="announcement-save" type="button">保存</button
+                ><button class="btn btn-ghost btn-sm" id="announcement-cancel" type="button">取消</button>
               </div>
             </div>
           </section>
-
           <section class="card">
             <h2 class="card-title">Rating 排行榜</h2>
             <ol class="leaderboard-list" id="leaderboard-list"></ol>
-            <p id="leaderboard-empty" class="panel-empty" style="display: none">暂无 rated 玩家。</p>
+            <p class="panel-empty" id="leaderboard-empty" style="display: none">暂无 rated 玩家。</p>
           </section>
-
           <section class="card">
             <h2 class="card-title">在线</h2>
             <ol class="leaderboard-list" id="recently-online-list"></ol>
-            <p id="recently-online-empty" class="panel-empty" style="display: none">暂无活动记录。</p>
+            <p class="panel-empty" id="recently-online-empty" style="display: none">暂无活动记录。</p>
           </section>
-
           <footer class="home-footer">
-            <a href="/develop">开发</a>
-            <span class="dot">·</span>
-            <a href="/tutorial">教程</a>
-            <span class="dot">·</span>
-            <a href="/about">关于</a>
-            <a id="footer-version" target="_blank" rel="noopener" style="display: none"></a>
+            <a href="/develop">开发</a><span class="dot">·</span><a href="/tutorial">教程</a
+            ><span class="dot">·</span><a href="/about">关于</a
+            ><a id="footer-version" target="_blank" rel="noopener" style="display: none"></a>
           </footer>
         </div>
       </div>
     </div>
-
-    <div id="replay-incompat-modal" class="replay-modal" style="display: none">
+    <div class="replay-modal" id="replay-incompat-modal" style="display: none">
       <div class="replay-modal-card">
         <p>回放文件与当前版本不兼容或已损坏，无法查看。</p>
-        <button id="replay-incompat-ok" type="button" class="btn btn-primary btn-sm">知道了</button>
+        <button class="btn btn-primary btn-sm" id="replay-incompat-ok" type="button">知道了</button>
       </div>
     </div>
-
     <script>
       var currentUsername = '';
       var currentIsAdmin = false;

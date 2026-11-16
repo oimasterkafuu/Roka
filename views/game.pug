@@ -1,0 +1,293 @@
+html
+  head
+    meta(charset='utf-8')
+    link(rel='icon', href='/icons/favicon.ico?v={{V}}', sizes='any')
+    link(rel='icon', type='image/png', sizes='32x32', href='/icons/icon-32.png?v={{V}}')
+    link(rel='icon', type='image/png', sizes='192x192', href='/icons/icon-192.png?v={{V}}')
+    link(rel='apple-touch-icon', href='/icons/icon-180.png?v={{V}}')
+    //
+       会话戳由服务端渲染本页时注入 content：真人验证凭据只随页面下发，不再出现在任何 JSON 接口。
+    meta(name='roka-session-stamp', content='')
+    meta(
+      name='viewport',
+      content='width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0'
+    )
+    script(
+      src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}',
+      integrity='sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK',
+      crossorigin='anonymous',
+      referrerpolicy='no-referrer'
+    )
+    script(
+      src='/vendor/socket.io/socket.io-4.0.1.js?v={{V}}',
+      integrity='sha384-ZCmVL/dTQHh41JxtZe73klDRFSJ/zixGCGt5lhnLQGjSWfAnlXSg+GSnRACaK5lc',
+      crossorigin='anonymous',
+      referrerpolicy='no-referrer'
+    )
+    script(
+      src='/vendor/lodash/lodash-4.17.21.min.js?v={{V}}',
+      integrity='sha384-H6KKS1H1WwuERMSm+54dYLzjg0fKqRK5ZRyASdbrI/lwrCc6bXEmtGYr5SwvP1pZ',
+      crossorigin='anonymous',
+      referrerpolicy='no-referrer'
+    )
+    script(src='/crown.js?v={{V}}')
+    script(src='/sw-register.js?v={{V}}')
+    script(src='/username.js?v={{V}}')
+    script(src='/main/core-globals.js?v={{V}}')
+    script(src='/notify.js?v={{V}}')
+    script(src='/main/replay-binary.js?v={{V}}')
+    script(src='/main/replay-cache.js?v={{V}}')
+    script(src='/main/room-controls.js?v={{V}}')
+    script(src='/main/replay-controls.js?v={{V}}')
+    script(src='/main/replay-stats.js?v={{V}}')
+    script(src='/main/render-update.js?v={{V}}')
+    script(src='/main/blink-clock.js?v={{V}}')
+    script(src='/main.js?v={{V}}')
+    link(rel='stylesheet', href='/main.css?v={{V}}')
+    link(rel='stylesheet', href='/styles/rating.css?v={{V}}')
+    title Roka - 对局
+  body
+    div#disconnect-banner(style='display: none') 连接已断开，正在尝试重连…10 秒内重连可恢复对局
+    div#deploy-banner(style='display: none') 系统即将更新
+    div#game(style='display: none')
+      div#map
+      div#map_back
+    div#turn-counter(style='display: none')
+    div#spectate-mode.fixed-center-horizontal(style='display: none')
+      div#spectate-mode-box.background(style='padding: 4px 8px; white-space: nowrap')
+        span.unselectable(style='font-size: 12px; color: #253042') 下局模式：
+        div#tabs-spectate-mode.tabs.unselectable
+          input(type='hidden', value='参与')
+          div.inline-button 观战
+          div.inline-button.inverted 参与
+      div#spectate-view-section.background(
+        style='display: none; padding: 4px 8px; white-space: nowrap; margin-top: 6px'
+      )
+        span.unselectable(style='font-size: 12px; color: #253042') 视角：
+        div#tabs-spectate-view.tabs.unselectable
+          input(type='hidden', value='全图')
+          div.inline-button.inverted 全图
+    table#game-leaderboard(style='display: none')
+      tbody
+        tr
+          td 队伍
+          td 玩家
+          td 兵力
+          td 领土
+    div#replay-title.fixed-center-horizontal.background(style='display: none')
+    div#replay-stats(style='display: none')
+      div#tabs-replay-stats.tabs.unselectable
+        input(type='hidden', value='兵力')
+        div.inline-button.inverted 兵力
+        div.inline-button 领土
+      canvas#replay-stats-canvas
+      div#replay-stats-legend
+    div#room-top-left(style='display: none; position: fixed; top: 12px; left: 12px; z-index: 24')
+      button#room-home-btn.small 返回首页
+    div#menu.center.center-tag(style='display: none')
+      div(style='margin-bottom: 15px')
+        div#room-link-display(title='点击复制房间链接')
+          span#room-link-label 房间链接：
+          span#room-link-text
+          span#room-link-copied(style='display: none') 复制成功
+      div.custom-queue-page-container
+        div#teams
+        h3 地图类型：
+        div#tabs-map-mode.tabs.background.unselectable
+          input(type='hidden', value='random')
+          div.inline-button.inverted 标准地图
+          div.inline-button 峡谷回廊
+          div.inline-button 群岛要塞
+          div.inline-button 地中海
+          div.inline-button(data-map-mode='huaxia') 华夏系列
+        div#map-region-section(style='display: none')
+          h3 华夏地区：
+          div#tabs-map-region.tabs.background.unselectable
+            input(type='hidden', value='中国')
+            div.inline-button 秦
+            div.inline-button 汉
+            div.inline-button 唐
+            div.inline-button 辽
+            div.inline-button 宋
+            div.inline-button 元
+            div.inline-button 明
+            div.inline-button.inverted 中国
+            div.inline-button 台湾省
+        h3 游戏速度：
+        div#tabs-game-speed.tabs.background.unselectable
+          input(type='hidden', value='1x')
+          div.inline-button 0.5x
+          div.inline-button 0.75x
+          div.inline-button.inverted 1x
+          div.inline-button 1.5x
+          div.inline-button 2x
+          div.inline-button 3x
+          div.inline-button 4x
+        h3#map-input-label 地图随机种子：
+        p
+          input#map-token(
+            type='text',
+            placeholder='留空将自动生成随机种子',
+            value='',
+            maxlength='32',
+            style='margin-top: 3px'
+          )
+        p#map-token-custom-hint(style='display: none')
+          | &#32;⚠ 正在使用自定义种子：本房间每局都会生成相同的地图，清空输入框可恢复随机。&#32;
+        h3 地图大小：
+        div#tabs-map-size.tabs.background.unselectable
+          input(type='hidden', value='标准')
+          div.inline-button.inverted 标准
+          div.inline-button 大地图
+        p 选择大地图后，地图面积约为标准地图的 4 倍。
+        div#team-mode-section
+          h3 允许组队：
+          div#tabs-team-mode.tabs.background.unselectable
+            input(type='hidden', value='不允许')
+            div.inline-button.inverted 不允许
+            div.inline-button 允许
+          p#team-mode-bot-hint(style='display: none') 房间内有官方策略 Bot，不允许组队。
+        div#fog-mode-section
+          h3 迷雾远征：
+          div#tabs-fog-mode.tabs.background.unselectable
+            input(type='hidden', value='关闭')
+            div.inline-button.inverted 关闭
+            div.inline-button 开启
+          p 开启后仅可见己方队伍周围一圈的归属与兵力，其余地块加暗色遮罩。
+          p#fog-mode-bot-hint(style='display: none') Bot 对局不支持迷雾远征。
+        div#multi-line-mode-section
+          h3 多线争锋：
+          div#tabs-multi-line-mode.tabs.background.unselectable
+            input(type='hidden', value='关闭')
+            div.inline-button.inverted 关闭
+            div.inline-button 开启
+          p 开启后每名玩家可同时下达多组指令，系统自动分线并行执行，一次结算可能移动多步。
+          p#multi-line-mode-bot-hint(style='display: none') Bot 对局不支持多线争锋。
+        div#team-select-section
+          h3 选择队伍：
+          div#tabs-custom-team.tabs.background.unselectable
+            input(type='hidden', value='参赛')
+            div.inline-button.inverted 参赛
+            div.inline-button(style='display: none') 2
+            div.inline-button(style='display: none') 3
+            div.inline-button(style='display: none') 4
+            div.inline-button(style='display: none') 5
+            div.inline-button(style='display: none') 6
+            div.inline-button(style='display: none') 7
+            div.inline-button(style='display: none') 8
+            div.inline-button(style='display: none') 9
+            div.inline-button(style='display: none') 10
+            div.inline-button(style='display: none') 11
+            div.inline-button(style='display: none') 12
+            div.inline-button(style='display: none') 13
+            div.inline-button(style='display: none') 14
+            div.inline-button(style='display: none') 15
+            div.inline-button(style='display: none') 16
+            div.inline-button 观战
+      p#host-true.custom-host-message(style='background-color: teal; color: #ffffff; display: none')
+        | &#32;你是本局房主，只有你可以修改游戏设置。准备阶段连续 15 分钟无操作将被移出房间并自动移交房主；聊天、准备、换队或修改设置可重新计时，心跳不续期。对局中不执行。&#32;
+      p#host-false.custom-host-message(style='background-color: rgba(255, 0, 0, 0.25); display: none')
+        | &#32;你不是房主，无法修改游戏设置。&#32;
+      div#you-are(style='display: none')
+        p(style='margin-right: 3px; display: inline') 你的颜色：
+        span
+      span#ready-counts(style='display: none')
+      button#force-start(style='display: none')
+    div#game-starting.center.center-tag(style='display: none')
+      h1 游戏即将开始...
+      div#you-are-2(style='display: none')
+        p(style='margin-right: 3px; display: inline') 你的颜色：
+        span
+    div#chat(style='display: none')
+      div#chat-messages-container
+      input#chatroom-input(class='', type='text', placeholder='按 [回车] 发送聊天', value='')
+    div#status-alert.alert.center(style='display: none')
+      center
+        h1(
+          style='margin: 15px 0px 5px; text-align: center; font-family: Quicksand-Bold, HYMaQiDuo-Bold; white-space: nowrap;'
+        )
+          | &#32;游戏结束&#32;
+        p(style='text-align: center; margin-bottom: 0')
+          span
+            | 你被&#32;
+            span(style='font-family: Quicksand-Bold, HYMaQiDuo-Bold')
+            | &#32;击败了。
+        button.small.inverted(style='margin-top: 16px; display: none') 继续观战
+        br
+        = ' '
+        button.inverted 返回房间
+        br
+        = ' '
+        button.inverted(style='display: none') 查看回放
+        br
+        = ' '
+        button.inverted 退出
+        = ' '
+    div#surrender-alert.alert.center(style='display: none')
+      center
+        h1(
+          style='margin: 15px 0px 5px; text-align: center; font-family: Quicksand-Bold, HYMaQiDuo-Bold; white-space: nowrap;'
+        )
+          | &#32;确认投降&#32;
+        p(style='text-align: center; margin-bottom: 0')
+          | &#32;投降后将转为观战，并留在当前对局中；领土将转移给存活队友（无存活队友时拆除锚点并自然衰减）。&#32;
+        button#surrender-confirm.small.inverted(style='margin-top: 16px') 确认投降
+        br
+        button#surrender-cancel 取消
+    div#replay-top-left(style='display: none')
+      div#replay-turn-jump.background
+        | &#32;跳转回合：&#32;
+        input#replay-turn-jump-input.unselectable(type='text', placeholder='0')
+        div#replay-turn-jump-button.inline-button →
+      button#replay-autoplay-btn.small(style='display: block') 自动播放
+      button#replay-download-btn.small(style='display: block') 下载回放
+      button#replay-exit-btn.small(style='display: block') 退出
+    div#replay-loading.alert.center(style='display: none')
+      center
+        h1(
+          style='margin: 15px 0px 5px; text-align: center; font-family: Quicksand-Bold, HYMaQiDuo-Bold; white-space: nowrap;'
+        )
+          | &#32;回放加载中&#32;
+        div#replay-loading-bar
+          div#replay-loading-fill.indeterminate
+        p#replay-loading-text(style='text-align: center; margin-bottom: 0') 正在下载回放数据…
+    div#replay-error-alert.alert.center(style='display: none')
+      center
+        h1(
+          style='margin: 15px 0px 5px; text-align: center; font-family: Quicksand-Bold, HYMaQiDuo-Bold; white-space: nowrap;'
+        )
+          | &#32;回放不兼容&#32;
+        p(style='text-align: center; margin-bottom: 0') 该回放文件与当前版本不兼容或已损坏，无法播放。
+        button#replay-error-back.small.inverted(style='margin-top: 16px') 返回首页
+    div#replay-bottom.fixed-center-horizontal(style='display: none')
+      center
+        div#tabs-replay-autoplay.tabs.background.unselectable(style='display: none')
+          input(type='hidden', value='1x')
+          div.inline-button 0.5x
+          div.inline-button 0.75x
+          div.inline-button.inverted 1x
+          div.inline-button 1.5x
+          div.inline-button 2x
+          div.inline-button 3x
+          div.inline-button 4x
+          div.inline-button 8x
+          div.inline-button 16x
+        div#replay-view-section(style='display: none; margin-top: 6px')
+          span#replay-view-label.unselectable 视角：
+          div#tabs-replay-view.tabs.background.unselectable
+            input(type='hidden', value='全知')
+            div.inline-button.inverted 全知
+        br
+        div#replay-bottom-bar.background
+          div.unselectable
+            span [←]
+            br
+            | 后退
+          div.unselectable
+            span [空格]
+            br
+            | 切换自动播放
+          div.unselectable
+            span [→]
+            br
+            | 下一步

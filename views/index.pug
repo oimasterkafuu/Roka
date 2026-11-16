@@ -1,0 +1,1200 @@
+html
+  head
+    meta(charset='utf-8')
+    link(rel='icon', href='/icons/favicon.ico?v={{V}}', sizes='any')
+    link(rel='icon', type='image/png', sizes='32x32', href='/icons/icon-32.png?v={{V}}')
+    link(rel='icon', type='image/png', sizes='192x192', href='/icons/icon-192.png?v={{V}}')
+    link(rel='apple-touch-icon', href='/icons/icon-180.png?v={{V}}')
+    meta(
+      name='viewport',
+      content='width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0'
+    )
+    script(
+      src='/vendor/jquery/jquery-3.6.0.min.js?v={{V}}',
+      integrity='sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK',
+      crossorigin='anonymous',
+      referrerpolicy='no-referrer'
+    )
+    script(
+      src='/vendor/socket.io/socket.io-4.0.1.js?v={{V}}',
+      integrity='sha384-ZCmVL/dTQHh41JxtZe73klDRFSJ/zixGCGt5lhnLQGjSWfAnlXSg+GSnRACaK5lc',
+      crossorigin='anonymous',
+      referrerpolicy='no-referrer'
+    )
+    script(src='/notify.js?v={{V}}')
+    script(defer='', src='/intro.js?v={{V}}', data-version='{{V}}')
+    script(src='/sw-register.js?v={{V}}')
+    script(src='/username.js?v={{V}}')
+    script(src='/mention-autocomplete.js?v={{V}}')
+    link(rel='stylesheet', href='/main.css?v={{V}}')
+    link(rel='stylesheet', href='/styles/rating.css?v={{V}}')
+    link(rel='stylesheet', href='/vendor/katex/katex.min.css?v={{V}}')
+    link(rel='stylesheet', href='/styles/home.css?v={{V}}')
+    link(rel='stylesheet', href='/styles/intro.css?v={{V}}')
+    title Roka
+  body.home
+    div.home-wrap
+      header.home-topbar
+        div.brand
+          img.brand-icon(
+            src='/icons/icon-48.png?v={{V}}',
+            srcset='/icons/icon-48.png?v={{V}} 1x, /icons/icon-192.png?v={{V}} 2x',
+            alt='Roka 图标'
+          )
+          span.brand-name Roka
+        div.account
+          span#online-count.online-count(title='当前在线用户数（不含 bot）')
+          a#account-name(href='#')
+          a#login-btn.btn.btn-primary.btn-sm(href='/login', style='display: none') 登录
+          a#admin-entry.btn.btn-ghost.btn-sm(href='/admin', style='display: none')
+            | &#32;后台管理&#32;
+          button#logout-btn.btn.btn-ghost.btn-sm(type='button', style='display: none')
+            | &#32;退出登录&#32;
+      div.home-grid
+        //
+           左栏
+        div.home-col
+          section#me-card.card
+            h2.card-title 个人信息
+            div
+              a#me-name.profile-card-name(href='#')
+              span#me-title.profile-card-title
+            div.profile-stats
+              div.profile-stat
+                div#me-rating.profile-stat-value -
+                div.profile-stat-label Rating
+              div.profile-stat
+                div#me-games.profile-stat-value -
+                div.profile-stat-label 对局数
+              div.profile-stat
+                div#me-days.profile-stat-value -
+                div.profile-stat-label 注册天数
+            a#me-profile-link.profile-card-link(href='#') 查看我的主页 →
+            p#me-guest.panel-empty(style='display: none') 登录后查看个人积分、等级与排名。
+          section.card
+            h2.card-title 房间
+            div.room-row
+              input#room-input(type='text', placeholder='请输入房间号', value='')
+              = ' '
+              button#enter-room.btn.btn-primary.btn-sm(type='button') 进入
+            table.mini-table
+              thead
+                tr
+                  th 房间号
+                  th 房主
+                  th 人数
+                  th 状态
+              tbody#rooms-body
+            p#rooms-empty.panel-empty(style='display: none') 当前没有可加入的房间。
+          section.card
+            h2.card-title 回放
+            table.mini-table
+              thead
+                tr
+                  th 时间
+                  th 回合
+                  th 结果
+              tbody#replays-body
+            p#replays-empty.panel-empty(style='display: none') 暂无回放。
+            div.replay-upload
+              input#replay-upload-file(type='file', accept='.rpl,application/octet-stream', style='display: none')
+              button#replay-upload-pick.btn.btn-secondary.btn-sm(type='button')
+                | &#32;选择回放文件&#32;
+              span#replay-upload-name.replay-upload-name
+              button#replay-upload-view.btn.btn-primary.btn-sm(type='button', disabled)
+                | &#32;查看&#32;
+              a.btn.btn-ghost.btn-sm(href='/replays') 全部回放 →
+        //
+           中栏：动态
+        div.home-col
+          section.card.feed-card
+            h2.card-title 动态
+            div.composer
+              div#feed-guest.panel-empty(style='display: none')
+                | &#32;游客可以浏览动态；
+                a(href='/login') 登录后即可发布、点赞和评论。
+              textarea#feed-input(maxlength='300', data-mention='', placeholder='分享点什么…')
+              div.composer-hint 支持 Markdown 与 LaTeX 语法（如 $x^2$）。
+              div.composer-footer
+                span#feed-count.feed-count 0/300
+                span
+                  span#feed-cooldown.feed-cooldown(style='display: none')
+                  button#feed-post-btn.btn.btn-primary.btn-sm(type='button') 发布
+            div#feed-list
+            div#feed-empty.feed-empty(style='display: none') 还没有动态，来发第一条吧。
+            div#feed-pager.feed-pager(style='display: none')
+        //
+           右栏
+        div.home-col
+          section.card
+            h2.card-title
+              | &#32;公告&#32;
+              button#announcement-edit-btn.btn.btn-ghost.btn-sm(type='button', style='display: none')
+                | &#32;编辑&#32;
+            div#announcement-view
+              div#announcement-text.announcement-text
+              div#announcement-meta.announcement-meta
+            div#announcement-edit.announcement-edit(style='display: none')
+              textarea#announcement-input(maxlength='2000')
+              div.announcement-edit-actions
+                button#announcement-save.btn.btn-primary.btn-sm(type='button') 保存
+                button#announcement-cancel.btn.btn-ghost.btn-sm(type='button') 取消
+          section.card
+            h2.card-title Rating 排行榜
+            ol#leaderboard-list.leaderboard-list
+            p#leaderboard-empty.panel-empty(style='display: none') 暂无 rated 玩家。
+          section.card
+            h2.card-title 在线
+            ol#recently-online-list.leaderboard-list
+            p#recently-online-empty.panel-empty(style='display: none') 暂无活动记录。
+          footer.home-footer
+            a(href='/develop') 开发
+            span.dot ·
+            a(href='/tutorial') 教程
+            span.dot ·
+            a(href='/about') 关于
+            a#footer-version(target='_blank', rel='noopener', style='display: none')
+    div#replay-incompat-modal.replay-modal(style='display: none')
+      div.replay-modal-card
+        p 回放文件与当前版本不兼容或已损坏，无法查看。
+        button#replay-incompat-ok.btn.btn-primary.btn-sm(type='button') 知道了
+    script.
+            var currentUsername = '';
+            var currentIsAdmin = false;
+
+            /* ---------- 基础工具 ---------- */
+
+            function pad2(n) {
+              return (n < 10 ? '0' : '') + n;
+            }
+
+            function relativeTime(time) {
+              var diff = Date.now() - time;
+              if (diff < 0) {
+                diff = 0;
+              }
+              var sec = Math.floor(diff / 1000);
+              if (sec < 10) {
+                return '刚刚';
+              }
+              if (sec < 60) {
+                return sec + ' 秒前';
+              }
+              var min = Math.floor(sec / 60);
+              if (min < 60) {
+                return min + ' 分钟前';
+              }
+              var hour = Math.floor(min / 60);
+              if (hour < 24) {
+                return hour + ' 小时前';
+              }
+              var day = Math.floor(hour / 24);
+              if (day < 30) {
+                return day + ' 天前';
+              }
+              var d = new Date(time);
+              return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+            }
+
+            function fullTime(time) {
+              var d = new Date(time);
+              return (
+                d.getFullYear() +
+                '-' +
+                pad2(d.getMonth() + 1) +
+                '-' +
+                pad2(d.getDate()) +
+                ' ' +
+                pad2(d.getHours()) +
+                ':' +
+                pad2(d.getMinutes())
+              );
+            }
+
+            // 服务端渲染出的 @提及链接只带 data-username，这里批量补 rating 颜色。
+            function ensureUsernameColors($scope) {
+              var names = [];
+              $scope.find('[data-username]').each(function () {
+                names.push($(this).attr('data-username'));
+              });
+              if (names.length) {
+                usernameEnsureColors(names);
+              }
+            }
+
+            async function apiPost(url, payload) {
+              var res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+              var data = null;
+              try {
+                data = await res.json();
+              } catch (e) {
+                // 忽略非 JSON 响应
+              }
+              if (!res.ok) {
+                var err = new Error((data && data.error) || '请求失败，请稍后再试。');
+                err.status = res.status;
+                err.retryAfter = data && data.retryAfter;
+                throw err;
+              }
+              return data;
+            }
+
+            /* ---------- 登录态与个人信息 ---------- */
+
+            // 新手期未定型（基准分未发完）时，在 rating 数字右侧加小号「?」提示。
+            function setRatingWithProvisional($el, rating, provisional) {
+              $el.empty().text(Math.round(rating));
+              if (provisional === true) {
+                $('<span class="rating-provisional">?</span>')
+                  .attr('title', '基准分尚未发完，rating 未定型')
+                  .appendTo($el);
+              }
+            }
+
+            async function loadUser() {
+              try {
+                var res = await fetch('/api/auth/me');
+                if (!res.ok) {
+                  $('#login-btn').show();
+                  $('#account-name').hide();
+                  $('#logout-btn, #admin-entry').hide();
+                  $('#me-card > div, #me-profile-link').hide();
+                  $('#me-guest').show();
+                  $('#feed-guest').show();
+                  $('#feed-input, #feed-count, #feed-post-btn, #feed-cooldown, .composer-hint').hide();
+                  return false;
+                }
+                var data = await res.json();
+                currentUsername = data.username;
+                currentIsAdmin = data.isAdmin === true;
+                // 顶栏当前用户：统一用户名组件（rating 颜色 + 点击跳主页），颜色经缓存批量补色。
+                $('#account-name').replaceWith(usernameLink(currentUsername));
+                usernameEnsureColors([currentUsername]);
+                $('#login-btn').hide();
+                $('#logout-btn').show();
+                $('#admin-entry').toggle(currentIsAdmin);
+                return true;
+              } catch (e) {
+                $('#login-btn').show();
+                $('#account-name').hide();
+                $('#logout-btn, #admin-entry').hide();
+                $('#me-guest, #feed-guest').show();
+                $('#feed-input, #feed-count, #feed-post-btn, #feed-cooldown, .composer-hint').hide();
+                return false;
+              }
+            }
+
+            async function loadMyProfile() {
+              try {
+                var res = await fetch('/api/profile/' + encodeURIComponent(currentUsername));
+                if (!res.ok) {
+                  return;
+                }
+                var p = await res.json();
+                var seed = {};
+                seed[p.username] = {
+                  colorClass: p.colorClass,
+                  title: p.title,
+                  admin: p.admin === true,
+                  banned: p.banned === true,
+                  starred: p.starred === true,
+                };
+                usernameCacheSeed(seed);
+                // 顶栏链接已在 loadUser 经组件渲染；个人卡名字也由同一缓存刷新。
+                $('#me-name')
+                  .attr('data-username', p.username)
+                  .text(p.username)
+                  .attr('href', '/u/' + encodeURIComponent(p.username));
+                usernameRefreshRendered();
+                $('#me-title').text(p.banned ? '' : p.title || '');
+                setRatingWithProvisional($('#me-rating'), p.rating, p.provisional);
+                $('#me-games').text(p.ratingGames);
+                $('#me-days').text(p.registeredDays);
+                $('#me-profile-link').attr('href', '/u/' + encodeURIComponent(p.username));
+              } catch (e) {
+                // 个人信息卡加载失败不阻塞首页其余功能
+              }
+            }
+
+            /* ---------- 进入房间 ---------- */
+
+            function normalizeRoomId(input) {
+              return String(input || '')
+                .trim()
+                .replace(/[^0-9A-Za-z_-]/g, '')
+                .slice(0, 15);
+            }
+
+            function gotoRoom() {
+              if (!currentUsername) {
+                window.location.href = '/login';
+                return;
+              }
+              var room = normalizeRoomId($('#room-input').val());
+              if (!room) {
+                window.location.pathname = '/games/';
+                return;
+              }
+              $('#room-input').val(room);
+              window.location.pathname = '/games/' + room;
+            }
+
+            $('#enter-room').on('click', function () {
+              gotoRoom();
+            });
+            $('#room-input').on('keypress', function (e) {
+              if (e.keyCode == 13) {
+                gotoRoom();
+              }
+            });
+            $('#logout-btn').on('click', async function () {
+              await fetch('/api/auth/logout', { method: 'POST' });
+              location.href = '/login';
+            });
+
+            /* ---------- 房间列表（socket 失效通知刷新） ---------- */
+
+            // 上一份房间号快照（null = 尚未完成首次加载），用于检测「新建房间」并在后台弹通知。
+            var prevRoomIds = null;
+
+            async function loadRooms() {
+              try {
+                var res = await fetch('/api/rooms');
+                if (!res.ok) {
+                  return;
+                }
+                var rooms = await res.json();
+                if (Array.isArray(rooms)) {
+                  // 房主名接口不带 rating 颜色：批量补色（全局缓存，链接渲染后自动刷新）。
+                  usernameEnsureColors(
+                    rooms.map(function (item) {
+                      return item.host;
+                    }),
+                  );
+                  var ids = rooms.map(function (item) {
+                    return item.room;
+                  });
+                  if (prevRoomIds !== null) {
+                    var added = ids.filter(function (id) {
+                      return prevRoomIds.indexOf(id) === -1;
+                    });
+                    if (added.length > 0) {
+                      notifyEvent('home-rooms', 'Roka', '有新的房间：' + added.join('、'));
+                    }
+                  }
+                  prevRoomIds = ids;
+                }
+                var $body = $('#rooms-body');
+                $body.empty();
+                if (!Array.isArray(rooms) || rooms.length === 0) {
+                  $('#rooms-empty').show();
+                  return;
+                }
+                $('#rooms-empty').hide();
+                rooms.forEach(function (item) {
+                  var $tr = $('<tr></tr>').on('click', function () {
+                    location.href = '/games/' + encodeURIComponent(item.room);
+                  });
+                  var $roomTd = $('<td></td>').text(item.room).appendTo($tr);
+                  var $hostTd = $('<td></td>').appendTo($tr);
+                  if (item.host) {
+                    // 房主名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进房。
+                    usernameLink(item.host)
+                      .on('click', function (e) {
+                        e.stopPropagation();
+                      })
+                      .appendTo($hostTd);
+                  } else {
+                    $hostTd.text('-');
+                  }
+                  $('<td></td>')
+                    .text((item.playing || 0) + (item.spectators || 0))
+                    .appendTo($tr);
+                  $('<td></td>')
+                    // 对局进行中显示「游戏中」；参赛不足 2 人时服务端 need 为 0，展示「人数不足」而非 0/0。
+                    .text(
+                      item.running
+                        ? '游戏中'
+                        : item.playing < 2
+                          ? '人数不足'
+                          : Object.keys(item.ready_counts || {})
+                              .filter(function (kind) {
+                                return item.ready_counts[kind].total > 0;
+                              })
+                              .map(function (kind) {
+                                return (
+                                  (kind === 'human' ? '真人' : 'AI') +
+                                  ' ' +
+                                  item.ready_counts[kind].ready +
+                                  '/' +
+                                  item.ready_counts[kind].need
+                                );
+                              })
+                              .join('，'),
+                    )
+                    .appendTo($tr);
+                  $body.append($tr);
+                });
+              } catch (e) {
+                // 加载失败时静默，等待下次失效通知
+              }
+            }
+
+            /* ---------- 回放面板 ---------- */
+
+            var REPLAYS_LIMIT = 10;
+
+            async function loadReplays() {
+              try {
+                var res = await fetch('/api/replays?limit=' + REPLAYS_LIMIT + '&offset=0');
+                if (!res.ok) {
+                  throw new Error('replays request failed');
+                }
+                var data = await res.json();
+                var items = Array.isArray(data.items) ? data.items : [];
+                var $body = $('#replays-body');
+                $body.empty();
+                $('#replays-empty').toggle(items.length === 0);
+                items.forEach(function (item) {
+                  var mine = Array.isArray(item.rank) && item.rank.indexOf(currentUsername) !== -1;
+                  var $tr = $('<tr></tr>')
+                    .toggleClass('replay-mine', mine)
+                    .on('click', function () {
+                      location.href = '/replays/' + encodeURIComponent(item.id);
+                    });
+                  // 参赛者名字接口不带 rating 颜色：先按 rt-unrated 渲染，批量补色后自动刷新。
+                  usernameEnsureColors(item.rank || []);
+                  // item.time 为 Unix 秒：相对时间展示，完整时间放 title。
+                  $('<td></td>')
+                    .text(relativeTime(item.time * 1000))
+                    .attr('title', fullTime(item.time * 1000))
+                    .appendTo($tr);
+                  $('<td></td>').text(item.turn).appendTo($tr);
+                  // 名次列：有队伍分组（组队局归档写入 teams）时同队合并成一组——
+                  // 组内 ', '、组间 ' › '、组序为终局队伍名次序（不展示玩家配色色块）；
+                  // 旧数据无 teams 字段时回退为 rank 平铺（每人一组，天然兼容非组队局）。
+                  var $rankTd = $('<td></td>').appendTo($tr);
+                  // 名次列成员名：统一用户名组件（rating 颜色 + 点击跳主页），点击链接时阻止冒泡避免触发整行进回放。
+                  var linkOpts = { stopPropagation: true };
+                  if (Array.isArray(item.teams) && item.teams.length) {
+                    item.teams.forEach(function (team, index) {
+                      if (index > 0) $rankTd.append(' › ');
+                      (team.members || []).forEach(function (member, mi) {
+                        if (mi > 0) $rankTd.append(', ');
+                        usernameLink(member, null, null, linkOpts).appendTo($rankTd);
+                      });
+                    });
+                  } else {
+                    (item.rank || []).forEach(function (member, mi) {
+                      if (mi > 0) $rankTd.append(' › ');
+                      usernameLink(member, null, null, linkOpts).appendTo($rankTd);
+                    });
+                  }
+                  $body.append($tr);
+                });
+              } catch (e) {
+                // 加载失败时保留现有列表，等待下次失效通知。
+              }
+            }
+
+            /* ---------- 上传并查看回放 ---------- */
+
+            function arrayBufferToBase64(buf) {
+              var bytes = new Uint8Array(buf);
+              var bin = '';
+              for (var i = 0; i < bytes.length; i += 0x8000) {
+                bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+              }
+              return btoa(bin);
+            }
+
+            $('#replay-upload-pick').on('click', function () {
+              $('#replay-upload-file').trigger('click');
+            });
+            $('#replay-upload-file').on('change', function () {
+              var file = this.files && this.files[0];
+              $('#replay-upload-name').text(file ? file.name : '');
+              $('#replay-upload-view').prop('disabled', !file);
+            });
+            $('#replay-incompat-ok').on('click', function () {
+              $('#replay-incompat-modal').hide();
+            });
+            $('#replay-upload-view').on('click', async function () {
+              var input = $('#replay-upload-file')[0];
+              var file = input.files && input.files[0];
+              if (!file) {
+                return;
+              }
+              var $btn = $(this).prop('disabled', true);
+              try {
+                // 把原始 .rpl 文件 POST 给服务器，由服务器解码重建并转码为可播放二进制。
+                var res = await fetch('/api/replay-upload', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/octet-stream' },
+                  body: file,
+                });
+                if (!res.ok) {
+                  throw new Error('incompatible');
+                }
+                var viewable = await res.arrayBuffer();
+                // 原始 .rpl 一并暂存，回放页“下载回放”可原样取回。
+                sessionStorage.setItem('roka_local_replay_raw', arrayBufferToBase64(await file.arrayBuffer()));
+                sessionStorage.setItem('roka_local_replay', arrayBufferToBase64(viewable));
+                location.href = '/replays/local';
+              } catch (e) {
+                $('#replay-incompat-modal').css('display', 'flex');
+              } finally {
+                $btn.prop('disabled', false);
+              }
+            });
+
+            /* ---------- 公告 ---------- */
+
+            var announcementRawText = '';
+
+            async function loadAnnouncement() {
+              try {
+                var res = await fetch('/api/announcement');
+                if (!res.ok) {
+                  return;
+                }
+                var data = await res.json();
+                announcementRawText = data.text || '';
+                if (typeof data.html === 'string') {
+                  // html 字段由服务端渲染并消毒（与动态同一条管线），可直接注入。
+                  $('#announcement-text').html(data.html || '暂无公告。');
+                } else {
+                  $('#announcement-text').text(announcementRawText || '暂无公告。');
+                }
+                var meta = '';
+                if (data.updatedBy) {
+                  meta = data.updatedBy + ' 更新于 ' + relativeTime(data.updatedAt);
+                }
+                $('#announcement-meta').text(meta);
+                if (currentIsAdmin) {
+                  $('#announcement-edit-btn').show();
+                }
+              } catch (e) {
+                // 忽略加载失败
+              }
+            }
+
+            $('#announcement-edit-btn').on('click', function () {
+              $('#announcement-input').val(announcementRawText);
+              $('#announcement-view').hide();
+              $('#announcement-edit').show();
+            });
+            $('#announcement-cancel').on('click', function () {
+              $('#announcement-edit').hide();
+              $('#announcement-view').show();
+            });
+            $('#announcement-save').on('click', async function () {
+              try {
+                await apiPost('/api/announcement', { text: $('#announcement-input').val() });
+                $('#announcement-edit').hide();
+                $('#announcement-view').show();
+                loadAnnouncement();
+              } catch (err) {
+                alert(err.message);
+              }
+            });
+
+            /* ---------- 排行榜 ---------- */
+
+            async function loadLeaderboard() {
+              try {
+                var res = await fetch('/api/leaderboard');
+                if (!res.ok) {
+                  return;
+                }
+                var data = await res.json();
+                var items = Array.isArray(data.items) ? data.items : [];
+                var $list = $('#leaderboard-list');
+                $list.empty();
+                $('#leaderboard-empty').toggle(items.length === 0);
+                items.forEach(function (item, index) {
+                  var $li = $('<li></li>');
+                  $('<span class="lb-rank"></span>')
+                    .text(index + 1)
+                    .appendTo($li);
+                  var $name = $('<span class="lb-name"></span>').appendTo($li);
+                  usernameLink(item.username, item).appendTo($name);
+                  var $rating = $('<span class="lb-rating"></span>').appendTo($li);
+                  setRatingWithProvisional($rating, item.rating, item.provisional);
+                  $list.append($li);
+                });
+              } catch (e) {
+                // 忽略加载失败
+              }
+            }
+
+            /* ---------- 在线人数与「在线」列表 ---------- */
+
+            // 上一次在线人数快照（null = 尚未完成首次加载），用于检测「有人上线」并在后台弹通知。
+            var prevOnlineCount = null;
+
+            async function loadOnline() {
+              try {
+                var res = await fetch('/api/online');
+                if (!res.ok) {
+                  return;
+                }
+                var data = await res.json();
+                var count = data.count || 0;
+                if (prevOnlineCount !== null && count > prevOnlineCount) {
+                  notifyEvent('home-online', 'Roka', '有玩家上线了，当前在线 ' + count + ' 人');
+                }
+                prevOnlineCount = count;
+                $('#online-count').text('在线 ' + count + ' 人');
+                var items = Array.isArray(data.items) ? data.items : [];
+                var $list = $('#recently-online-list');
+                $list.empty();
+                $('#recently-online-empty').toggle(items.length === 0);
+                items.forEach(function (item) {
+                  var $li = $('<li></li>');
+                  var $name = $('<span class="lb-name"></span>').appendTo($li);
+                  usernameLink(item.username, item).appendTo($name);
+                  $('<span class="lb-time"></span>')
+                    .text(relativeTime(item.lastSeenAt))
+                    .attr('title', fullTime(item.lastSeenAt))
+                    .appendTo($li);
+                  $list.append($li);
+                });
+              } catch (e) {
+                // 忽略加载失败
+              }
+            }
+
+            /* ---------- 动态 ---------- */
+
+            var FEED_LIMIT = 10;
+            var feedPage = 1;
+            var feedPages = 1;
+            var feedLoading = false;
+            var feedPosting = false;
+
+            function commentButtonText(count) {
+              return count > 0 ? '评论 ' + count : '评论';
+            }
+
+            function createCommentElement(comment) {
+              var $item = $('<div class="comment-item"></div>').attr('data-id', comment.id);
+              // 评论作者：统一用户名组件（服务端已附 authorInfo：colorClass/title）。
+              var $author = usernameLink(comment.author, comment.authorInfo || null, 'comment-author');
+              $item.append($author);
+              // html 字段由服务端渲染并消毒；响应没有 html 字段时退化为纯文本。
+              var $text = $('<span class="comment-text"></span>');
+              if (comment.html) {
+                $text.html(comment.html);
+              } else {
+                $text.text(comment.text).css('white-space', 'pre-wrap');
+              }
+              $item.append($text);
+              ensureUsernameColors($text);
+              ensureUsernameColors($item);
+              $('<span class="comment-time"></span>').attr('title', fullTime(comment.time)).appendTo($item);
+              // 删除入口：与动态删除同风格，作者本人或管理员可见（服务端 canManage 判定）。
+              if (comment.canManage) {
+                $('<button type="button" class="comment-delete-btn"></button>').text('删除').appendTo($item);
+              }
+              return $item;
+            }
+
+            function createPostElement(post) {
+              var $item = $('<div class="feed-item"></div>').attr('data-id', post.id);
+              // 原始 text/html 缓存在元素上，供内联编辑回填与增量更新的变更检测。
+              $item.data('raw-text', post.text);
+              $item.data('raw-html', post.html);
+
+              var $head = $('<div class="feed-item-head"></div>');
+              var $author = usernameLink(post.author, post.authorInfo || null, 'feed-author');
+              $author.appendTo($head);
+              $('<span class="feed-time"></span>')
+                .text(relativeTime(post.time))
+                .attr('title', fullTime(post.time))
+                .appendTo($head);
+              $head.appendTo($item);
+
+              var $wrap = $('<div class="feed-body-wrap"></div>');
+              // html 字段由服务端渲染并消毒，可直接注入。
+              var $text = $('<div class="feed-text"></div>').html(post.html).appendTo($wrap);
+              ensureUsernameColors($text);
+              $wrap.appendTo($item);
+              ensureUsernameColors($item);
+
+              var $actions = $('<div class="feed-actions"></div>');
+              if (currentUsername) {
+                var $likeBtn = $('<button type="button" class="like-btn"></button>');
+                $likeBtn.toggleClass('liked', post.likes.indexOf(currentUsername) !== -1);
+                $('<span class="heart"></span>')
+                  // 自定义 SVG 爱心，避免 ♥ 字符在不同设备上渲染不一致（有的平台会变成 emoji）。
+                  .html(
+                    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+                  )
+                  .appendTo($likeBtn);
+                $('<span class="like-count"></span>').text(post.likes.length).appendTo($likeBtn);
+                $likeBtn.appendTo($actions);
+              }
+              $('<button type="button" class="comment-toggle"></button>')
+                .text(commentButtonText(post.comments.length))
+                .appendTo($actions);
+              if (post.canManage) {
+                $('<button type="button" class="feed-edit-btn"></button>').text('编辑').appendTo($actions);
+                $('<button type="button" class="feed-delete-btn"></button>').text('删除').appendTo($actions);
+              }
+              $actions.appendTo($item);
+
+              var $comments = $('<div class="comment-section"></div>').hide();
+              var $commentList = $('<div class="comment-list"></div>');
+              post.comments.forEach(function (comment) {
+                $commentList.append(createCommentElement(comment));
+              });
+              $commentList.appendTo($comments);
+              if (currentUsername) {
+                var $inputRow = $('<div class="comment-input-row"></div>');
+                $(
+                  '<input type="text" class="comment-input" maxlength="200" data-mention placeholder="写下你的评论…" />',
+                ).appendTo($inputRow);
+                $('<button type="button" class="btn btn-primary btn-sm comment-send">回复</button>').appendTo(
+                  $inputRow,
+                );
+                $inputRow.appendTo($comments);
+              }
+              $comments.appendTo($item);
+
+              return $item;
+            }
+
+            // 长说说折叠：渲染后高度超过 220px 的加渐变遮罩并显示「展开」按钮。
+            function applyCollapse($item) {
+              var $wrap = $item.find('.feed-body-wrap');
+              var textEl = $wrap.find('.feed-text')[0];
+              if (!textEl || textEl.scrollHeight <= 220) {
+                return;
+              }
+              $wrap.addClass('collapsed');
+              var $btn = $('<button type="button" class="feed-expand-btn">展开</button>');
+              $btn.on('click', function () {
+                var collapsed = $wrap.toggleClass('collapsed').hasClass('collapsed');
+                $btn.text(collapsed ? '展开' : '收起');
+              });
+              $wrap.after($btn);
+            }
+
+            // 单条动态的就地更新（issue #85）：只改有变化的字段，保留评论展开状态、
+            // 正在输入的评论框与内联编辑态，避免 home_feeds 失效通知把整页打断重渲染。
+            function updatePostElement($item, post) {
+              var authorSeed = {};
+              authorSeed[post.author] = post.authorInfo;
+              post.comments.forEach(function (comment) {
+                authorSeed[comment.author] = comment.authorInfo;
+              });
+              usernameCacheSeed(authorSeed);
+              var editing = $item.find('.feed-edit').length > 0;
+              if (!editing) {
+                $item.data('raw-text', post.text);
+                if ($item.data('raw-html') !== post.html) {
+                  $item.data('raw-html', post.html);
+                  var $text = $item.find('.feed-text');
+                  $text.html(post.html);
+                  ensureUsernameColors($text);
+                }
+              }
+              $item.find('.feed-time').text(relativeTime(post.time)).attr('title', fullTime(post.time));
+              if (currentUsername) {
+                var $likeBtn = $item.find('.like-btn');
+                $likeBtn.toggleClass('liked', post.likes.indexOf(currentUsername) !== -1);
+                $likeBtn.find('.like-count').text(post.likes.length);
+              }
+              $item.find('.comment-toggle').text(commentButtonText(post.comments.length));
+              // 评论就地 reconcile：新评论按序追加、被删评论移除，已有评论与输入框不动。
+              var $commentList = $item.find('.comment-list');
+              var seenComments = {};
+              post.comments.forEach(function (comment) {
+                var cid = String(comment.id);
+                seenComments[cid] = true;
+                var $existing = $commentList.children().filter(function () {
+                  return $(this).attr('data-id') === cid;
+                });
+                // append 对已挂载元素是移动，逐条按序处理即完成重排。
+                $commentList.append($existing.length ? $existing : createCommentElement(comment));
+              });
+              $commentList.children().each(function () {
+                if (!seenComments[$(this).attr('data-id')]) {
+                  $(this).remove();
+                }
+              });
+            }
+
+            function renderFeedPage(data) {
+              var $list = $('#feed-list');
+              var items = Array.isArray(data.items) ? data.items : [];
+              // 就地增量更新（issue #85）：已存在的动态在原 DOM 上更新并重排，只增删有变化的项。
+              var seen = {};
+              items.forEach(function (post) {
+                var pid = String(post.id);
+                seen[pid] = true;
+                var $existing = $list.children().filter(function () {
+                  return $(this).attr('data-id') === pid;
+                });
+                if ($existing.length) {
+                  updatePostElement($existing.first(), post);
+                  $list.append($existing.first());
+                } else {
+                  var $item = createPostElement(post);
+                  $list.append($item);
+                  applyCollapse($item);
+                }
+              });
+              $list.children().each(function () {
+                if (!seen[$(this).attr('data-id')]) {
+                  $(this).remove();
+                }
+              });
+              $('#feed-empty').toggle(items.length === 0);
+              feedPage = data.page;
+              feedPages = data.pages;
+              renderFeedPager();
+            }
+
+            function renderFeedPager() {
+              var $pager = $('#feed-pager');
+              $pager.empty();
+              if (feedPages <= 1 && feedPage <= 1) {
+                $pager.hide();
+                return;
+              }
+              $pager.show();
+              var $prev = $('<button type="button">上一页</button>')
+                .prop('disabled', feedPage <= 1)
+                .on('click', function () {
+                  gotoFeedPage(feedPage - 1);
+                });
+              $pager.append($prev);
+
+              var pages = [];
+              var i;
+              for (i = 1; i <= feedPages; i++) {
+                if (i === 1 || i === feedPages || Math.abs(i - feedPage) <= 2) {
+                  pages.push(i);
+                }
+              }
+              var last = 0;
+              pages.forEach(function (p) {
+                if (last && p - last > 1) {
+                  $pager.append($('<span class="pager-ellipsis">…</span>'));
+                }
+                var $btn = $('<button type="button"></button>')
+                  .text(p)
+                  .toggleClass('current', p === feedPage);
+                if (p !== feedPage) {
+                  $btn.on('click', function () {
+                    gotoFeedPage(p);
+                  });
+                }
+                $pager.append($btn);
+                last = p;
+              });
+
+              var $next = $('<button type="button">下一页</button>')
+                .prop('disabled', feedPage >= feedPages)
+                .on('click', function () {
+                  gotoFeedPage(feedPage + 1);
+                });
+              $pager.append($next);
+            }
+
+            function gotoFeedPage(page, replace) {
+              if (page < 1 || (feedPages > 0 && page > feedPages)) {
+                return;
+              }
+              var url = page > 1 ? '?page=' + page : location.pathname;
+              history[replace ? 'replaceState' : 'pushState']({ page: page }, '', url);
+              loadFeeds(page);
+            }
+
+            async function loadFeeds(page) {
+              if (feedLoading) {
+                return;
+              }
+              feedLoading = true;
+              try {
+                var res = await fetch('/api/feeds?page=' + page + '&limit=' + FEED_LIMIT);
+                if (!res.ok) {
+                  throw new Error('动态加载失败，请稍后再试。');
+                }
+                var data = await res.json();
+                renderFeedPage(data);
+              } catch (err) {
+                alert(err.message);
+              } finally {
+                feedLoading = false;
+              }
+            }
+
+            window.addEventListener('popstate', function () {
+              var page = parseInt(new URLSearchParams(location.search).get('page'), 10) || 1;
+              loadFeeds(page);
+            });
+
+            $('#feed-input').on('input', function () {
+              $('#feed-count').text($(this).val().length + '/300');
+            });
+
+            var cooldownTimer = null;
+
+            function startCooldown(seconds) {
+              var $btn = $('#feed-post-btn').prop('disabled', true);
+              var $tip = $('#feed-cooldown').show();
+              var remain = Math.max(1, Math.ceil(seconds));
+              $tip.text('发布太频繁，请 ' + remain + ' 秒后再试');
+              if (cooldownTimer) {
+                clearInterval(cooldownTimer);
+              }
+              cooldownTimer = setInterval(function () {
+                remain -= 1;
+                if (remain <= 0) {
+                  clearInterval(cooldownTimer);
+                  cooldownTimer = null;
+                  $tip.hide();
+                  $btn.prop('disabled', false);
+                } else {
+                  $tip.text('发布太频繁，请 ' + remain + ' 秒后再试');
+                }
+              }, 1000);
+            }
+
+            async function submitFeed() {
+              if (feedPosting) {
+                return;
+              }
+              var text = $('#feed-input').val().trim();
+              if (!text) {
+                alert('请输入内容后再发布。');
+                return;
+              }
+              feedPosting = true;
+              try {
+                await apiPost('/api/feeds', { text: text });
+                $('#feed-input').val('');
+                $('#feed-count').text('0/300');
+                // 新动态在第 1 页；若当前不在第 1 页则留在本页刷新即可。
+                loadFeeds(feedPage);
+              } catch (err) {
+                if (err.status === 429) {
+                  startCooldown(err.retryAfter || 30);
+                } else {
+                  alert(err.message);
+                }
+              } finally {
+                feedPosting = false;
+              }
+            }
+            $('#feed-post-btn').on('click', function () {
+              submitFeed();
+            });
+
+            $('#feed-list')
+              .on('click', '.like-btn', async function () {
+                var $btn = $(this);
+                if ($btn.data('busy')) {
+                  return;
+                }
+                $btn.data('busy', true);
+                try {
+                  var data = await apiPost('/api/feeds/like', {
+                    id: $btn.closest('.feed-item').attr('data-id'),
+                  });
+                  $btn.toggleClass('liked', data.liked);
+                  $btn.find('.like-count').text(data.likes);
+                } catch (err) {
+                  alert(err.message);
+                } finally {
+                  $btn.data('busy', false);
+                }
+              })
+              .on('click', '.comment-toggle', function () {
+                $(this).closest('.feed-item').find('.comment-section').toggle();
+              })
+              .on('click', '.comment-send', function () {
+                sendComment($(this).closest('.feed-item'));
+              })
+              .on('keypress', '.comment-input', function (e) {
+                // 提及补全下拉打开时回车用于选中候选，不提交评论。
+                if (
+                  e.keyCode == 13 &&
+                  !(
+                    window.mentionAutocompleteShouldIgnoreEnter && window.mentionAutocompleteShouldIgnoreEnter(this)
+                  )
+                ) {
+                  sendComment($(this).closest('.feed-item'));
+                }
+              })
+              .on('click', '.feed-edit-btn', function () {
+                startEdit($(this).closest('.feed-item'));
+              })
+              .on('click', '.feed-delete-btn', async function () {
+                var $item = $(this).closest('.feed-item');
+                if (!confirm('确定删除这条动态吗？')) {
+                  return;
+                }
+                try {
+                  await apiPost('/api/feeds/delete', { id: $item.attr('data-id') });
+                  // 删除后刷新当前页；若当前页被删空且不是第 1 页则退到上一页。
+                  if ($('#feed-list .feed-item').length <= 1 && feedPage > 1) {
+                    gotoFeedPage(feedPage - 1);
+                  } else {
+                    loadFeeds(feedPage);
+                  }
+                } catch (err) {
+                  alert(err.message);
+                }
+              })
+              .on('click', '.comment-delete-btn', async function () {
+                var $comment = $(this).closest('.comment-item');
+                var $item = $comment.closest('.feed-item');
+                if (!confirm('确定删除这条评论吗？')) {
+                  return;
+                }
+                try {
+                  await apiPost('/api/feeds/comment/delete', {
+                    id: $item.attr('data-id'),
+                    commentId: $comment.attr('data-id'),
+                  });
+                  $comment.remove();
+                  var count = $item.find('.comment-item').length;
+                  $item.find('.comment-toggle').text(commentButtonText(count));
+                } catch (err) {
+                  alert(err.message);
+                }
+              });
+
+            async function sendComment($item) {
+              var $input = $item.find('.comment-input');
+              var text = $input.val().trim();
+              if (!text) {
+                return;
+              }
+              try {
+                var data = await apiPost('/api/feeds/comment', {
+                  id: $item.attr('data-id'),
+                  text: text,
+                });
+                $item.find('.comment-list').append(createCommentElement(data.comment));
+                $input.val('');
+                var count = $item.find('.comment-item').length;
+                $item.find('.comment-toggle').text(commentButtonText(count));
+              } catch (err) {
+                alert(err.message);
+              }
+            }
+
+            /* ---------- 动态编辑（内联） ---------- */
+
+            function startEdit($item) {
+              if ($item.find('.feed-edit').length > 0) {
+                return;
+              }
+              var id = $item.attr('data-id');
+              // 原始文本缓存在元素上，避免重新拉取。
+              var original = $item.data('raw-text') || '';
+              var $edit = $('<div class="feed-edit"></div>');
+              var $textarea = $('<textarea maxlength="300"></textarea>').val(original).appendTo($edit);
+              var $actions = $('<div class="feed-edit-actions"></div>');
+              $('<button type="button" class="btn btn-primary btn-sm">保存</button>')
+                .on('click', async function () {
+                  var text = $textarea.val().trim();
+                  if (!text) {
+                    alert('内容不能为空。');
+                    return;
+                  }
+                  try {
+                    await apiPost('/api/feeds/edit', { id: id, text: text });
+                    // 渲染已改为就地增量更新，保存成功后先退出编辑态再刷新（同取消路径）。
+                    $edit.remove();
+                    $item.find('.feed-body-wrap, .feed-expand-btn, .feed-actions').show();
+                    loadFeeds(feedPage);
+                  } catch (err) {
+                    alert(err.message);
+                  }
+                })
+                .appendTo($actions);
+              $('<button type="button" class="btn btn-ghost btn-sm">取消</button>')
+                .on('click', function () {
+                  $edit.remove();
+                  $item.find('.feed-body-wrap, .feed-expand-btn, .feed-actions').show();
+                })
+                .appendTo($actions);
+              $edit.append($actions);
+              $item.find('.feed-body-wrap, .feed-expand-btn, .feed-actions').hide();
+              $item.find('.comment-section').before($edit);
+              $textarea.trigger('focus');
+            }
+
+            /* ---------- 启动 ---------- */
+
+            // 页脚版本号：取 /api/version，成功且 commit 非空时显示 v{version} 并链接到
+            // GitHub 对应 commit（title 为 commit 短串）；失败或非 git 部署保持隐藏。
+            fetch('/api/version')
+              .then(function (res) {
+                return res.ok ? res.json() : null;
+              })
+              .then(function (data) {
+                if (!data || typeof data.commit !== 'string' || !data.commit) return;
+                var $v = $('#footer-version');
+                $v.text('v' + (typeof data.version === 'string' ? data.version : ''));
+                $v.attr('title', data.commit.slice(0, 7));
+                $v.attr('href', 'https://github.com/oimasterkafuu/Roka/commit/' + data.commit);
+                $v.show();
+              })
+              .catch(function () {});
+
+            // 登录态是可选的；游客仍加载所有公开只读面板。
+            loadUser()
+              .catch(function () {})
+              .then(function (loggedIn) {
+                if (loggedIn) {
+                  // 登录后引导浏览器通知权限（仅 permission 为 default 时弹解释窗）。
+                  maybePromptNotificationPermission();
+                  loadMyProfile();
+                }
+                // Intro waits until auth has had a chance to show the notification explanation.
+                document.documentElement.dataset.introHomeReady = 'true';
+                document.dispatchEvent(new Event('roka:home-ready'));
+                loadRooms();
+                loadReplays();
+                loadAnnouncement();
+                loadLeaderboard();
+                loadOnline();
+                var page = parseInt(new URLSearchParams(location.search).get('page'), 10) || 1;
+                loadFeeds(page);
+
+                // 各面板改由 socket 失效通知驱动刷新（事件无 payload，收到后重新 fetch）。
+                // query.home 标记为首页监听连接，服务端不会用它参与同账号连接互斥。
+                var socket = io({ query: { home: '1' } });
+                socket.on('home_rooms', function () {
+                  loadRooms();
+                });
+                socket.on('home_replays', function () {
+                  loadReplays();
+                });
+                socket.on('home_leaderboard', function () {
+                  loadLeaderboard();
+                  // rating 与身份外观变更后刷新用户名和个人卡片头衔。
+                  usernameColorsInvalidate();
+                  if (currentUsername) loadMyProfile();
+                });
+                socket.on('home_online', function () {
+                  loadOnline();
+                });
+                socket.on('home_announcement', function () {
+                  loadAnnouncement();
+                });
+                socket.on('home_feeds', function () {
+                  loadFeeds(feedPage);
+                });
+              });
