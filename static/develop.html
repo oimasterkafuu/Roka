@@ -11,19 +11,35 @@
       content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
     />
     <link rel="stylesheet" href="/main.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/site-header.css?v={{V}}" />
+    <script src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"></script>
+    <script src="/username.js?v={{V}}"></script>
+    <script defer src="/site-header.js?v={{V}}"></script>
     <link rel="stylesheet" href="/styles/docs.css?v={{V}}" />
     <title>Roka - 网站开发</title>
   </head>
-
   <body style="overflow: auto; height: auto">
-    <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
-      <button data-goto="/" class="small">返回首页</button>
-    </div>
-    <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
-      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span
-      ><a id="login-btn" href="/login">登录</a>
-    </div>
-
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-brand" href="/" aria-label="Roka 首页"
+          ><img
+            class="brand-icon"
+            src="/icons/icon-48.png?v={{V}}"
+            srcset="/icons/icon-48.png?v={{V}} 1x, /icons/icon-192.png?v={{V}} 2x"
+            alt="Roka 图标"
+          /><span class="brand-name">Roka</span></a
+        >
+        <nav class="site-nav" aria-label="站点导航">
+          <a class="site-nav-link" href="/">首页</a><a class="site-nav-link" href="/replays">回放</a
+          ><a class="site-nav-link" href="/about">关于</a>
+        </nav>
+        <div class="site-account" aria-label="账号">
+          <span class="site-account-name" id="site-account-name" hidden></span
+          ><a class="btn btn-primary btn-sm" id="site-login" href="/login">登录</a
+          ><button class="btn btn-ghost btn-sm" id="site-logout" type="button" hidden>退出登录</button>
+        </div>
+      </div>
+    </header>
     <div id="app">
       <h1 class="doc-title">Roka 网站开发</h1>
       <p class="doc-subtitle">
@@ -37,35 +53,36 @@
           >https://github.com/oimasterkafuu/Roka</a
         >
       </p>
-
       <section class="doc-panel">
         <h2>1. 贡献流程</h2>
         <ol>
           <li>外部贡献者 fork 仓库并 clone 自己的 fork；维护者从主仓库创建功能分支。</li>
-          <li>每个分支只处理一个主题，使用 <code>feat/xxx</code>、<code>fix/xxx</code> 等名称。</li>
+          <li>每个分支只处理一个主题，使用&#32;<code>feat/xxx</code>、<code>fix/xxx</code> 等名称。</li>
           <li>完成开发与验证后推送分支并创建 PR，说明动机、实现、影响范围和验证结果。</li>
           <li>根据评审意见更新同一个分支，保持提交聚焦，不混入无关文件。</li>
         </ol>
         <p>
-          开始修改前请阅读仓库根目录的 <code>AGENTS.md</code> 与
-          <code>MAP.md</code>。维护者直接提交需要配置指定作者身份并启用 GPG 签名；外部贡献通过 PR 进行。
+          开始修改前请阅读仓库根目录的&#32;<code>AGENTS.md</code>
+          与&#32;<code>MAP.md</code>。维护者直接提交需要配置指定作者身份并启用 GPG 签名；外部贡献通过 PR
+          进行。
         </p>
       </section>
-
       <section class="doc-panel">
         <h2>2. 环境要求</h2>
         <ul>
           <li>建议使用 Node.js 22，与仓库工作流一致，并启用 Corepack。</li>
           <li>
-            统一使用 <code>pnpm</code>，版本由 <code>package.json</code> 的
-            <code>packageManager</code> 锁定；不要使用 npm 或 yarn。
+            统一使用&#32;<code>pnpm</code>，版本由&#32;<code>package.json</code> 的&#32;<code
+              >packageManager</code
+            >
+            锁定；不要使用 npm 或 yarn。
           </li>
         </ul>
         <pre class="code-snippet"><code>corepack enable
 pnpm install
-pnpm run dev        # http://localhost:23333</code></pre>
+pnpm run dev        # http://localhost:23333
+</code></pre>
       </section>
-
       <section class="doc-panel">
         <h2>3. 项目结构</h2>
         <pre class="code-snippet"><code>src/           后端 TypeScript 源码
@@ -86,17 +103,16 @@ bot-template/  四个 bot 参考实现
 scripts/       测试、维护、迁移与观测脚本
 data/          运行时数据，不入库
 dist/          构建产物，不手工编辑</code></pre>
-        <p>逐文件职责与修改定位见 <code>MAP.md</code>，本页不重复完整源码地图。</p>
-
+        <p>逐文件职责与修改定位见&#32;<code>MAP.md</code>，本页不重复完整源码地图。</p>
         <h3>3.1 运行时数据</h3>
         <table class="doc-table">
           <tr>
-            <th><code>users.bin</code> / <code>feeds.bin</code></th>
-            <td>用户与动态数据，使用 v8 serialize 与 brotli；写入时保留 <code>.bak</code> 备份。</td>
+            <th><code>users.bin</code> /&#32;<code>feeds.bin</code></th>
+            <td>用户与动态数据，使用 v8 serialize 与 brotli；写入时保留&#32;<code>.bak</code> 备份。</td>
           </tr>
           <tr>
             <th><code>announcement.json</code></th>
-            <td>公告数据，原子写入并保留 <code>.bak</code> 备份。</td>
+            <td>公告数据，原子写入并保留&#32;<code>.bak</code> 备份。</td>
           </tr>
           <tr>
             <th><code>server-bots.json</code></th>
@@ -108,16 +124,17 @@ dist/          构建产物，不手工编辑</code></pre>
           <tr>
             <th><code>replays/</code></th>
             <td>
-              <code>&lt;id&gt;.rpl</code> 操作流、<code>index.bin</code> 索引与
-              <code>&lt;id&gt;.rpb.gz</code> 观看缓存。
+              <code>&lt;id&gt;.rpl</code> 操作流、<code>index.bin</code> 索引与&#32;<code
+                >&lt;id&gt;.rpb.gz</code
+              >
+              观看缓存。
             </td>
           </tr>
         </table>
       </section>
-
       <section class="doc-panel">
         <h2>4. 常用命令</h2>
-        <p>命令以 <code>package.json</code> 的 <code>scripts</code> 为准。</p>
+        <p>命令以&#32;<code>package.json</code> 的&#32;<code>scripts</code> 为准。</p>
         <table class="doc-table">
           <tr>
             <th><code>pnpm run dev</code></th>
@@ -125,26 +142,28 @@ dist/          构建产物，不手工编辑</code></pre>
           </tr>
           <tr>
             <th><code>pnpm run build</code></th>
-            <td>先独立构建介绍片及压缩资源，再用 tsc 编译 <code>src/</code> 到 <code>dist/</code>。</td>
+            <td>
+              先独立构建介绍片及压缩资源，再用 tsc 编译&#32;<code>src/</code> 到&#32;<code>dist/</code>。
+            </td>
           </tr>
           <tr>
             <th><code>pnpm start</code></th>
-            <td>运行 <code>dist/server.js</code>。</td>
+            <td>运行&#32;<code>dist/server.js</code>。</td>
           </tr>
           <tr>
             <th><code>pnpm run lint</code></th>
-            <td>ESLint 检查 <code>src/**/*.ts</code>；<code>lint:fix</code> 可自动修复。</td>
+            <td>ESLint 检查&#32;<code>src/**/*.ts</code>；<code>lint:fix</code> 可自动修复。</td>
           </tr>
           <tr>
             <th><code>pnpm run format</code></th>
             <td>
-              Prettier 格式化 <code>src/**/*.ts</code>、<code>static/**</code>、<code>README.md</code> 与
-              <code>AGENTS.md</code>。
+              Prettier 格式化&#32;<code>src/**/*.ts</code>、<code>static/**</code>、<code>README.md</code>
+              与&#32;<code>AGENTS.md</code>。
             </td>
           </tr>
           <tr>
             <th><code>pnpm test</code></th>
-            <td>运行聚合回归套件；也可按需执行单项 <code>test:*</code>，部分测试需要先构建。</td>
+            <td>运行聚合回归套件；也可按需执行单项&#32;<code>test:*</code>，部分测试需要先构建。</td>
           </tr>
           <tr>
             <th><code>pnpm run test:bot</code></th>
@@ -156,7 +175,6 @@ dist/          构建产物，不手工编辑</code></pre>
           </tr>
         </table>
       </section>
-
       <section class="doc-panel">
         <h2>5. 检查、提交与合并</h2>
         <div class="tips">
@@ -165,38 +183,36 @@ dist/          构建产物，不手工编辑</code></pre>
             <li>
               <code>pnpm run lint</code>、<code>pnpm run build</code>、<code>pnpm run format</code> 均通过。
             </li>
-            <li>检查 <code>git diff</code>，不混入无关改动，并确认锁文件与依赖清单一致。</li>
-            <li>运行方式、接口或配置变化时同步更新 <code>README.md</code>。</li>
-            <li>文件结构、模块职责或协议变化时同步更新 <code>MAP.md</code>。</li>
+            <li>检查&#32;<code>git diff</code>，不混入无关改动，并确认锁文件与依赖清单一致。</li>
+            <li>运行方式、接口或配置变化时同步更新&#32;<code>README.md</code>。</li>
+            <li>文件结构、模块职责或协议变化时同步更新&#32;<code>MAP.md</code>。</li>
             <li>
-              合并到 <code>main</code> 的更新必须提升版本号：破坏性变更 major，新功能 minor，其余 patch。
+              合并到&#32;<code>main</code> 的更新必须提升版本号：破坏性变更 major，新功能 minor，其余 patch。
             </li>
           </ul>
         </div>
-
         <h3>5.1 提交信息</h3>
         <p>
           使用 Conventional Commits：<code>&lt;type&gt;(&lt;scope&gt;): &lt;subject&gt;</code>。subject
-          为英文祈使句，首字母小写且不超过 72 字符。常用类型包括
-          <code>feat</code
-          >、<code>fix</code>、<code>refactor</code>、<code>perf</code>、<code>docs</code>、<code>style</code>、<code>test</code>、<code>chore</code>、<code
+          为英文祈使句，首字母小写且不超过 72
+          字符。常用类型包括&#32;<code>feat</code>、<code>fix</code>、<code>refactor</code>、<code>perf</code>、<code>docs</code>、<code>style</code>、<code>test</code>、<code>chore</code>、<code
             >ci</code
           >
-          与 <code>revert</code>；破坏性变更需标注 <code>BREAKING CHANGE:</code>。
+          与&#32;<code>revert</code>；破坏性变更需标注&#32;<code>BREAKING CHANGE:</code>。
         </p>
-
         <h3>5.2 PR 合并工作流</h3>
         <p>
-          <code>bump-version-and-merge.yml</code> 支持在 PR 下评论
-          <code>OK. &lt;major|minor|patch&gt; [merge|squash|rebase]</code
-          >，或由维护者手动触发。工作流会升版、检查冲突并按指定策略合并；评论触发仅限指定维护者，且只支持同仓库分支。合并后自动删除的分支仅限
-          <code>dev/</code> 前缀。
+          <code>bump-version-and-merge.yml</code> 支持在 PR 下评论&#32;<code
+            >OK. &lt;major|minor|patch&gt; [merge|squash|rebase]</code
+          >，或由维护者手动触发。工作流会升版、检查冲突并按指定策略合并；评论触发仅限指定维护者，且只支持同仓库分支。合并后自动删除的分支仅限&#32;<code
+            >dev/</code
+          >
+          前缀。
         </p>
       </section>
-
       <section class="doc-panel">
         <h2>6. 部署机制</h2>
-        <p>生产环境以 GitHub <code>main</code> 为准。push webhook 经 HMAC-SHA256 校验后触发：</p>
+        <p>生产环境以 GitHub&#32;<code>main</code> 为准。push webhook 经 HMAC-SHA256 校验后触发：</p>
         <pre class="code-snippet"><code>git fetch origin main
 git reset --hard origin/main
 pnpm install --frozen-lockfile
@@ -209,19 +225,18 @@ pnpm run build
           </li>
           <li>生产工作区中未推送的改动可能被自动部署覆盖，验证完成后应及时推送。</li>
           <li>
-            重启期间 Service Worker 为导航请求显示 <code>static/updating.html</code>，服务恢复后自动返回。
+            重启期间 Service Worker 为导航请求显示&#32;<code>static/updating.html</code>，服务恢复后自动返回。
           </li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>7. 自动化</h2>
         <table class="doc-table">
           <tr>
             <th>CodeQL</th>
             <td>
-              在 <code>main</code> 的 push、PR 与每周一定时任务中扫描 JavaScript/TypeScript，使用
-              <code>build-mode: none</code>；告警应及时处理。
+              在&#32;<code>main</code> 的 push、PR 与每周一定时任务中扫描
+              JavaScript/TypeScript，使用&#32;<code>build-mode: none</code>；告警应及时处理。
             </td>
           </tr>
           <tr>
@@ -234,57 +249,59 @@ pnpm run build
           </tr>
         </table>
       </section>
-
       <section class="doc-panel">
         <h2>8. 前端与静态资源</h2>
         <ul>
           <li>前端主体是原生 JavaScript 与 jQuery，不经过统一前端打包；对局页脚本全局化且加载顺序敏感。</li>
           <li>
-            普通静态文件由静态服务直接提供；全部 HTML 及
-            <code>main.css</code>、<code>main.js</code>、<code>sw.js</code>、<code>sw-register.js</code>
-            会替换 <code>{{V}}</code> 为当前版本号后发出。
+            普通静态文件由静态服务直接提供；全部 HTML
+            及&#32;<code>main.css</code>、<code>main.js</code>、<code>sw.js</code>、<code
+              >sw-register.js</code
+            >
+            会替换&#32;<code>{{V}}</code> 为当前版本号后发出。
           </li>
           <li>
             生产环境可把 JS、CSS、字体、图片与介绍片素材指向固定提交的 CDN，HTML、API 与 Socket.IO
             仍由本站提供；开发命令默认使用同源资源。
           </li>
           <li>
-            介绍片是独立构建入口，<code>scripts/intro/build-intro.mjs</code> 将
-            <code>player-source.js</code> 打包为 <code>static/intro/player.js</code> 并生成压缩资源，已包含在
-            <code>pnpm run build</code> 中。
+            介绍片是独立构建入口，<code>scripts/intro/build-intro.mjs</code> 将&#32;<code
+              >player-source.js</code
+            >
+            打包为&#32;<code>static/intro/player.js</code> 并生成压缩资源，已包含在&#32;<code
+              >pnpm run build</code
+            >
+            中。
           </li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>9. 开发边界</h2>
         <ul>
           <li>
-            源码修改放在 <code>src/</code> 与 <code>static/</code>，不要手工编辑
-            <code>dist/</code>；行为与源码不符时先重新构建。
+            源码修改放在&#32;<code>src/</code>
+            与&#32;<code>static/</code>，不要手工编辑&#32;<code>dist/</code>；行为与源码不符时先重新构建。
           </li>
           <li>
-            网站功能开发不要把 <code>bot-template/</code> 当作服务端源码修改；需要调整 bot
+            网站功能开发不要把&#32;<code>bot-template/</code> 当作服务端源码修改；需要调整 bot
             时应单独验证对应模板。
           </li>
           <li>
-            Socket.IO 协议或格子编码变化要同步修改类型、服务端、前端消费方与
-            <code>static/develop-bot.html</code>。
+            Socket.IO
+            协议或格子编码变化要同步修改类型、服务端、前端消费方与&#32;<code>static/develop-bot.html</code>。
           </li>
           <li><code>tsconfig.json</code> 刻意关闭 strict；改变严格度会影响整个后端编译面。</li>
           <li>Prettier 使用单引号、分号、尾逗号与 110 列宽度，规则见仓库配置文件。</li>
         </ul>
       </section>
-
       <section class="doc-panel">
         <h2>10. 机器人开发</h2>
         <p>连接鉴权、房间事件、对局帧、队列序号、格子编码、操作与托管规则见独立协议文档。</p>
         <div class="cta-row">
-          <button data-goto="/develop/bot" class="small inverted">查看机器人开发文档</button>
+          <button class="small inverted" data-goto="/develop/bot">查看机器人开发文档</button>
         </div>
       </section>
     </div>
-
     <script src="/docs.js?v={{V}}"></script>
   </body>
 </html>
