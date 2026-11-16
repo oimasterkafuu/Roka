@@ -1,0 +1,350 @@
+extends layout.pug
+
+block vars
+  - var bodyStyle = 'overflow: auto; height: auto'
+  - var currentPage = 'develop'
+
+block head
+  link(rel='stylesheet', href='/styles/docs.css?v={{V}}')
+  title Roka - 网站开发
+
+block content
+  #app
+    h1.doc-title Roka 网站开发
+    p.doc-subtitle
+      | Roka 使用 TypeScript、Fastify 与 Socket.IO，前端主体为原生 JavaScript。本页面向新开发者，介绍项目结构、本地流程、检查、贡献与部署约定。仓库：
+      |
+      a.doc-link(href='https://github.com/oimasterkafuu/Roka', target='_blank', rel='noopener noreferrer') https://github.com/oimasterkafuu/Roka
+
+    section.doc-panel
+      h2 1. 贡献流程
+      ol
+        li 外部贡献者 fork 仓库并 clone 自己的 fork；维护者从主仓库创建功能分支。
+        li
+          | 每个分支只处理一个主题，使用&#32;
+          code feat/xxx
+          | 、
+          code fix/xxx
+          |  等名称。
+        li 完成开发与验证后推送分支并创建 PR，说明动机、实现、影响范围和验证结果。
+        li 根据评审意见更新同一个分支，保持提交聚焦，不混入无关文件。
+      p
+        | 开始修改前请阅读仓库根目录的&#32;
+        code AGENTS.md
+        |  与&#32;
+        code MAP.md
+        | 。维护者直接提交需要配置指定作者身份并启用 GPG 签名；外部贡献通过 PR 进行。
+
+    section.doc-panel
+      h2 2. 环境要求
+      ul
+        li 建议使用 Node.js 22，与仓库工作流一致，并启用 Corepack。
+        li
+          | 统一使用&#32;
+          code pnpm
+          | ，版本由&#32;
+          code package.json
+          |  的&#32;
+          code packageManager
+          |  锁定；不要使用 npm 或 yarn。
+      pre.code-snippet
+        code.
+          corepack enable
+          pnpm install
+          pnpm run dev        # http://localhost:23333
+
+    section.doc-panel
+      h2 3. 项目结构
+      pre.code-snippet
+        code.
+          src/           后端 TypeScript 源码
+            server.ts      唯一入口：Fastify 路由与 Socket.IO 事件
+            game-engine.ts 对局核心：Tick、战斗、连通、投降与回放
+            game-engine/   常量、选点、榜单、编码、迷雾、回放与增兵模块
+            map/           地图生成器与华夏地区配置
+            server/        认证、验证码、房间、在线状态、托管与部署服务
+            types.ts       共享类型与协议定义
+            *-store.ts     用户、动态、公告与回放存储
+          static/        前端源码与静态素材
+            index.html     首页与大厅
+            game.html      对局与回放骨架，配合 main.js 和 main/
+            styles/        页面样式，main.css 负责聚合
+            intro/         介绍片运行时与独立构建产物
+            develop*.html  网站开发指南与 bot 协议文档
+          bot-template/  四个 bot 参考实现
+          scripts/       测试、维护、迁移与观测脚本
+          data/          运行时数据，不入库
+          dist/          构建产物，不手工编辑
+      p
+        | 逐文件职责与修改定位见&#32;
+        code MAP.md
+        | ，本页不重复完整源码地图。
+
+      h3 3.1 运行时数据
+      table.doc-table
+        tr
+          th
+            code users.bin
+            |  /&#32;
+            code feeds.bin
+          td
+            | 用户与动态数据，使用 v8 serialize 与 brotli；写入时保留&#32;
+            code .bak
+            |  备份。
+        tr
+          th
+            code announcement.json
+          td
+            | 公告数据，原子写入并保留&#32;
+            code .bak
+            |  备份。
+        tr
+          th
+            code server-bots.json
+          td
+            | 托管恢复状态：
+            code { username, room, template, allowTeam, allowFog, allowMultiLine }
+            |  列表。
+        tr
+          th
+            code replays/
+          td
+            code &lt;id&gt;.rpl
+            |  操作流、
+            code index.bin
+            |  索引与&#32;
+            code &lt;id&gt;.rpb.gz
+            |  观看缓存。
+
+    section.doc-panel
+      h2 4. 常用命令
+      p
+        | 命令以&#32;
+        code package.json
+        |  的&#32;
+        code scripts
+        |  为准。
+      table.doc-table
+        tr
+          th
+            code pnpm run dev
+          td 用 tsx 启动开发服务器，默认端口 23333，并显式关闭静态 CDN。
+        tr
+          th
+            code pnpm run build
+          td
+            | 先独立构建介绍片及压缩资源，再用 tsc 编译&#32;
+            code src/
+            |  到&#32;
+            code dist/
+            | 。
+        tr
+          th
+            code pnpm start
+          td
+            | 运行&#32;
+            code dist/server.js
+            | 。
+        tr
+          th
+            code pnpm run lint
+          td
+            | ESLint 检查&#32;
+            code src/**/*.ts
+            | ；
+            code lint:fix
+            |  可自动修复。
+        tr
+          th
+            code pnpm run format
+          td
+            | Prettier 格式化&#32;
+            code src/**/*.ts
+            | 、
+            code static/**
+            | 、
+            code README.md
+            |  与&#32;
+            code AGENTS.md
+            | 。
+        tr
+          th
+            code pnpm test
+          td
+            | 运行聚合回归套件；也可按需执行单项&#32;
+            code test:*
+            | ，部分测试需要先构建。
+        tr
+          th
+            code pnpm run test:bot
+          td 在临时数据目录启动服务，让两个 random-patch-bot 自动开局，验证基本接入与对局流程。
+        tr
+          th
+            code pnpm run observe:bot
+          td 录制 bot 对局并生成行为分析报告，用于策略维护。
+
+    section.doc-panel
+      h2 5. 检查、提交与合并
+      .tips
+        b 提交前最小检查：
+        ul
+          li
+            code pnpm run lint
+            | 、
+            code pnpm run build
+            | 、
+            code pnpm run format
+            |  均通过。
+          li
+            | 检查&#32;
+            code git diff
+            | ，不混入无关改动，并确认锁文件与依赖清单一致。
+          li
+            | 运行方式、接口或配置变化时同步更新&#32;
+            code README.md
+            | 。
+          li
+            | 文件结构、模块职责或协议变化时同步更新&#32;
+            code MAP.md
+            | 。
+          li
+            | 合并到&#32;
+            code main
+            |  的更新必须提升版本号：破坏性变更 major，新功能 minor，其余 patch。
+
+      h3 5.1 提交信息
+      p
+        | 使用 Conventional Commits：
+        code &lt;type&gt;(&lt;scope&gt;): &lt;subject&gt;
+        | 。subject 为英文祈使句，首字母小写且不超过 72 字符。常用类型包括&#32;
+        code feat
+        | 、
+        code fix
+        | 、
+        code refactor
+        | 、
+        code perf
+        | 、
+        code docs
+        | 、
+        code style
+        | 、
+        code test
+        | 、
+        code chore
+        | 、
+        code ci
+        |  与&#32;
+        code revert
+        | ；破坏性变更需标注&#32;
+        code BREAKING CHANGE:
+        | 。
+
+      h3 5.2 PR 合并工作流
+      p
+        code bump-version-and-merge.yml
+        |  支持在 PR 下评论&#32;
+        code OK. &lt;major|minor|patch&gt; [merge|squash|rebase]
+        | ，或由维护者手动触发。工作流会升版、检查冲突并按指定策略合并；评论触发仅限指定维护者，且只支持同仓库分支。合并后自动删除的分支仅限&#32;
+        code dev/
+        |  前缀。
+
+    section.doc-panel
+      h2 6. 部署机制
+      p
+        | 生产环境以 GitHub&#32;
+        code main
+        |  为准。push webhook 经 HMAC-SHA256 校验后触发：
+      pre.code-snippet
+        code.
+          git fetch origin main
+          git reset --hard origin/main
+          pnpm install --frozen-lockfile
+          pnpm run build
+          # systemd 环境退出并由守护进程重启，其他环境自行重启。
+      ul
+        li 有对局运行时先进入更新排队：广播状态、禁止开新局，最后一局结束后部署；默认 120 秒宽限到期时按当前名次清算残余对局。
+        li 生产工作区中未推送的改动可能被自动部署覆盖，验证完成后应及时推送。
+        li
+          | 重启期间 Service Worker 为导航请求显示&#32;
+          code static/updating.html
+          | ，服务恢复后自动返回。
+
+    section.doc-panel
+      h2 7. 自动化
+      table.doc-table
+        tr
+          th CodeQL
+          td
+            | 在&#32;
+            code main
+            |  的 push、PR 与每周一定时任务中扫描 JavaScript/TypeScript，使用&#32;
+            code build-mode: none
+            | ；告警应及时处理。
+        tr
+          th Dependabot
+          td npm 生态每天检查，开放 PR 上限为 50。依赖 PR 逐个处理，合并时统一提升 patch 版本。
+        tr
+          th 版本与合并
+          td 由第 5.2 节的工作流执行，不要把它当作覆盖所有测试的 CI。
+
+    section.doc-panel
+      h2 8. 前端与静态资源
+      ul
+        li 前端主体是原生 JavaScript 与 jQuery，不经过统一前端打包；对局页脚本全局化且加载顺序敏感。
+        li
+          | 普通静态文件由静态服务直接提供；全部 HTML 及&#32;
+          code main.css
+          | 、
+          code main.js
+          | 、
+          code sw.js
+          | 、
+          code sw-register.js
+          |  会替换&#32;
+          code {{V}}
+          |  为当前版本号后发出。
+        li 生产环境可把 JS、CSS、字体、图片与介绍片素材指向固定提交的 CDN，HTML、API 与 Socket.IO 仍由本站提供；开发命令默认使用同源资源。
+        li
+          | 介绍片是独立构建入口，
+          code scripts/intro/build-intro.mjs
+          |  将&#32;
+          code player-source.js
+          |  打包为&#32;
+          code static/intro/player.js
+          |  并生成压缩资源，已包含在&#32;
+          code pnpm run build
+          |  中。
+
+    section.doc-panel
+      h2 9. 开发边界
+      ul
+        li
+          | 源码修改放在&#32;
+          code src/
+          |  与&#32;
+          code static/
+          | ，不要手工编辑&#32;
+          code dist/
+          | ；行为与源码不符时先重新构建。
+        li
+          | 网站功能开发不要把&#32;
+          code bot-template/
+          |  当作服务端源码修改；需要调整 bot 时应单独验证对应模板。
+        li
+          | Socket.IO 协议或格子编码变化要同步修改类型、服务端、前端消费方与&#32;
+          code static/develop-bot.html
+          | 。
+        li
+          code tsconfig.json
+          |  刻意关闭 strict；改变严格度会影响整个后端编译面。
+        li Prettier 使用单引号、分号、尾逗号与 110 列宽度，规则见仓库配置文件。
+
+    section.doc-panel
+      h2 10. 机器人开发
+      p 连接鉴权、房间事件、对局帧、队列序号、格子编码、操作与托管规则见独立协议文档。
+      .cta-row
+        button.small.inverted(data-goto='/develop/bot') 查看机器人开发文档
+
+block scripts
+  script(src='/docs.js?v={{V}}')
