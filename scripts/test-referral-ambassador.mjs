@@ -209,10 +209,14 @@ function cookieFrom(response, name) {
   return cookie ? cookie.split(';')[0] : '';
 }
 
-async function post(pathname, body, cookie = '') {
+async function post(pathname, body, cookie = '', ip = '') {
   return fetch(base + pathname, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(cookie ? { cookie } : {}),
+      ...(ip ? { 'x-real-ip': ip } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
@@ -257,7 +261,12 @@ try {
   const invalidClick = await post('/api/referrals/click', { referrer: 'Missing' });
   assert.deepEqual(await invalidClick.json(), { ok: false });
 
-  const registration = await post('/api/auth/register', await authBody('InvitedHttp'), referralCookie);
+  const registration = await post(
+    '/api/auth/register',
+    await authBody('InvitedHttp'),
+    referralCookie,
+    '198.51.100.101',
+  );
   assert.equal(registration.status, 200, await registration.text());
   const registrationCookies = registration.headers.getSetCookie();
   assert.equal(
@@ -306,9 +315,15 @@ try {
     '/api/auth/register',
     await authBody('SelfHttp'),
     'roka_referral=SelfHttp',
+    '198.51.100.102',
   );
   assert.equal(selfRegistration.status, 200);
-  const organicRegistration = await post('/api/auth/register', await authBody('PlainHttp'));
+  const organicRegistration = await post(
+    '/api/auth/register',
+    await authBody('PlainHttp'),
+    '',
+    '198.51.100.103',
+  );
   assert.equal(organicRegistration.status, 200);
   const afterBoundaries = await (
     await fetch(`${base}/api/admin/referrals`, { headers: { cookie: adminCookie } })

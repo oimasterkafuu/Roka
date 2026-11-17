@@ -2,7 +2,6 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { isIP } from 'node:net';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
@@ -44,6 +43,10 @@ import { PresenceService } from './server/presence-service';
 import { ServerBotManager } from './server/server-bot-manager';
 import { WebhookUpdater } from './server/webhook-updater';
 import { StaticAssetDelivery } from './server/static-assets';
+import { resolveClientIp, resolveRateLimitKey } from './server/client-ip';
+import { RegistrationSecurity } from './server/registration-security';
+import { SecurityAuditStore } from './server/security-audit';
+import { UsernameSecurityService } from './server/username-security';
 
 const runtimeEnv = ensureRuntimeEnv();
 const app = Fastify({ logger: true });
@@ -88,8 +91,10 @@ const replayStore = new ReplayStore(path.join(dataDir, 'replays'), {
 const userStore = new UserStore(dataDir);
 const feedStore = new FeedStore(dataDir);
 const chatModeration = new ChatModeration(dataDir);
+const securityAudit = new SecurityAuditStore(dataDir);
 const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
+const registrationSecurity = new RegistrationSecurity(userStore, securityAudit);
 const captchaService = new CaptchaService();
 const contributorsService = new ContributorsService();
 const stargazerService = new StargazerService({
@@ -124,6 +129,16 @@ const serverBotManager = new ServerBotManager({
 // Socket.IO 实例在 boot() 内创建；webhook 广播回调经此引用延迟绑定
 // （webhook 只在 listen 后可达，回调触发时 socketServer 必然已赋值）。
 let socketServer: SocketIOServer | null = null;
+const usernameSecurity = new UsernameSecurityService(
+  userStore,
+  securityAudit,
+  async (username) => {
+    await userStore.clearSession(username);
+    authService.disconnectUserSockets(username);
+    socketServer?.emit('home_leaderboard');
+  },
+  (error) => app.log.error({ err: error }, 'username security scan failed'),
+);
 const DEPLOY_SETTLE_MESSAGE = '系统即将更新，本局按当前名次提前结算。';
 const webhookUpdater = new WebhookUpdater(
   app.log,
@@ -346,86 +361,6 @@ const parseMapExamplePlayerCount = (value: unknown): number => {
   return Math.max(MAP_EXAMPLE_MIN_PLAYER_COUNT, Math.min(MAP_EXAMPLE_MAX_PLAYER_COUNT, parsed));
 };
 
-const normalizeIpToken = (token: string): string | null => {
-  const trimmed = token.trim().replace(/^"(.+)"$/u, '$1');
-  if (!trimmed || trimmed.toLowerCase() === 'unknown') {
-    return null;
-  }
-
-  const strippedForPrefix = trimmed
-    .replace(/^for=/iu, '')
-    .trim()
-    .replace(/^"(.+)"$/u, '$1');
-  const bracketWrapped = strippedForPrefix.match(/^\[([^[\]]+)\](?::\d+)?$/u);
-  const maybeIp = bracketWrapped ? bracketWrapped[1] : strippedForPrefix;
-  const normalized = maybeIp.startsWith('::ffff:') ? maybeIp.slice(7) : maybeIp;
-
-  if (isIP(normalized)) {
-    return normalized;
-  }
-
-  const ipv4WithPort = normalized.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/u);
-  if (ipv4WithPort && isIP(ipv4WithPort[1])) {
-    return ipv4WithPort[1];
-  }
-
-  return null;
-};
-
-const isPrivateOrLoopbackIp = (ip: string): boolean => {
-  if (isIP(ip) === 4) {
-    const parts = ip.split('.').map((part) => Number.parseInt(part, 10));
-    const [a, b] = parts;
-    return (
-      a === 10 ||
-      a === 127 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254)
-    );
-  }
-
-  const lowered = ip.toLowerCase();
-  return (
-    lowered === '::1' ||
-    lowered === '::' ||
-    lowered.startsWith('fc') ||
-    lowered.startsWith('fd') ||
-    lowered.startsWith('fe8') ||
-    lowered.startsWith('fe9') ||
-    lowered.startsWith('fea') ||
-    lowered.startsWith('feb')
-  );
-};
-
-const getRealIpFromHeaders = (request: FastifyRequest): string | null => {
-  const value = request.headers['x-real-ip'];
-  return typeof value === 'string' ? normalizeIpToken(value) : null;
-};
-
-const getRemoteIp = (request: FastifyRequest): string | null => {
-  const remoteAddress = request.socket.remoteAddress;
-  if (typeof remoteAddress === 'string') {
-    const normalized = normalizeIpToken(remoteAddress);
-    if (normalized) {
-      return normalized;
-    }
-  }
-
-  return typeof request.ip === 'string' ? normalizeIpToken(request.ip) : null;
-};
-
-const resolveRateLimitKey = (request: FastifyRequest): string => {
-  const remoteIp = getRemoteIp(request);
-  if (remoteIp && isPrivateOrLoopbackIp(remoteIp)) {
-    const realIp = getRealIpFromHeaders(request);
-    if (realIp) {
-      return realIp;
-    }
-  }
-  return remoteIp ?? 'unknown';
-};
-
 const REPLAY_DOWNLOAD_STATE_MAX_KEYS = 10_000;
 const REPLAY_WINDOW_MS = 60_000;
 const REPLAY_DOWNLOAD_DISABLED_RETRY_AFTER_SECONDS = 3600;
@@ -554,6 +489,7 @@ const boot = async (listen = true): Promise<void> => {
   await userStore.ensureReady();
   await feedStore.ensureReady();
   await chatModeration.ensureReady();
+  await securityAudit.ensureReady();
   // Expiry applies even on an idle server; no raw chat is included in error logs.
   const flushChatAudit = (): void => {
     void chatModeration.flush().catch((error) => app.log.error({ err: error }, 'chat audit write failed'));
@@ -576,7 +512,10 @@ const boot = async (listen = true): Promise<void> => {
   app.addHook('onRequest', app.rateLimit(GENERAL_RATE_LIMIT));
   app.addHook('onClose', async () => {
     clearInterval(chatAuditTimer);
-    await chatModeration.flush();
+    await Promise.all([chatModeration.flush(), securityAudit.flush()]);
+  });
+  app.addHook('onSend', async (request, reply) => {
+    if (request.url.split('?')[0].startsWith('/api/admin/')) reply.header('Cache-Control', 'no-store');
   });
 
   app.addHook('onRequest', async (request, reply) => {
@@ -598,6 +537,12 @@ const boot = async (listen = true): Promise<void> => {
       return reply.code(403).send({ error: formatBanMessage(banStatus) });
     }
     (request as AuthRequest).authUser = authUser;
+    const clientIp = resolveClientIp(request);
+    if (clientIp) {
+      void userStore
+        .recordActivityIp(authUser.username, clientIp)
+        .catch((error) => app.log.error({ err: error }, 'user IP activity write failed'));
+    }
     // 任何已认证请求都算一次用户活动；/api/online 自身除外（在线状态查询是被动
     // 轮询，计入会让在线状态自我维持、永不掉线）。
     if (pathname !== '/api/online') {
@@ -775,10 +720,22 @@ const boot = async (listen = true): Promise<void> => {
       return reply.code(400).send({ error: captchaCheck.error ?? '验证码校验失败。' });
     }
 
+    const clientIp = resolveClientIp(request);
+    const review = await registrationSecurity.review(usernameRaw, clientIp);
+    if (review.allowed === false) {
+      if (review.retryAfter) reply.header('Retry-After', String(review.retryAfter));
+      return reply.code(review.status).send({ error: review.error });
+    }
+
     try {
       const referrer = authService.getReferralFromCookie(request.headers.cookie) ?? undefined;
-      const username = await userStore.register(usernameRaw, password, referrer);
-      const sessionId = await userStore.rotateSession(username);
+      const username = await userStore.register(usernameRaw, password, referrer, clientIp ?? undefined);
+      const sessionId = await userStore.rotateSession(username, clientIp ?? undefined);
+      try {
+        await registrationSecurity.afterRegistration(username, clientIp, review.relatedBannedUsernames);
+      } catch (error) {
+        app.log.error({ err: error }, 'registration security audit write failed');
+      }
       authService.disconnectUserSockets(username);
       const token = authService.signAuthToken(username, sessionId);
       authService.clearReferralCookie(reply);
@@ -824,7 +781,7 @@ const boot = async (listen = true): Promise<void> => {
       return reply.code(403).send({ error: formatBanMessage(banStatus) });
     }
 
-    const sessionId = await userStore.rotateSession(username);
+    const sessionId = await userStore.rotateSession(username, resolveClientIp(request) ?? undefined);
     authService.disconnectUserSockets(username);
 
     const token = authService.signAuthToken(username, sessionId);
@@ -999,6 +956,56 @@ const boot = async (listen = true): Promise<void> => {
       chatModeration.release(target, admin.username);
       await chatModeration.flush();
       return reply.send({ ok: true });
+    },
+  );
+
+  app.get('/api/admin/security/dashboard', async (request, reply) => {
+    if (!requireAdmin(request, reply)) return;
+    const now = Date.now();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const users = userStore.listUsersForAdmin();
+    return reply.send({
+      summary: {
+        totalUsers: users.length,
+        activeBans: users.filter((user) => user.bannedUntil !== null).length,
+        registrationsToday: users.filter((user) => user.createdAt >= today.getTime()).length,
+        registrations7Days: users.filter((user) => user.createdAt >= now - 7 * 24 * 60 * 60 * 1000).length,
+        registrationBlocks24Hours: securityAudit.count(
+          'registration_rate_limited',
+          now - 24 * 60 * 60 * 1000,
+        ),
+        usernameAutoBans: securityAudit.count('username_auto_banned'),
+        pendingBanEvasions: securityAudit.count('possible_ban_evasion'),
+      },
+      recentEvents: securityAudit.list({}, 10),
+      lastScan: securityAudit.latestScan(),
+    });
+  });
+
+  app.get('/api/admin/security/events', async (request, reply) => {
+    if (!requireAdmin(request, reply)) return;
+    const query = request.query as { type?: unknown; username?: unknown; ip?: unknown };
+    return reply.send({
+      items: securityAudit.list({
+        type: String(query.type ?? '').slice(0, 50),
+        username: String(query.username ?? '').slice(0, 100),
+        ip: String(query.ip ?? '').slice(0, 100),
+      }),
+    });
+  });
+
+  app.post(
+    '/api/admin/security/scan',
+    { preHandler: adminActionRateLimitPreHandler },
+    async (request, reply) => {
+      if (!requireAdmin(request, reply)) return;
+      try {
+        return reply.send(await usernameSecurity.scan());
+      } catch (error) {
+        request.log.error(error, 'manual username security scan failed');
+        return reply.code(500).send({ error: '复查失败，请查看服务日志后重试。' });
+      }
     },
   );
 
@@ -1870,6 +1877,7 @@ const boot = async (listen = true): Promise<void> => {
   socketServer = io;
   authService.attachSocketServer(io);
   lobbyService.startLobbyHeartbeatSweep(io);
+  usernameSecurity.start();
 
   // home_online 失效通知做简单节流合并：上线/下线转换频繁时最多每 2 秒广播一次。
   let homeOnlineTimer: NodeJS.Timeout | null = null;
@@ -1895,6 +1903,7 @@ const boot = async (listen = true): Promise<void> => {
     clearInterval(presenceSweepTimer);
     clearInterval(replayDownloadStateCleanupTimer);
     lobbyService.stopLobbyHeartbeatSweep();
+    usernameSecurity.stop();
     if (homeOnlineTimer) {
       clearTimeout(homeOnlineTimer);
     }

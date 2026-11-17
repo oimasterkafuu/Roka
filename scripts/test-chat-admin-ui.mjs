@@ -84,6 +84,7 @@ try {
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/admin`);
+    await page.locator('#tab-chat').click();
     await page.waitForFunction(() => document.querySelectorAll('#chat-body tr').length === 3);
     await page.evaluate(() => document.fonts.ready);
     const card = page.locator('section').filter({ has: page.locator('#chat-body') });

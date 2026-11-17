@@ -17,6 +17,7 @@ coverage/
 data/users.bin
 data/feeds.bin
 data/announcement.json
+data/security-audit.json
 data/server-bots.json
 data/replays/
 data/observe-*/

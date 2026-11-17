@@ -26,29 +26,125 @@
         <button class="btn btn-ghost btn-sm" id="back-home-btn" type="button">← 返回首页</button
         ><a id="account-name" href="#"></a>
       </header>
-      <!--用户管理-->
-      <section class="card">
+      <nav class="admin-tabs" role="tablist" aria-label="后台管理分区">
+        <a
+          class="admin-tab"
+          id="tab-dashboard"
+          href="#dashboard"
+          role="tab"
+          aria-selected="true"
+          aria-controls="panel-dashboard"
+          >仪表盘</a
+        ><a
+          class="admin-tab"
+          id="tab-users"
+          href="#users"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-users"
+          >用户管理</a
+        ><a
+          class="admin-tab"
+          id="tab-security"
+          href="#security"
+          role="tab"
+          aria-selected="false"
+          aria-controls="panel-security"
+          >安全风险</a
+        ><a
+          class="admin-tab"
+          id="tab-chat"
+          href="#chat"
+          role="tab"
+          aria-selected="false"
+          aria-controls="chat-audit"
+          >聊天审计</a
+        ><a
+          class="admin-tab"
+          id="tab-bots"
+          href="#bots"
+          role="tab"
+          aria-selected="false"
+          aria-controls="bots-card"
+          style="display: none"
+          >策略 Bot</a
+        >
+      </nav>
+      <section class="card admin-panel" id="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
+        <h2 class="card-title">仪表盘</h2>
+        <div class="dashboard-grid">
+          <div class="metric-card">
+            <span class="metric-label">用户总数</span
+            ><strong class="metric-value" id="metric-total-users">-</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">有效封禁</span
+            ><strong class="metric-value" id="metric-active-bans">-</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">今日注册</span
+            ><strong class="metric-value" id="metric-registrations-today">-</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">近 7 天注册</span
+            ><strong class="metric-value" id="metric-registrations-7-days">-</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">24 小时注册拦截</span
+            ><strong class="metric-value" id="metric-registration-blocks">-</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">违规用户名自动处置</span
+            ><strong class="metric-value" id="metric-username-auto-bans">-</strong>
+          </div>
+          <div class="metric-card metric-alert">
+            <span class="metric-label">待复核绕封关联</span
+            ><strong class="metric-value" id="metric-pending-evasions">-</strong>
+          </div>
+        </div>
+        <p class="security-status" id="dashboard-last-scan">最近一次全量扫描：尚未执行</p>
+        <h3 class="card-subtitle">最近安全事件</h3>
+        <div class="table-scroll">
+          <table class="mini-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>类型</th>
+                <th>用户 / IP</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody id="dashboard-events-body"></tbody>
+          </table>
+        </div>
+        <p class="panel-empty" id="dashboard-events-empty">暂无安全事件。</p>
+      </section>
+      <section class="card admin-panel" id="panel-users" role="tabpanel" aria-labelledby="tab-users">
         <h2 class="card-title">用户管理</h2>
         <div class="user-toolbar">
-          <input id="user-search" type="text" placeholder="按用户名搜索" maxlength="20" /><span
+          <input id="user-search" type="text" placeholder="按用户名或 IP 搜索" maxlength="100" /><span
             class="users-total"
             id="users-total"
           ></span>
         </div>
-        <table class="mini-table">
-          <thead>
-            <tr>
-              <th>用户名</th>
-              <th>Rating</th>
-              <th>注册时间</th>
-              <th>最后在线</th>
-              <th>角色</th>
-              <th>封禁详情</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="users-body"></tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="mini-table users-table">
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>Rating</th>
+                <th>注册时间</th>
+                <th>注册 IP</th>
+                <th>最近 IP / 时间</th>
+                <th>最后在线</th>
+                <th>角色</th>
+                <th>封禁详情</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="users-body"></tbody>
+          </table>
+        </div>
         <p class="panel-empty" id="users-empty" style="display: none">暂无用户。</p>
         <div class="users-pagination" id="users-pagination" style="display: none">
           <button class="btn btn-ghost btn-sm" id="users-prev" type="button">上一页</button
@@ -56,12 +152,64 @@
           ><button class="btn btn-ghost btn-sm" id="users-next" type="button">下一页</button>
         </div>
       </section>
-      <section class="card chat-audit" id="chat-audit" aria-labelledby="chat-audit-title">
+      <section
+        class="card admin-panel security-panel"
+        id="panel-security"
+        role="tabpanel"
+        aria-labelledby="tab-security"
+      >
+        <h2 class="card-title">安全风险</h2>
+        <p class="security-hint">
+          同 IP 仅作为复核线索，不会自动连坐；批量注册拦截只影响后续新注册，不封禁既有正常账号。
+        </p>
+        <button class="btn btn-secondary btn-sm" id="security-scan-btn" type="button">
+          立即复查全部用户名
+        </button>
+        <p class="security-status" id="security-scan-result" role="status"></p>
+        <div class="security-filters">
+          <select id="security-type" aria-label="安全事件类型">
+            <option value="">全部事件</option>
+            <option value="username_rejected">违规用户名拦截</option>
+            <option value="username_auto_banned">用户名自动封禁</option>
+            <option value="username_manual_review">超管人工复核</option>
+            <option value="possible_ban_evasion">可能绕封关联</option>
+            <option value="registration_rate_limited">批量注册拦截</option>
+            <option value="username_scan_completed">全量扫描结果</option></select
+          ><input id="security-username" type="text" placeholder="用户名子串" maxlength="100" /><input
+            id="security-ip"
+            type="text"
+            placeholder="IP 子串"
+            maxlength="100"
+          /><button class="btn btn-secondary btn-sm" id="security-search" type="button">筛选</button>
+        </div>
+        <p class="security-status" id="security-error" role="status"></p>
+        <h3 class="card-subtitle">可能绕封关联</h3>
+        <div class="security-records" id="security-evasions"></div>
+        <h3 class="card-subtitle">批量注册拦截</h3>
+        <div class="security-records" id="security-blocks"></div>
+        <h3 class="card-subtitle">安全审计事件</h3>
+        <div class="table-scroll">
+          <table class="mini-table security-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>类型</th>
+                <th>用户 / 关联账号</th>
+                <th>IP</th>
+                <th>动作 / 原因</th>
+              </tr>
+            </thead>
+            <tbody id="security-events-body"></tbody>
+          </table>
+        </div>
+        <p class="panel-empty" id="security-events-empty" style="display: none">暂无匹配事件。</p>
+      </section>
+      <section class="card chat-audit admin-panel" id="chat-audit" role="tabpanel" aria-labelledby="tab-chat">
         <h2 class="card-title" id="chat-audit-title">聊天审计与广告复核</h2>
         <p class="chat-audit-hint">
           &#32;仅公开聊天，网址仅保留来源域名；最多保留 7 天、2000 条、2 MiB。候选不代表确认广告：进房 30
           秒内发网址并在发链后 15 秒内离开，仅限聊 10
-          分钟。请结合上下文复核，误判可解除；需封禁时使用上方用户管理。&#32;
+          分钟。请结合上下文复核，误判可解除；需封禁时使用用户管理。&#32;
         </p>
         <div class="chat-audit-toolbar">
           <input id="chat-user" placeholder="精确用户名" aria-label="精确用户名" maxlength="20" /><input
@@ -89,8 +237,13 @@
           <tbody id="chat-body"></tbody>
         </table>
       </section>
-      <!--策略 Bot（仅超级管理员）-->
-      <section class="card" id="bots-card" style="display: none">
+      <section
+        class="card admin-panel"
+        id="bots-card"
+        role="tabpanel"
+        aria-labelledby="tab-bots"
+        style="display: none"
+      >
         <h2 class="card-title">策略 Bot</h2>
         <p class="bot-hint">
           &#32;在服务器进程内运行所选模板的策略
@@ -114,26 +267,27 @@
           ><button class="btn btn-ghost btn-sm" id="bots-refresh-btn" type="button">刷新</button>
         </div>
         <p class="dialog-error" id="bot-error" style="display: none"></p>
-        <table class="mini-table" id="bots-table">
-          <thead>
-            <tr>
-              <th>用户名</th>
-              <th>房间</th>
-              <th>模板</th>
-              <th>组队</th>
-              <th>迷雾远征</th>
-              <th>多线争锋</th>
-              <th>启动时间</th>
-              <th>连接状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody id="bots-body"></tbody>
-        </table>
+        <div class="table-scroll">
+          <table class="mini-table" id="bots-table">
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>房间</th>
+                <th>模板</th>
+                <th>组队</th>
+                <th>迷雾远征</th>
+                <th>多线争锋</th>
+                <th>启动时间</th>
+                <th>连接状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="bots-body"></tbody>
+          </table>
+        </div>
         <p class="panel-empty" id="bots-empty" style="display: none">暂无运行中的 Bot。</p>
       </section>
     </div>
-    <!--封禁对话框-->
     <div class="dialog-mask" id="ban-dialog-mask" style="display: none">
       <div class="dialog">
         <h3 class="dialog-title">封禁用户&#32;<span id="ban-target"></span></h3>
