@@ -67,8 +67,6 @@ const pages = {
   ],
   'replays.html': ['app', 'replay-query', 'replays-heading', 'replays-body', 'replays-pagination'],
   'tutorial-text.html': [
-    'account-name',
-    'login-btn',
     'app',
     'map-example-mode',
     'map-example-region-control',
@@ -100,8 +98,9 @@ const sharedHeaderPages = [
   'develop-bot.html',
   'develop.html',
   'login.html',
+  'tutorial-text.html',
 ];
-const specialPages = ['index.html', 'game.html', 'tutorial.html', 'tutorial-text.html', 'replays.html'];
+const specialPages = ['index.html', 'game.html', 'tutorial.html', 'replays.html'];
 const sharedHeaderIds = ['site-account-name', 'site-login', 'site-logout'];
 const faviconAssets = [
   '/icons/favicon.ico?v={{V}}',
@@ -212,9 +211,9 @@ for (const name of expectedPages) {
     );
   }
 }
-assert.equal(normalizedHeaders.length, 5, 'exactly five pages use the shared header');
+assert.equal(normalizedHeaders.length, 6, 'exactly six pages use the shared header');
 for (const header of normalizedHeaders) {
-  assert.equal(header, normalizedHeaders[0], 'all five shared-header pages render the same structure');
+  assert.equal(header, normalizedHeaders[0], 'all six shared-header pages render the same structure');
 }
 for (const name of specialPages) {
   assertNoSharedHeader(name, htmlFor(name));
@@ -271,10 +270,12 @@ assert.ok(tutorial.includes('class="tutorial-back-link" href="/tutorial"'));
 assertScriptOrder('tutorial.html', tutorial, ['/main/blink-clock.js?v={{V}}', '/tutorial.js?v={{V}}']);
 
 const tutorialText = htmlFor('tutorial-text.html');
-assert.ok(tutorialText.includes('data-goto="/"'), 'tutorial-text: private home control');
-assert.ok(tutorialText.includes('返回首页'), 'tutorial-text: private home label');
-assert.ok(tutorialText.includes('position: fixed; top: 12px; left: 12px'));
-assert.ok(tutorialText.includes('position: fixed; top: 12px; right: 12px'));
+assert.ok(!tutorialText.includes('data-goto="/"'), 'tutorial-text: former private home control removed');
+assert.ok(!tutorialText.includes('返回首页'), 'tutorial-text: former private home label removed');
+assert.ok(!tutorialText.includes('id="account-name"'), 'tutorial-text: former private account removed');
+assert.ok(!tutorialText.includes('id="login-btn"'), 'tutorial-text: former private login link removed');
+assert.ok(!tutorialText.includes('position: fixed; top: 12px; left: 12px'));
+assert.ok(!tutorialText.includes('position: fixed; top: 12px; right: 12px'));
 for (const asset of [
   '/styles/docs.css?v={{V}}',
   '/vendor/katex/katex.min.css?v={{V}}',
@@ -436,5 +437,5 @@ assert.equal(user.calls[1].options.method, 'POST');
 assert.equal(user.location.href, '/login');
 
 console.log('PASS build-pages: 13 same-named Pug/HTML pages, idempotent output, key DOM and script order');
-console.log('PASS headers: shared on five pages; private controls and no shared assets on eight pages');
+console.log('PASS headers: shared on six pages; private controls and no shared assets on seven pages');
 console.log('PASS inline scripts and site-header account state');
