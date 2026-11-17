@@ -149,6 +149,24 @@ function assertNoSharedHeader(name, html) {
   }
 }
 
+function extractInlineScripts(html) {
+  return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script(?:\s[^>]*)?>/gi)]
+    .filter((match) => !/(?:^|\s)src\s*=/i.test(match[1]))
+    .map((match) => match[2])
+    .filter((source) => source.trim());
+}
+
+assert.deepEqual(
+  extractInlineScripts(`
+    <SCRIPT SRC="/external.js">external.mustNotBeInline = true;</SCRIPT>
+    <ScRiPt type="text/javascript">const mixedCase = true;</sCrIpT>
+    <script>const closingAttributes = true;</script foo="bar">
+    <script>  \n  </script>
+  `),
+  ['const mixedCase = true;', 'const closingAttributes = true;'],
+  'inline script extraction handles tag case and closing attributes without external or empty scripts',
+);
+
 const staticPages = readdirSync(path.join(rootDir, 'static'))
   .filter((name) => name.endsWith('.html'))
   .sort();
@@ -207,9 +225,7 @@ for (const name of expectedPages) {
     assertNoSharedHeader(name, html);
   }
 
-  const inlineScripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
-    .map((match) => match[1])
-    .filter((source) => source.trim());
+  const inlineScripts = extractInlineScripts(html);
   for (const [index, source] of inlineScripts.entries()) {
     assert.doesNotThrow(
       () => new vm.Script(source, { filename: `${name} inline script ${index + 1}` }),
