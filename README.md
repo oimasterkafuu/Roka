@@ -124,3 +124,9 @@ pnpm run test:build-pages
 动态可选 `editedAt` 兼容旧数据，正文写操作使用存储内单调毫秒时间，点赞与渲染不变更版本。首次扫描现有动态/评论，之后用版本时间和同时间版本键增量识别。`security-audit.json` 顶层 `contentCursor` 与本轮事件原子写入，成功才推进，失败重试；游标不依赖会被裁剪的历史事件。审计继续为 0600、最多 2000 条/2 MiB。管理员原有 `GET /api/admin/security/events` 可按 `content_manual_review`、`content_scan_completed` 筛选，响应 no-store；内容证据含作者、类型、post/comment id、版本时间、命中词与原文（300/200 字），扫描结果含动态/评论数、命中数、完成时间与游标。这些审计字段不加入公开动态 DTO。未增加手动内容扫描 API。
 
 验证：`pnpm run test:content-moderation`（已纳入 `pnpm test`），配合 `test:admin-security`、`test:admin-security-ui` 验证策略、注册共用、增量/同毫秒边界、重启、失败重试、裁剪恢复、人工复核与公开隐私、权限及桌面/手机安全渲染。
+
+## 回放与首屏加载动画
+
+未知回放大小时，加载条从轨道左侧进入，向右横贯后离开并循环；已知大小时左缘固定，按百分比向右增长，下载结束显示 100%。CDN 首屏样式准备期间显示 CSS 旋转圆环和「Roka 加载中…」，样式就绪后一起移除。减少动态效果模式使用静态指示。
+
+`pnpm run test:replay-loading-ui`（纳入 `pnpm test`，需先构建）使用真实 Chromium，在 1440/390 视口测量 0/25/75/100% 几何位置、单周期动画相位、状态切换、首屏旋转和移除、布局溢出与脚本错误。先运行 `pnpm exec playwright install chromium` 准备浏览器；可用 `ROKA_PLAYWRIGHT_MODULE` / `CHROMIUM_PATH` 指定浏览器依赖，`ROKA_LOADING_OUTPUT=<仓库外目录>` 导出测量 JSON。

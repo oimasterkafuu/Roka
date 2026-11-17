@@ -535,3 +535,9 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 - `src/server/security-audit.ts`：顶层 `contentCursor: {time, keys}` 独立于有界事件，键为含类型、post/comment id、版本时间的 SHA-256。首次全量、随后只查更晚时间及同时间未见键；完整扫描事件和游标同次原子写入，失败回滚并重试，裁剪不丢游标。`content_manual_review` 的 `content` 保存类型、位置、版本、命中词、原文，作者沿用 `username`；`content_scan_completed.contentResult` 保存 scanned/posts/comments/hits/completedAt/cursor。
 - `views/admin.pug` → `static/admin.html`、`static/admin.js`：安全风险增加两种筛选，正文与定位证据继续 `.text()` 安全显示。复用管理员 no-store 查询 API，不新增公开审计字段或手动扫描接口。
 - `scripts/test-content-moderation.mjs`：独立测试并纳入 `pnpm test`；现有 admin/security UI 测试扩展权限、公开 DTO 隐私、新事件注入与 1440/390 布局。
+
+### 回放与首屏加载动画
+
+- `static/styles/game-ui.css`：轨道覆盖 `<center>` 继承的 `-webkit-center`，填充条显式左对齐并复位 transform；未知大小以 transform 从左进入、横贯全轨道向右离开，减少动态效果模式静态显示。`static/main.js` 保留下载进度接口及 EOF 100% 语义。
+- `src/server/static-assets.ts`：`#roka-initial-style` 用 html 伪元素呈现旋转圆环与文字，继续隐藏 body，由资源运行时移除整段样式。
+- `scripts/test-replay-loading-ui.mjs` / `pnpm run test:replay-loading-ui`：真实 Chromium 采样生成的 game.html DOM、最终 CSS 与服务端注入 HTML，覆盖桌面/手机百分比几何、单向全轨道动画、状态切换无位移、首屏旋转及移除、减少动态效果和 pageerror；纳入 `pnpm test`，可导出仓库外测量 JSON。

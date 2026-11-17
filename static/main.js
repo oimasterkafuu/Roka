@@ -221,7 +221,7 @@ function updateReplayLoading(loaded, total) {
     text =
       '回放加载中… ' + percent + '%（' + formatReplaySize(loaded) + ' / ' + formatReplaySize(total) + '）';
   } else {
-    // 服务端未给出 X-Replay-Size（仍在转码重建）时进度「虚」显示：填充条往返滑动。
+    // 服务端未给出 X-Replay-Size（仍在转码重建）时进度「虚」显示：填充条从左向右横贯轨道。
     $fill.addClass('indeterminate').css('width', '');
     text = '回放加载中… 已下载 ' + formatReplaySize(loaded);
   }

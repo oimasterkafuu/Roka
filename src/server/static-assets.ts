@@ -212,7 +212,7 @@ export class StaticAssetDelivery {
     );
     const config = { bases: this.bases, commit: this.commit, commits: this.commits, version: this.version };
     const initialStyle =
-      '<style id="roka-initial-style">html{background:#eef1f6}body{visibility:hidden!important}html::before{content:"Roka 加载中…";position:fixed;inset:0;display:grid;place-items:center;color:#253042;font:16px sans-serif}</style>';
+      '<style id="roka-initial-style">html{background:#eef1f6}body{visibility:hidden!important}html::before{content:"";position:fixed;top:calc(50% - 48px);left:calc(50% - 16px);box-sizing:border-box;width:32px;height:32px;border:3px solid #cbd5e1;border-top-color:#2f6fe4;border-radius:50%;animation:roka-initial-spin .8s linear infinite}html::after{content:"Roka 加载中…";position:fixed;inset:0;display:grid;place-items:center;color:#253042;font:16px sans-serif}@keyframes roka-initial-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){html::before{animation:none}}</style>';
     const bootstrap = `${initialStyle}<script>window.ROKA_ASSET_CONFIG=${jsonForHtml(config)};\n${this.runtime.replace(/<\/script/gi, '<\\/script')}\n</script>`;
     return html.replace(/<head\b[^>]*>/i, (head) => head + bootstrap + preloads.join(''));
   }
