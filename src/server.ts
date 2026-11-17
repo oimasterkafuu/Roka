@@ -46,6 +46,7 @@ import { StaticAssetDelivery } from './server/static-assets';
 import { resolveClientIp, resolveRateLimitKey } from './server/client-ip';
 import { RegistrationSecurity } from './server/registration-security';
 import { SecurityAuditStore } from './server/security-audit';
+import { ContentSecurityService } from './server/content-security';
 import { UsernameSecurityService } from './server/username-security';
 
 const runtimeEnv = ensureRuntimeEnv();
@@ -92,6 +93,9 @@ const userStore = new UserStore(dataDir);
 const feedStore = new FeedStore(dataDir);
 const chatModeration = new ChatModeration(dataDir);
 const securityAudit = new SecurityAuditStore(dataDir);
+const contentSecurity = new ContentSecurityService(feedStore, securityAudit, (error) =>
+  app.log.error({ err: error }, 'content security scan failed'),
+);
 const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const registrationSecurity = new RegistrationSecurity(userStore, securityAudit);
@@ -1878,6 +1882,7 @@ const boot = async (listen = true): Promise<void> => {
   authService.attachSocketServer(io);
   lobbyService.startLobbyHeartbeatSweep(io);
   usernameSecurity.start();
+  contentSecurity.start();
 
   // home_online 失效通知做简单节流合并：上线/下线转换频繁时最多每 2 秒广播一次。
   let homeOnlineTimer: NodeJS.Timeout | null = null;
@@ -1904,6 +1909,7 @@ const boot = async (listen = true): Promise<void> => {
     clearInterval(replayDownloadStateCleanupTimer);
     lobbyService.stopLobbyHeartbeatSweep();
     usernameSecurity.stop();
+    await contentSecurity.stop();
     if (homeOnlineTimer) {
       clearTimeout(homeOnlineTimer);
     }

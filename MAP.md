@@ -526,3 +526,12 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 - `views/replays.pug → static/replays.html` / `static/replays.js`：公开回放查询页，最新列表、用户名/日期过滤、地址栏分页状态及登录上传；`?home=1` socket 监听 `home_leaderboard`，两秒节流后保持当前查询与页码刷新，默认最新 10 条同样生效。
 - `src/replay-store.ts`：观看缓存命中更新时间及 `sweepReplayViewCaches` 过期缓存扫描；`src/server.ts` 在启动和每日调度，关闭时释放计时器，同时提供 `/replays` 页面及扩展查询 API。
 - `scripts/test-replays-page.mjs`：观看缓存保留/清理、公开页面、回放查询过滤与分页、两秒节流 socket 刷新回归测试。
+
+### 动态/评论周期内容核查
+
+- `src/server/content-policy.ts`：独立中文/英文小词表与保留 CJK 的 NFKC/大小写归一化；中文支持分隔符，英文采用字母数字边界避免正常名/代码误伤。`username-policy.ts` 补充明确拼音与缩写，注册前和用户名周期扫描仍共用同一策略。
+- `src/server/content-security.ts`：启动延迟十秒与六小时串行增量核查，Promise 防重入、unref timer、onClose 停止并等待在途扫描。仅生成待复核事件，没有删除、封禁或积分依赖。
+- `src/feed-store.ts` / `src/types.ts`：动态新增可选 `editedAt`，正文创建/编辑/评论使用存储内单调版本时间，加载旧数据恢复时钟；点赞与提及渲染不形成版本。
+- `src/server/security-audit.ts`：顶层 `contentCursor: {time, keys}` 独立于有界事件，键为含类型、post/comment id、版本时间的 SHA-256。首次全量、随后只查更晚时间及同时间未见键；完整扫描事件和游标同次原子写入，失败回滚并重试，裁剪不丢游标。`content_manual_review` 的 `content` 保存类型、位置、版本、命中词、原文，作者沿用 `username`；`content_scan_completed.contentResult` 保存 scanned/posts/comments/hits/completedAt/cursor。
+- `views/admin.pug` → `static/admin.html`、`static/admin.js`：安全风险增加两种筛选，正文与定位证据继续 `.text()` 安全显示。复用管理员 no-store 查询 API，不新增公开审计字段或手动扫描接口。
+- `scripts/test-content-moderation.mjs`：独立测试并纳入 `pnpm test`；现有 admin/security UI 测试扩展权限、公开 DTO 隐私、新事件注入与 1440/390 布局。

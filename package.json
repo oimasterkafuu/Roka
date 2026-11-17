@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "2.12.4",
+  "version": "2.13.0",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -31,7 +31,7 @@
     "test:rebind-sync": "node scripts/test-rebind-init-sync.mjs",
     "test:ready-counts": "node scripts/test-ready-counts.mjs",
     "test:spectator-broadcast": "node scripts/test-spectator-broadcast.mjs",
-    "test": "pnpm run test:admin-security && pnpm run test:admin-security-ui && pnpm run test:chat-admin-ui && pnpm run test:chat-moderation && pnpm run test:api-contract && pnpm run test:ready-counts && pnpm run test:spectator-broadcast && pnpm run test:multiline-replay && pnpm run test:multiline-v2 && pnpm run test:rebind-sync && pnpm run test:multiline && pnpm run test:strategy && pnpm run test:fog && pnpm run test:bot && pnpm run test:server-bot && pnpm run test:server-bot-config && pnpm run test:lobby-guards && pnpm run test:lobby-host-idle && pnpm run test:lobby-dwell && pnpm run test:guest-access && pnpm run test:contributors && pnpm run test:github-link && pnpm run test:points && pnpm run test:referral-ambassador && pnpm run test:deploy-update && pnpm run test:presence && pnpm run test:map-generation && pnpm run test:huaxia-season && pnpm run test:leaderboard && pnpm run test:storage && pnpm run test:auto-ban-policy && pnpm run test:replay-stats && pnpm run test:replay-controls && pnpm run test:replay-cache && pnpm run test:replays-page && pnpm run test:build-pages && pnpm run test:replay-quota && pnpm run test:replay-termination && pnpm run test:profile-stat-label && pnpm run test:mentions && pnpm run test:crown-transfer && pnpm run test:admin-badge && pnpm run test:client-verify && pnpm run test:bot-dwell-cap && pnpm run test:asset-versioning && pnpm run test:asset-versioning-exit && pnpm run test:army-num-font && pnpm run test:isolated-reinforcement && pnpm run test:per-file-cdn",
+    "test": "pnpm run test:content-moderation && pnpm run test:admin-security && pnpm run test:admin-security-ui && pnpm run test:chat-admin-ui && pnpm run test:chat-moderation && pnpm run test:api-contract && pnpm run test:ready-counts && pnpm run test:spectator-broadcast && pnpm run test:multiline-replay && pnpm run test:multiline-v2 && pnpm run test:rebind-sync && pnpm run test:multiline && pnpm run test:strategy && pnpm run test:fog && pnpm run test:bot && pnpm run test:server-bot && pnpm run test:server-bot-config && pnpm run test:lobby-guards && pnpm run test:lobby-host-idle && pnpm run test:lobby-dwell && pnpm run test:guest-access && pnpm run test:contributors && pnpm run test:github-link && pnpm run test:points && pnpm run test:referral-ambassador && pnpm run test:deploy-update && pnpm run test:presence && pnpm run test:map-generation && pnpm run test:huaxia-season && pnpm run test:leaderboard && pnpm run test:storage && pnpm run test:auto-ban-policy && pnpm run test:replay-stats && pnpm run test:replay-controls && pnpm run test:replay-cache && pnpm run test:replays-page && pnpm run test:build-pages && pnpm run test:replay-quota && pnpm run test:replay-termination && pnpm run test:profile-stat-label && pnpm run test:mentions && pnpm run test:crown-transfer && pnpm run test:admin-badge && pnpm run test:client-verify && pnpm run test:bot-dwell-cap && pnpm run test:asset-versioning && pnpm run test:asset-versioning-exit && pnpm run test:army-num-font && pnpm run test:isolated-reinforcement && pnpm run test:per-file-cdn",
     "test:presence": "node scripts/test-presence.mjs",
     "test:referral-ambassador": "node scripts/test-referral-ambassador.mjs",
     "test:map-generation": "pnpm exec tsx scripts/test-map-generation.mjs",
@@ -65,7 +65,8 @@
     "test:chat-moderation": "node scripts/test-chat-moderation.mjs && node scripts/test-chat-moderation-server.mjs",
     "test:chat-admin-ui": "node scripts/test-chat-admin-ui.mjs",
     "test:admin-security": "node scripts/test-admin-security.mjs",
-    "test:admin-security-ui": "node scripts/test-admin-security-ui.mjs"
+    "test:admin-security-ui": "node scripts/test-admin-security-ui.mjs",
+    "test:content-moderation": "node scripts/test-content-moderation.mjs"
   },
   "repository": {
     "type": "git",

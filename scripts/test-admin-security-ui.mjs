@@ -121,6 +121,39 @@ const securityEvents = [
     result: { scanned: 4, hits: 1, autoBanned: 1, skipped: 0, completedAt: now - 3000 },
   },
 ];
+securityEvents.push(
+  {
+    id: 'content',
+    at: now,
+    type: 'content_manual_review',
+    action: 'flag_for_review',
+    reason: '待复核',
+    username: 'author',
+    content: {
+      kind: 'comment',
+      postId: 'p'.repeat(80),
+      commentId: 'c1',
+      versionTime: now,
+      terms: ['傻逼'],
+      text: '傻逼 <img src=x onerror=window.injected=true>',
+    },
+  },
+  {
+    id: 'content-scan',
+    at: now,
+    type: 'content_scan_completed',
+    action: 'complete_scan',
+    reason: '完成',
+    contentResult: {
+      scanned: 2,
+      posts: 1,
+      comments: 1,
+      hits: 1,
+      completedAt: now,
+      cursor: { time: now, keys: ['key'] },
+    },
+  },
+);
 const chatEntry = {
   id: 'chat1',
   at: now,
@@ -230,7 +263,7 @@ try {
     assert.equal(await page.locator('#tab-dashboard').getAttribute('aria-selected'), 'true');
     assert.equal(await page.locator('#panel-dashboard').isVisible(), true);
     assert.equal(await page.locator('#panel-users').isVisible(), false);
-    assert.equal(await page.locator('#dashboard-events-body tr').count(), 4);
+    assert.equal(await page.locator('#dashboard-events-body tr').count(), 6);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 
     await page.locator('#tab-users').click();
@@ -240,16 +273,32 @@ try {
     assert.equal(await page.locator('#users-body tr').count(), 2, 'exact IP lists every associated account');
     await page.locator('#user-search').fill('new_peer');
     assert.equal(await page.locator('#users-body tr').count(), 1);
-    assert.equal(await page.locator('#users-body').textContent().then((text) => text.includes('2001:db8::1')), true);
+    assert.equal(
+      await page
+        .locator('#users-body')
+        .textContent()
+        .then((text) => text.includes('2001:db8::1')),
+      true,
+    );
 
     await page.locator('#tab-security').click();
-    await page.waitForFunction(() => document.querySelectorAll('#security-events-body tr').length === 4);
+    await page.waitForFunction(() => document.querySelectorAll('#security-events-body tr').length === 6);
     const previousScanCalls = scanCalls;
     await page.locator('#security-scan-btn').click();
-    await page.waitForFunction(() => document.querySelector('#security-scan-result').textContent.includes('自动封禁 1'));
+    await page.waitForFunction(() =>
+      document.querySelector('#security-scan-result').textContent.includes('自动封禁 1'),
+    );
     assert.equal(scanCalls, previousScanCalls + 1);
     assert.equal(await page.locator('#security-events-body img, #security-events-body script').count(), 0);
     assert.equal(await page.evaluate(() => window.injected), undefined);
+    assert.ok((await page.locator('#security-events-body').textContent()).includes('原文：傻逼 <img'));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('#security-type').selectOption('content_manual_review');
+    await page.locator('#security-search').click();
+    await page.waitForFunction(() => document.querySelectorAll('#security-events-body tr').length === 1);
+    await page.locator('#security-type').selectOption('');
+    await page.locator('#security-search').click();
+    await page.waitForFunction(() => document.querySelectorAll('#security-events-body tr').length === 6);
     await page.locator('#security-evasions button').first().click();
     await page.waitForFunction(() => location.hash === '#users');
     assert.equal(await page.locator('#user-search').inputValue(), 'new_peer');
@@ -258,13 +307,23 @@ try {
     await page.locator('#tab-chat').click();
     await page.waitForFunction(() => document.querySelectorAll('#chat-body tr').length === 1);
     assert.equal(await page.locator('#chat-body script').count(), 0);
-    assert.equal(await page.locator('#chat-body').textContent().then((text) => text.includes('<script>')), true);
+    assert.equal(
+      await page
+        .locator('#chat-body')
+        .textContent()
+        .then((text) => text.includes('<script>')),
+      true,
+    );
     await page.reload();
     await page.waitForFunction(() => document.querySelectorAll('#chat-body tr').length === 1);
     assert.equal(await page.locator('#tab-chat').getAttribute('aria-selected'), 'true');
     await page.locator('#tab-security').click();
     await page.goBack();
-    await page.waitForFunction(() => location.hash === '#chat' && document.querySelector('#tab-chat').getAttribute('aria-selected') === 'true');
+    await page.waitForFunction(
+      () =>
+        location.hash === '#chat' &&
+        document.querySelector('#tab-chat').getAttribute('aria-selected') === 'true',
+    );
     await page.goForward();
     await page.waitForFunction(() => location.hash === '#security');
 
@@ -272,11 +331,19 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('#bots-body tr').length === 1);
     assert.equal(await page.locator('#bot-template option').count(), 1);
     assert.equal(await page.locator('#bot-allow-fog').count(), 1);
-    assert.equal(await page.locator('#bots-body').textContent().then((text) => text.includes('Simple') || text.includes('simple-strategy-bot')), true);
+    assert.equal(
+      await page
+        .locator('#bots-body')
+        .textContent()
+        .then((text) => text.includes('Simple') || text.includes('simple-strategy-bot')),
+      true,
+    );
     await page.locator('#tab-bots').focus();
     await page.keyboard.press('ArrowLeft');
     assert.equal(await page.evaluate(() => location.hash), '#chat');
-    await page.waitForFunction(() => document.querySelector('#tab-chat').getAttribute('aria-selected') === 'true');
+    await page.waitForFunction(
+      () => document.querySelector('#tab-chat').getAttribute('aria-selected') === 'true',
+    );
     assert.equal(await page.locator('#tab-chat').getAttribute('aria-selected'), 'true');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);
@@ -288,7 +355,10 @@ try {
   const normalErrors = [];
   normal.on('pageerror', (error) => normalErrors.push(error.message));
   await normal.goto(`${base}/admin#bots`);
-  await pageWait(normal, () => document.querySelector('#tab-dashboard').getAttribute('aria-selected') === 'true');
+  await pageWait(
+    normal,
+    () => document.querySelector('#tab-dashboard').getAttribute('aria-selected') === 'true',
+  );
   assert.equal(await normal.locator('.admin-tab:visible').count(), 4);
   assert.equal(await normal.locator('#tab-bots').isVisible(), false);
   assert.equal(await normal.locator('#bots-card').isVisible(), false);
@@ -302,7 +372,9 @@ try {
   assert.equal(await noJs.locator('#panel-security').isVisible(), true);
   assert.equal(await noJs.locator('#chat-audit').isVisible(), true);
   await noJs.close();
-  console.log('PASS Chromium admin dashboard, tabs/hash, search, scan, risk links, chat/bot, 1440/390 and no-JS');
+  console.log(
+    'PASS Chromium admin dashboard, tabs/hash, search, scan, risk links, chat/bot, 1440/390 and no-JS',
+  );
 } finally {
   await browser?.close();
   await new Promise((resolve) => server.close(resolve));

@@ -47,6 +47,12 @@ export class FeedStore {
   private readonly binaryFilePath: string;
 
   private posts: FeedPost[] = [];
+  private lastContentTime = 0;
+
+  private nextContentTime(): number {
+    this.lastContentTime = Math.max(Date.now(), this.lastContentTime + 1);
+    return this.lastContentTime;
+  }
 
   private readonly lastPostTimeByAuthor = new Map<string, number>();
 
@@ -65,6 +71,11 @@ export class FeedStore {
       const parsed = await readFileWithBackup(this.binaryFilePath, decodeFeedFileBinary);
       this.posts = Array.isArray(parsed.posts) ? parsed.posts : [];
       this.posts.sort((a, b) => b.time - a.time);
+      for (const post of this.posts) {
+        this.lastContentTime = Math.max(this.lastContentTime, post.time, post.editedAt ?? 0);
+        for (const comment of post.comments)
+          this.lastContentTime = Math.max(this.lastContentTime, comment.time);
+      }
       return;
     } catch (error) {
       if (!isMissingFileError(error)) {
@@ -124,7 +135,7 @@ export class FeedStore {
       id: randomBytes(8).toString('hex'),
       author,
       text,
-      time: Date.now(),
+      time: this.nextContentTime(),
       likes: [],
       comments: [],
       mentions: mentions.length ? mentions : undefined,
@@ -144,10 +155,18 @@ export class FeedStore {
     if (text.length === 0 || text.length > POST_TEXT_MAX) {
       throw new Error(`动态内容需为 1-${POST_TEXT_MAX} 字。`);
     }
+    const previous = { text: post.text, editedAt: post.editedAt, mentions: post.mentions };
     post.text = text;
+    post.editedAt = this.nextContentTime();
     const mentions = parseMentionTokens(text);
     post.mentions = mentions.length ? mentions : undefined;
-    await this.persist();
+    const versionTime = post.editedAt;
+    try {
+      await this.persist();
+    } catch (error) {
+      if (post.editedAt === versionTime) Object.assign(post, previous);
+      throw error;
+    }
     return post;
   }
 
@@ -194,7 +213,7 @@ export class FeedStore {
       id: randomBytes(8).toString('hex'),
       author,
       text,
-      time: Date.now(),
+      time: this.nextContentTime(),
       mentions: mentions.length ? mentions : undefined,
     };
     post.comments.push(comment);

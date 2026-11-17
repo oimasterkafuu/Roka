@@ -19,6 +19,8 @@ var SECURITY_EVENT_LABELS = {
   username_manual_review: '超管人工复核',
   possible_ban_evasion: '可能绕封关联',
   registration_rate_limited: '批量注册拦截',
+  content_manual_review: '动态/评论待复核',
+  content_scan_completed: '内容核查结果',
   username_scan_completed: '全量扫描完成',
 };
 
@@ -463,6 +465,43 @@ $('#ban-confirm').on('click', async function () {
 
 /* ---------- 用户名与注册安全 ---------- */
 
+function contentEventText(entry) {
+  if (entry.content) {
+    var c = entry.content;
+    return (
+      '；' +
+      (c.kind === 'post' ? '动态' : '评论') +
+      '；post ' +
+      c.postId +
+      (c.commentId ? '；comment ' + c.commentId : '') +
+      '；版本 ' +
+      fullTime(c.versionTime) +
+      '；命中 ' +
+      c.terms.join(', ') +
+      '；原文：' +
+      c.text
+    );
+  }
+  if (entry.contentResult) {
+    var r = entry.contentResult;
+    return (
+      '；完成 ' +
+      fullTime(r.completedAt) +
+      '；扫描 ' +
+      r.scanned +
+      '（动态 ' +
+      r.posts +
+      '，评论 ' +
+      r.comments +
+      '）；命中 ' +
+      r.hits +
+      '；游标 ' +
+      r.cursor.time
+    );
+  }
+  return '';
+}
+
 function renderSecurityEvents() {
   var $body = $('#security-events-body').empty();
   securityEventsCache.forEach(function (entry) {
@@ -481,7 +520,13 @@ function renderSecurityEvents() {
       .text(entry.ip || '-')
       .appendTo($row);
     $('<td></td>')
-      .text(entry.action + '：' + entry.reason + (entry.result ? '；' + scanResultText(entry.result) : ''))
+      .text(
+        entry.action +
+          '：' +
+          entry.reason +
+          (entry.result ? '；' + scanResultText(entry.result) : '') +
+          contentEventText(entry),
+      )
       .appendTo($row);
   });
   $('#security-events-empty').toggle(securityEventsCache.length === 0);

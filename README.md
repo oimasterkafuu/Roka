@@ -114,3 +114,13 @@ pnpm run test:build-pages
 ## 许可
 
 本项目以 [AGPL-3.0-only](LICENSE) 许可开源。
+
+### 动态与评论周期核查
+
+用户名注册前与启动后/每六小时全量扫描共用小词表，支持 `shabi`、`caonima`、`nimabi`、`mabi`、`wocao`、`nmsl`、`cnm`、`nmd`、`tmd` 及既有英文词的 NFKC、大小写、分隔符与 leetspeak 变体；不加入 `ri`、`cao`、`sb`、`nima` 等短片段，不增加注册成功后的重复检查。
+
+动态/评论在启动约十秒后及每六小时串行增量核查。独立内容词表保留中文，覆盖明确辱骂、歧视、色情/性侵犯汉字与常见变体（例如傻逼、傻B、煞笔、草泥马、操你妈、nmsl），英文词使用字母数字边界以避免 grape、Scunthorpe 和代码标识符误伤；一般负面表达不纳入。发布、编辑和评论接口不作同步拦截。命中仅写入后台「安全风险」的“动态/评论待复核”，不会自动删除、隐藏、封禁、扣分或公开警告；人工可沿用原有删除功能。
+
+动态可选 `editedAt` 兼容旧数据，正文写操作使用存储内单调毫秒时间，点赞与渲染不变更版本。首次扫描现有动态/评论，之后用版本时间和同时间版本键增量识别。`security-audit.json` 顶层 `contentCursor` 与本轮事件原子写入，成功才推进，失败重试；游标不依赖会被裁剪的历史事件。审计继续为 0600、最多 2000 条/2 MiB。管理员原有 `GET /api/admin/security/events` 可按 `content_manual_review`、`content_scan_completed` 筛选，响应 no-store；内容证据含作者、类型、post/comment id、版本时间、命中词与原文（300/200 字），扫描结果含动态/评论数、命中数、完成时间与游标。这些审计字段不加入公开动态 DTO。未增加手动内容扫描 API。
+
+验证：`pnpm run test:content-moderation`（已纳入 `pnpm test`），配合 `test:admin-security`、`test:admin-security-ui` 验证策略、注册共用、增量/同毫秒边界、重启、失败重试、裁剪恢复、人工复核与公开隐私、权限及桌面/手机安全渲染。

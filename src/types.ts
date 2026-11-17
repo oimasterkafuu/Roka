@@ -337,6 +337,8 @@ export interface FeedComment {
 }
 
 export interface FeedPost {
+  /** 成功编辑正文的版本时间；旧数据缺省。 */
+  editedAt?: number;
   id: string;
   author: string;
   text: string;

@@ -20,7 +20,29 @@ export interface UsernameScanResult {
   completedAt: number;
 }
 
+export interface ContentCursor {
+  time: number;
+  keys: string[];
+}
+export interface ContentScanResult {
+  scanned: number;
+  posts: number;
+  comments: number;
+  hits: number;
+  completedAt: number;
+  cursor: ContentCursor;
+}
+export interface ContentEvidence {
+  kind: 'post' | 'comment';
+  postId: string;
+  commentId?: string;
+  versionTime: number;
+  terms: string[];
+  text: string;
+}
 export type SecurityEventType =
+  | 'content_manual_review'
+  | 'content_scan_completed'
   | 'username_rejected'
   | 'username_auto_banned'
   | 'username_manual_review'
@@ -38,9 +60,12 @@ export interface SecurityAuditEntry {
   ip?: string;
   relatedUsernames?: string[];
   result?: UsernameScanResult;
+  content?: ContentEvidence;
+  contentResult?: ContentScanResult;
 }
 
 interface SecurityAuditFile {
+  contentCursor?: ContentCursor;
   entries: SecurityAuditEntry[];
 }
 
@@ -51,6 +76,7 @@ export interface SecurityAuditQuery {
 }
 
 export class SecurityAuditStore {
+  private contentCursor?: ContentCursor;
   private entries: SecurityAuditEntry[] = [];
   private readonly file: string;
   private pending?: Promise<void>;
@@ -65,6 +91,14 @@ export class SecurityAuditStore {
     try {
       const parsed = JSON.parse(await readFile(this.file, 'utf8')) as SecurityAuditFile;
       if (!Array.isArray(parsed.entries)) throw new Error('Invalid security audit');
+      if (
+        parsed.contentCursor &&
+        Number.isFinite(parsed.contentCursor.time) &&
+        Array.isArray(parsed.contentCursor.keys) &&
+        parsed.contentCursor.keys.every((key) => typeof key === 'string')
+      ) {
+        this.contentCursor = structuredClone(parsed.contentCursor);
+      }
       this.entries = parsed.entries.filter(
         (entry) =>
           entry &&
@@ -135,14 +169,41 @@ export class SecurityAuditStore {
 
   latestScan(): UsernameScanResult | null {
     const entry = this.latest('username_scan_completed');
-    return entry.result ? { ...entry.result } : null;
+    return entry?.result ? { ...entry.result } : null;
+  }
+
+  getContentCursor(): ContentCursor | undefined {
+    return this.contentCursor ? structuredClone(this.contentCursor) : undefined;
+  }
+
+  /** Commit a complete scan and its checkpoint in one atomic audit write. */
+  async completeContentScan(entries: Omit<SecurityAuditEntry, 'id'>[], cursor: ContentCursor): Promise<void> {
+    await this.flush();
+    const previousEntries = [...this.entries];
+    const previousCursor = this.contentCursor;
+    const batch = entries.map((entry) => ({ ...structuredClone(entry), id: randomUUID() }));
+    const batchIds = new Set<string>(batch.map((entry) => entry.id));
+    this.entries.push(...batch);
+    this.contentCursor = structuredClone(cursor);
+    try {
+      await this.flush();
+    } catch (error) {
+      // Retain unrelated events appended while the write was pending.
+      this.entries = [
+        ...previousEntries,
+        ...this.entries.filter((entry) => !batchIds.has(entry.id) && !previousEntries.includes(entry)),
+      ];
+      this.contentCursor = previousCursor;
+      throw error;
+    }
   }
 
   private prune(): void {
     this.entries = this.entries.slice(-SECURITY_AUDIT_MAX_ENTRIES);
     while (
       this.entries.length > 0 &&
-      Buffer.byteLength(JSON.stringify({ entries: this.entries })) > SECURITY_AUDIT_MAX_BYTES
+      Buffer.byteLength(JSON.stringify({ entries: this.entries, contentCursor: this.contentCursor })) >
+        SECURITY_AUDIT_MAX_BYTES
     ) {
       this.entries.shift();
     }
@@ -156,7 +217,12 @@ export class SecurityAuditStore {
           this.dirty = false;
           this.prune();
           const tmp = `${this.file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-          await writeFile(tmp, JSON.stringify({ entries: this.entries }), { mode: 0o600 });
+          const serialized = JSON.stringify({ entries: this.entries, contentCursor: this.contentCursor });
+          if (Buffer.byteLength(serialized) > SECURITY_AUDIT_MAX_BYTES)
+            throw new Error('Content checkpoint exceeds audit size limit');
+          await writeFile(tmp, serialized, {
+            mode: 0o600,
+          });
           await rename(tmp, this.file);
         } while (this.dirty);
       })().finally(() => {

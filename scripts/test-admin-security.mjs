@@ -69,8 +69,14 @@ async function testIpStorage() {
   }
   entry = store.listUsersForAdmin()[0];
   assert.equal(entry.ipHistory.length, 20);
-  assert.equal(entry.ipHistory.some((item) => item.ip === '198.51.100.1'), false);
-  assert.equal(entry.ipHistory.some((item) => item.ip === '198.51.100.25'), true);
+  assert.equal(
+    entry.ipHistory.some((item) => item.ip === '198.51.100.1'),
+    false,
+  );
+  assert.equal(
+    entry.ipHistory.some((item) => item.ip === '198.51.100.25'),
+    true,
+  );
   assert.equal(JSON.stringify(store.getPublicProfile('ip_user')).includes('192.0.2.1'), false);
   assert.equal(JSON.stringify(store.getPublicProfile('ip_user')).includes('registeredIp'), false);
   const restarted = new UserStore(dir);
@@ -187,7 +193,8 @@ async function testRegistrationAndScanning() {
   assert.equal(banned.ban.reason, '用户名违反社区规范');
   assert.equal(scanStore.isSessionValid('fuckuser', oldSession), false);
   assert.deepEqual(disconnected, ['fuckuser']);
-  const historyLength = scanStore.listUsersForAdmin().find((user) => user.username === 'fuckuser').banHistory.length;
+  const historyLength = scanStore.listUsersForAdmin().find((user) => user.username === 'fuckuser')
+    .banHistory.length;
   const repeated = await scanner.scan();
   assert.equal(repeated.autoBanned, 0);
   assert.equal(
@@ -239,6 +246,13 @@ async function testHttpApi() {
   process.env.WEBHOOK_SECRET = secret;
   process.env.NODE_ENV = 'test';
   process.env.ROKA_STATIC_CDN = '0';
+  const { ContentSecurityService } = require('../dist/server/content-security.js');
+  let contentService;
+  const originalStart = ContentSecurityService.prototype.start;
+  ContentSecurityService.prototype.start = function (...args) {
+    contentService = this;
+    return originalStart.apply(this, args);
+  };
   const { app, boot } = require('../dist/server.js');
   await boot(false);
   const request = (method, url, { cookie, ip, body } = {}) =>
@@ -273,7 +287,10 @@ async function testHttpApi() {
       assert.equal(response.headers['cache-control'], 'no-store');
     }
     let normalCookie = await register('normal_http', '198.51.100.3');
-    assert.equal((await request('GET', '/api/admin/security/events', { cookie: normalCookie })).statusCode, 403);
+    assert.equal(
+      (await request('GET', '/api/admin/security/events', { cookie: normalCookie })).statusCode,
+      403,
+    );
     const denied = await request('POST', '/api/auth/register', {
       ip: '198.51.100.4',
       body: { username: 'FUCKnew', password: 'password1', captchaId: 'test', captchaCode: 'test' },
@@ -302,6 +319,30 @@ async function testHttpApi() {
     assert.equal(publicProfile.statusCode, 200);
     assert.equal(JSON.stringify(publicProfile.json()).includes('198.51.100.3'), false);
     assert.equal(JSON.stringify(publicProfile.json()).includes('ipHistory'), false);
+    // Periodic content scan is the only added inspection path; publishing stays available.
+    const published = await request('POST', '/api/feeds', {
+      cookie: normalCookie,
+      body: { text: '傻逼 <script>alert(1)</script>' },
+    });
+    assert.equal(published.statusCode, 200, published.body);
+    const postId = published.json().post.id;
+    const adminBefore = (await request('GET', '/api/admin/users', { cookie: adminCookie })).json().items;
+    await contentService.scan();
+    const contentEvents = await request('GET', '/api/admin/security/events?type=content_manual_review', {
+      cookie: adminCookie,
+    });
+    assert.equal(contentEvents.headers['cache-control'], 'no-store');
+    assert.ok(contentEvents.json().items.some((e) => e.content.postId === postId));
+    const publicFeeds = await request('GET', '/api/feeds');
+    assert.ok(publicFeeds.json().items.some((p) => p.id === postId));
+    for (const field of ['contentResult', 'versionTime', 'terms', 'content_manual_review'])
+      assert.equal(publicFeeds.body.includes(field), false);
+    assert.deepEqual(
+      (await request('GET', '/api/admin/users', { cookie: adminCookie }))
+        .json()
+        .items.map(({ lastSeenAt, ...user }) => user),
+      adminBefore.map(({ lastSeenAt, ...user }) => user),
+    );
     const scan = await request('POST', '/api/admin/security/scan', { cookie: adminCookie, body: {} });
     assert.equal(scan.statusCode, 200, scan.body);
     assert.equal(scan.json().autoBanned, 1);
@@ -312,13 +353,17 @@ async function testHttpApi() {
     assert.equal(dashboard.json().summary.activeBans, 1);
     assert.equal(dashboard.json().summary.usernameAutoBans, 1);
     assert.equal(dashboard.json().lastScan.autoBanned, 1);
-    const events = await request('GET', '/api/admin/security/events?username=fucklegacy', { cookie: adminCookie });
+    const events = await request('GET', '/api/admin/security/events?username=fucklegacy', {
+      cookie: adminCookie,
+    });
     assert.ok(events.json().items.some((entry) => entry.type === 'username_auto_banned'));
     assert.equal(events.headers['cache-control'], 'no-store');
   } finally {
     await app.close();
   }
-  console.log('PASS admin HTTP permissions/no-store, registration/login IP, public privacy and session revocation');
+  console.log(
+    'PASS admin HTTP permissions/no-store, registration/login IP, public privacy and session revocation',
+  );
 }
 
 try {
@@ -328,5 +373,7 @@ try {
   await testAuditBounds();
   await testHttpApi();
 } finally {
-  await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })));
+  await Promise.all(
+    dirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })),
+  );
 }

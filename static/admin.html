@@ -162,6 +162,9 @@
         <p class="security-hint">
           同 IP 仅作为复核线索，不会自动连坐；批量注册拦截只影响后续新注册，不封禁既有正常账号。
         </p>
+        <p class="security-hint">
+          动态与评论启动后及每六小时增量核查，命中仅记录待人工复核，不自动删除、隐藏、封禁或扣分。
+        </p>
         <button class="btn btn-secondary btn-sm" id="security-scan-btn" type="button">
           立即复查全部用户名
         </button>
@@ -174,6 +177,8 @@
             <option value="username_manual_review">超管人工复核</option>
             <option value="possible_ban_evasion">可能绕封关联</option>
             <option value="registration_rate_limited">批量注册拦截</option>
+            <option value="content_manual_review">动态/评论待复核</option>
+            <option value="content_scan_completed">内容核查结果</option>
             <option value="username_scan_completed">全量扫描结果</option></select
           ><input id="security-username" type="text" placeholder="用户名子串" maxlength="100" /><input
             id="security-ip"

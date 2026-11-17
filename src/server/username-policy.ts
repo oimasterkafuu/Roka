@@ -17,6 +17,15 @@ const LEETSPEAK: Record<string, string> = {
 };
 
 const STRONG_VIOLATIONS = [
+  'shabi',
+  'caonima',
+  'nimabi',
+  'mabi',
+  'wocao',
+  'nmsl',
+  'cnm',
+  'nmd',
+  'tmd',
   'fuck',
   'shit',
   'bitch',
