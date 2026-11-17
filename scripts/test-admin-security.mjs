@@ -17,7 +17,6 @@ const {
   REGISTRATION_DENIAL_MS,
 } = require('../dist/server/security-audit.js');
 const { RegistrationSecurity } = require('../dist/server/registration-security.js');
-const { UsernameSecurityService } = require('../dist/server/username-security.js');
 
 const dirs = [];
 async function tempDir(label) {
@@ -125,12 +124,9 @@ async function testRegistrationAndScanning() {
   let now = Date.now();
   const registration = new RegistrationSecurity(store, audit, () => now);
 
-  const rejected = await registration.review('fuckcheng', '203.0.113.10');
-  assert.equal(rejected.allowed, false);
-  assert.equal(rejected.error, '用户名不符合社区规范，请更换。');
-  assert.equal(store.getPublicProfile('fuckcheng'), null);
-  assert.equal(audit.list({ type: 'username_rejected' })[0].ip, '203.0.113.10');
-
+  await registerProtected(registration, 'fuckcheng', '203.0.113.10');
+  assert.equal(store.getBanStatus('fuckcheng').banned, false);
+  assert.equal(audit.list({ type: 'username_manual_review' })[0].ip, '203.0.113.10');
   await registerProtected(registration, 'batch_one', '203.0.113.11');
   await registerProtected(registration, 'batch_two', '203.0.113.11');
   now = Date.now();
@@ -159,51 +155,10 @@ async function testRegistrationAndScanning() {
   assert.deepEqual(evasion.relatedUsernames, ['banned_peer']);
   assert.equal(store.getBanStatus('new_peer').banned, false);
 
-  const scanDir = await tempDir('scan');
-  const scanStore = new UserStore(scanDir);
-  const scanAudit = new SecurityAuditStore(scanDir);
-  await scanStore.ensureReady();
-  await scanAudit.ensureReady();
-  await scanStore.register('fuckadmin', 'password1', undefined, '203.0.113.20');
-  await scanStore.register('fuckuser', 'password1', undefined, '203.0.113.21');
-  await scanStore.register('shitbanned', 'password1', undefined, '203.0.113.22');
-  await scanStore.register('grass', 'password1', undefined, '203.0.113.23');
-  await scanStore.banUser('shitbanned', -1, '既有封禁');
-  const oldSession = await scanStore.rotateSession('fuckuser');
-  const disconnected = [];
-  const scanner = new UsernameSecurityService(
-    scanStore,
-    scanAudit,
-    async (username) => {
-      disconnected.push(username);
-      await scanStore.clearSession(username);
-    },
-    undefined,
-    () => now,
-  );
-  const result = await scanner.scan();
-  assert.equal(result.autoBanned, 1);
-  assert.equal(result.hits, 3);
-  assert.equal(result.skipped, 2);
-  assert.equal(scanStore.getBanStatus('fuckadmin').banned, false);
-  assert.equal(scanAudit.list({ type: 'username_manual_review' }).length, 1);
-  const banned = scanStore.getBanStatus('fuckuser');
-  assert.equal(banned.bannedUntil, -1);
-  assert.equal(banned.ban.type, 'username');
-  assert.equal(banned.ban.reason, '用户名违反社区规范');
-  assert.equal(scanStore.isSessionValid('fuckuser', oldSession), false);
-  assert.deepEqual(disconnected, ['fuckuser']);
-  const historyLength = scanStore.listUsersForAdmin().find((user) => user.username === 'fuckuser')
-    .banHistory.length;
-  const repeated = await scanner.scan();
-  assert.equal(repeated.autoBanned, 0);
-  assert.equal(
-    scanStore.listUsersForAdmin().find((user) => user.username === 'fuckuser').banHistory.length,
-    historyLength,
-  );
-  assert.equal(scanStore.getBanStatus('grass').banned, false);
-  assert.deepEqual(scanAudit.latestScan(), repeated);
-  console.log('PASS registration limits, restart denial, ban-evasion review and idempotent permanent scan');
+  const sid = await store.rotateSession('fuckcheng');
+  assert.equal(store.isSessionValid('fuckcheng', sid), true);
+  assert.equal(store.getBanStatus('fuckcheng').banned, false);
+  console.log('PASS registration review-only, session preservation, limits and ban-evasion review');
 }
 
 async function testAuditBounds() {
@@ -246,13 +201,6 @@ async function testHttpApi() {
   process.env.WEBHOOK_SECRET = secret;
   process.env.NODE_ENV = 'test';
   process.env.ROKA_STATIC_CDN = '0';
-  const { ContentSecurityService } = require('../dist/server/content-security.js');
-  let contentService;
-  const originalStart = ContentSecurityService.prototype.start;
-  ContentSecurityService.prototype.start = function (...args) {
-    contentService = this;
-    return originalStart.apply(this, args);
-  };
   const { app, boot } = require('../dist/server.js');
   await boot(false);
   const request = (method, url, { cookie, ip, body } = {}) =>
@@ -295,8 +243,8 @@ async function testHttpApi() {
       ip: '198.51.100.4',
       body: { username: 'FUCKnew', password: 'password1', captchaId: 'test', captchaCode: 'test' },
     });
-    assert.equal(denied.statusCode, 400);
-    assert.equal(denied.json().error, '用户名不符合社区规范，请更换。');
+    assert.equal(denied.statusCode, 200);
+
     const login = await request('POST', '/api/auth/login', {
       ip: '2001:0DB8::2',
       body: { username: 'normal_http', password: 'password1', captchaId: 'test', captchaCode: 'test' },
@@ -326,13 +274,37 @@ async function testHttpApi() {
     });
     assert.equal(published.statusCode, 200, published.body);
     const postId = published.json().post.id;
-    const adminBefore = (await request('GET', '/api/admin/users', { cookie: adminCookie })).json().items;
-    await contentService.scan();
     const contentEvents = await request('GET', '/api/admin/security/events?type=content_manual_review', {
       cookie: adminCookie,
     });
     assert.equal(contentEvents.headers['cache-control'], 'no-store');
     assert.ok(contentEvents.json().items.some((e) => e.content.postId === postId));
+    assert.equal(contentEvents.json().items.length, 1);
+    const edit = await request('POST', '/api/feeds/edit', {
+      cookie: normalCookie,
+      body: { id: postId, text: '草泥马' },
+    });
+    assert.equal(edit.statusCode, 200);
+    const comment = await request('POST', '/api/feeds/comment', {
+      cookie: normalCookie,
+      body: { id: postId, text: 'nmsl' },
+    });
+    assert.equal(comment.statusCode, 200);
+    const countReviews = async () =>
+      (
+        await request('GET', '/api/admin/security/events?type=content_manual_review', { cookie: adminCookie })
+      ).json().items.length;
+    assert.equal(await countReviews(), 3);
+    await request('GET', '/api/feeds');
+    await request('POST', '/api/feeds/like', { cookie: normalCookie, body: { id: postId } });
+    const removed = await request('POST', '/api/feeds/comment/delete', {
+      cookie: normalCookie,
+      body: { id: postId, commentId: comment.json().comment.id },
+    });
+    assert.equal(removed.statusCode, 200, removed.body);
+    assert.equal(await countReviews(), 3, 'reads, likes and deletion do not create reviews');
+
+    const adminBefore = (await request('GET', '/api/admin/users', { cookie: adminCookie })).json().items;
     const publicFeeds = await request('GET', '/api/feeds');
     assert.ok(publicFeeds.json().items.some((p) => p.id === postId));
     for (const field of ['contentResult', 'versionTime', 'terms', 'content_manual_review'])
@@ -344,19 +316,17 @@ async function testHttpApi() {
       adminBefore.map(({ lastSeenAt, ...user }) => user),
     );
     const scan = await request('POST', '/api/admin/security/scan', { cookie: adminCookie, body: {} });
-    assert.equal(scan.statusCode, 200, scan.body);
-    assert.equal(scan.json().autoBanned, 1);
-    assert.equal((await request('GET', '/api/auth/me', { cookie: legacyCookie })).statusCode, 401);
+    assert.equal(scan.statusCode, 404);
+    assert.equal((await request('GET', '/api/auth/me', { cookie: legacyCookie })).statusCode, 200);
     const dashboard = await request('GET', '/api/admin/security/dashboard', { cookie: adminCookie });
     assert.equal(dashboard.statusCode, 200);
-    assert.equal(dashboard.json().summary.totalUsers, 3);
-    assert.equal(dashboard.json().summary.activeBans, 1);
-    assert.equal(dashboard.json().summary.usernameAutoBans, 1);
-    assert.equal(dashboard.json().lastScan.autoBanned, 1);
-    const events = await request('GET', '/api/admin/security/events?username=fucklegacy', {
+    assert.equal(dashboard.json().summary.totalUsers, 4);
+    assert.equal(dashboard.json().summary.activeBans, 0);
+    assert.equal(dashboard.json().summary.usernameAutoBans, 0);
+    const events = await request('GET', '/api/admin/security/events?type=username_manual_review', {
       cookie: adminCookie,
     });
-    assert.ok(events.json().items.some((entry) => entry.type === 'username_auto_banned'));
+    assert.ok(events.json().items.some((entry) => entry.username === 'FUCKnew'));
     assert.equal(events.headers['cache-control'], 'no-store');
   } finally {
     await app.close();

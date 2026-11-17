@@ -16,7 +16,6 @@ const pages = {
     'metric-total-users',
     'dashboard-events-body',
     'panel-security',
-    'security-scan-btn',
     'security-events-body',
     'user-search',
     'users-body',
@@ -332,6 +331,8 @@ assertScriptOrder('profile.html', profile, [
 ]);
 const admin = htmlFor('admin.html');
 assert.ok(admin.includes('class="admin-topbar"'));
+assert.ok(!admin.includes('id="security-scan-btn"'), 'removed periodic/manual username scan control');
+assert.ok(!profile.includes('id="github-star-refresh-btn"'), 'removed profile Star refresh control');
 assertScriptOrder('admin.html', admin, [
   '/vendor/jquery/jquery-3.6.0.min.js?v={{V}}',
   '/username.js?v={{V}}',

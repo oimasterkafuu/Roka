@@ -34,6 +34,8 @@ class AuthService {
 
   private ioRef: SocketIOServer | null = null;
 
+  private readonly sessionActivations = new Map<string, Promise<void>>();
+
   constructor(private readonly userStore: UserStore) {}
 
   isPublicPath(pathname: string, method = 'GET'): boolean {
@@ -244,7 +246,63 @@ class AuthService {
     }
   }
 
-  disconnectUserSockets(username: string): void {
+  /** Serialize cross-sid activation so an already revoked handshake cannot evict the winner. */
+  async activateSession(username: string, sid: string, socketId?: string): Promise<void> {
+    const previous = this.sessionActivations.get(username) ?? Promise.resolve();
+    const activation = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (!this.userStore.isSessionValid(username, sid)) throw new Error('登录已失效。');
+        const oldSids = new Set<string>();
+        for (const id of this.userSocketIds.get(username) ?? []) {
+          const socket = this.ioRef?.sockets.sockets.get(id);
+          const oldSid = socket?.data.sessionSid;
+          if (socket?.connected && typeof oldSid === 'string' && oldSid !== sid) oldSids.add(oldSid);
+        }
+        for (const oldSid of oldSids) {
+          await this.userStore.clearSession(username, oldSid);
+          this.disconnectSessionSockets(username, oldSid, 'new-login');
+        }
+        if (!this.userStore.isSessionValid(username, sid)) throw new Error('登录已失效。');
+        if (socketId && this.ioRef?.sockets.sockets.get(socketId)?.connected) {
+          this.trackSocket(username, socketId);
+        }
+      });
+    this.sessionActivations.set(username, activation);
+    try {
+      await activation;
+    } finally {
+      if (this.sessionActivations.get(username) === activation) this.sessionActivations.delete(username);
+    }
+  }
+
+  disconnectSessionSockets(username: string, sid: string, reason = 'session-ended'): void {
+    for (const id of [...(this.userSocketIds.get(username) ?? [])]) {
+      const socket = this.ioRef?.sockets.sockets.get(id);
+      if (socket?.data.sessionSid !== sid) continue;
+      socket.emit('force_logout', { reason });
+      socket.disconnect(true);
+      this.untrackSocket(username, id);
+    }
+  }
+
+  async cleanupExpiredSessions(): Promise<void> {
+    await this.userStore.cleanupExpiredSessions();
+    for (const [username, ids] of this.userSocketIds) {
+      for (const id of [...ids]) {
+        const socket = this.ioRef?.sockets.sockets.get(id);
+        if (!socket) {
+          this.untrackSocket(username, id);
+          continue;
+        }
+        if (!this.userStore.isSessionValid(username, String(socket.data.sessionSid ?? ''))) {
+          this.disconnectSessionSockets(username, String(socket.data.sessionSid ?? ''), 'expired');
+        }
+      }
+    }
+  }
+
+  disconnectUserSockets(username: string, reason = 'session-ended'): void {
     if (!this.ioRef) {
       return;
     }
@@ -254,7 +312,9 @@ class AuthService {
     }
 
     for (const id of ids) {
-      this.ioRef.sockets.sockets.get(id)?.disconnect(true);
+      const socket = this.ioRef.sockets.sockets.get(id);
+      socket?.emit('force_logout', { reason });
+      socket?.disconnect(true);
     }
     this.userSocketIds.delete(username);
   }
@@ -269,7 +329,7 @@ class AuthService {
     }
 
     for (const id of ids) {
-      if (id === keepSocketId) {
+      if (id === keepSocketId || this.ioRef.sockets.sockets.get(id)?.handshake.query?.home === '1') {
         continue;
       }
       this.ioRef.sockets.sockets.get(id)?.disconnect(true);

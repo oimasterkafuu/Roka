@@ -283,12 +283,8 @@ try {
 
     await page.locator('#tab-security').click();
     await page.waitForFunction(() => document.querySelectorAll('#security-events-body tr').length === 6);
-    const previousScanCalls = scanCalls;
-    await page.locator('#security-scan-btn').click();
-    await page.waitForFunction(() =>
-      document.querySelector('#security-scan-result').textContent.includes('自动封禁 1'),
-    );
-    assert.equal(scanCalls, previousScanCalls + 1);
+    assert.equal(await page.locator('#security-scan-btn').count(), 0);
+    assert.equal(scanCalls, 0);
     assert.equal(await page.locator('#security-events-body img, #security-events-body script').count(), 0);
     assert.equal(await page.evaluate(() => window.injected), undefined);
     assert.ok((await page.locator('#security-events-body').textContent()).includes('原文：傻逼 <img'));

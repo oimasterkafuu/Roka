@@ -11,7 +11,6 @@ const { SecurityAuditStore, SECURITY_AUDIT_MAX_BYTES } = require('../dist/server
 const { FeedStore } = require('../dist/feed-store.js');
 const { UserStore } = require('../dist/auth-store.js');
 const { RegistrationSecurity } = require('../dist/server/registration-security.js');
-const { UsernameSecurityService } = require('../dist/server/username-security.js');
 for (const name of [
   'shabi',
   'ＣＡＯＮＩＭＡ',
@@ -74,116 +73,54 @@ try {
   await audit.ensureReady();
   await users.ensureReady();
   await users.register('author', 'password1');
-  const before = users.listUsersForAdmin();
   const registration = new RegistrationSecurity(users, audit);
-  assert.equal((await registration.review('shabi', null)).allowed, false);
-  assert.equal((await registration.review('animal', null)).allowed, true);
-  const bannedNames = [];
-  const usernameScan = new UsernameSecurityService(
-    {
-      listUsersForAdmin: () =>
-        ['shabi', 'animal'].map((username) => ({ username, isSuperAdmin: false, bannedUntil: null })),
-      applyBan: async (username) => {
-        bannedNames.push(username);
-      },
-    },
-    audit,
-    async () => {},
-  );
-  assert.equal((await usernameScan.scan()).hits, 1);
-  assert.deepEqual(bannedNames, ['shabi']);
-
+  assert.equal((await registration.review('shabi', null)).allowed, true);
+  assert.equal(audit.list().length, 0, 'preflight is not a registration event');
+  await users.register('shabi', 'password1');
+  const sid = await users.rotateSession('shabi');
+  await registration.afterRegistration('shabi', null, []);
+  assert.equal(audit.list({ type: 'username_manual_review' }).length, 1);
+  assert.equal(users.getBanStatus('shabi').banned, false);
+  assert.equal(users.isSessionValid('shabi', sid), true);
+  const service = new ContentSecurityService(audit);
+  assert.equal(service.start, undefined);
+  assert.equal(service.scan, undefined);
   const post = await feeds.create('author', '傻逼 <img src=x onerror=alert(1)>');
-  assert.equal(post.editedAt, undefined);
-  const comment = await feeds.addComment(post.id, 'author', '正常评论');
-  const scanner = new ContentSecurityService(feeds, audit);
-  const first = scanner.scan();
-  assert.equal(scanner.scan(), first);
-  assert.equal((await first).scanned, 2);
+  assert.equal(audit.list({ type: 'content_manual_review' }).length, 0, 'no scan on store access');
+  await service.reviewPost(post);
   assert.equal(audit.list({ type: 'content_manual_review' }).length, 1);
-  assert.equal((await scanner.scan()).scanned, 0);
   await feeds.toggleLike(post.id, 'author');
-  assert.equal((await scanner.scan()).scanned, 0);
+  await feeds.listAll();
+  assert.equal(audit.list({ type: 'content_manual_review' }).length, 1);
+  const comment = await feeds.addComment(post.id, 'author', '正常评论');
+  await service.reviewComment(post.id, comment);
+  assert.equal(audit.list({ type: 'content_manual_review' }).length, 1);
+  const badComment = await feeds.addComment(post.id, 'shabi', '草泥马');
+  await service.reviewComment(post.id, badComment);
+  assert.equal(audit.list({ type: 'content_manual_review' }).length, 2);
   await feeds.update(post.id, '草泥马');
-  assert.ok(post.editedAt > post.time);
-  assert.equal((await scanner.scan()).hits, 1);
-  const reloadedFeeds = new FeedStore(dir);
-  await reloadedFeeds.ensureReady();
-  assert.equal(reloadedFeeds.getById(post.id).editedAt, post.editedAt);
-  const realNow = Date.now;
-  const previousVersion = post.editedAt;
-  Date.now = () => previousVersion;
-  try {
-    await feeds.update(post.id, '正常中文');
-    const nextComment = await feeds.addComment(post.id, 'author', '正常中文评论');
-    assert.ok(post.editedAt > previousVersion);
-    assert.ok(nextComment.time > post.editedAt);
-    await feeds.update(post.id, '草泥马');
-    assert.ok(post.editedAt > nextComment.time);
-  } finally {
-    Date.now = realNow;
-  }
-  assert.equal((await scanner.scan()).scanned, 2);
-
-  // Inject same timestamp arrivals through a snapshot provider, independent of wall clock.
-  const time = audit.getContentCursor().time;
-  const sameTimePost = {
-    id: 'same-ms',
-    author: 'author',
-    text: '正常动态',
-    time,
-    likes: [],
-    comments: [{ id: 'c', author: 'author', text: 'nmsl', time }],
-  };
-  const snapshot = { listAll: () => [...feeds.listAll(), structuredClone(sameTimePost)] };
-  let restarted = new SecurityAuditStore(dir);
+  await service.reviewPost(post);
+  assert.equal(audit.list({ type: 'content_manual_review' }).length, 3);
+  await feeds.update(post.id, '正常内容');
+  await service.reviewPost(post);
+  assert.equal(audit.list({ type: 'content_manual_review' }).length, 3);
+  const restarted = new SecurityAuditStore(dir);
   await restarted.ensureReady();
-  let service = new ContentSecurityService(snapshot, restarted);
-  assert.equal((await service.scan()).scanned, 2);
-  restarted = new SecurityAuditStore(dir);
-  await restarted.ensureReady();
-  service = new ContentSecurityService(snapshot, restarted);
-  assert.equal((await service.scan()).scanned, 0);
-  const oldCursor = restarted.getContentCursor();
-  sameTimePost.comments.push({ id: 'late', author: 'author', text: '傻b', time });
-  // Real persistence failure: missing parent directory; no checkpoint or partial hit survives retry.
-  await rename(dir, dir + '-offline');
-  await assert.rejects(service.scan());
-  assert.deepEqual(restarted.getContentCursor(), oldCursor);
-  await rename(dir + '-offline', dir);
-  assert.equal((await service.scan()).hits, 1);
-  assert.equal((await service.scan()).scanned, 0);
-  assert.equal(
-    restarted.list({ type: 'content_manual_review' }).filter((e) => e.content.commentId === 'late').length,
-    1,
-  );
-  assert.equal(feeds.getById(post.id).text, '草泥马');
-  assert.equal(feeds.getById(post.id).comments[0].id, comment.id);
-  assert.deepEqual(users.listUsersForAdmin(), before);
-  const checkpoint = restarted.getContentCursor();
-  // Exercise trimming without thousands of separate writes.
-  await restarted.completeContentScan(
-    Array.from({ length: 2100 }, () => ({
-      at: Date.now(),
-      type: 'content_scan_completed',
-      action: 'test',
-      reason: 'x'.repeat(1500),
-    })),
-    checkpoint,
-  );
+  assert.equal(restarted.list({ type: 'content_manual_review' }).length, 3);
+  assert.equal(restarted.list({ type: 'content_scan_completed' }).length, 0);
+  assert.equal(users.getBanStatus('author').banned, false);
+  assert.equal(users.isSessionValid('shabi', sid), true);
+  assert.equal(feeds.getById(post.id).text, '正常内容');
   const file = path.join(dir, 'security-audit.json');
   assert.ok((await stat(file)).size <= SECURITY_AUDIT_MAX_BYTES);
   assert.equal((await stat(file)).mode & 0o777, 0o600);
-  assert.ok(JSON.parse(await readFile(file, 'utf8')).entries.length <= 2000);
-  const recovered = new SecurityAuditStore(dir);
-  await recovered.ensureReady();
-  assert.deepEqual(recovered.getContentCursor(), checkpoint);
-  assert.equal((await new ContentSecurityService(snapshot, recovered).scan()).scanned, 0);
-  await service.stop();
+  const serverSource = await readFile(new URL('../src/server.ts', import.meta.url), 'utf8');
+  assert.equal(/(?:usernameSecurity|contentSecurity)\.(?:start|scan)\(/.test(serverSource), false);
+  const contentSource = await readFile(new URL('../src/server/content-security.ts', import.meta.url), 'utf8');
+  assert.equal(/setInterval|setTimeout/.test(contentSource), false);
   console.log(
-    'PASS content policies, shared registration, incremental versions, same-ms arrivals, restart, atomic failure retry, pruning, review-only effects',
+    'PASS event-only registration/content review, no auto ban/session clearing, no timers, persistence',
   );
 } finally {
   await rm(dir, { recursive: true, force: true });
-  await rm(dir + '-offline', { recursive: true, force: true });
 }

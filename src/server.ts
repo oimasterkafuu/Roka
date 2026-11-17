@@ -47,7 +47,6 @@ import { resolveClientIp, resolveRateLimitKey } from './server/client-ip';
 import { RegistrationSecurity } from './server/registration-security';
 import { SecurityAuditStore } from './server/security-audit';
 import { ContentSecurityService } from './server/content-security';
-import { UsernameSecurityService } from './server/username-security';
 
 const runtimeEnv = ensureRuntimeEnv();
 const app = Fastify({ logger: true });
@@ -93,9 +92,7 @@ const userStore = new UserStore(dataDir);
 const feedStore = new FeedStore(dataDir);
 const chatModeration = new ChatModeration(dataDir);
 const securityAudit = new SecurityAuditStore(dataDir);
-const contentSecurity = new ContentSecurityService(feedStore, securityAudit, (error) =>
-  app.log.error({ err: error }, 'content security scan failed'),
-);
+const contentSecurity = new ContentSecurityService(securityAudit);
 const announcementStore = new AnnouncementStore(dataDir);
 const authService = new AuthService(userStore);
 const registrationSecurity = new RegistrationSecurity(userStore, securityAudit);
@@ -103,8 +100,6 @@ const captchaService = new CaptchaService();
 const contributorsService = new ContributorsService();
 const stargazerService = new StargazerService({
   filePath: path.join(dataDir, 'github-stargazers.json'),
-  token: process.env.GITHUB_STARGAZERS_TOKEN,
-  apiBaseUrl: process.env.GITHUB_API_BASE_URL,
   logger: {
     info: (message) => app.log.info(message),
     warn: (message) => app.log.warn(message),
@@ -122,7 +117,7 @@ const githubService = new GithubService({
   apiBaseUrl: process.env.GITHUB_API_BASE_URL,
 });
 const lobbyService = new LobbyService(replayStore, userStore, (username) => {
-  authService.disconnectUserSockets(username);
+  authService.disconnectUserSockets(username, 'banned');
 });
 // 服务器实际监听端口：listen 前赋值；托管 bot 自连回环地址时读取（API 调用必发生在 listen 后）。
 let listenPort = Number(process.env.PORT) || 23333;
@@ -133,16 +128,6 @@ const serverBotManager = new ServerBotManager({
 // Socket.IO 实例在 boot() 内创建；webhook 广播回调经此引用延迟绑定
 // （webhook 只在 listen 后可达，回调触发时 socketServer 必然已赋值）。
 let socketServer: SocketIOServer | null = null;
-const usernameSecurity = new UsernameSecurityService(
-  userStore,
-  securityAudit,
-  async (username) => {
-    await userStore.clearSession(username);
-    authService.disconnectUserSockets(username);
-    socketServer?.emit('home_leaderboard');
-  },
-  (error) => app.log.error({ err: error }, 'username security scan failed'),
-);
 const DEPLOY_SETTLE_MESSAGE = '系统即将更新，本局按当前名次提前结算。';
 const webhookUpdater = new WebhookUpdater(
   app.log,
@@ -314,11 +299,6 @@ interface DecoratedFeedPost {
 // @提及解析：用户名存在时返回规范形式，不存在/改名后由渲染层降级为普通文本。
 const resolveFeedMention = (token: string): string | null => userStore.resolveUsername(token);
 
-const usernameStarred = (username: string) => {
-  const github = userStore.getGithubPublicProfile(username);
-  return github?.starred === true && github.starState === 'starred';
-};
-
 const usernameAppearance = (username: string, rating: number, ratingGames: number) => {
   const admin = userStore.isAdminUser(username);
   const banned = userStore.getBanStatus(username).banned;
@@ -328,7 +308,7 @@ const usernameAppearance = (username: string, rating: number, ratingGames: numbe
     title: banned ? '已封禁' : admin ? 'Headquarters' : tier.title,
     admin,
     banned,
-    starred: usernameStarred(username),
+    ...userStore.getPublicAppearance(username),
   };
 };
 
@@ -527,6 +507,7 @@ const boot = async (listen = true): Promise<void> => {
     const token = authService.getTokenFromCookie(request.headers.cookie);
     const authUser = authService.verifyAuthToken(token);
     if (!authUser) {
+      if (token) authService.clearAuthCookie(reply);
       if (authService.isPublicPath(pathname, request.method)) {
         return;
       }
@@ -734,13 +715,13 @@ const boot = async (listen = true): Promise<void> => {
     try {
       const referrer = authService.getReferralFromCookie(request.headers.cookie) ?? undefined;
       const username = await userStore.register(usernameRaw, password, referrer, clientIp ?? undefined);
-      const sessionId = await userStore.rotateSession(username, clientIp ?? undefined);
+      const sessionId = await userStore.createSession(username, clientIp ?? undefined);
       try {
         await registrationSecurity.afterRegistration(username, clientIp, review.relatedBannedUsernames);
       } catch (error) {
         app.log.error({ err: error }, 'registration security audit write failed');
       }
-      authService.disconnectUserSockets(username);
+      await authService.activateSession(username, sessionId);
       const token = authService.signAuthToken(username, sessionId);
       authService.clearReferralCookie(reply);
       authService.setAuthCookie(reply, token);
@@ -785,8 +766,8 @@ const boot = async (listen = true): Promise<void> => {
       return reply.code(403).send({ error: formatBanMessage(banStatus) });
     }
 
-    const sessionId = await userStore.rotateSession(username, resolveClientIp(request) ?? undefined);
-    authService.disconnectUserSockets(username);
+    const sessionId = await userStore.createSession(username, resolveClientIp(request) ?? undefined);
+    await authService.activateSession(username, sessionId);
 
     const token = authService.signAuthToken(username, sessionId);
     authService.clearReferralCookie(reply);
@@ -797,8 +778,8 @@ const boot = async (listen = true): Promise<void> => {
   app.post('/api/auth/logout', { preHandler: authActionRateLimitPreHandler }, async (request, reply) => {
     const authUser = (request as AuthRequest).authUser;
     if (authUser) {
-      await userStore.clearSession(authUser.username);
-      authService.disconnectUserSockets(authUser.username);
+      await userStore.clearSession(authUser.username, authUser.sid);
+      authService.disconnectSessionSockets(authUser.username, authUser.sid, 'logout');
     }
     authService.clearAuthCookie(reply);
     return reply.send({ ok: true });
@@ -833,6 +814,7 @@ const boot = async (listen = true): Promise<void> => {
       const profilePath = `/u/${encodeURIComponent(authUser.username)}`;
       try {
         await githubService.completeLink(authUser, request.query as Record<string, unknown>);
+        socketServer?.emit('home_leaderboard');
         return reply.redirect(`${profilePath}?github=linked`);
       } catch (error) {
         const code = error instanceof GithubServiceError ? error.code : 'failed';
@@ -849,23 +831,8 @@ const boot = async (listen = true): Promise<void> => {
       githubNoStore(reply);
       const authUser = (request as AuthRequest).authUser;
       await githubService.unlink(authUser.username);
+      socketServer?.emit('home_leaderboard');
       return reply.send({ ok: true });
-    },
-  );
-
-  app.post(
-    '/api/auth/github/star/refresh',
-    { preHandler: authActionRateLimitPreHandler },
-    async (request, reply) => {
-      githubNoStore(reply);
-      const authUser = (request as AuthRequest).authUser;
-      try {
-        const github = await githubService.refreshStar(authUser.username, true);
-        if (!github) return reply.code(404).send({ error: '尚未绑定 GitHub 账号。' });
-        return reply.send({ ok: true, github });
-      } catch {
-        return reply.code(502).send({ error: 'GitHub 暂时无法核验 Star 状态，请稍后重试。' });
-      }
     },
   );
 
@@ -877,6 +844,7 @@ const boot = async (listen = true): Promise<void> => {
     return reply.send({
       username: authUser.username,
       rating: userStore.getDisplayRating(authUser.username),
+      ...userStore.getPublicAppearance(authUser.username),
       isAdmin: userStore.isAdminUser(authUser.username),
       isSuperAdmin: userStore.isSuperAdminUser(authUser.username),
       github: {
@@ -998,20 +966,6 @@ const boot = async (listen = true): Promise<void> => {
       }),
     });
   });
-
-  app.post(
-    '/api/admin/security/scan',
-    { preHandler: adminActionRateLimitPreHandler },
-    async (request, reply) => {
-      if (!requireAdmin(request, reply)) return;
-      try {
-        return reply.send(await usernameSecurity.scan());
-      } catch (error) {
-        request.log.error(error, 'manual username security scan failed');
-        return reply.code(500).send({ error: '复查失败，请查看服务日志后重试。' });
-      }
-    },
-  );
 
   app.get('/api/admin/users', async (request, reply) => {
     const admin = requireAdmin(request, reply);
@@ -1312,6 +1266,9 @@ const boot = async (listen = true): Promise<void> => {
     const body = request.body as { text?: unknown };
     try {
       const post = await feedStore.create(authUser.username, String(body?.text ?? ''));
+      await contentSecurity
+        .reviewPost(post)
+        .catch((err) => app.log.error({ err }, 'content review audit write failed'));
       await userStore.applyPointsUpdates([{ username: authUser.username, points: POST_POINTS }]);
       io.emit('home_feeds');
       return reply.send({ post: decorateFeedPost(post, authUser.username) });
@@ -1338,6 +1295,10 @@ const boot = async (listen = true): Promise<void> => {
     }
     try {
       const updated = await feedStore.update(post.id, String(body?.text ?? ''));
+      if (updated)
+        await contentSecurity
+          .reviewPost(updated)
+          .catch((err) => app.log.error({ err }, 'content review audit write failed'));
       io.emit('home_feeds');
       return reply.send({ post: decorateFeedPost(updated as FeedPost, authUser.username) });
     } catch (error) {
@@ -1403,6 +1364,9 @@ const boot = async (listen = true): Promise<void> => {
       if (!comment || !post) {
         return reply.code(404).send({ error: '动态不存在。' });
       }
+      await contentSecurity
+        .reviewComment(post.id, comment)
+        .catch((err) => app.log.error({ err }, 'content review audit write failed'));
       await userStore.applyPointsUpdates([
         { username: post.author, points: RECEIVED_INTERACTION_POINTS },
         { username: authUser.username, points: COMMENT_POINTS },
@@ -1520,7 +1484,7 @@ const boot = async (listen = true): Promise<void> => {
   });
 
   // 按用户名批量查询公开外观，供前端统一用户名组件为接口原本不带外观的位置补齐。
-  // starred 仅由公开 GitHub DTO 的新鲜已核验状态产生，不暴露 token 或其他绑定字段。
+  // starred 与用户外观同源读取持久化字段，不暴露 GitHub 私密绑定字段。
   app.get('/api/user-colors', async (request, reply) => {
     const query = request.query as { users?: unknown };
     const names = String(query.users ?? '')
@@ -1557,11 +1521,6 @@ const boot = async (listen = true): Promise<void> => {
 
   app.get('/api/profile/:username', async (request, reply) => {
     const { username } = request.params as { username: string };
-    try {
-      await githubService.refreshStar(username);
-    } catch {
-      // A previously verified badge remains subject to the store's maximum staleness.
-    }
     const profile = userStore.getPublicProfile(username);
     if (!profile) {
       return reply.code(404).send({ error: '用户不存在。' });
@@ -1881,8 +1840,6 @@ const boot = async (listen = true): Promise<void> => {
   socketServer = io;
   authService.attachSocketServer(io);
   lobbyService.startLobbyHeartbeatSweep(io);
-  usernameSecurity.start();
-  contentSecurity.start();
 
   // home_online 失效通知做简单节流合并：上线/下线转换频繁时最多每 2 秒广播一次。
   let homeOnlineTimer: NodeJS.Timeout | null = null;
@@ -1903,13 +1860,18 @@ const boot = async (listen = true): Promise<void> => {
     }
   }, PRESENCE_SWEEP_INTERVAL_MS);
   presenceSweepTimer.unref();
+  const sessionCleanupTimer = setInterval(() => {
+    void authService
+      .cleanupExpiredSessions()
+      .catch((err) => app.log.error({ err }, 'session cleanup failed'));
+  }, 60_000);
+  sessionCleanupTimer.unref();
 
   app.addHook('onClose', async () => {
     clearInterval(presenceSweepTimer);
+    clearInterval(sessionCleanupTimer);
     clearInterval(replayDownloadStateCleanupTimer);
     lobbyService.stopLobbyHeartbeatSweep();
-    usernameSecurity.stop();
-    await contentSecurity.stop();
     if (homeOnlineTimer) {
       clearTimeout(homeOnlineTimer);
     }
@@ -1951,6 +1913,10 @@ const boot = async (listen = true): Promise<void> => {
 
     if (!authUser) {
       if (socket.handshake.query?.home === '1') {
+        if (fromCookie || fromHandshake) {
+          next(new Error('未登录或登录已失效。'));
+          return;
+        }
         socket.data.homeGuest = true;
         next();
         return;
@@ -1969,7 +1935,7 @@ const boot = async (listen = true): Promise<void> => {
     next();
   });
 
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     const username = String(socket.data.username ?? '');
     const isHomeGuest = socket.data.homeGuest === true;
     if (!username && !isHomeGuest) {
@@ -1981,13 +1947,30 @@ const boot = async (listen = true): Promise<void> => {
     }
 
     const isBot = socket.data.isBot === true;
+    if (!isBot) socket.on('disconnect', () => authService.untrackSocket(username, socket.id));
     // 统一 presence：连接建立与任何入站 socket 事件（对局操作、聊天等）都算用户活动；
     // room_heartbeat 是纯机械保活包，在此排除——房内成员的心跳由 room_heartbeat
     // 处理器单独计入，房外 socket 的心跳不刷新在线状态。
     // bot 连接不计入在线（ROKA_BOT_TOKENS 合成用户 / 服务端托管 bot）。
     if (!isBot) {
+      try {
+        await authService.activateSession(username, String(socket.data.sessionSid ?? ''), socket.id);
+      } catch {
+        socket.emit('force_logout', { reason: 'session-ended' });
+        socket.disconnect(true);
+        return;
+      }
+      if (!socket.connected) {
+        authService.untrackSocket(username, socket.id);
+        return;
+      }
       recordPresence(username);
       socket.use((packet, next) => {
+        if (!userStore.isSessionValid(username, String(socket.data.sessionSid ?? ''))) {
+          socket.emit('force_logout', { reason: 'new-login' });
+          socket.disconnect(true);
+          return;
+        }
         const banStatus = userStore.getBanStatus(username);
         if (banStatus.banned) {
           socket.disconnect(true);
@@ -2003,7 +1986,9 @@ const boot = async (listen = true): Promise<void> => {
 
     // 首页只接收全局失效通知：不参与「同一用户单连接」互斥，
     // 否则打开首页会踢掉该用户在游戏页/其他标签页的连接（反之亦然）。
-    if (socket.handshake.query?.home === '1') {
+    if (socket.handshake.query?.home === '1' && !isBot) {
+      authService.trackSocket(username, socket.id);
+      socket.on('disconnect', () => authService.untrackSocket(username, socket.id));
       return;
     }
 

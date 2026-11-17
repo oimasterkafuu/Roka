@@ -3,7 +3,6 @@ import { GithubPublicProfile, UserStore } from '../auth-store';
 import { StargazerLookup } from './stargazer-service';
 
 const GITHUB_STATE_TTL_MS = 10 * 60 * 1000;
-export const GITHUB_STAR_CACHE_TTL_MS = 15 * 60 * 1000;
 const GITHUB_REQUEST_TIMEOUT_MS = 10_000;
 
 interface GithubActor {
@@ -61,7 +60,6 @@ export class GithubService {
   private readonly operations = new Map<string, OAuthState>();
   private readonly states = new Map<string, OAuthState>();
   private readonly stateByUser = new Map<string, string>();
-  private readonly starRefreshes = new Map<string, Promise<GithubPublicProfile | null>>();
 
   constructor(private readonly options: GithubServiceOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -192,41 +190,6 @@ export class GithubService {
   async unlink(username: string): Promise<boolean> {
     this.cancelLink(username);
     return this.options.userStore.unlinkGithub(username);
-  }
-
-  async refreshStar(username: string, force = false): Promise<GithubPublicProfile | null> {
-    const credential = this.options.userStore.getGithubCredential(username);
-    if (!credential) return null;
-    const verifiedAt = credential.starVerifiedAt;
-    if (
-      !force &&
-      typeof verifiedAt === 'number' &&
-      verifiedAt <= this.now() &&
-      this.now() - verifiedAt < GITHUB_STAR_CACHE_TTL_MS
-    ) {
-      return this.options.userStore.getGithubPublicProfile(username, this.now());
-    }
-    const pending = this.starRefreshes.get(username);
-    if (pending) return pending;
-
-    const refresh = this.performStarRefresh(username, credential.id).finally(() => {
-      this.starRefreshes.delete(username);
-    });
-    this.starRefreshes.set(username, refresh);
-    return refresh;
-  }
-
-  private async performStarRefresh(
-    username: string,
-    expectedId: number,
-  ): Promise<GithubPublicProfile | null> {
-    const credential = this.options.userStore.getGithubCredential(username);
-    if (!credential || credential.id !== expectedId) {
-      return this.options.userStore.getGithubPublicProfile(username, this.now());
-    }
-    const starred = this.options.stargazerService.isStarred(credential.login);
-    await this.options.userStore.updateGithubStar(username, expectedId, starred, this.now());
-    return this.options.userStore.getGithubPublicProfile(username, this.now());
   }
 
   private async exchangeCode(code: string, verifier: string, signal: AbortSignal): Promise<string> {

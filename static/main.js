@@ -946,6 +946,15 @@ socket.on('connect', function () {
   joinGameRoom();
 });
 
+var sessionReloading = false;
+socket.on('force_logout', function () {
+  if (sessionReloading) return;
+  sessionReloading = true;
+  stopRoomHeartbeat();
+  socket.disconnect();
+  location.reload();
+});
+
 socket.on('connect_error', function () {
   location.href = '/login';
 });
@@ -958,6 +967,7 @@ socket.on('room_kick', function (data) {
 socket.on('disconnect', function (reason) {
   // 断线后房间成员身份待重连确认，先停心跳；重连成功收到 room_update 后重启。
   stopRoomHeartbeat();
+  if (sessionReloading) return;
   if (reason == 'io server disconnect') {
     location.href = '/';
     return;

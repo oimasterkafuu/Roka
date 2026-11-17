@@ -1174,8 +1174,33 @@ html
                 loadFeeds(page);
 
                 // 各面板改由 socket 失效通知驱动刷新（事件无 payload，收到后重新 fetch）。
-                // query.home 标记为首页监听连接，服务端不会用它参与同账号连接互斥。
+                // query.home 标记首页通知连接；同 sid 不参与游戏连接互斥，跨 sid 仍检查活动冲突。
                 var socket = io({ query: { home: '1' } });
+                var sessionReloading = false;
+                function checkHomeSession() {
+                  fetch('/api/auth/me').then(function (res) {
+                    if (res.status === 401 && !sessionReloading) {
+                      sessionReloading = true;
+                      socket.disconnect();
+                      location.reload();
+                    }
+                  }).catch(function () {});
+                }
+                socket.on('force_logout', function () {
+                  if (sessionReloading) return;
+                  sessionReloading = true;
+                  socket.disconnect();
+                  location.reload();
+                });
+                socket.on('connect_error', function () {
+                  if (currentUsername) checkHomeSession();
+                });
+                socket.on('disconnect', function () {
+                  if (currentUsername && !sessionReloading) checkHomeSession();
+                });
+                document.addEventListener('visibilitychange', function () {
+                  if (!document.hidden && currentUsername) checkHomeSession();
+                });
                 socket.on('home_rooms', function () {
                   loadRooms();
                 });

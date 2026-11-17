@@ -136,7 +136,7 @@ function normalizeGithubProfile(value) {
     return {
       login: login,
       htmlUrl: url.toString(),
-      starred: value.starred === true && value.starState === 'starred',
+      starred: value.starred === true,
       starState: ['starred', 'not-starred', 'unknown', 'stale'].includes(value.starState)
         ? value.starState
         : 'unknown',
@@ -149,7 +149,7 @@ function normalizeGithubProfile(value) {
 
 function syncProfileStar(github) {
   var previous = usernameColorCache[profileUsername] || {};
-  previous.starred = !!(github && github.starred && github.starState === 'starred');
+  previous.starred = !!(github && github.starred);
   previous.starState = github ? github.starState : 'unknown';
   var seed = {};
   seed[profileUsername] = previous;
@@ -163,7 +163,7 @@ function setGithubActionStatus(message) {
 function setGithubActionBusy(busy) {
   githubActionBusy = busy;
   $('#github-bind-btn').prop('disabled', busy || !viewerGithubConfigured);
-  $('#github-star-refresh-btn, #github-unlink-btn').prop('disabled', busy);
+  $('#github-unlink-btn').prop('disabled', busy);
 }
 
 function renderGithubProfile(value) {
@@ -190,7 +190,7 @@ function renderGithubProfile(value) {
   $('#github-bind-btn')
     .text(github ? '换绑 GitHub' : '绑定 GitHub')
     .prop('disabled', githubActionBusy || !viewerGithubConfigured);
-  $('#github-star-refresh-btn, #github-unlink-btn').toggle(!!github).prop('disabled', githubActionBusy);
+  $('#github-unlink-btn').toggle(!!github).prop('disabled', githubActionBusy);
 
   if (!github) {
     $('#github-account-link').hide().attr('href', '#').text('');
@@ -199,10 +199,10 @@ function renderGithubProfile(value) {
   }
 
   var starText = {
-    starred: '已确认你 Star 了 Roka，名字首字母已变为金色。',
-    'not-starred': 'Star Roka 并刷新核验后，名字首字母会变为金色。',
-    unknown: '暂时无法确认 Star 状态，请稍后手动刷新。',
-    stale: 'Star 状态可能已过期，请手动刷新。',
+    starred: '已确认你 Star 了 Roka，用户名的前半名已变为金色。',
+    'not-starred': 'Star Roka 后，用户名的前半名会变为金色。',
+    unknown: '暂无已保存的 Star 状态。',
+    stale: 'Star 核验时间较早，已保存的用户名外观保持不变。',
   };
   $('#github-account-link')
     .attr('href', github.htmlUrl)
@@ -264,23 +264,6 @@ $('#github-unlink-btn').on('click', async function () {
     await apiPost('/api/auth/github/unlink', {});
     renderGithubProfile(null);
     setGithubActionStatus('GitHub 账号已解绑。');
-  } catch (err) {
-    setGithubActionStatus(err.message);
-  } finally {
-    setGithubActionBusy(false);
-  }
-});
-
-$('#github-star-refresh-btn').on('click', async function () {
-  if (githubActionBusy) {
-    return;
-  }
-  setGithubActionBusy(true);
-  setGithubActionStatus('正在刷新 Star 状态…');
-  try {
-    var data = await apiPost('/api/auth/github/star/refresh', {});
-    renderGithubProfile(data.github);
-    setGithubActionStatus('Star 状态已刷新。');
   } catch (err) {
     setGithubActionStatus(err.message);
   } finally {

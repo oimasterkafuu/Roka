@@ -3,10 +3,10 @@
 //   var $a = usernameLink(name, info);   // info 可选 {colorClass, title, admin, banned, starred}；缺省时查全局缓存
 //   usernameCacheSeed({name: {colorClass, title, admin, banned, starred}});  // 用接口已有数据喂缓存
 //   usernameEnsureColors([name, ...]);   // 批量拉取缺失名字的颜色（/api/user-colors），返回 Promise
-// 缓存回填后，已渲染的链接（带 data-username 标记）会自动刷新颜色、title 与 Star 首字母。
+// 缓存回填后，已渲染的链接（带 data-username 标记）会自动刷新颜色、title 与 Star 前半名。
 // 有效封禁优先渲染为 rt-banned（棕色正常字重）；未封禁管理员使用 rt-admin
 // （黑色加粗）及 Headquarters tooltip；无可见徽标。
-// 经公开接口确认 starred 时仅首字母染金，其余字符继续继承原颜色。
+// 经公开接口确认 starred 时仅前半名染金，其余字符继续继承原颜色。
 // 防注入：DOM 版用 .text()/文本节点，HTML 版转义用户名。
 
 // 用户名 → {colorClass, title, admin, banned, starred} 全局缓存。
@@ -19,12 +19,19 @@ function usernameColorKey(username) {
   return String(username);
 }
 
+function usernameStarParts(username, starred) {
+  var name = String(username);
+  var goldLength = starred ? Math.floor(name.length / 2) : 0;
+  return [name.slice(0, goldLength), name.slice(goldLength)];
+}
+
 function usernameRenderText($el, username, starred) {
   var name = String(username);
   $el.text('');
-  if (starred && name) {
-    $('<span class="username-star-initial"></span>').text(name.charAt(0)).appendTo($el);
-    $el.append(document.createTextNode(name.slice(1)));
+  var parts = usernameStarParts(name, starred);
+  if (parts[0]) {
+    $('<span class="username-star-initial"></span>').text(parts[0]).appendTo($el);
+    $el.append(document.createTextNode(parts[1]));
   } else {
     $el.text(name);
   }
@@ -32,24 +39,18 @@ function usernameRenderText($el, username, starred) {
 
 function usernameTextHtml(username, starred) {
   var name = String(username);
-  if (!starred || !name) return htmlescape(name);
-  return (
-    '<span class="username-star-initial">' +
-    htmlescape(name.charAt(0)) +
-    '</span>' +
-    htmlescape(name.slice(1))
-  );
+  var parts = usernameStarParts(name, starred);
+  if (!parts[0]) return htmlescape(name);
+  return '<span class="username-star-initial">' + htmlescape(parts[0]) + '</span>' + htmlescape(parts[1]);
 }
 
 // 即使调用方带着旧 rating 信息，有效封禁仍优先于管理员与 rating。
-// 不带 starred 的旧接口保留已核验状态；显式状态必须同时满足 starred 与 starState（若提供）。
+// 不带 starred 的旧接口保留已核验状态；显式 starred 布尔值覆盖缓存，核验新鲜度不影响外观。
 function usernameNormalizeInfo(info, previous) {
   var admin = info.admin === true;
   var banned = info.banned === true;
   var hasStarred = Object.prototype.hasOwnProperty.call(info, 'starred');
-  var starred = hasStarred
-    ? info.starred === true && (info.starState === undefined || info.starState === 'starred')
-    : !!(previous && previous.starred);
+  var starred = hasStarred ? info.starred === true : !!(previous && previous.starred);
   return {
     colorClass: banned ? 'rt-banned' : admin ? 'rt-admin' : info.colorClass || 'rt-unrated',
     title: banned ? '已封禁' : admin ? 'Headquarters' : info.title || '',
@@ -140,7 +141,7 @@ function usernameColorsInvalidate() {
   usernameEnsureColors(names);
 }
 
-// 缓存回填后刷新已渲染链接的颜色、tooltip 与 Star 首字母（含状态撤销）。
+// 缓存回填后刷新已渲染链接的颜色、tooltip 与 Star 前半名（含状态撤销）。
 function usernameRefreshRendered() {
   $('[data-username]').each(function () {
     var key = usernameColorKey($(this).attr('data-username'));
@@ -159,7 +160,7 @@ function usernameRefreshRendered() {
 
 // HTML 字符串版：与 usernameLink 同源（同一缓存与 rt-* 降级），供每帧全量 innerHTML 重建的
 // 热路径（对局排行榜）使用；用户名经 htmlescape 防注入，输出与 DOM 版一致的 data-username 标记，
-// 缓存批量回填后经 usernameRefreshRendered 统一刷新颜色与 Star 首字母。
+// 缓存批量回填后经 usernameRefreshRendered 统一刷新颜色与 Star 前半名。
 function usernameLinkHtml(username) {
   var key = usernameColorKey(username);
   var cached = usernameColorCache[key] || null;

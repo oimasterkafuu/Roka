@@ -596,22 +596,6 @@ $('#security-search').on('click', function () {
   loadSecurityEvents(true);
 });
 
-$('#security-scan-btn').on('click', async function () {
-  var $button = $('#security-scan-btn').prop('disabled', true);
-  $('#security-scan-result').text('正在串行复查全部用户名…');
-  try {
-    var result = await apiPost('/api/admin/security/scan', {});
-    $('#security-scan-result').text(scanResultText(result));
-    securityLoaded = false;
-    await loadSecurityEvents(true);
-    loadDashboard();
-  } catch (err) {
-    $('#security-scan-result').text(err.message);
-  } finally {
-    $button.prop('disabled', false);
-  }
-});
-
 /* ---------- 聊天审计 ---------- */
 
 var chatBefore = null;

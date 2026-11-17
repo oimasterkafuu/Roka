@@ -20,17 +20,6 @@ export class RegistrationSecurity {
 
   async review(usernameInput: string, ip: string | null): Promise<RegistrationReview> {
     const username = usernameInput.trim();
-    if (inspectUsername(username).violated) {
-      await this.audit.record({
-        at: this.now(),
-        type: 'username_rejected',
-        action: 'reject_registration',
-        reason: '用户名违反社区规范',
-        username: username.slice(0, 100),
-        ip: ip ?? undefined,
-      });
-      return { allowed: false, status: 400, error: '用户名不符合社区规范，请更换。' };
-    }
     if (!ip) return { allowed: true, relatedBannedUsernames: [] };
 
     const now = this.now();
@@ -65,6 +54,16 @@ export class RegistrationSecurity {
     ip: string | null,
     relatedBannedUsernames: string[],
   ): Promise<void> {
+    if (inspectUsername(username).violated) {
+      await this.audit.record({
+        at: this.now(),
+        type: 'username_manual_review',
+        action: 'flag_for_review',
+        reason: '用户名命中，待人工复核',
+        username,
+        ip: ip ?? undefined,
+      });
+    }
     if (!ip || relatedBannedUsernames.length === 0) return;
     await this.audit.record({
       at: this.now(),

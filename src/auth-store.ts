@@ -93,11 +93,21 @@ export interface ReferralConversion {
 
 export type ReferralAdminEntry = ReferralAttribution;
 
+export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface UserSession {
+  sid: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
 export interface StoredUser {
   username: string;
   passwordSalt: string;
   passwordHash: string;
-  sessionId: string | null;
+  /** Legacy single sid, consumed on load. New writes use sessions. */
+  sessionId?: string | null;
+  sessions?: UserSession[];
   createdAt: number;
   updatedAt: number;
   rating?: number;
@@ -449,14 +459,15 @@ const toGithubPublicProfile = (github: GithubLinkRecord, now: number): GithubPub
     verifiedAt > 0 &&
     verifiedAt <= now &&
     now - verifiedAt <= GITHUB_STAR_BADGE_MAX_AGE_MS;
-  const starred = github.starred === true && fresh;
-  const starState = starred
-    ? 'starred'
-    : github.starred === true && verifiedAt !== null
-      ? 'stale'
-      : github.starred === false
-        ? 'not-starred'
-        : 'unknown';
+  const starred = github.starred === true;
+  const starState =
+    starred && fresh
+      ? 'starred'
+      : github.starred === true && verifiedAt !== null
+        ? 'stale'
+        : github.starred === false
+          ? 'not-starred'
+          : 'unknown';
   return {
     login: github.login,
     htmlUrl: `https://github.com/${encodeURIComponent(github.login)}`,
@@ -480,7 +491,7 @@ const toStoredUser = (value: unknown): StoredUser | null => {
     typeof username !== 'string' ||
     typeof passwordSalt !== 'string' ||
     typeof passwordHash !== 'string' ||
-    (sessionId !== null && typeof sessionId !== 'string') ||
+    (sessionId !== undefined && sessionId !== null && typeof sessionId !== 'string') ||
     typeof createdAt !== 'number' ||
     typeof updatedAt !== 'number' ||
     !Number.isFinite(createdAt) ||
@@ -488,7 +499,27 @@ const toStoredUser = (value: unknown): StoredUser | null => {
   ) {
     return null;
   }
-  const normalizedSessionId: string | null = sessionId === null ? null : (sessionId as string);
+  const sessions: UserSession[] = Array.isArray(value.sessions)
+    ? value.sessions
+        .filter(
+          (entry): entry is UserSession =>
+            isRecord(entry) &&
+            typeof entry.sid === 'string' &&
+            entry.sid.length > 0 &&
+            typeof entry.createdAt === 'number' &&
+            Number.isFinite(entry.createdAt) &&
+            typeof entry.expiresAt === 'number' &&
+            Number.isFinite(entry.expiresAt) &&
+            entry.expiresAt > entry.createdAt &&
+            entry.expiresAt <= entry.createdAt + SESSION_TTL_MS,
+        )
+        .map(({ sid, createdAt, expiresAt }) => ({ sid, createdAt, expiresAt }))
+    : typeof sessionId === 'string' && sessionId.length > 0
+      ? [{ sid: sessionId, createdAt, expiresAt: updatedAt + SESSION_TTL_MS }]
+      : [];
+  // Legacy data has no login time. Its last update bounds migration expiry;
+  // the original JWT exp still limits the actual remaining lifetime.
+  if (!Array.isArray(value.sessions) && sessions.length) sessions[0].createdAt = updatedAt;
   const rating = value.rating;
   const ratingGames = value.ratingGames;
   const points = value.points;
@@ -534,7 +565,8 @@ const toStoredUser = (value: unknown): StoredUser | null => {
     username,
     passwordSalt,
     passwordHash,
-    sessionId: normalizedSessionId,
+    sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+    sessions,
     createdAt,
     updatedAt,
     rating: typeof rating === 'number' && Number.isFinite(rating) ? rating : undefined,
@@ -679,6 +711,13 @@ export class UserStore {
       const now = Date.now();
       let migrated = false;
       for (const user of this.usersByKey.values()) {
+        if (user.sessionId !== undefined) {
+          delete user.sessionId;
+          migrated = true;
+        }
+        const active = (user.sessions ?? []).filter((session) => session.expiresAt > now);
+        if (active.length !== user.sessions?.length) migrated = true;
+        user.sessions = active;
         const result = deriveLastGameAt(user, now);
         if (result.source !== 'valid') {
           user.lastGameAt = result.value;
@@ -739,7 +778,7 @@ export class UserStore {
       username,
       passwordSalt: salt,
       passwordHash: this.hashPassword(password, salt),
-      sessionId: null,
+      sessions: [],
       createdAt: now,
       updatedAt: now,
       rating: DEFAULT_RATING,
@@ -866,42 +905,68 @@ export class UserStore {
     return user.username;
   }
 
-  async rotateSession(usernameInput: string, loginIp?: string): Promise<string> {
-    const key = this.normalize(usernameInput);
-    const user = this.usersByKey.get(key);
-    if (!user) {
-      throw new Error('用户不存在。');
-    }
-
+  async createSession(usernameInput: string, loginIp?: string): Promise<string> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) throw new Error('用户不存在。');
     const now = Date.now();
-    user.sessionId = randomBytes(24).toString('base64url');
+    const sid = randomBytes(24).toString('base64url');
+    user.sessions = (user.sessions ?? []).filter((session) => session.expiresAt > now);
+    user.sessions.push({ sid, createdAt: now, expiresAt: now + SESSION_TTL_MS });
+    delete user.sessionId;
     user.updatedAt = now;
     if (loginIp) this.applyIpRecord(user, loginIp, now);
     await this.persist();
-    return user.sessionId;
+    return sid;
   }
 
-  async clearSession(usernameInput: string): Promise<void> {
-    const key = this.normalize(usernameInput);
-    const user = this.usersByKey.get(key);
-    if (!user) {
-      return;
-    }
+  /** Compatibility for internal callers: creates an independent session. */
+  rotateSession(usernameInput: string, loginIp?: string): Promise<string> {
+    return this.createSession(usernameInput, loginIp);
+  }
 
-    user.sessionId = null;
+  /** Omit sid only for account-wide revocation (e.g. a ban). */
+  async clearSession(usernameInput: string, sid?: string): Promise<void> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) return;
+    user.sessions = sid ? (user.sessions ?? []).filter((session) => session.sid !== sid) : [];
+    delete user.sessionId;
     user.updatedAt = Date.now();
     await this.persist();
   }
 
-  isSessionValid(usernameInput: string, sessionId: string): boolean {
-    const key = this.normalize(usernameInput);
-    const user = this.usersByKey.get(key);
-    return Boolean(user && user.sessionId && user.sessionId === sessionId);
+  async cleanupExpiredSessions(now = Date.now()): Promise<void> {
+    let changed = false;
+    for (const user of this.usersByKey.values()) {
+      const sessions = user.sessions ?? [];
+      const active = sessions.filter((session) => session.expiresAt > now);
+      if (active.length === sessions.length) continue;
+      user.sessions = active;
+      changed = true;
+    }
+    if (changed) await this.persist();
+  }
+
+  isSessionValid(usernameInput: string, sid: string): boolean {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    if (!user) return false;
+    const now = Date.now();
+    const sessions = user.sessions ?? [];
+    const active = sessions.filter((session) => session.expiresAt > now);
+    if (active.length !== sessions.length) {
+      user.sessions = active;
+      void this.persist().catch(() => undefined);
+    }
+    return active.some((session) => session.sid === sid);
   }
 
   getGithubCredential(usernameInput: string): GithubLinkRecord | null {
     const github = this.usersByKey.get(this.normalize(usernameInput))?.github;
     return github ? { ...github } : null;
+  }
+
+  // Public appearance is the persisted user field; verification age is status only.
+  getPublicAppearance(usernameInput: string): { starred: boolean } {
+    return { starred: this.usersByKey.get(this.normalize(usernameInput))?.github?.starred === true };
   }
 
   getGithubPublicProfile(usernameInput: string, now: number = Date.now()): GithubPublicProfile | null {
@@ -1149,6 +1214,8 @@ export class UserStore {
       triggeredAt: details.triggeredAt ?? now,
       evidence: details.evidence ?? '',
     };
+    user.sessions = [];
+    delete user.sessionId;
     user.bannedUntil = bannedUntil;
     user.currentBan = record;
     user.banHistory = [...(user.banHistory ?? []), record].slice(-50);

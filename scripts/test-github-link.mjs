@@ -9,11 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { GITHUB_STAR_BADGE_MAX_AGE_MS, UserStore } from '../dist/auth-store.js';
-import {
-  GITHUB_STAR_CACHE_TTL_MS,
-  GithubService,
-  GithubServiceError,
-} from '../dist/server/github-service.js';
+import { GithubService, GithubServiceError } from '../dist/server/github-service.js';
 import { StargazerService } from '../dist/server/stargazer-service.js';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -176,7 +172,7 @@ async function testUserStore() {
 
   assert.equal(store.getGithubPublicProfile('alice', 2_000_001).starred, true);
   const stale = store.getGithubPublicProfile('alice', 2_000_000 + GITHUB_STAR_BADGE_MAX_AGE_MS + 1);
-  assert.equal(stale.starred, false);
+  assert.equal(stale.starred, true);
   assert.equal(stale.starState, 'stale');
 
   assertNoSensitiveDto(store.getPublicProfile('alice'));
@@ -188,7 +184,7 @@ async function testUserStore() {
   assert.equal(restarted.findUsernameByGithubId(101), 'bob');
   assert.equal(restarted.getGithubCredential('alice').accessTokenEncrypted, 'v1.second.cipher');
   assert.equal(restarted.getGithubCredential('alice').starred, true);
-
+  assert.deepEqual(restarted.getPublicAppearance('alice'), { starred: true });
   assert.equal(await restarted.unlinkGithub('alice'), true);
   assert.equal(await restarted.unlinkGithub('alice'), false);
   assert.equal(restarted.findUsernameByGithubId(202), null);
@@ -463,101 +459,64 @@ async function waitForCondition(predicate, message, timeoutMs = 3000) {
 async function testStargazerService() {
   const directory = temporaryDirectory('roka-stargazers-unit-');
   const filePath = path.join(directory, 'github-stargazers.json');
-  const nowRef = { value: 40_000_000 };
   const logger = { info() {}, warn() {}, error() {} };
-  const requests = [];
-  const first = {
-    login: 'FirstUser',
-    avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4',
-    starred_at: '2026-01-01T00:00:00Z',
+  let fetches = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetches++;
+    throw new Error('Star network access forbidden');
   };
-  const second = {
-    login: 'SecondUser',
-    avatar_url: 'https://avatars.githubusercontent.com/u/2?v=4',
-    starred_at: '2026-02-01T00:00:00Z',
-  };
-  const service = new StargazerService({
-    filePath,
-    token: 'stargazer-unit-token',
-    apiBaseUrl: 'https://api.unit.test',
-    now: () => nowRef.value,
-    logger,
-    fetchImpl: async (url, init) => {
-      const target = String(url);
-      requests.push({ url: target, init });
-      assert.equal(init.headers.Authorization, 'Bearer stargazer-unit-token');
-      if (!target.includes('page=2')) {
-        return new Response(JSON.stringify([first]), {
-          status: 200,
-          headers: {
-            Link: '<https://api.unit.test/repos/oimasterkafuu/Roka/stargazers?per_page=100&page=2>; rel="next", <https://api.unit.test/repos/oimasterkafuu/Roka/stargazers?per_page=100&page=2>; rel="last"',
-          },
-        });
-      }
-      return jsonResponse(200, [second]);
-    },
-  });
-  assert.equal(service.isStarred('FirstUser'), null);
-  await service.start();
-  await waitForCondition(() => requests.length === 2 && service.getFetchedAt() !== null, 'initial pagination');
-  assert.equal(requests.length, 2);
-  assert.equal(service.isStarred('firstuser'), true);
-  assert.equal(service.isStarred('missing'), false);
-  assert.deepEqual(
-    service.listStargazers().map((item) => item.login),
-    ['SecondUser', 'FirstUser'],
-  );
-  const persisted = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  assert.equal(persisted.fetchedAt, nowRef.value);
-  assert.deepEqual(Object.keys(persisted.stars).sort(), ['firstuser', 'seconduser']);
-  assert.equal(fs.existsSync(`${filePath}.tmp`), false);
-  service.stop();
-
-  const originalDisk = fs.readFileSync(filePath, 'utf8');
-  const fallback = new StargazerService({
-    filePath,
-    token: 'stargazer-unit-token',
-    apiBaseUrl: 'https://api.unit.test',
-    logger,
-    fetchImpl: async () => jsonResponse(500, { message: 'limited' }),
-  });
-  await fallback.start();
-  assert.equal(fallback.isStarred('FIRSTUSER'), true, 'old data is available before the refresh finishes');
-  assert.equal(await fallback.refresh(), false);
-  assert.equal(fallback.getFetchedAt(), nowRef.value);
-  assert.equal(fallback.listStargazers().length, 2);
-  assert.match(fallback.getLastError(), /500/);
-  assert.equal(fs.readFileSync(filePath, 'utf8'), originalDisk, 'failed refresh preserves the old table');
-  fallback.stop();
-
-  let attempts = 0;
-  const retry = new StargazerService({
-    filePath: path.join(directory, 'retry.json'),
-    token: 'stargazer-unit-token',
-    apiBaseUrl: 'https://api.unit.test',
-    retryIntervalMs: 25,
-    syncIntervalMs: 60_000,
-    logger,
-    fetchImpl: async () => {
-      attempts += 1;
-      return attempts === 1 ? jsonResponse(500, {}) : jsonResponse(200, [first]);
-    },
-  });
-  await retry.start();
-  await waitForCondition(() => attempts >= 2 && retry.getFetchedAt() !== null, 'failed sync did not retry');
-  assert.equal(retry.getLastError(), null);
-  assert.equal(await retry.handleStarEvent('created', 'ThirdUser', 'https://avatars.githubusercontent.com/u/3'), true);
-  assert.equal(await retry.handleStarEvent('deleted', 'firstuser'), true);
-  const eventDisk = JSON.parse(fs.readFileSync(path.join(directory, 'retry.json'), 'utf8'));
-  assert.equal(eventDisk.stars.firstuser, undefined);
-  assert.equal(eventDisk.stars.thirduser.login, 'ThirdUser');
-  assert.equal(eventDisk.stars.thirduser.avatarUrl, 'https://avatars.githubusercontent.com/u/3');
-  retry.stop();
-  const stoppedAttempts = attempts;
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  assert.equal(attempts, stoppedAttempts, 'stop clears the retry timer');
-  assert.equal(fs.readFileSync(filePath, 'utf8').includes('stargazer-unit-token'), false);
-  log('passed stargazer pagination, bearer auth, persistence, failure fallback, retry and event updates');
+  try {
+    const missing = new StargazerService({ filePath, logger });
+    await missing.start();
+    assert.equal(missing.isStarred('FirstUser'), null);
+    assert.deepEqual(missing.listStargazers(), []);
+    assert.equal(missing.timer, undefined);
+    assert.equal(missing.refresh, undefined, 'no on-demand network refresh API');
+    await missing.handleStarEvent('created', 'FirstUser', 'https://avatars.githubusercontent.com/u/1');
+    assert.equal(missing.isStarred('FIRSTUSER'), true);
+    assert.equal(missing.listStargazers()[0].login, 'FirstUser', 'webhook-only table is visible');
+    missing.stop();
+    const restarted = new StargazerService({ filePath, logger });
+    await restarted.start();
+    assert.equal(restarted.isStarred('firstuser'), true, 'webhook table survives restart without full fetch');
+    await restarted.handleStarEvent('deleted', 'firstuser');
+    assert.equal(restarted.isStarred('firstuser'), false);
+    assert.deepEqual(restarted.listStargazers(), []);
+    assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')).stars, {});
+    restarted.stop();
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify({
+        fetchedAt: 40000000,
+        stars: {
+          firstuser: { login: 'FirstUser', avatarUrl: 'https://avatars.githubusercontent.com/u/1' },
+          seconduser: { login: 'SecondUser', avatarUrl: 'https://avatars.githubusercontent.com/u/2' },
+        },
+      }),
+    );
+    const saved = new StargazerService({ filePath, logger });
+    const originalDisk = fs.readFileSync(filePath, 'utf8');
+    await saved.start();
+    assert.equal(saved.isStarred('FIRSTUSER'), true);
+    assert.equal(saved.isStarred('missing'), false);
+    assert.equal(saved.listStargazers().length, 2);
+    assert.equal(saved.getFetchedAt(), 40000000);
+    assert.equal(fs.readFileSync(filePath, 'utf8'), originalDisk, 'startup is read-only');
+    assert.equal(saved.timer, undefined);
+    saved.stop();
+    fs.writeFileSync(filePath, 'invalid JSON');
+    const invalid = new StargazerService({ filePath, logger });
+    await invalid.start();
+    assert.equal(invalid.isStarred('firstuser'), null);
+    assert.equal(invalid.timer, undefined, 'bad local table does not schedule retry');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(fetches, 0, 'missing, saved, corrupt and restarted table startup fetch=0');
+    invalid.stop();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  log('passed local-only Star startup fetch=0, no retry timer/refresh API, webhook table persistence');
 }
 
 async function createStarCase(username, id, initialStarStatus = 204) {
@@ -605,29 +564,22 @@ async function testStarStatesAndCache() {
   assert.equal((await starred.complete()).starred, true);
   assert.equal(starred.starCalls, 0);
   assert.equal(starred.lookupCalls, 1);
-  starred.nowRef.value += GITHUB_STAR_CACHE_TTL_MS - 1;
-  await starred.service.refreshStar('starred');
-  assert.equal(starred.lookupCalls, 1, 'fresh 15-minute result is cached');
-  starred.nowRef.value += 2;
-  await Promise.all([starred.service.refreshStar('starred'), starred.service.refreshStar('starred', true)]);
-  assert.equal(starred.lookupCalls, 2, 'expired and forced concurrent local refreshes are deduplicated');
-  assert.equal(starred.store.getGithubPublicProfile('starred', starred.nowRef.value).starred, true);
-
   starred.nowRef.value += GITHUB_STAR_BADGE_MAX_AGE_MS + 1;
   const stale = starred.store.getGithubPublicProfile('starred', starred.nowRef.value);
-  assert.equal(stale.starred, false);
+  assert.equal(stale.starred, true);
   assert.equal(stale.starState, 'stale');
 
   starred.starStatus = false;
-  const revoked = await starred.service.refreshStar('starred', true);
+  await starred.store.updateGithubStar('starred', 501, false, starred.nowRef.value);
+  const revoked = starred.store.getGithubPublicProfile('starred', starred.nowRef.value);
   assert.equal(revoked.starred, false);
   assert.equal(revoked.starState, 'not-starred');
 
   starred.starStatus = null;
-  const unknown = await starred.service.refreshStar('starred', true);
+  const unknown = starred.store.getGithubPublicProfile('starred', starred.nowRef.value);
   assert.equal(unknown.starred, false);
-  assert.equal(unknown.starState, 'unknown');
-  assert.equal(unknown.starVerifiedAt, null);
+  assert.equal(unknown.starState, 'not-starred');
+  assert.equal(unknown.starVerifiedAt, revoked.starVerifiedAt);
   assert.equal(starred.starCalls, 0);
   assertDiskDoesNotContain(starred.directory, [starred.rawToken, `refresh-star-token-501`]);
 
@@ -732,7 +684,10 @@ function addMockIdentity(mock, code, id, login, starStatus = 204) {
   mock.codes.set(code, token);
   mock.tokens.set(token, { id, login });
   mock.stars.set(token, starStatus);
-  if (starStatus === 204 && !mock.stargazers.some((item) => item.login.toLowerCase() === login.toLowerCase())) {
+  if (
+    starStatus === 204 &&
+    !mock.stargazers.some((item) => item.login.toLowerCase() === login.toLowerCase())
+  ) {
     mock.stargazers.push({
       login,
       avatar_url: `https://avatars.githubusercontent.com/u/${id}?v=4`,
@@ -943,6 +898,117 @@ async function sendStarWebhook(server, action, login, { validSignature = true } 
   return { status: response.status, json: await response.json() };
 }
 
+async function testPersistedColdStart() {
+  const dataDir = temporaryDirectory('roka-star-cold-');
+  const tokens = await prepareIntegrationUsers(dataDir);
+  const store = new UserStore(dataDir);
+  await store.ensureReady();
+  await store.linkGithub(
+    'alice',
+    encryptedRecord(101, 'v1.cold.cipher', {
+      login: 'cold-alice',
+      starred: true,
+      starVerifiedAt: Date.now() - GITHUB_STAR_BADGE_MAX_AGE_MS - 10000,
+    }),
+  );
+  await store.setLastSeenAt('alice', Date.now());
+  const { FeedStore } = require('./dist/feed-store.js');
+  const feeds = new FeedStore(dataDir);
+  await feeds.ensureReady();
+  const post = await feeds.create('alice', 'cold start appearance');
+  await feeds.addComment(post.id, 'alice', 'cold comment');
+  let startupFetches = 0;
+  const failedGithub = http.createServer((_req, res) => {
+    startupFetches++;
+    res.writeHead(503);
+    res.end();
+  });
+  await new Promise((resolve) => failedGithub.listen(0, '127.0.0.1', resolve));
+  const mock = { baseUrl: `http://127.0.0.1:${failedGithub.address().port}` };
+  let server;
+  let browser;
+  try {
+    server = await startServer(dataDir, mock, false);
+    const api = createApi(server, tokens, []);
+    for (const route of [
+      '/api/leaderboard',
+      '/api/online',
+      '/api/users/search?q=alice',
+      '/api/user-colors?users=alice',
+    ]) {
+      const response = await api(route);
+      assert.equal(response.status, 200);
+      const value = route.includes('user-colors')
+        ? response.json.colors.alice
+        : response.json.items.find((item) => item.username === 'alice');
+      assert.ok(value, route);
+      assert.equal(value.starred, true, route);
+    }
+    const feedDto = (await api('/api/feeds')).json.items.find((item) => item.id === post.id);
+    assert.equal(feedDto.authorInfo.starred, true);
+    assert.equal(feedDto.comments[0].authorInfo.starred, true);
+    const { chromium } = require(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox'],
+      ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+    });
+    for (const width of [1440, 390]) {
+      const context = await browser.newContext({ viewport: { width, height: 900 } });
+      const page = await context.newPage();
+      const errors = [],
+        profiles = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      page.on('request', (request) => {
+        if (new URL(request.url()).pathname.startsWith('/api/profile/')) profiles.push(request.url());
+      });
+      await page.goto(server.baseUrl);
+      const gold = page.locator('#leaderboard-list [data-username="alice"] .username-star-initial');
+      await gold.waitFor();
+      assert.equal(await gold.textContent(), 'al');
+      assert.deepEqual(profiles, []);
+      assert.deepEqual(errors, []);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      log(`persisted stale cold start ${width}: gold=2, profile requests=0, pageerror=0`);
+      await context.close();
+    }
+    const profile = await api('/api/profile/alice');
+    assert.equal(profile.json.github.starred, true);
+    assert.equal(profile.json.github.starState, 'stale', 'profile reads do not refresh verification');
+    await stopChild(server.child);
+    const saved = new UserStore(dataDir);
+    await saved.ensureReady();
+    await saved.updateGithubStar('alice', 101, false, Date.now());
+    fs.writeFileSync(
+      path.join(dataDir, 'github-stargazers.json'),
+      JSON.stringify({
+        fetchedAt: Date.now(),
+        stars: {
+          'cold-alice': { login: 'cold-alice', avatarUrl: 'https://avatars.githubusercontent.com/u/101?v=4' },
+        },
+      }),
+    );
+    server = await startServer(dataDir, mock, false);
+    const restartedApi = createApi(server, tokens, []);
+    assert.equal(
+      (await restartedApi('/api/user-colors?users=alice')).json.colors.alice.starred,
+      false,
+      'local table must not overwrite user field',
+    );
+    assert.equal(startupFetches, 0, 'real server startup does not fetch GitHub');
+    await stopChild(server.child);
+    const reconciled = new UserStore(dataDir);
+    await reconciled.ensureReady();
+    assert.equal(reconciled.getPublicAppearance('alice').starred, false);
+    log('startup fetch=0, no local-table writeback to users; profile read keeps stale verification');
+  } finally {
+    await browser?.close();
+    if (server) await stopChild(server.child);
+    failedGithub.closeAllConnections();
+    await new Promise((resolve) => failedGithub.close(resolve));
+  }
+}
+
 async function testIntegration() {
   const dataDir = temporaryDirectory('roka-github-integration-');
   const tokens = await prepareIntegrationUsers(dataDir);
@@ -960,6 +1026,22 @@ async function testIntegration() {
   addIdentity('carol-code', 303, 'carol-github', 204);
   addIdentity('carol-rebind', 202, 'carol-new-github', 204);
 
+  fs.writeFileSync(
+    path.join(dataDir, 'github-stargazers.json'),
+    JSON.stringify({
+      fetchedAt: Date.now(),
+      stars: Object.fromEntries(
+        mock.stargazers.map((item) => [
+          item.login.toLowerCase(),
+          {
+            login: item.login,
+            avatarUrl: item.avatar_url,
+            starredAt: item.starred_at,
+          },
+        ]),
+      ),
+    }),
+  );
   const unconfigured = await startServer(dataDir, mock, false);
   let api = createApi(unconfigured, tokens, secrets);
   const guestStargazers = await api('/api/stargazers');
@@ -984,24 +1066,9 @@ async function testIntegration() {
 
   const server = await startServer(dataDir, mock, true);
   api = createApi(server, tokens, secrets);
-  await within(
-    (async () => {
-      while (true) {
-        const response = await api('/api/stargazers');
-        assert.equal(response.status, 200);
-        if (response.json.fetchedAt !== null) {
-          assert.equal(response.json.items.length, mock.stargazers.length);
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-    })(),
-    'spawned server did not finish initial stargazer sync',
-  );
-  assert.ok(mock.stargazerRequests.length >= 2, 'both spawned servers load the full table');
-  assert.ok(
-    mock.stargazerRequests.every((request) => request.authorization === 'Bearer stargazer-integration-token'),
-  );
+  const localStars = await api('/api/stargazers');
+  assert.equal(localStars.json.items.length, mock.stargazers.length);
+  assert.equal(mock.stargazerRequests.length, 0, 'both server startups load only local table');
   const configuredMe = await api('/api/auth/me', { user: 'alice' });
   assert.equal(configuredMe.json.github.configured, true);
 
@@ -1194,7 +1261,10 @@ async function testIntegration() {
     (await api('/api/stargazers')).json.items.some((item) => item.login.toLowerCase() === 'bob-github'),
     false,
   );
-  assert.equal((await sendStarWebhook(server, 'created', 'bob-github', { validSignature: false })).status, 401);
+  assert.equal(
+    (await sendStarWebhook(server, 'created', 'bob-github', { validSignature: false })).status,
+    401,
+  );
   assert.equal((await api('/api/profile/bob')).json.github.starState, 'not-starred');
   const createdBob = await sendStarWebhook(server, 'created', 'BOB-GITHUB');
   assert.equal(createdBob.status, 200);
@@ -1243,12 +1313,7 @@ async function testIntegration() {
   assert.equal((await api('/api/profile/carol')).json.github.login, 'carol-new-github');
 
   assert.equal((await sendStarWebhook(server, 'deleted', 'alice-github')).status, 200);
-  const refreshed = await api('/api/auth/github/star/refresh', { method: 'POST', user: 'alice' });
-  assert.equal(refreshed.status, 200);
-  assert.equal(refreshed.json.ok, true);
-  assert.equal(refreshed.json.github.starred, false);
-  assert.equal(refreshed.json.github.starState, 'not-starred');
-  assertNoSensitiveDto(refreshed.json);
+  assert.equal((await api('/api/auth/github/star/refresh', { method: 'POST', user: 'alice' })).status, 404);
   const revokedProfile = await api('/api/profile/alice');
   assert.equal(revokedProfile.json.github.starred, false);
   assert.equal(revokedProfile.json.starred, false);
@@ -1269,6 +1334,7 @@ async function testIntegration() {
   assert.equal(persisted.findUsernameByGithubId(303), null);
   assert.equal(mock.userStarCalls, 0, 'no binding, profile or refresh path may call /user/starred');
   assertDiskDoesNotContain(dataDir, secrets);
+  assert.equal(mock.stargazerRequests.length, 0, 'OAuth/profile/webhook never fetch full Star table');
   log(
     'passed spawned OAuth, public stargazers, signed star webhooks, local refresh, DTO and persistence checks',
   );
@@ -1349,13 +1415,16 @@ async function testGuestHomeStarAppearanceBrowser(baseUrl) {
       const initial = link.locator('.username-star-initial');
       assert.equal(await initial.count(), starred ? 1 : 0, `${listSelector} ${username} first render`);
       if (starred) {
-        assert.equal(await initial.textContent(), username.charAt(0));
+        assert.equal(await initial.textContent(), username.slice(0, Math.floor(username.length / 2)));
         assert.equal(
           await initial.evaluate((element) => getComputedStyle(element).color),
           'rgb(184, 134, 11)',
         );
         assert.equal(await link.evaluate((element) => element.lastChild.nodeType), 3);
-        assert.equal(await link.evaluate((element) => element.lastChild.textContent), username.slice(1));
+        assert.equal(
+          await link.evaluate((element) => element.lastChild.textContent),
+          username.slice(Math.floor(username.length / 2)),
+        );
       } else {
         assert.equal(await link.evaluate((element) => element.children.length), 0);
       }
@@ -1367,6 +1436,30 @@ async function testGuestHomeStarAppearanceBrowser(baseUrl) {
     assert.equal(await page.evaluate(() => document.cookie.includes('auth_token=')), false);
     assert.deepEqual(profileRequests, [], 'cold guest home rendering must not visit a profile API');
     assert.deepEqual(userColorRequests, [], 'complete home DTOs must not need a second appearance request');
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      for (const name of ['abc', 'abcd', 'abcde', 'a1_b2_c3_d', 'a12345678_1234567890']) {
+        const result = await page.evaluate((name) => {
+          window.htmlescape =
+            window.htmlescape ||
+            function (text) {
+              var el = document.createElement('div');
+              el.textContent = text;
+              return el.innerHTML;
+            };
+          var info = { colorClass: 'rt-green', starred: true, starState: 'stale' };
+          var dom = usernameLink(name, info)[0];
+          var host = document.createElement('div');
+          host.innerHTML = usernameLinkHtml(name);
+          return [dom.querySelector('span').textContent, host.querySelector('span').textContent];
+        }, name);
+        assert.deepEqual(result, [
+          name.slice(0, Math.floor(name.length / 2)),
+          name.slice(0, Math.floor(name.length / 2)),
+        ]);
+      }
+    }
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();
@@ -1463,7 +1556,7 @@ async function testGuestFeedStarRefreshBrowser(baseUrl, api, triggerPostId) {
       const initial = locator.locator('.username-star-initial');
       assert.equal(await initial.count(), starred ? 1 : 0);
       if (starred) {
-        assert.equal(await initial.textContent(), name.charAt(0));
+        assert.equal(await initial.textContent(), name.slice(0, Math.floor(name.length / 2)));
         assert.equal(
           await initial.evaluate((element) => getComputedStyle(element).color),
           'rgb(184, 134, 11)',
@@ -1519,6 +1612,30 @@ async function testGuestFeedStarRefreshBrowser(baseUrl, api, triggerPostId) {
       true,
       'rt-green',
     );
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      for (const name of ['abc', 'abcd', 'abcde', 'a1_b2_c3_d', 'a12345678_1234567890']) {
+        const result = await page.evaluate((name) => {
+          window.htmlescape =
+            window.htmlescape ||
+            function (text) {
+              var el = document.createElement('div');
+              el.textContent = text;
+              return el.innerHTML;
+            };
+          var info = { colorClass: 'rt-green', starred: true, starState: 'stale' };
+          var dom = usernameLink(name, info)[0];
+          var host = document.createElement('div');
+          host.innerHTML = usernameLinkHtml(name);
+          return [dom.querySelector('span').textContent, host.querySelector('span').textContent];
+        }, name);
+        assert.deepEqual(result, [
+          name.slice(0, Math.floor(name.length / 2)),
+          name.slice(0, Math.floor(name.length / 2)),
+        ]);
+      }
+    }
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();
@@ -1575,7 +1692,7 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
       assert.equal(await component.evaluate((element) => getComputedStyle(element).color), 'rgb(0, 0, 0)');
       if (expectedStarred) {
         const initial = component.locator('.username-star-initial');
-        assert.equal(await initial.textContent(), 'a');
+        assert.equal(await initial.textContent(), 'al');
         assert.equal(
           await initial.evaluate((element) => getComputedStyle(element).color),
           'rgb(184, 134, 11)',
@@ -1590,7 +1707,7 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
         renderGithubProfile({
           login: 'alice-github',
           htmlUrl: 'https://github.com/alice-github',
-          starred: true,
+          starred: false,
           starState: state,
           starVerifiedAt: Date.now(),
         });
@@ -1648,8 +1765,8 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
       await page.goto(`${baseUrl}/`);
       const homeName = page.locator('#leaderboard-list [data-username="alice"]');
       await homeName.locator('.username-star-initial').waitFor();
-      assert.equal(await homeName.locator('.username-star-initial').textContent(), 'a');
-      assert.equal(await page.locator('#recently-online-list .username-star-initial').textContent(), 'a');
+      assert.equal(await homeName.locator('.username-star-initial').textContent(), 'al');
+      assert.equal(await page.locator('#recently-online-list .username-star-initial').textContent(), 'al');
       assert.equal(await page.evaluate(() => document.cookie.includes('auth_token=')), false);
       await page.route('**/api/feeds?*', (route) =>
         route.fulfill({
@@ -1685,7 +1802,7 @@ async function testProfileStarInitialBrowser(baseUrl, expectedStarred) {
       });
       const feedName = page.locator('#feed-list .feed-author[data-username="alice"]');
       await feedName.locator('.username-star-initial').waitFor();
-      assert.equal(await feedName.locator('.username-star-initial').textContent(), 'a');
+      assert.equal(await feedName.locator('.username-star-initial').textContent(), 'al');
       await page.route('**/api/contributors', (route) =>
         route.fulfill({
           contentType: 'application/json',
@@ -1948,7 +2065,8 @@ async function testOAuthCancellationAndBodyTimeouts() {
 
     const oldSid = actor.sid;
     const stale = startQuery(service, actor);
-    actor.sid = await store.rotateSession('alice');
+    actor.sid = await store.createSession('alice');
+    await store.clearSession('alice', oldSid);
     const beforeStale = requestCount;
     await expectGithubError(
       () => service.completeLink({ username: 'alice', sid: oldSid }, stale.query),
@@ -1963,8 +2081,11 @@ async function testOAuthCancellationAndBodyTimeouts() {
       const completion = service.completeLink(actor, attempt.query);
       const rejected = expectGithubError(() => completion, 'state');
       await within(fixture.headers.promise, 'session race response headers missing');
-      if (invalidate === 'logout') await store.clearSession('alice');
-      else await store.rotateSession('alice');
+      if (invalidate === 'logout') await store.clearSession('alice', actor.sid);
+      else {
+        await store.createSession('alice');
+        await store.clearSession('alice', actor.sid);
+      }
       fixture.response.end();
       await within(rejected, `${invalidate} session allowed late binding`);
       await within(fixture.closed.promise, 'completed response did not close');
@@ -2006,6 +2127,7 @@ async function main() {
   await testStargazerService();
   await testStarStatesAndCache();
   await testOAuthCancellationAndBodyTimeouts();
+  await testPersistedColdStart();
   await testIntegration();
   testStaticStarInitialPlacement();
   log('all unit, mocked-integration, browser UI and static tests passed (no live GitHub OAuth was used)');
