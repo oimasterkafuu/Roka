@@ -15,6 +15,8 @@ src/server.ts ── Fastify 路由 + socket.io 事件（唯一入口）
    ├── src/server/captcha-service.ts  图形验证码
    ├── src/server/lobby-service.ts    房间/对局状态机、断线宽限期、ELO 结算、托管 bot 房长保留
    ├── src/server/presence-service.ts 统一在线状态（活动touch/在线窗口/落盘节流）
+   ├── src/server/client-ip.ts / username-policy.ts / registration-security.ts / username-security.ts  真实 IP、用户名策略、注册防护与周期扫描
+   ├── src/server/security-audit.ts  安全事件 0600 原子持久化、2000 条 / 2 MiB 有界审计
    ├── src/server/server-bot-manager.ts  托管策略 Bot 管理器（进程内自连、内存令牌鉴权、重启自动恢复）
    └── src/server/webhook-updater.ts  GitHub push 自动部署（更新排队状态机：禁开局 + 120s 宽限清算）
    ▼
@@ -22,7 +24,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
    ├── src/game-engine/*              常量/主城选择/排行榜/编码/回放工具/增兵
    └── src/map/*                      五种 map_mode 地图生成器、华夏地区配置与年度开放窗口（纯函数）
    ▼
-持久化（data/，均被 gitignore）：announcement-store / auth-store / feed-store / replay-store；server-bots.json（托管 bot 重启恢复状态）；github-stargazers.json（全量 Star 表 + webhook 增量）
+持久化（data/，均被 gitignore）：announcement-store / auth-store / feed-store / replay-store / security-audit.json；server-bots.json（托管 bot 重启恢复状态）；github-stargazers.json（全量 Star 表 + webhook 增量）
 ```
 
 关键事实：
@@ -209,6 +211,7 @@ _一句话：存储底座：统一编码、.bak 备份回退、合并写盘。_
 
 **src/auth-store.ts** — 用户/会话/Rating/积分存储（`data/users.bin`，v8 serialize + brotli，经 binary-store 底座）。
 密码 scrypt 加盐 + `timingSafeEqual`；角色模型：首个注册用户 = 超级管理员（`isSuperAdmin`，唯一、不可剥夺、不可封禁，同时拥有 admin），普通 admin（`isAdmin`）由超管授予/撤销（`setAdmin`），旧数据启动时由 `migrateRoles` 把首个用户升级为超管（向后兼容）；封禁字段 `bannedUntil`（毫秒时间戳，-1=永久，缺省=未封禁），到期由 `getBanStatus` 惰性判定自动解除，`banUser`/`unbanUser` 操作，`listUsersForAdmin` 出后台用户列表；Rating Codeforces 风格：内部 1200 起算，`toDisplayRating` 按 `1200/2^对局数` 折算新手显示分，`ratingHistory` 存显示分（上限 1000 点），`getRatingRank` 与榜单共用有效封禁、计分局数与 7 天比赛活跃候选集，并按显示 Rating、注册时间、用户名稳定排序，导出 `displayRatingRank` 生成个人页分段名次。积分规则常量、`getGamePoints` 与 `calculateHistoricalPoints` 集中在此：每局 40 基础分 + 40~100 排名分，动态奖励为发帖 30、获得互动 10、点赞他人 10、评论 20；`applyPointsUpdates` 支持正负更新并 clamp 到 0。`initializeHistoricalPoints` 使用 `UserFile.pointsMigrationVersion` 从回放和动态完整重建一次旧用户积分，避免旧版每局 10 分重复叠加；积分排名仅保留存储层能力，不在个人页展示。可选字段 `lastSeenAt` 记录「最后在线」（= 用户最近一次有效请求/动作的时间，由 presence-service 统一计算并节流落盘；旧数据无此字段按 undefined 兼容），`setLastSeenAt` 写入（presence 的落盘回调），`listLastSeen` 出全量落盘记录供 presence 启动 seed。`resolveUsername` 返回用户名规范大小写（不存在为 null，@提及解析用），`searchUsernames` 按大小写不敏感前缀搜索用户名（空串返回前若干，@提及候选用）。
+可选 IP 字段 `registeredIp` / `lastIp` / `lastIpAt` / `ipHistory` 向后兼容旧 users.bin；注册与登录立即记录，已认证 HTTP 活动按用户+IP 至少 5 分钟节流。历史最多 20 个规范化 IPv4/IPv6，重复 IP 合并时间，超出淘汰最久未活动项；不改变 presence 语义。IP 与历史只由 `listUsersForAdmin` 输出，公开 DTO 不携带。
 排行榜 `listTopRated` 只出最近 7 天内有比赛且未被封禁的用户：活跃只认比赛时间 `lastGameAt`（`applyRatingUpdates` 对局结算时刷新；登录/上线不再续命），距今 ≥ `LEADERBOARD_INACTIVITY_MS`（7×24×3600×1000）即暂时下榜（rating 数据不动，重新结算一局即回榜；bot 账号同一规则）；旧数据缺失/非法 `lastGameAt` 时启动迁移仅从有效历史比赛恢复并持久化，无证据置 0。有效封禁用户不上榜，封禁到期后按相同规则自动回榜。
 可选 `github` 记录保存 OAuth 数字 ID、login、绑定时间、加密 access token 与 Star 核验快照；`usersByGithubId` 保证数字 ID 唯一，加载重复记录即拒绝启动。`linkGithub` 在首次 await 前同步完成冲突检查与换绑，`unlinkGithub` 释放 ID，`updateGithubStar` 以预期 ID 阻止迟到响应覆盖解绑/新绑定。公开个人资料只含 login、GitHub URL、Star 状态和核验时间；已 Star 快照超过 `GITHUB_STAR_BADGE_MAX_AGE_MS`（1 小时）不再展示金色首字母，token 与管理/榜单等 DTO 隔离。
 推广大使数据直接保存在 `UserFile.referrals` 与 `referralClicks`，沿用同一原子写盘与重启恢复，不使用 Supabase/数据库。注册时仅给新账号建立一条固定归因并排除自邀；`activateReferral` 在 await 前同步占用状态，保证进程内与跨请求幂等，重复同局返回 duplicate、后续对局或已排除归因不再激活。`getPublicProfile` 只附 `{activatedCount,badgeLevel}`，`listAmbassadorWall` 只出大使用户名与汇总并按名字排序，私人 invitee↔referrer 关系仅 `listReferralsForAdmin` 提供；`excludeReferral` 撤销异常奖励但保留审计记录。
@@ -303,8 +306,8 @@ _一句话：个人主页逻辑：积分等级/进度、Rating 排名与 SVG Rat
 
 **views/ambassadors.pug → static/ambassadors.html + ambassadors.js** — 独立推广大使感谢墙 `/ambassadors`（公开，与 about 的 GitHub 贡献墙分离）：展示全局点击/归因注册/激活/排除聚合和大使徽章汇总，按用户名排序、不设竞技名次；整卡仍跳个人主页，卡内名字由 `usernameLink(..., {element:'span'})` 渲染并批量补色，避免嵌套链接；其余 DOM 经 `textContent` 与属性 API 构建，不渲染或接收受邀玩家对应关系，含真实空状态与失败提示；登录后可直接复制自己的 `/invite/<用户名>` 链接，未登录保留登录并分享按钮。
 
-**views/admin.pug → static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：用户列表（用户名/rating/注册与最后在线时间/角色/封禁状态）分页展示（每页 20 条，前端即时过滤），顶部搜索框按用户名子串即时筛选并显示用户总数/匹配数；封禁对话框（1 小时/1 天/7 天/自定义小时/永久）与解封，超管额外可授予/撤销管理员。JS 按功能分区（顶部 chrome / 用户管理 / 封禁对话框 / 策略 Bot），便于扩展新管理模块。「策略 Bot」分区仅超管可见（`viewerIsSuperAdmin` 门控 + 服务端 403 兜底）：初始化时拉取 `GET /api/admin/bot-templates` 自动填充模板下拉框（无可托管模板时禁用启动按钮并提示），输入用户名 + 房间号、选择模板并勾选是否允许组队后启动（成功后仅清空房间输入），表格展示运行中 bot（用户名/房间/模板/启动时间/连接状态），三项许可以复选框就地编辑并通过 `POST /api/admin/bots/config` 一次保存，无需重启 bot，也可手动停止。
-_一句话：后台管理页：用户封禁、管理员权限分配与策略 Bot 托管。_
+**views/admin.pug → static/admin.html / admin.js** — 后台管理页 `/admin`（仅管理员；页面入口在首页顶栏，仅 admin 可见）：默认仪表盘，标签包括仪表盘、用户管理、安全风险、聊天审计与仅超管可见的策略 Bot；URL hash 恢复标签，支持方向键，所有动态文本走安全 DOM/text 渲染，无 JS 保留基本可读结构。仪表盘真实汇总用户、注册、封禁、注册拦截、用户名自动处置、待复核绕封关联、最近事件与最近扫描。用户列表每页 20 条，显示注册 IP、最近 IP/时间并按用户名或全部有界 IP 历史做子串搜索；保留封禁/解封与超管权限分配。安全风险页支持手动全量复查、事件类型/用户名/IP 筛选、绕封关联跳转用户搜索及批量注册拦截。聊天审计与 Bot 原有控件独立保留；Bot 模板枚举、启动、三项许可编辑与停止逻辑不变。
+_一句话：后台管理页：真实安全仪表盘、用户/IP 管理、风险复核、聊天审计与策略 Bot 标签。_
 
 **static/login.html** — 登录/注册表单 + 图形验证码 + 离屏蜜罐字段。
 _一句话：登录/注册表单 + 验证码 + 蜜罐。_
@@ -351,7 +354,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **chat-and-alert.css** — 左下聊天框（含收起态、媒体查询）与 `.alert` 居中弹窗、通知权限引导弹窗（`.notify-permission-*`）。_聊天框与弹窗样式。_
 - **home.css** — 首页（`body.home` 作用域隔离）三栏卡片布局 + 动态/公告/排行榜/回放上传弹窗全套。_首页三栏布局与 feed 全套样式。_
 - **profile.css** — 个人主页，与 home.css 平行的卡片语言 + rating 变更/历史图。**改 feed/评论样式需与 home.css 双改。\***个人主页样式（与首页平行）。\*
-- **admin.css** — 后台管理页：用户表格、搜索/分页工具栏、角色徽标、封禁行高亮、封禁对话框、策略 Bot 分区表单。_后台管理页样式。_
+- **admin.css** — 后台管理页：可键盘操作标签、仪表盘指标卡、用户/IP 表格、安全事件与关联卡、搜索/分页、角色徽标、封禁对话框、聊天审计及 Bot 表单；800px 以下管理表格转逐条卡片，页面不横向溢出。_后台管理页样式。_
 - **lobby.css** — 房间页：邀请链接卡、队伍分组色块、房主滑条设置。_大厅链接/队伍/滑条设置样式。_
 - **rating.css** — `.rt-*` 八档 rating 用户名颜色（后端 `rating-color.ts` 注入类名）+ `.rt-admin` 管理员黑色加粗与 `.rt-banned` 有效封禁棕色正常字重（issue #97）；`game-ui.css` 局内排行榜仍压为白字保证底色可读。_Rating 与身份姓名样式。_
 - **tables-and-inputs.css** — 通用表格、`.mobile` 移动端紧凑模式、跨浏览器 range 滑条。_通用表格/移动端/滑条样式。_
@@ -431,7 +434,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **bot-template/simple-strategy-bot/** — 综合策略 bot（独立 pnpm 包）：`strategy.js` 为入口与管线编排（socket/房间循环/队列镜像/逐 tick 决策，recentMoves 窗口丢弃互逆操作防往返抖动，常规输送每 tick 限 1 条 op 防挤占扩张/建设），`bot/` 为纯函数决策模块——`board.js`（棋盘视图/距离场/Dijkstra/推兵预演/孤军聚块/咽喉割点识别与双层危险场定量驻军）、`defense.js`（威胁推演与集结布防，活跃威胁逼近触发回防闩锁）、`offense.js`（目标评估/风险路径/集结打击/切断入侵/前线突破集结/打击体检与冷却）、`rescue.js`（被切断孤军的走廊救援评估与止损）、`economy.js`（皇冠/指挥所建设选址）、`logistics.js`（汇集输送/中立扩张）、`opening.js`（开局发育规划器：逐 tick 模拟选最优启动时机，1–30 tick 接管、爆发期后半交还常规管线）；CLI `index.js` 与服务端托管（`src/server/server-bot-manager.ts` 经 `strategy.js` 加载）共用这一份实现；用法见包内 `USAGE.md`。
 - **bot-template/anti-human-bot/** — 独立实现的 AI 策略 bot（独立 pnpm 包，依赖 socket.io-client）：自研协议/状态（`bot/state.cjs`）与纯函数决策管线（`bot/policy.cjs` 调度，`bot/threat.cjs` 共享局面分析层——按到达时间衰减的局部威胁场 + 建造竞赛状态，frontline/logistics/building/architecture/defense/campaign/cutoff/column/ffa/interception/rescue/opening/tactics/planner ，并导出 `ownStrandedMass` 共享连通判定——引擎 applyConnectivity 同款锚点 BFS，脖子纪律/campaign 锚点链/frontline maze 关卡评估共用一个口径等模块；`bot/cutoff.cjs` 专责截断（入侵截断 + 散兵单格/两格/三格组合截断 + 割点脖子纪律），`bot/movement-guard.cjs` 为移动护栏；`bot/campaign.cjs` 含浓缩突击（军力占优且出击兵力达决定性规模时 mode2 全冲压皇冠，带脖子截断风险检查与无状态止损，参数 `assaultMargin`/`megaStackMin`；与画圈推进（窄突出部先侧向扫一格把锋面涂成宽 2–3 连通块再前压，参数 `pushFrontWidth`）+ 锚点链（推进走廊按节奏/截断风险落指挥所保连通，参数 `anchorChainGap`/`anchorBuildEvery`；2026-09-27 第二轮加同 tick 预锚——走廊可被 1 tick 切断且大堆 ≥`preemptAnchorMinArmy` 时本 tick 不移动原地起锚，钱不够等 `preemptAnchorWaitTicks` 上限——与腾出格补锚——大堆推进后立即在原位置补锚，两动作不受节奏限制、policy 中压过截断/脖子纪律但让位背水/斩首；2026-09-28 起跳板推进常态化——rally 距最近己方皇冠 ≥`leapfrogMinDepth` 的深入长线推进把「走一步→腾出格补一座指挥所」作为默认节奏（不再要求切断风险，链距 `leapfrogChainGap`，钱不够原地等 `leapfrogWaitTicks` 凑钱，常态化期间不用 mode2 全冲；锚定距离场不查移动护栏的反向禁行边——这是此前补锚在 policy 管线里被卡死的主根因））；`bot/column.cjs` 敌方跳板纵队拦截（敌连通块深入我控区 ≥`columnMinDepth` 格且头部较上 tick 更近才出手：头自带建筑一律打头拆建筑、长纵队优先掐链（冻住 ≥`columnMinMass`）其次侧击腰部、短促自耗型迎头撞头部，出兵方案复用 cutoff 的 `planChokeAttack`；policy 中背水/告急与多路告急之下、普通推进之上）；`bot/frontline.cjs` 含 maze 拓展纪律（迷宫图拓展只派必要兵力、源点关卡贴敌不为拓展削弱咽喉，参数 `mazeMountainRatio`）与阶段化扩张-要塞方针（`fortressPhaseTurn` 起无要塞撑腰的薄皮中立扩张须够厚才拓、皇冠目标按 `lateTerritoryPerCrown` 提速，配套 `lateSkinMin`/`lateMaxCrowns`/`lateAnchorRadius`）与斩首攻冠兵力三级递升（2026-09-28 方针「三」：半兵推得下只出半兵 → 不够试智能全兵 mode0（就近合力、留守义务照算的智能分兵合力口径，余量 `crownSmartMargin`）→ 还不够才退真全兵 mode2（合力余量 `crownFullMargin`））；；此外仅有三处用户方针要求的跨回合防抖——frontline 斩首锁定（合力推皇冠的多 tick 连续攻击）、logistics 工地/集结点滞回（防目标每 tick 跳变来回倒兵）与 campaign 深入决心（已出击大堆 `campaignResolveTicks` 窗口内锁定同一皇冠方向，另一方向评分甩开 `campaignResolveMargin` 或形势剧变才解锁），均非旧版计划状态；2026-09-29 截断失灵根因修复 + 涂色/建造天平矫正：policy 涂色让位块（本 tick 推进只是中立涂色时非紧急截断/可负担建造/经济筹资依次压过涂色——根因是旧调度里非紧急截断只在 !canAdvance 时执行而被涂色无限期饿死；产能落后时经济紧急加 advanceIsPaint 条件把竞赛追赶做实）+ frontline 薄土涂色降权（中立涂色基础分 26→`paintValue`，到达兵力 <`paintThinArrive` 按差值 ×`paintThinPenalty` 扣分、负分中立候选跳过）；2026-09-29 追加方针「身后下刀」：入侵截断与纵队掐链的脖子候选按「比深入块更靠敌锚点一侧」加权（`cutoffBehindBonus`，敌锚点距离场口径），column 短促自耗型迎头撞带 `headOn` 标记、policy 层在截断模块有后方切断点时让位截断）+ 离线训练脚本（`training/`，不含生成物 results/）；入口 `bot.cjs`（CLI，`BOT_TOKEN` 鉴权、默认自动准备且 `BOT_AUTO_READY=0` 可关闭，`/ready`、`/room` 聊天命令控制），`bot/client.cjs` 的 `attachBot` 支持 `preferredTeam`/`autoReady` 初始选项；`server-bot.js` 为服务端托管适配入口（`attachStrategy` 映射为 `{roomName, preferredTeam, autoReady}`），托管启动自动准备并固定首选 2 队。人格层：`bot/client.cjs` 在组队模式下检测人类同队并自主避让换队（首选 2 队 → 最小编号空队 → 纯 bot 队，全满则按兵不动；人类侧不受任何限制）；`bot/trash-talk.cjs` 优势垃圾话（帝国时代 2 嘲讽风格文案库 ≥30 条分四档、多触发器独立冷却、全局冷却 + 每局上限 + 概率门控、wololo 彩蛋仅在对方领土单 tick 暴跌时触发且每局限 1 次）；`bot/surrender.cjs` 绝境投降（严重劣势 + 绝无胜算 + 对方活跃 + 调戏收尾四条全满足才发 GG 投降，独立可测））+ 推进方向纪律（threat.cjs 的 crownDistance 敌核心距离场 + frontline 方向加权/侧翼涂色降权，参数 pushDirectionWeight/flankPaintPenalty/paintDiscardDist）+ 建造阈值分级（architecture.cjs 的 locationRisk/buildFund/frontStable：大后方 rearBuildFund=100/前线 frontBuildFund=150/中间按敌距+威胁场过渡/绝境回落 100，位置不按出生点）+ 前线迁都（logistics 稳定前线格可作工地并获 frontBaseBonus）+ 集兵树形化（缺口 ≥bulkPullMin 时最远子树先动逐级汇聚、深后方大堆 ≥supplyTreeDepth 跳一次性拉出，一次性集满再造）+ 推进方向纪律（threat.cjs 的 crownDistance 敌核心距离场 + frontline 方向加权/侧翼涂色降权，参数 pushDirectionWeight/flankPaintPenalty/paintDiscardDist）+ 建造阈值分级（architecture.cjs 的 locationRisk/buildFund/frontStable：大后方 rearBuildFund=100/前线 frontBuildFund=150/中间按敌距+威胁场过渡/绝境回落 100，位置不按出生点）+ 前线迁都（logistics 稳定前线格可作工地并获 frontBaseBonus；2026-09-28 回调：后方优先、产能富余 frontBaseMinCrowns 后才启用前线选址，frontBaseBonus 下调至 10 且需自带资金/皇冠群撑腰；开局提速 earlyBuildTurns 内距离档按 earlyDistScale 收缩、前线阈值按 earlyFrontFundScale 下调，保底建造 earlyBuildTurns 内不贴敌 50 兵即开工）+ 集兵树形化（缺口 ≥bulkPullMin 时最远子树先动逐级汇聚、深后方大堆 ≥supplyTreeDepth 跳一次性拉出，一次性集满再造；2026-09-30 issue #70 maze 系统性弱点修复（56 败 42 场 maze，复盘 /root/antihuman-review.md）：defense 迷宫反应窗放宽 mazeDefenseHorizon/mazeRallyWindow + 贴境超大兵堆（≥megaStackMin/2）强制预置防线；cutoff 脖子纪律加 mazeNeckWarnRange 跳预警与主动夺备用连通格；frontline 咽喉留守推广到 enemy/city 推进（mazePushNeckKeep 硬下限，含 allInSafe 与消耗冲击）并放宽迷宫后期扩张 mazeLateAnchorRadius/mazeLateSkinMin；campaign 锚点门槛参数化 anchorMinArmy 且迷宫 1 格脖子即无条件落锚（含大堆脚下）；building 迷宫 clusterValue 改惩罚贴邻；policy 迷宫落后时经济让位更早更密；测试 test/maze-systemic.test.cjs；用法见包内 `USAGE.md`，测试 `node --test test/*.test.cjs`。
 
-- **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`server-bots.json`（托管策略 bot 重启自动恢复状态：{username, room, template, allowTeam, allowFog, allowMultiLine} 列表）、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）；各数据文件写入时自动生成同名 `.bak` 上一代备份（损坏回退用，issue #67）。
+- **data/** — 全部运行时状态（gitignored）：`users.bin`/`feeds.bin`（v8+brotli）、`announcement.json`、`security-audit.json`（0600、原子写、2000 条 / 2 MiB，无备份）、`server-bots.json`（托管策略 bot 重启自动恢复状态：{username, room, template, allowTeam, allowFog, allowMultiLine} 列表）、`replays/*.rpl`（+ 观看缓存 `*.rpb.gz`、`index.bin`）；二进制与公告 Store 写入时自动生成同名 `.bak` 上一代备份（损坏回退用，issue #67）。
 
 ---
 
@@ -477,6 +480,14 @@ Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/front
 - `scripts/test-asset-versioning-exit.mjs`：真实运行静态资源测试及临时故障副本，验证成功 exit 0、异常与断言失败 exit 1；纳入 `pnpm test`。SW VM 覆盖脚本版本、运行时配置优先及 window load 延迟注册。
 
 - Apex v3 多线（`bot-template/apex-bot/`）：`bot/controller.cjs` 的 `chooseBatch` 保留单线决策入口；`bot/multiline.cjs` 组合独立动作头、预演组合后的驻军安全，保留主攻/回防/经济送兵链并限制副线预算和低力度扩张，直接推冠与 51 建/101 升不设保守前置；`strategy.js` 按全局 seq 维护完整队列与重连 init 同步，换绑缺省模式标记时保留未结束对局的多线模式。`training/long-eval.cjs --multi-line true` 在真实引擎启用并行；`training/engine.cjs` 按真实成功操作统计所有副线动作。回归见 `test/multiline.test.cjs`（含单线真实终局哈希 parity），原 13×17 回放门槛不变。
+
+### 后台安全审查与 IP 风险
+
+- `src/server/client-ip.ts`：共享真实客户端 IP 解析，只有远端为私网/回环地址时才接受 `X-Real-IP`，公网直连忽略自报头；IPv4 映射与 IPv6 统一规范化，回放限流继续使用同一 key。
+- `src/server/username-policy.ts`：独立小词表与 leetspeak/分隔符归一化，仅用于审查，不修改原名；正常名反例避免宽泛短词误伤。`username-security.ts` 在启动延迟后及每 6 小时串行全量扫描，timer unref、onClose 清理；命中永久封禁并复用手动封禁的清 session、断 socket、排行榜失效流程，超管跳过并记人工复核，重复扫描幂等。
+- `src/server/registration-security.ts`：注册前复用用户名策略；同一真实 IP 滚动 24 小时成功注册第 3 个账号起拒绝并记录事件，阈值/窗口/期限集中于 `security-audit.ts`。有效永久封禁账号同 IP 新注册只记录 `possible_ban_evasion` 与关联账号，不自动封禁。
+- `src/server/security-audit.ts`：`data/security-audit.json` 0600 原子写，2000 条 / 2 MiB 上限；保存扫描结果、注册拦截和风险关联供重启后查询。管理接口 `GET /api/admin/security/dashboard`、`GET /api/admin/security/events`、`POST /api/admin/security/scan` 均走 `requireAdmin`，全部 `/api/admin/*` 响应 no-store。
+- `scripts/test-admin-security.mjs`：策略、IP 存储/重启/上限、注册防护、扫描幂等、会话失效、管理权限/no-store 与公开 DTO 隐私；`scripts/test-admin-security-ui.mjs` 用真实 Chromium 验证默认仪表盘、超管五标签/普通管理员四标签、hash/键盘、搜索、扫描、风险跳转、旧聊天/Bot DOM、1440/390 无溢出及无 JS 基本结构。两者纳入 `pnpm test`。
 
 ### 聊天审计与反广告（issue #134）
 

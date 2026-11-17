@@ -12,6 +12,12 @@ const pages = {
   'admin.html': [
     'back-home-btn',
     'account-name',
+    'panel-dashboard',
+    'metric-total-users',
+    'dashboard-events-body',
+    'panel-security',
+    'security-scan-btn',
+    'security-events-body',
     'user-search',
     'users-body',
     'users-pagination',

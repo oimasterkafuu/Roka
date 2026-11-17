@@ -24,33 +24,114 @@ html
       header.admin-topbar
         button#back-home-btn.btn.btn-ghost.btn-sm(type='button') ← 返回首页
         a#account-name(href='#')
-      //
-         用户管理
-      section.card
+      nav.admin-tabs(role='tablist', aria-label='后台管理分区')
+        a#tab-dashboard.admin-tab(href='#dashboard', role='tab', aria-selected='true', aria-controls='panel-dashboard') 仪表盘
+        a#tab-users.admin-tab(href='#users', role='tab', aria-selected='false', aria-controls='panel-users') 用户管理
+        a#tab-security.admin-tab(href='#security', role='tab', aria-selected='false', aria-controls='panel-security') 安全风险
+        a#tab-chat.admin-tab(href='#chat', role='tab', aria-selected='false', aria-controls='chat-audit') 聊天审计
+        a#tab-bots.admin-tab(href='#bots', role='tab', aria-selected='false', aria-controls='bots-card', style='display: none') 策略 Bot
+
+      section#panel-dashboard.card.admin-panel(role='tabpanel', aria-labelledby='tab-dashboard')
+        h2.card-title 仪表盘
+        div.dashboard-grid
+          div.metric-card
+            span.metric-label 用户总数
+            strong#metric-total-users.metric-value -
+          div.metric-card
+            span.metric-label 有效封禁
+            strong#metric-active-bans.metric-value -
+          div.metric-card
+            span.metric-label 今日注册
+            strong#metric-registrations-today.metric-value -
+          div.metric-card
+            span.metric-label 近 7 天注册
+            strong#metric-registrations-7-days.metric-value -
+          div.metric-card
+            span.metric-label 24 小时注册拦截
+            strong#metric-registration-blocks.metric-value -
+          div.metric-card
+            span.metric-label 违规用户名自动处置
+            strong#metric-username-auto-bans.metric-value -
+          div.metric-card.metric-alert
+            span.metric-label 待复核绕封关联
+            strong#metric-pending-evasions.metric-value -
+        p#dashboard-last-scan.security-status 最近一次全量扫描：尚未执行
+        h3.card-subtitle 最近安全事件
+        div.table-scroll
+          table.mini-table
+            thead
+              tr
+                th 时间
+                th 类型
+                th 用户 / IP
+                th 说明
+            tbody#dashboard-events-body
+        p#dashboard-events-empty.panel-empty 暂无安全事件。
+
+      section#panel-users.card.admin-panel(role='tabpanel', aria-labelledby='tab-users')
         h2.card-title 用户管理
         div.user-toolbar
-          input#user-search(type='text', placeholder='按用户名搜索', maxlength='20')
+          input#user-search(type='text', placeholder='按用户名或 IP 搜索', maxlength='100')
           span#users-total.users-total
-        table.mini-table
-          thead
-            tr
-              th 用户名
-              th Rating
-              th 注册时间
-              th 最后在线
-              th 角色
-              th 封禁详情
-              th 操作
-          tbody#users-body
+        div.table-scroll
+          table.mini-table.users-table
+            thead
+              tr
+                th 用户名
+                th Rating
+                th 注册时间
+                th 注册 IP
+                th 最近 IP / 时间
+                th 最后在线
+                th 角色
+                th 封禁详情
+                th 操作
+            tbody#users-body
         p#users-empty.panel-empty(style='display: none') 暂无用户。
         div#users-pagination.users-pagination(style='display: none')
           button#users-prev.btn.btn-ghost.btn-sm(type='button') 上一页
           span#users-page-info.users-page-info
           button#users-next.btn.btn-ghost.btn-sm(type='button') 下一页
-      section#chat-audit.card.chat-audit(aria-labelledby='chat-audit-title')
+
+      section#panel-security.card.admin-panel.security-panel(role='tabpanel', aria-labelledby='tab-security')
+        h2.card-title 安全风险
+        p.security-hint 同 IP 仅作为复核线索，不会自动连坐；批量注册拦截只影响后续新注册，不封禁既有正常账号。
+        button#security-scan-btn.btn.btn-secondary.btn-sm(type='button') 立即复查全部用户名
+        p#security-scan-result.security-status(role='status')
+        div.security-filters
+          select#security-type(aria-label='安全事件类型')
+            option(value='') 全部事件
+            option(value='username_rejected') 违规用户名拦截
+            option(value='username_auto_banned') 用户名自动封禁
+            option(value='username_manual_review') 超管人工复核
+            option(value='possible_ban_evasion') 可能绕封关联
+            option(value='registration_rate_limited') 批量注册拦截
+            option(value='username_scan_completed') 全量扫描结果
+          input#security-username(type='text', placeholder='用户名子串', maxlength='100')
+          input#security-ip(type='text', placeholder='IP 子串', maxlength='100')
+          button#security-search.btn.btn-secondary.btn-sm(type='button') 筛选
+        p#security-error.security-status(role='status')
+        h3.card-subtitle 可能绕封关联
+        div#security-evasions.security-records
+        h3.card-subtitle 批量注册拦截
+        div#security-blocks.security-records
+        h3.card-subtitle 安全审计事件
+        div.table-scroll
+          table.mini-table.security-table
+            thead
+              tr
+                th 时间
+                th 类型
+                th 用户 / 关联账号
+                th IP
+                th 动作 / 原因
+            tbody#security-events-body
+        p#security-events-empty.panel-empty(style='display: none') 暂无匹配事件。
+
+      section#chat-audit.card.chat-audit.admin-panel(role='tabpanel', aria-labelledby='tab-chat')
         h2#chat-audit-title.card-title 聊天审计与广告复核
         p.chat-audit-hint
-          | &#32;仅公开聊天，网址仅保留来源域名；最多保留 7 天、2000 条、2 MiB。候选不代表确认广告：进房 30 秒内发网址并在发链后 15 秒内离开，仅限聊 10 分钟。请结合上下文复核，误判可解除；需封禁时使用上方用户管理。&#32;
+          | &#32;仅公开聊天，网址仅保留来源域名；最多保留 7 天、2000 条、2 MiB。候选不代表确认广告：进房 30 秒内发网址并在发链后 15 秒内离开，仅限聊 10 分钟。请结合上下文复核，误判可解除；需封禁时使用用户管理。&#32;
         div.chat-audit-toolbar
           input#chat-user(placeholder='精确用户名', aria-label='精确用户名', maxlength='20')
           input#chat-room(placeholder='精确房间号', aria-label='精确房间号', maxlength='15')
@@ -70,9 +151,8 @@ html
               th(scope='col') 公开聊天
               th(scope='col') 复核
           tbody#chat-body
-      //
-         策略 Bot（仅超级管理员）
-      section#bots-card.card(style='display: none')
+
+      section#bots-card.card.admin-panel(role='tabpanel', aria-labelledby='tab-bots', style='display: none')
         h2.card-title 策略 Bot
         p.bot-hint
           | &#32;在服务器进程内运行所选模板的策略 Bot：以指定用户身份自动登录（跳过验证码）进入房间并自动准备，对局结束后自动重新准备。 支持多个模板（由服务端自动枚举 bot-template/ 目录）；同一用户名最多运行一个 Bot，同一房间也只能运行一个 Bot。 Bot 进房不会成为房主，房主保留给后续进房的人类用户或第三方 Bot；不允许组队的 Bot 会强制关闭房间组队，允许组队的 Bot 则由房主决定是否开启组队。 运行中可直接编辑组队、迷雾与多线许可，无需重启 Bot；改为不允许会立即关闭对应房间开关。&#32;
@@ -92,22 +172,22 @@ html
           button#bot-start-btn.btn.btn-secondary.btn-sm(type='button') 启动
           button#bots-refresh-btn.btn.btn-ghost.btn-sm(type='button') 刷新
         p#bot-error.dialog-error(style='display: none')
-        table#bots-table.mini-table
-          thead
-            tr
-              th 用户名
-              th 房间
-              th 模板
-              th 组队
-              th 迷雾远征
-              th 多线争锋
-              th 启动时间
-              th 连接状态
-              th 操作
-          tbody#bots-body
+        div.table-scroll
+          table#bots-table.mini-table
+            thead
+              tr
+                th 用户名
+                th 房间
+                th 模板
+                th 组队
+                th 迷雾远征
+                th 多线争锋
+                th 启动时间
+                th 连接状态
+                th 操作
+            tbody#bots-body
         p#bots-empty.panel-empty(style='display: none') 暂无运行中的 Bot。
-    //
-       封禁对话框
+
     div#ban-dialog-mask.dialog-mask(style='display: none')
       div.dialog
         h3.dialog-title

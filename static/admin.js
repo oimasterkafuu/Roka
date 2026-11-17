@@ -1,5 +1,4 @@
-/* 后台管理页 /admin 逻辑（jQuery）。
- * 结构按功能分区（顶部 chrome / 用户管理 / 封禁对话框），便于后续扩展新管理模块。 */
+/* 后台管理页 /admin 逻辑（jQuery）。 */
 
 var currentUsername = '';
 var viewerIsSuperAdmin = false;
@@ -7,8 +6,21 @@ var usersCache = [];
 var USER_PAGE_SIZE = 20;
 var userSearchQuery = '';
 var userPage = 1;
-
-/* ---------- 基础工具 ---------- */
+var currentAdminTab = 'dashboard';
+var securityEventsCache = [];
+var securityLoaded = false;
+var chatLoaded = false;
+var usersLoaded = false;
+var botsLoaded = false;
+var ADMIN_TABS = ['dashboard', 'users', 'security', 'chat', 'bots'];
+var SECURITY_EVENT_LABELS = {
+  username_rejected: '违规用户名拦截',
+  username_auto_banned: '用户名自动封禁',
+  username_manual_review: '超管人工复核',
+  possible_ban_evasion: '可能绕封关联',
+  registration_rate_limited: '批量注册拦截',
+  username_scan_completed: '全量扫描完成',
+};
 
 function pad2(n) {
   return (n < 10 ? '0' : '') + n;
@@ -30,26 +42,15 @@ function fullTime(time) {
 }
 
 function relativeTime(time) {
-  var diff = Date.now() - time;
-  if (diff < 0) {
-    diff = 0;
-  }
+  var diff = Math.max(0, Date.now() - time);
   var sec = Math.floor(diff / 1000);
-  if (sec < 60) {
-    return '刚刚';
-  }
+  if (sec < 60) return '刚刚';
   var min = Math.floor(sec / 60);
-  if (min < 60) {
-    return min + ' 分钟前';
-  }
+  if (min < 60) return min + ' 分钟前';
   var hour = Math.floor(min / 60);
-  if (hour < 24) {
-    return hour + ' 小时前';
-  }
+  if (hour < 24) return hour + ' 小时前';
   var day = Math.floor(hour / 24);
-  if (day < 30) {
-    return day + ' 天前';
-  }
+  if (day < 30) return day + ' 天前';
   return fullTime(time);
 }
 
@@ -73,12 +74,95 @@ async function apiPost(url, payload) {
   return data;
 }
 
-/* ---------- 顶部 chrome ---------- */
+function securityEventLabel(type) {
+  return SECURITY_EVENT_LABELS[type] || type;
+}
 
-// 校验登录态与管理员身份；非管理员直接跳回首页（API 侧另有 403 兜底）。
+function scanResultText(result) {
+  if (!result) return '最近一次全量扫描：尚未执行';
+  return (
+    '最近完成 ' +
+    fullTime(result.completedAt) +
+    '；扫描 ' +
+    result.scanned +
+    '，命中 ' +
+    result.hits +
+    '，自动封禁 ' +
+    result.autoBanned +
+    '，跳过 ' +
+    result.skipped
+  );
+}
+
+/* ---------- 标签页 ---------- */
+
+function tabPanel(name) {
+  return $('#' + (name === 'chat' ? 'chat-audit' : name === 'bots' ? 'bots-card' : 'panel-' + name));
+}
+
+function showAdminTab(name, loadData) {
+  if (ADMIN_TABS.indexOf(name) === -1 || (name === 'bots' && !viewerIsSuperAdmin)) name = 'dashboard';
+  currentAdminTab = name;
+  ADMIN_TABS.forEach(function (tab) {
+    var selected = tab === name;
+    $('#tab-' + tab)
+      .attr('aria-selected', selected ? 'true' : 'false')
+      .attr('tabindex', selected ? 0 : -1);
+    var $panel = tabPanel(tab);
+    if (tab === 'bots') {
+      $panel.toggle(viewerIsSuperAdmin && selected);
+    } else {
+      $panel.prop('hidden', !selected);
+    }
+  });
+  if (!loadData) return;
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'users') loadUsers();
+  if (name === 'security') loadSecurityEvents(false);
+  if (name === 'chat' && !chatLoaded) loadChatAudit(false);
+  if (name === 'bots' && viewerIsSuperAdmin) {
+    if (!botsLoaded) {
+      loadBotTemplates();
+      loadBots();
+    }
+  }
+}
+
+function navigateAdminTab(name) {
+  if (location.hash === '#' + name) showAdminTab(name, true);
+  else location.hash = name;
+}
+
+$('.admin-tab').on('click', function (event) {
+  event.preventDefault();
+  navigateAdminTab($(this).attr('href').slice(1));
+});
+
+$('.admin-tabs').on('keydown', '.admin-tab', function (event) {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].indexOf(event.key) === -1) return;
+  event.preventDefault();
+  var available = ADMIN_TABS.filter(function (name) {
+    return name !== 'bots' || viewerIsSuperAdmin;
+  });
+  var current = available.indexOf(currentAdminTab);
+  var next = current;
+  if (event.key === 'ArrowLeft') next = (current - 1 + available.length) % available.length;
+  if (event.key === 'ArrowRight') next = (current + 1) % available.length;
+  if (event.key === 'Home') next = 0;
+  if (event.key === 'End') next = available.length - 1;
+  navigateAdminTab(available[next]);
+  $('#tab-' + available[next]).focus();
+});
+
+window.addEventListener('hashchange', function () {
+  showAdminTab(location.hash.slice(1), true);
+});
+
+/* ---------- 顶部与仪表盘 ---------- */
+
 async function loadViewer() {
   try {
-    var res = await fetch('/api/auth/me');
+    var res = await fetch('/api/auth/me', { cache: 'no-store' });
     if (!res.ok) {
       location.href = '/login';
       return false;
@@ -89,6 +173,8 @@ async function loadViewer() {
       return false;
     }
     currentUsername = data.username;
+    viewerIsSuperAdmin = data.isSuperAdmin === true;
+    $('#tab-bots').toggle(viewerIsSuperAdmin);
     $('#account-name').replaceWith(usernameLink(currentUsername));
     usernameEnsureColors([currentUsername]);
     return true;
@@ -101,16 +187,56 @@ $('#back-home-btn').on('click', function () {
   location.href = '/';
 });
 
+async function loadDashboard() {
+  try {
+    var res = await fetch('/api/admin/security/dashboard', { cache: 'no-store' });
+    if (!res.ok) throw new Error('仪表盘加载失败或无权限。');
+    var data = await res.json();
+    var summary = data.summary || {};
+    var fields = {
+      totalUsers: '#metric-total-users',
+      activeBans: '#metric-active-bans',
+      registrationsToday: '#metric-registrations-today',
+      registrations7Days: '#metric-registrations-7-days',
+      registrationBlocks24Hours: '#metric-registration-blocks',
+      usernameAutoBans: '#metric-username-auto-bans',
+      pendingBanEvasions: '#metric-pending-evasions',
+    };
+    Object.keys(fields).forEach(function (key) {
+      $(fields[key]).text(typeof summary[key] === 'number' ? summary[key] : 0);
+    });
+    $('#dashboard-last-scan').text(scanResultText(data.lastScan));
+    var events = Array.isArray(data.recentEvents) ? data.recentEvents : [];
+    var $body = $('#dashboard-events-body').empty();
+    events.forEach(function (entry) {
+      var $row = $('<tr></tr>').appendTo($body);
+      $('<td></td>').text(fullTime(entry.at)).appendTo($row);
+      $('<td></td>').text(securityEventLabel(entry.type)).appendTo($row);
+      $('<td></td>')
+        .text((entry.username || '-') + ' / ' + (entry.ip || '-'))
+        .appendTo($row);
+      $('<td></td>')
+        .text(entry.action + '：' + entry.reason)
+        .appendTo($row);
+    });
+    $('#dashboard-events-empty').toggle(events.length === 0);
+  } catch (err) {
+    $('#dashboard-last-scan').text(err.message);
+  }
+}
+
 /* ---------- 用户管理 ---------- */
 
 function roleLabel(user) {
-  if (user.isSuperAdmin) {
-    return '超级管理员';
-  }
-  if (user.isAdmin) {
-    return '管理员';
-  }
+  if (user.isSuperAdmin) return '超级管理员';
+  if (user.isAdmin) return '管理员';
   return '用户';
+}
+
+function roleClass(user) {
+  if (user.isSuperAdmin) return 'role-superadmin';
+  if (user.isAdmin) return 'role-admin';
+  return 'role-user';
 }
 
 function banStatusLabel(user) {
@@ -127,45 +253,46 @@ function banStatusLabel(user) {
   return '正常';
 }
 
-// 判断当前操作者能否封禁该用户（服务端另有同等校验）。
 function canBan(user) {
-  if (user.username === currentUsername || user.isSuperAdmin) {
-    return false;
-  }
-  if (user.isAdmin && !viewerIsSuperAdmin) {
-    return false;
-  }
+  if (user.username === currentUsername || user.isSuperAdmin) return false;
+  if (user.isAdmin && !viewerIsSuperAdmin) return false;
   return true;
 }
 
+function userIpValues(user) {
+  return [user.registeredIp, user.lastIp]
+    .concat(
+      (user.ipHistory || []).map(function (item) {
+        return item.ip;
+      }),
+    )
+    .filter(Boolean);
+}
+
 function filteredUsers() {
-  if (!userSearchQuery) {
-    return usersCache;
-  }
+  if (!userSearchQuery) return usersCache;
   var query = userSearchQuery.toLowerCase();
   return usersCache.filter(function (user) {
-    return user.username.toLowerCase().indexOf(query) !== -1;
+    return (
+      user.username.toLowerCase().indexOf(query) !== -1 ||
+      userIpValues(user).some(function (ip) {
+        return ip.toLowerCase().indexOf(query) !== -1;
+      })
+    );
   });
 }
 
 function renderUsers() {
   var filtered = filteredUsers();
   var pageCount = Math.max(1, Math.ceil(filtered.length / USER_PAGE_SIZE));
-  if (userPage > pageCount) {
-    userPage = pageCount;
-  }
+  if (userPage > pageCount) userPage = pageCount;
   var pageItems = filtered.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
-
   var totalText = '共 ' + usersCache.length + ' 个用户';
-  if (userSearchQuery) {
-    totalText += '，匹配 ' + filtered.length + ' 个';
-  }
+  if (userSearchQuery) totalText += '，匹配 ' + filtered.length + ' 个';
   $('#users-total').text(totalText);
-
   $('#users-empty')
-    .text(userSearchQuery ? '没有匹配的用户。' : '暂无用户。')
+    .text(userSearchQuery ? '没有匹配的用户或 IP。' : '暂无用户。')
     .toggle(pageItems.length === 0);
-
   $('#users-pagination').toggle(pageCount > 1);
   $('#users-page-info').text('第 ' + userPage + ' / ' + pageCount + ' 页');
   $('#users-prev').prop('disabled', userPage <= 1);
@@ -174,32 +301,35 @@ function renderUsers() {
   var $body = $('#users-body').empty();
   pageItems.forEach(function (user) {
     var $tr = $('<tr></tr>');
-    if (typeof user.bannedUntil === 'number') {
-      $tr.addClass('row-banned');
-    }
-
-    var $name = $('<td></td>');
-    // 用户名：统一用户名组件（/api/admin/users 已附有效封禁状态）。
+    if (typeof user.bannedUntil === 'number') $tr.addClass('row-banned');
+    var $name = $('<td data-label="用户名"></td>').appendTo($tr);
     usernameLink(user.username, {
       colorClass: user.colorClass,
       title: user.title,
       admin: user.admin === true,
       banned: user.banned === true,
     }).appendTo($name);
-    $tr.append($name);
-
-    $('<td></td>').text(Math.round(user.rating)).appendTo($tr);
-    $('<td></td>').text(fullTime(user.createdAt)).appendTo($tr);
-    $('<td></td>')
+    $('<td data-label="Rating"></td>').text(Math.round(user.rating)).appendTo($tr);
+    $('<td data-label="注册时间"></td>').text(fullTime(user.createdAt)).appendTo($tr);
+    $('<td data-label="注册 IP"></td>')
+      .text(user.registeredIp || '尚未记录')
+      .appendTo($tr);
+    $('<td data-label="最近 IP / 时间"></td>')
+      .text(
+        user.lastIp
+          ? user.lastIp + ' / ' + (user.lastIpAt ? fullTime(user.lastIpAt) : '尚未记录')
+          : '尚未记录',
+      )
+      .appendTo($tr);
+    $('<td data-label="最后在线"></td>')
       .text(user.lastSeenAt ? relativeTime(user.lastSeenAt) : '-')
       .attr('title', user.lastSeenAt ? fullTime(user.lastSeenAt) : '')
       .appendTo($tr);
-    $('<td></td>')
+    $('<td data-label="角色"></td>')
       .append($('<span class="role-badge"></span>').addClass(roleClass(user)).text(roleLabel(user)))
       .appendTo($tr);
-    $('<td></td>').text(banStatusLabel(user)).appendTo($tr);
-
-    var $ops = $('<td class="op-cell"></td>');
+    $('<td data-label="封禁详情"></td>').text(banStatusLabel(user)).appendTo($tr);
+    var $ops = $('<td class="op-cell" data-label="操作"></td>').appendTo($tr);
     if (!user.isSuperAdmin && user.username !== currentUsername) {
       if (typeof user.bannedUntil === 'number') {
         $('<button type="button" class="btn btn-secondary btn-sm">解除封禁</button>')
@@ -224,37 +354,25 @@ function renderUsers() {
           .appendTo($ops);
       }
     }
-    $tr.append($ops);
-
     $body.append($tr);
   });
 }
 
-function roleClass(user) {
-  if (user.isSuperAdmin) {
-    return 'role-superadmin';
-  }
-  if (user.isAdmin) {
-    return 'role-admin';
-  }
-  return 'role-user';
-}
-
 async function loadUsers() {
   try {
-    var res = await fetch('/api/admin/users');
+    var res = await fetch('/api/admin/users', { cache: 'no-store' });
     if (!res.ok) {
-      if (res.status === 403 || res.status === 401) {
-        location.href = '/';
-      }
+      if (res.status === 403 || res.status === 401) location.href = '/';
       return;
     }
     var data = await res.json();
     viewerIsSuperAdmin = data.viewerIsSuperAdmin === true;
+    $('#tab-bots').toggle(viewerIsSuperAdmin);
     usersCache = Array.isArray(data.items) ? data.items : [];
+    usersLoaded = true;
     renderUsers();
   } catch (e) {
-    // 加载失败不阻塞页面
+    // 加载失败不阻塞其他标签
   }
 }
 
@@ -277,12 +395,11 @@ $('#users-next').on('click', function () {
 });
 
 async function unbanUser(username) {
-  if (!confirm('确定解除对 ' + username + ' 的封禁吗？')) {
-    return;
-  }
+  if (!confirm('确定解除对 ' + username + ' 的封禁吗？')) return;
   try {
     await apiPost('/api/admin/unban', { username: username });
     loadUsers();
+    loadDashboard();
   } catch (err) {
     alert(err.message);
   }
@@ -290,9 +407,7 @@ async function unbanUser(username) {
 
 async function setAdmin(username, granting) {
   var action = granting ? '授予' : '撤销';
-  if (!confirm('确定' + action + ' ' + username + ' 的管理员权限吗？')) {
-    return;
-  }
+  if (!confirm('确定' + action + ' ' + username + ' 的管理员权限吗？')) return;
   try {
     await apiPost('/api/admin/set-admin', { username: username, admin: granting });
     loadUsers();
@@ -319,9 +434,7 @@ function closeBanDialog() {
 $('#ban-duration').on('change', function () {
   $('#ban-custom-field').toggle($(this).val() === 'custom');
 });
-
 $('#ban-cancel').on('click', closeBanDialog);
-
 $('#ban-confirm').on('click', async function () {
   var username = $('#ban-target').text();
   var choice = $('#ban-duration').val();
@@ -342,12 +455,120 @@ $('#ban-confirm').on('click', async function () {
     await apiPost('/api/admin/ban', payload);
     closeBanDialog();
     loadUsers();
+    loadDashboard();
   } catch (err) {
     $('#ban-error').text(err.message).show();
   }
 });
 
-/* ---------- 聊天审计（所有内容用 text 渲染，网址不自动链接） ---------- */
+/* ---------- 用户名与注册安全 ---------- */
+
+function renderSecurityEvents() {
+  var $body = $('#security-events-body').empty();
+  securityEventsCache.forEach(function (entry) {
+    var $row = $('<tr></tr>').appendTo($body);
+    $('<td></td>').text(fullTime(entry.at)).appendTo($row);
+    $('<td></td>').text(securityEventLabel(entry.type)).appendTo($row);
+    $('<td></td>')
+      .text(
+        (entry.username || '-') +
+          (entry.relatedUsernames && entry.relatedUsernames.length
+            ? ' ↔ ' + entry.relatedUsernames.join(', ')
+            : ''),
+      )
+      .appendTo($row);
+    $('<td></td>')
+      .text(entry.ip || '-')
+      .appendTo($row);
+    $('<td></td>')
+      .text(entry.action + '：' + entry.reason + (entry.result ? '；' + scanResultText(entry.result) : ''))
+      .appendTo($row);
+  });
+  $('#security-events-empty').toggle(securityEventsCache.length === 0);
+
+  var $evasions = $('#security-evasions').empty();
+  var evasions = securityEventsCache.filter(function (entry) {
+    return entry.type === 'possible_ban_evasion';
+  });
+  if (!evasions.length)
+    $('<p class="panel-empty"></p>').text('暂无待复核的同 IP 封禁关联。').appendTo($evasions);
+  evasions.forEach(function (entry) {
+    var $card = $('<div class="security-record"></div>').appendTo($evasions);
+    $('<p></p>')
+      .text(fullTime(entry.at) + '；IP ' + entry.ip)
+      .appendTo($card);
+    var $links = $('<div class="security-record-links"></div>').appendTo($card);
+    [entry.username]
+      .concat(entry.relatedUsernames || [])
+      .filter(Boolean)
+      .forEach(function (username) {
+        $('<button type="button" class="btn btn-ghost btn-sm"></button>')
+          .text(username)
+          .on('click', function () {
+            $('#user-search').val(username);
+            userSearchQuery = username;
+            userPage = 1;
+            navigateAdminTab('users');
+            renderUsers();
+          })
+          .appendTo($links);
+      });
+  });
+
+  var $blocks = $('#security-blocks').empty();
+  var blocks = securityEventsCache.filter(function (entry) {
+    return entry.type === 'registration_rate_limited';
+  });
+  if (!blocks.length) $('<p class="panel-empty"></p>').text('暂无批量注册拦截。').appendTo($blocks);
+  blocks.forEach(function (entry) {
+    $('<div class="security-record"></div>')
+      .text(fullTime(entry.at) + '；' + entry.ip + '；尝试用户名 ' + entry.username)
+      .appendTo($blocks);
+  });
+}
+
+async function loadSecurityEvents(force) {
+  if (securityLoaded && !force) return;
+  try {
+    var query = new URLSearchParams({
+      type: $('#security-type').val(),
+      username: $('#security-username').val().trim(),
+      ip: $('#security-ip').val().trim(),
+    });
+    var res = await fetch('/api/admin/security/events?' + query, { cache: 'no-store' });
+    if (!res.ok) throw new Error('安全事件加载失败或无权限。');
+    var data = await res.json();
+    securityEventsCache = Array.isArray(data.items) ? data.items : [];
+    securityLoaded = true;
+    $('#security-error').text('');
+    renderSecurityEvents();
+  } catch (err) {
+    $('#security-error').text(err.message);
+  }
+}
+
+$('#security-search').on('click', function () {
+  loadSecurityEvents(true);
+});
+
+$('#security-scan-btn').on('click', async function () {
+  var $button = $('#security-scan-btn').prop('disabled', true);
+  $('#security-scan-result').text('正在串行复查全部用户名…');
+  try {
+    var result = await apiPost('/api/admin/security/scan', {});
+    $('#security-scan-result').text(scanResultText(result));
+    securityLoaded = false;
+    await loadSecurityEvents(true);
+    loadDashboard();
+  } catch (err) {
+    $('#security-scan-result').text(err.message);
+  } finally {
+    $button.prop('disabled', false);
+  }
+});
+
+/* ---------- 聊天审计 ---------- */
+
 var chatBefore = null;
 async function loadChatAudit(older) {
   if (!older) chatBefore = null;
@@ -404,10 +625,12 @@ async function loadChatAudit(older) {
     $('#chat-error').text(
       data.items.length ? '本页 ' + data.items.length + ' 条；请勿外传聊天审计内容。' : '无匹配记录。',
     );
+    chatLoaded = true;
   } catch (err) {
     $('#chat-error').text(err.message);
   }
 }
+
 $('#chat-release-user').on('click', async function () {
   var username = $('#chat-user').val().trim();
   if (!username) {
@@ -447,17 +670,14 @@ function renderBotTemplates() {
   });
   var hasTemplate = botTemplatesCache.length > 0;
   $('#bot-start-btn').prop('disabled', !hasTemplate);
-  if (!hasTemplate) {
+  if (!hasTemplate)
     showBotError('未发现可托管的 Bot 模板（bot-template/ 下缺少 strategy.js 或 server-bot.js）。');
-  }
 }
 
 async function loadBotTemplates() {
   try {
-    var res = await fetch('/api/admin/bot-templates');
-    if (!res.ok) {
-      return;
-    }
+    var res = await fetch('/api/admin/bot-templates', { cache: 'no-store' });
+    if (!res.ok) return;
     var data = await res.json();
     botTemplatesCache = Array.isArray(data.items) ? data.items : [];
     renderBotTemplates();
@@ -471,10 +691,10 @@ function renderBots() {
   $('#bots-empty').toggle(botsCache.length === 0);
   botsCache.forEach(function (bot) {
     var $tr = $('<tr></tr>');
-    usernameLink(bot.username).appendTo($('<td></td>').appendTo($tr));
+    usernameLink(bot.username).appendTo($('<td data-label="用户名"></td>').appendTo($tr));
     usernameEnsureColors([bot.username]);
-    $('<td></td>').text(bot.room).appendTo($tr);
-    $('<td></td>').text(bot.template).appendTo($tr);
+    $('<td data-label="房间"></td>').text(bot.room).appendTo($tr);
+    $('<td data-label="模板"></td>').text(bot.template).appendTo($tr);
     var inputs = {};
     [
       ['allowTeam', '组队'],
@@ -485,17 +705,17 @@ function renderBots() {
       inputs[key] = $('<input type="checkbox" />')
         .prop('checked', bot[key] === true)
         .attr('aria-label', bot.username + ' 允许' + item[1]);
-      $('<td></td>').append(inputs[key]).appendTo($tr);
+      $('<td></td>').attr('data-label', item[1]).append(inputs[key]).appendTo($tr);
     });
-    $('<td></td>').text(fullTime(bot.startedAt)).appendTo($tr);
-    $('<td></td>')
+    $('<td data-label="启动时间"></td>').text(fullTime(bot.startedAt)).appendTo($tr);
+    $('<td data-label="连接状态"></td>')
       .append(
         $('<span class="bot-conn"></span>')
           .addClass(bot.connected ? 'on' : 'off')
           .text(bot.connected ? '已连接' : '未连接'),
       )
       .appendTo($tr);
-    var $ops = $('<td class="op-cell"></td>');
+    var $ops = $('<td class="op-cell" data-label="操作"></td>');
     $('<button type="button" class="btn btn-secondary btn-sm">保存配置</button>')
       .on('click', function () {
         updateBot(bot, inputs, $tr);
@@ -530,12 +750,11 @@ async function updateBot(bot, inputs, $row) {
 
 async function loadBots() {
   try {
-    var res = await fetch('/api/admin/bots');
-    if (!res.ok) {
-      return;
-    }
+    var res = await fetch('/api/admin/bots', { cache: 'no-store' });
+    if (!res.ok) return;
     var data = await res.json();
     botsCache = Array.isArray(data.items) ? data.items : [];
+    botsLoaded = true;
     renderBots();
   } catch (e) {
     // 加载失败不阻塞页面
@@ -546,9 +765,6 @@ async function startBot() {
   var username = $('#bot-username').val().trim();
   var room = $('#bot-room').val().trim();
   var template = $('#bot-template').val();
-  var allowTeam = $('#bot-allow-team').prop('checked');
-  var allowFog = $('#bot-allow-fog').prop('checked');
-  var allowMultiLine = $('#bot-allow-multi-line').prop('checked');
   if (!username || !room) {
     showBotError('请填写用户名与房间号。');
     return;
@@ -562,12 +778,11 @@ async function startBot() {
       username: username,
       room: room,
       template: template,
-      allowTeam: allowTeam,
-      allowFog: allowFog,
-      allowMultiLine: allowMultiLine,
+      allowTeam: $('#bot-allow-team').prop('checked'),
+      allowFog: $('#bot-allow-fog').prop('checked'),
+      allowMultiLine: $('#bot-allow-multi-line').prop('checked'),
     });
     showBotError('');
-    // 保留模板、组队、迷雾与多线选择，仅清空房间输入便于连续启动。
     $('#bot-room').val('');
     loadBots();
   } catch (err) {
@@ -576,9 +791,7 @@ async function startBot() {
 }
 
 async function stopBot(bot) {
-  if (!confirm('确定停止 ' + bot.username + '（房间 ' + bot.room + '）的策略 Bot 吗？')) {
-    return;
-  }
+  if (!confirm('确定停止 ' + bot.username + '（房间 ' + bot.room + '）的策略 Bot 吗？')) return;
   try {
     await apiPost('/api/admin/bots/stop', { id: bot.id });
     loadBots();
@@ -592,16 +805,8 @@ $('#bots-refresh-btn').on('click', loadBots);
 
 /* ---------- 初始化 ---------- */
 
+showAdminTab(location.hash.slice(1) || 'dashboard', false);
 loadViewer().then(function (ok) {
-  if (ok) {
-    loadChatAudit(false);
-    loadUsers().then(function () {
-      // viewerIsSuperAdmin 由 loadUsers 填充；超管才展示策略 Bot 分区。
-      if (viewerIsSuperAdmin) {
-        $('#bots-card').show();
-        loadBotTemplates();
-        loadBots();
-      }
-    });
-  }
+  if (!ok) return;
+  showAdminTab(location.hash.slice(1) || 'dashboard', true);
 });

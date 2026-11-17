@@ -5,6 +5,8 @@ import path from 'node:path';
 import { serialize } from 'node:v8';
 import type { DisciplineType } from './server/auto-ban-policy';
 import type { FeedPost, ReplayListItem } from './types';
+import { normalizeIpToken } from './server/client-ip';
+import { IP_ACTIVITY_WRITE_THROTTLE_MS, IP_HISTORY_MAX } from './server/security-audit';
 import {
   CoalescingFileWriter,
   decodeBinary,
@@ -21,10 +23,16 @@ interface RatingHistoryPoint {
 export interface BanRecord {
   startedAt: number;
   bannedUntil: number;
-  type: DisciplineType | 'manual';
+  type: DisciplineType | 'manual' | 'username';
   reason: string;
   triggeredAt: number;
   evidence: string;
+}
+
+export interface IpHistoryEntry {
+  ip: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
 }
 
 export interface DisciplineRecord {
@@ -85,7 +93,7 @@ export interface ReferralConversion {
 
 export type ReferralAdminEntry = ReferralAttribution;
 
-interface StoredUser {
+export interface StoredUser {
   username: string;
   passwordSalt: string;
   passwordHash: string;
@@ -114,6 +122,10 @@ interface StoredUser {
   // 最后比赛时间：最近一次对局结算（applyRatingUpdates）的时间。排行榜活跃口径只认
   // 本字段——登录/上线不再续命。旧数据无此字段，读取时按 undefined 处理（向后兼容）。
   lastGameAt?: number;
+  registeredIp?: string;
+  lastIp?: string;
+  lastIpAt?: number;
+  ipHistory?: IpHistoryEntry[];
   github?: GithubLinkRecord;
 }
 
@@ -163,6 +175,10 @@ export interface AdminUserEntry {
   provisional: boolean;
   createdAt: number;
   lastSeenAt: number | null;
+  registeredIp: string | null;
+  lastIp: string | null;
+  lastIpAt: number | null;
+  ipHistory: IpHistoryEntry[];
   isAdmin: boolean;
   isSuperAdmin: boolean;
   /** -1 表示永久封禁；null 表示未封禁。 */
@@ -498,6 +514,22 @@ const toStoredUser = (value: unknown): StoredUser | null => {
       ratingHistory.push({ t: point.t, r: point.r });
     }
   }
+  const registeredIp = typeof value.registeredIp === 'string' ? normalizeIpToken(value.registeredIp) : null;
+  const lastIp = typeof value.lastIp === 'string' ? normalizeIpToken(value.lastIp) : null;
+  const ipHistory: IpHistoryEntry[] = [];
+  for (const item of Array.isArray(value.ipHistory) ? value.ipHistory : []) {
+    if (!isRecord(item) || typeof item.ip !== 'string') continue;
+    const ip = normalizeIpToken(item.ip);
+    if (
+      !ip ||
+      typeof item.firstSeenAt !== 'number' ||
+      !Number.isFinite(item.firstSeenAt) ||
+      typeof item.lastSeenAt !== 'number' ||
+      !Number.isFinite(item.lastSeenAt)
+    )
+      continue;
+    ipHistory.push({ ip, firstSeenAt: item.firstSeenAt, lastSeenAt: item.lastSeenAt });
+  }
   return {
     username,
     passwordSalt,
@@ -524,6 +556,11 @@ const toStoredUser = (value: unknown): StoredUser | null => {
       typeof value.lastGameAt === 'number' && Number.isFinite(value.lastGameAt)
         ? value.lastGameAt
         : undefined,
+    registeredIp: registeredIp ?? undefined,
+    lastIp: lastIp ?? undefined,
+    lastIpAt:
+      typeof value.lastIpAt === 'number' && Number.isFinite(value.lastIpAt) ? value.lastIpAt : undefined,
+    ipHistory: ipHistory.slice(-IP_HISTORY_MAX),
     github: toGithubLinkRecord(value.github) ?? undefined,
   };
 };
@@ -680,7 +717,12 @@ export class UserStore {
     }
   }
 
-  async register(usernameInput: string, password: string, referrerInput?: string): Promise<string> {
+  async register(
+    usernameInput: string,
+    password: string,
+    referrerInput?: string,
+    registrationIp?: string,
+  ): Promise<string> {
     const username = this.validateUsernameOrThrow(usernameInput);
     this.validatePasswordOrThrow(password);
 
@@ -692,6 +734,7 @@ export class UserStore {
     const referrer = referrerInput ? this.usersByKey.get(this.normalize(referrerInput)) : undefined;
     const salt = randomBytes(16).toString('hex');
     const now = Date.now();
+    const registeredIp = registrationIp ? normalizeIpToken(registrationIp) : null;
     const user: StoredUser = {
       username,
       passwordSalt: salt,
@@ -707,6 +750,10 @@ export class UserStore {
       isSuperAdmin: this.usersByKey.size === 0 ? true : undefined,
       ratingHistory: [],
       lastGameAt: 0,
+      registeredIp: registeredIp ?? undefined,
+      lastIp: registeredIp ?? undefined,
+      lastIpAt: registeredIp ? now : undefined,
+      ipHistory: registeredIp ? [{ ip: registeredIp, firstSeenAt: now, lastSeenAt: now }] : [],
     };
 
     this.usersByKey.set(key, user);
@@ -819,15 +866,17 @@ export class UserStore {
     return user.username;
   }
 
-  async rotateSession(usernameInput: string): Promise<string> {
+  async rotateSession(usernameInput: string, loginIp?: string): Promise<string> {
     const key = this.normalize(usernameInput);
     const user = this.usersByKey.get(key);
     if (!user) {
       throw new Error('用户不存在。');
     }
 
+    const now = Date.now();
     user.sessionId = randomBytes(24).toString('base64url');
-    user.updatedAt = Date.now();
+    user.updatedAt = now;
+    if (loginIp) this.applyIpRecord(user, loginIp, now);
     await this.persist();
     return user.sessionId;
   }
@@ -1103,7 +1152,7 @@ export class UserStore {
     user.bannedUntil = bannedUntil;
     user.currentBan = record;
     user.banHistory = [...(user.banHistory ?? []), record].slice(-50);
-    if (details.type !== 'manual') {
+    if (details.type === 'afk' || details.type === 'rapid_surrender') {
       user.automaticBanCount = (user.automaticBanCount ?? 0) + 1;
     }
     user.updatedAt = now;
@@ -1202,6 +1251,10 @@ export class UserStore {
         createdAt: user.createdAt,
         lastSeenAt:
           typeof user.lastSeenAt === 'number' && Number.isFinite(user.lastSeenAt) ? user.lastSeenAt : null,
+        registeredIp: user.registeredIp ?? null,
+        lastIp: user.lastIp ?? null,
+        lastIpAt: user.lastIpAt ?? null,
+        ipHistory: (user.ipHistory ?? []).map((item) => ({ ...item })),
         isAdmin: user.isAdmin === true,
         isSuperAdmin: user.isSuperAdmin === true,
         bannedUntil: ban.banned ? ban.bannedUntil : null,
@@ -1211,6 +1264,19 @@ export class UserStore {
     }
     entries.sort((a, b) => a.createdAt - b.createdAt);
     return entries;
+  }
+
+  async recordActivityIp(usernameInput: string, ipInput: string, at = Date.now()): Promise<boolean> {
+    const user = this.usersByKey.get(this.normalize(usernameInput));
+    const ip = normalizeIpToken(ipInput);
+    if (!user || !ip || !Number.isFinite(at)) return false;
+    const previous = user.ipHistory?.find((item) => item.ip === ip);
+    if (previous && at >= previous.lastSeenAt && at - previous.lastSeenAt < IP_ACTIVITY_WRITE_THROTTLE_MS) {
+      return false;
+    }
+    this.applyIpRecord(user, ip, at);
+    await this.persist();
+    return true;
   }
 
   getPublicProfile(usernameInput: string): PublicProfile | null {
@@ -1358,6 +1424,28 @@ export class UserStore {
 
   private normalize(username: string): string {
     return username.trim().toLowerCase();
+  }
+
+  private applyIpRecord(user: StoredUser, ipInput: string, at: number): void {
+    const ip = normalizeIpToken(ipInput);
+    if (!ip) return;
+    const history = user.ipHistory ?? [];
+    const existing = history.find((item) => item.ip === ip);
+    if (existing) {
+      existing.lastSeenAt = at;
+    } else {
+      if (history.length >= IP_HISTORY_MAX) {
+        let oldestIndex = 0;
+        for (let index = 1; index < history.length; index += 1) {
+          if (history[index].lastSeenAt < history[oldestIndex].lastSeenAt) oldestIndex = index;
+        }
+        history.splice(oldestIndex, 1);
+      }
+      history.push({ ip, firstSeenAt: at, lastSeenAt: at });
+    }
+    user.ipHistory = history;
+    user.lastIp = ip;
+    user.lastIpAt = at;
   }
 
   private replaceUsers(users: StoredUser[]): void {
