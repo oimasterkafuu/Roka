@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "2.12.1",
+  "version": "2.12.2",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -81,7 +81,7 @@
   "homepage": "https://github.com/oimasterkafuu/Roka#readme",
   "dependencies": {
     "@fastify/rate-limit": "^11.2.2",
-    "@fastify/static": "^10.1.10",
+    "@fastify/static": "^10.1.11",
     "@napi-rs/canvas": "^1.1.1",
     "fastify": "^5.12.8",
     "jsonwebtoken": "^9.0.3",
