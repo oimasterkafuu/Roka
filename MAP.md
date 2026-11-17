@@ -62,7 +62,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 ├── views/                  # Pug 基础布局（含可选共享站点 header）与 13 页同名模板（构建生成 static/*.html）
 ├── static/                 # 前端（主体原生 JS；全部 HTML 为 Pug 生成物；介绍片独立打包）
 │   ├── index.html          # 首页/大厅（脚本基本内联，另加载 /notify.js）
-│   ├── site-header.js      # 五个内容/认证页共享登录态、用户名组件与退出逻辑
+│   ├── site-header.js      # 六个内容/认证页共享登录态、用户名组件与退出逻辑
 │   ├── game.html           # 对局/回放共用骨架
 │   ├── main.js + main/     # 对局/回放主控与模块（加载顺序敏感）
 │   ├── notify.js           # 浏览器通知共享模块（首页与对局页共用）
@@ -251,7 +251,7 @@ _一句话：共享类型/协议定义汇总。_
 
 ## 前端源码地图（static/）
 
-原生 JS + jQuery；全部 13 个 HTML 均由 `views/` 中的同名 Pug 模板构建生成，不直接维护 `static/*.html`。共享 Header 仅用于 about、ambassadors、login、develop、develop-bot 五页；index、game、tutorial、tutorial-text、replays 保留专用布局与控件，profile、admin、updating 也使用专用或独立结构，以上八页均不加载共享 Header 及其资源。
+原生 JS + jQuery；全部 13 个 HTML 均由 `views/` 中的同名 Pug 模板构建生成，不直接维护 `static/*.html`。共享 Header 仅用于 about、ambassadors、login、develop、develop-bot、tutorial-text 六页；index、game、tutorial、replays 保留专用布局与控件，profile、admin、updating 也使用专用或独立结构，以上七页均不加载共享 Header 及其资源。
 
 - **内容/文档页**（about、develop、develop-bot、tutorial-text）：共享 `styles/docs.css` 统一样式与 `docs.js`（登录态展示、`data-goto` 导航、KaTeX 公式渲染，含数学内容的页面引入 `vendor/katex/` 的 katex.min.js + auto-render.min.js）；页面特有样式保留内联。
 - **功能页**：index.html / profile.js（REST 交互，socket `home_*` 失效通知驱动刷新）；game.html + main.js + main/\*（对局与回放共用一套骨架，**脚本全局化、加载顺序敏感**）。
@@ -370,7 +370,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 - **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 
-- **scripts/build-pages.mjs / test-build-pages.mjs** — 自动枚举并用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出全部 13 个同名 `static/*.html`；测试断言 Pug/HTML 同名集合完全相等、连续两次构建字节一致，检查各页关键 DOM、脚本顺序、favicon/`{{V}}` 资源及 standards/quirks 模式，并断言共享 Header 仅用于指定五页、其余八页无共享 Header 资源且保留专用控件，纳入 `pnpm test`。
+- **scripts/build-pages.mjs / test-build-pages.mjs** — 自动枚举并用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出全部 13 个同名 `static/*.html`；测试断言 Pug/HTML 同名集合完全相等、连续两次构建字节一致，检查各页关键 DOM、脚本顺序、favicon/`{{V}}` 资源及 standards/quirks 模式，并断言共享 Header 仅用于指定六页、其余七页无共享 Header 资源且保留专用控件，纳入 `pnpm test`。
 
 - **scripts/test-referral-ambassador.mjs** — `pnpm run test:referral-ambassador`（纳入 `pnpm test`）：UserStore 覆盖邀请注册、自邀/旧账号/无邀请、重复与并发激活、同局多新玩家、异常撤销、徽章阈值、公开字段和文件重启一致；LobbyService 覆盖真人/60 Tick/60 秒门槛及 Rating/积分不变；真实 dist HTTP 服务（仅验证码为测试桩）覆盖首入口 Cookie、注册/登录清理、匿名聚合、管理员权限与撤销；DOM 桩验证感谢墙安全渲染、登录态邀请链接与复制成功/降级/失败；HTTP 覆盖游客邀请入口的 302、大小写归一与 404 提示。需先 `pnpm run build`。
 

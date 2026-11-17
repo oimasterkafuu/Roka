@@ -11,8 +11,10 @@
       content="width=device-width, height=device-height, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=0"
     />
     <link rel="stylesheet" href="/main.css?v={{V}}" />
+    <link rel="stylesheet" href="/styles/site-header.css?v={{V}}" />
     <script src="/vendor/jquery/jquery-3.6.0.min.js?v={{V}}"></script>
     <script src="/username.js?v={{V}}"></script>
+    <script defer src="/site-header.js?v={{V}}"></script>
     <link rel="stylesheet" href="/styles/docs.css?v={{V}}" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css?v={{V}}" />
     <title>Roka - 文字版教程</title>
@@ -148,13 +150,27 @@
     </style>
   </head>
   <body style="overflow: auto; height: auto">
-    <div style="position: fixed; top: 12px; left: 12px; z-index: 20">
-      <button class="small" data-goto="/">返回首页</button>
-    </div>
-    <div style="position: fixed; top: 12px; right: 12px; z-index: 20">
-      <span id="account-name" style="margin-right: 8px; font-family: Quicksand-Bold, HYMaQiDuo-Bold"></span
-      ><a id="login-btn" href="/login">登录</a>
-    </div>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-brand" href="/" aria-label="Roka 首页"
+          ><img
+            class="brand-icon"
+            src="/icons/icon-48.png?v={{V}}"
+            srcset="/icons/icon-48.png?v={{V}} 1x, /icons/icon-192.png?v={{V}} 2x"
+            alt="Roka 图标"
+          /><span class="brand-name">Roka</span></a
+        >
+        <nav class="site-nav" aria-label="站点导航">
+          <a class="site-nav-link" href="/">首页</a><a class="site-nav-link" href="/replays">回放</a
+          ><a class="site-nav-link" href="/about">关于</a>
+        </nav>
+        <div class="site-account" aria-label="账号">
+          <span class="site-account-name" id="site-account-name" hidden></span
+          ><a class="btn btn-primary btn-sm" id="site-login" href="/login">登录</a
+          ><button class="btn btn-ghost btn-sm" id="site-logout" type="button" hidden>退出登录</button>
+        </div>
+      </div>
+    </header>
     <div id="app">
       <h1 class="doc-title">Roka 文字版教程</h1>
       <p class="doc-subtitle">本页完整介绍 Roka 的全部规则。建议先通读本页，再进入互动教程上手实操。</p>
