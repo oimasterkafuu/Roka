@@ -15,10 +15,45 @@ const { version } = JSON.parse(await readFile('package.json', 'utf8'));
 const delivery = new StaticAssetDelivery(version, process.cwd(), {
   ROKA_STATIC_COMMIT: '0123456789abcdef0123456789abcdef01234567',
 });
+function removeScriptElements(html) {
+  const retained = [];
+  let previousEnd = 0;
+  for (const match of html.matchAll(/<script\b[^>]*>[\s\S]*?<\/script(?:\s[^>]*)?>/gi)) {
+    retained.push(html.slice(previousEnd, match.index));
+    previousEnd = match.index + match[0].length;
+  }
+  retained.push(html.slice(previousEnd));
+  return retained.join('');
+}
+
+assert.equal(
+  removeScriptElements(`
+    <main id="before">before</main>
+    <SCRIPT SRC="/external.js"></SCRIPT>
+    <ScRiPt>const mixedCase = true;</sCrIpT>
+    <script>const closingAttributes = true;</script foo="bar">
+    <script src="/empty.js"></script>
+    <script></script>
+    <section id="after">after</section>
+  `),
+  [
+    '',
+    '    <main id="before">before</main>',
+    '    ',
+    '    ',
+    '    ',
+    '    ',
+    '    ',
+    '    <section id="after">after</section>',
+    '  ',
+  ].join('\n'),
+  'script removal handles every script element and preserves surrounding non-script markup',
+);
+
 // Retain the final server-injected HTML/style; hold scripts so the initial overlay
 // can be inspected before the asset runtime removes it.
-const initial = delivery.html(game).replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '');
-const fixture = game.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '');
+const initial = removeScriptElements(delivery.html(game));
+const fixture = removeScriptElements(game);
 const browser = await chromium.launch({
   headless: true,
   executablePath: process.env.CHROMIUM_PATH || undefined,
