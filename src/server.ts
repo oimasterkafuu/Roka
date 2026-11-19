@@ -155,6 +155,55 @@ const GENERAL_RATE_LIMIT = { max: 1000, timeWindow: '1 minute' };
 const WEBHOOK_RATE_LIMIT = { max: 20, timeWindow: '1 minute' };
 const AUTH_PAGE_RATE_LIMIT = { max: 60, timeWindow: '1 minute' };
 const AUTH_ACTION_RATE_LIMIT = { max: 20, timeWindow: '1 minute' };
+const RATE_LIMIT_RETRY_AFTER = Symbol('rateLimitRetryAfter');
+type RateLimitError = Error & {
+  statusCode?: number;
+  [RATE_LIMIT_RETRY_AFTER]?: number;
+};
+
+const isHtmlPageNavigation = (request: FastifyRequest): boolean => {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  const pathname = request.url.split('?')[0];
+  if (pathname.startsWith('/api/')) return false;
+  if (pathname === '/socket.io' || pathname.startsWith('/socket.io/')) return false;
+  const extension = path.extname(pathname);
+  if (extension && extension !== '.html') return false;
+  return Boolean(
+    request.headers.accept?.split(',').some((value) => /^text\/html(?:\s*;|\s*$)/i.test(value.trim())),
+  );
+};
+
+const rateLimitHtml = (retryAfterSeconds: number): string => `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>访问过于频繁</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; box-sizing: border-box; padding: 24px; background: #f3f8f8; color: #253042; font-family: sans-serif; }
+    main { max-width: 480px; text-align: center; }
+    h1 { margin: 0 0 16px; color: teal; font-size: 28px; }
+    p { line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>访问过于频繁</h1>
+    <p>当前请求次数已达到上限，请稍后重试。</p>
+    <p><strong>请 ${retryAfterSeconds} 秒后再试</strong></p>
+  </main>
+</body>
+</html>`;
+
+const buildRateLimitError = (after: string, ttl: number): RateLimitError => {
+  const error = new Error(`Rate limit exceeded, retry in ${after}`) as RateLimitError;
+  Object.defineProperty(error, RATE_LIMIT_RETRY_AFTER, {
+    value: Math.max(1, Math.ceil(ttl / 1000)),
+  });
+  error.statusCode = 429;
+  return error;
+};
+
 const MAP_EXAMPLE_DEFAULT_PLAYER_COUNT = 4;
 const MAP_EXAMPLE_MIN_PLAYER_COUNT = 2;
 const MAP_EXAMPLE_MAX_PLAYER_COUNT = MAX_TEAMS;
@@ -492,6 +541,23 @@ const boot = async (listen = true): Promise<void> => {
     max: GENERAL_RATE_LIMIT.max,
     timeWindow: GENERAL_RATE_LIMIT.timeWindow,
     keyGenerator: resolveRateLimitKey,
+    errorResponseBuilder: (_request, context) => buildRateLimitError(context.after, context.ttl),
+  });
+  app.setErrorHandler((error, request, reply) => {
+    const rateLimitError = error as RateLimitError;
+    const retryAfterSeconds = rateLimitError[RATE_LIMIT_RETRY_AFTER];
+    if (
+      rateLimitError.statusCode === 429 &&
+      retryAfterSeconds !== undefined &&
+      isHtmlPageNavigation(request)
+    ) {
+      return reply
+        .code(429)
+        .header('Retry-After', String(retryAfterSeconds))
+        .type('text/html; charset=utf-8')
+        .send(rateLimitHtml(retryAfterSeconds));
+    }
+    return reply.send(error);
   });
   app.addHook('onRequest', app.rateLimit(GENERAL_RATE_LIMIT));
   app.addHook('onClose', async () => {
@@ -625,9 +691,24 @@ const boot = async (listen = true): Promise<void> => {
     webhookApp.post('/postreceive', { preHandler: webhookRateLimitPreHandler }, postReceiveHandler);
   });
 
-  const authPageRateLimitPreHandler = app.rateLimit(AUTH_PAGE_RATE_LIMIT);
-  const authActionRateLimitPreHandler = app.rateLimit(AUTH_ACTION_RATE_LIMIT);
   // createRateLimit evaluates independently of the global hook's rateLimitRan marker.
+  const createIndependentRateLimitPreHandler = (options: { max: number; timeWindow: string }) => {
+    const checkRateLimit = app.createRateLimit(options);
+    return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+      const result = await checkRateLimit(request);
+      if (result.isAllowed !== false) return;
+      reply
+        .header('x-ratelimit-limit', result.max)
+        .header('x-ratelimit-remaining', result.isExceeded ? 0 : result.remaining)
+        .header('x-ratelimit-reset', result.ttlInSeconds);
+      if (!result.isExceeded) return;
+      const retryAfterSeconds = Math.max(1, result.ttlInSeconds);
+      reply.header('Retry-After', String(retryAfterSeconds));
+      throw buildRateLimitError(`${retryAfterSeconds} seconds`, result.ttl);
+    };
+  };
+  const authPageRateLimitPreHandler = createIndependentRateLimitPreHandler(AUTH_PAGE_RATE_LIMIT);
+  const authActionRateLimitPreHandler = createIndependentRateLimitPreHandler(AUTH_ACTION_RATE_LIMIT);
   const checkReplayListRateLimit = app.createRateLimit({ max: 12, timeWindow: '1 minute' });
   const replayListRateLimitPreHandler = async (request: FastifyRequest, reply: FastifyReply) => {
     const result = await checkReplayListRateLimit(request);

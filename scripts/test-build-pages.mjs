@@ -103,9 +103,10 @@ const sharedHeaderPages = [
   'develop-bot.html',
   'develop.html',
   'login.html',
+  'replays.html',
   'tutorial-text.html',
 ];
-const specialPages = ['index.html', 'game.html', 'tutorial.html', 'replays.html'];
+const specialPages = ['index.html', 'game.html', 'tutorial.html'];
 const sharedHeaderIds = ['site-account-name', 'site-login', 'site-logout'];
 const faviconAssets = [
   '/icons/favicon.ico?v={{V}}',
@@ -232,9 +233,9 @@ for (const name of expectedPages) {
     );
   }
 }
-assert.equal(normalizedHeaders.length, 6, 'exactly six pages use the shared header');
+assert.equal(normalizedHeaders.length, 7, 'exactly seven pages use the shared header');
 for (const header of normalizedHeaders) {
-  assert.equal(header, normalizedHeaders[0], 'all six shared-header pages render the same structure');
+  assert.equal(header, normalizedHeaders[0], 'all seven shared-header pages render the same structure');
 }
 for (const name of specialPages) {
   assertNoSharedHeader(name, htmlFor(name));
@@ -308,14 +309,18 @@ for (const asset of [
 }
 
 const replays = htmlFor('replays.html');
-assert.ok(replays.includes('class="home-topbar"'), 'replays: private topbar');
-assert.ok(replays.includes('返回首页'), 'replays: private home control');
+assert.ok(!replays.includes('class="home-topbar"'), 'replays: former private topbar removed');
+assert.ok(!replays.includes('返回首页'), 'replays: former private home control removed');
+assert.equal((replays.match(/<h1\b/g) || []).length, 1, 'replays: exactly one h1');
+assert.match(replays, /<h1 class="doc-title">回放<\/h1>/, 'replays: body title');
+assert.match(replays, /href="\/replays" aria-current="page">回放<\/a\s*>/, 'replays: current navigation');
 for (const id of ['replay-login', 'replay-upload', 'replay-upload-file', 'replay-upload-view']) {
   assert.match(replays, new RegExp(`\\bid="${id}"`), `replays: account/upload control #${id}`);
 }
 assertScriptOrder('replays.html', replays, [
   '/vendor/jquery/jquery-3.6.0.min.js?v={{V}}',
   '/username.js?v={{V}}',
+  '/site-header.js?v={{V}}',
   '/vendor/socket.io/socket.io-4.0.1.js?v={{V}}',
   '/replays.js?v={{V}}',
 ]);
@@ -460,5 +465,5 @@ assert.equal(user.calls[1].options.method, 'POST');
 assert.equal(user.location.href, '/login');
 
 console.log('PASS build-pages: 13 same-named Pug/HTML pages, idempotent output, key DOM and script order');
-console.log('PASS headers: shared on six pages; private controls and no shared assets on seven pages');
+console.log('PASS headers: shared on seven pages; private controls and no shared assets on six pages');
 console.log('PASS inline scripts and site-header account state');
