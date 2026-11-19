@@ -5,7 +5,7 @@ import path from 'node:path';
 export const SECURITY_AUDIT_MAX_ENTRIES = 2000;
 export const SECURITY_AUDIT_MAX_BYTES = 2 * 1024 * 1024;
 export const REGISTRATION_WINDOW_MS = 24 * 60 * 60 * 1000;
-export const REGISTRATION_MAX_SUCCESSFUL_PER_WINDOW = 2;
+export const REGISTRATION_MAX_SUCCESSFUL_PER_WINDOW = 30;
 export const REGISTRATION_DENIAL_MS = 24 * 60 * 60 * 1000;
 export const IP_HISTORY_MAX = 20;
 export const IP_ACTIVITY_WRITE_THROTTLE_MS = 5 * 60 * 1000;

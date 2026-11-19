@@ -127,23 +127,24 @@ async function testRegistrationAndScanning() {
   await registerProtected(registration, 'fuckcheng', '203.0.113.10');
   assert.equal(store.getBanStatus('fuckcheng').banned, false);
   assert.equal(audit.list({ type: 'username_manual_review' })[0].ip, '203.0.113.10');
-  await registerProtected(registration, 'batch_one', '203.0.113.11');
-  await registerProtected(registration, 'batch_two', '203.0.113.11');
+  for (let index = 1; index <= 30; index += 1) {
+    const username = `batch_${index}`;
+    await registerProtected(registration, username, '203.0.113.11');
+    assert.equal(store.getBanStatus(username).banned, false);
+  }
   now = Date.now();
-  const limited = await registration.review('batch_three', '203.0.113.11');
+  const limited = await registration.review('batch_31', '203.0.113.11');
   assert.equal(limited.allowed, false);
   assert.equal(limited.status, 429);
   assert.equal(limited.retryAfter, REGISTRATION_DENIAL_MS / 1000);
-  assert.equal(store.getPublicProfile('batch_three'), null);
-  assert.equal(store.getBanStatus('batch_one').banned, false);
-  assert.equal(store.getBanStatus('batch_two').banned, false);
+  assert.equal(store.getPublicProfile('batch_31'), null);
   const restartedAudit = new SecurityAuditStore(dir);
   await restartedAudit.ensureReady();
   const restartedRegistration = new RegistrationSecurity(store, restartedAudit, () => now + 1000);
-  assert.equal((await restartedRegistration.review('batch_four', '203.0.113.11')).allowed, false);
+  assert.equal((await restartedRegistration.review('batch_32', '203.0.113.11')).allowed, false);
   assert.ok(restartedAudit.count('registration_rate_limited') >= 2, 'every rejected attempt is audited');
   now += REGISTRATION_DENIAL_MS + 2000;
-  assert.equal((await registration.review('batch_three', '203.0.113.11')).allowed, true);
+  assert.equal((await registration.review('batch_31', '203.0.113.11')).allowed, true);
 
   await registerProtected(registration, 'banned_peer', '203.0.113.12');
   await store.banUser('banned_peer', -1, '管理员手动封禁');
