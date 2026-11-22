@@ -132,9 +132,9 @@ pnpm run test:build-pages
 
 ### Bot(3.0) 策略 Bot
 
-Bot(3.0) 以 Relay 为基础框架，参考 Bot(2.0) 的 1v1 结构，目标是在官方小图上继续提升实战胜率。首个提交是 Relay 2.16.0 策略的完整副本，目录名 `bot-3.0` 会被后台托管模板自动发现。
+Bot(3.0) 以 Relay 为基础框架，参考 Bot(2.0) 的 1v1 结构，目标是在官方小图上继续提升实战胜率。目录名 `bot-3.0` 会被后台托管模板自动发现。
 
-基线使用真实引擎跑满 2048 局：Apex / Anti-Human / Bot(2.0) / Relay 四个对手，随机、迷宫、群岛、地中海四种地图，迷雾与多线各开关，每格 32 局、上限 1000 Tick，合计 1490 胜 / 424 负 / 134 超时，胜率 72.8%。逐项数据与复现命令见 [Bot(3.0) 基线](bot-template/bot-3.0/BASELINE.md)。
+当前主线已合入迷宫走廊相位、单线收尾纵队、迷雾单线层，并同步上游 relay 的 opening/reinforcement pricing 与多线 burst 移除。最终基线使用真实引擎跑满 2048 局：Apex / Anti-Human / Bot(2.0) / Relay 四个对手，随机、迷宫、群岛、地中海四种地图，迷雾与多线各开关，每格 32 局、上限 1000 Tick，合计 **1621 胜 / 367 负 / 60 超时，胜率 79.2%**。非 Relay 对手全部 >=50% 且无退化；Relay 2/16 格达标。逐项数据、旧引擎数字的不可比说明与复现命令见 [Bot(3.0) 基线](bot-template/bot-3.0/BASELINE.md)，暂停时保留的后续方向见 [NEXT.md](bot-template/bot-3.0/NEXT.md)。
 
 独立运行：`BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:bot3`；回归：`pnpm run test:bot3`；验收矩阵：`pnpm run eval:bot3`。
 
