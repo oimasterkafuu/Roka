@@ -123,6 +123,14 @@ pnpm run test:build-pages
 
 运行 `pnpm run test:relay` 检查协议与策略。当前结果见 [2.16.0 开局与峡谷评测](bot-template/relay-bot/OPENING.md)。历史结果见 [2.15.0 明牌单线与 FFA 评测](bot-template/relay-bot/SINGLE-LINE.md)及 [2.14.0 初版评测](bot-template/relay-bot/EVALUATION.md)。
 
+### Bot(3.0) 策略 Bot
+
+Bot(3.0) 以 Relay 为基础框架，参考 Bot(2.0) 的 1v1 结构，目标是在官方小图上继续提升实战胜率。首个提交是 Relay 2.16.0 策略的完整副本，目录名 `bot-3.0` 会被后台托管模板自动发现。
+
+基线使用真实引擎跑满 2048 局：Apex / Anti-Human / Bot(2.0) / Relay 四个对手，随机、迷宫、群岛、地中海四种地图，迷雾与多线各开关，每格 32 局、上限 1000 Tick，合计 1490 胜 / 424 负 / 134 超时，胜率 72.8%。逐项数据与复现命令见 [Bot(3.0) 基线](bot-template/bot-3.0/BASELINE.md)。
+
+独立运行：`BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:bot3`；回归：`pnpm run test:bot3`；验收矩阵：`pnpm run eval:bot3`。
+
 ## 许可
 
 本项目以 [AGPL-3.0-only](LICENSE) 许可开源。

@@ -1,0 +1,13 @@
+{
+  "name": "bot-3.0",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bot(3.0) - Roka small-map 1v1 strategy bot, based on relay-bot",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test bot3.test.cjs"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}

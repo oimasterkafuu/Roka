@@ -8,16 +8,20 @@ const { GameEngine } = require('../dist/game-engine');
 const { resolveMapSizeRatioByPlayers } = require('../dist/map/map-size');
 const { FIXED_SWAMP_RATIO } = require('../dist/server/lobby-service');
 const { attachStrategy } = require(process.env.RELAY_ENTRY || '../bot-template/relay-bot/strategy');
+// SELF_ID names the strategy under test; the default keeps the original relay
+// reports readable, while newer bots can reuse the same harness.
+const SELF = process.env.SELF_ID || 'relay';
 
 const entries = {
   simple: '../bot-template/simple-strategy-bot/strategy',
   anti: '../bot-template/anti-human-bot/server-bot',
   apex: '../bot-template/apex-bot/strategy',
+  relay: '../bot-template/relay-bot/strategy',
   v2: '../bot-template/bot-2.0/strategy',
 };
 
 async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
-  const lineup = ['relay', ...opponent.split('+')];
+  const lineup = [SELF, ...opponent.split('+')];
   const names = lineup.map((_, i) => lineup[(i - seat + lineup.length) % lineup.length]);
   const ratio = resolveMapSizeRatioByPlayers(names.length) * (large ? 2 : 1);
   const flags = { multi_line: multi, fog };
@@ -113,7 +117,7 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
       if (executed.includes(0))
         throw new Error('Inactive seat: ' + JSON.stringify({ opponent, seat, sent, executed }));
       const winner = ended ? lastFrame.leaderboard.find((p) => !p.dead)?.uid : undefined;
-      const self = lastFrame.leaderboard.find((p) => p.uid === 'relay');
+      const self = lastFrame.leaderboard.find((p) => p.uid === SELF);
       return {
         opponent,
         map,
@@ -123,7 +127,7 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
         seed,
         seat,
         tick,
-        result: self.dead ? 'loss' : winner === 'relay' ? 'win' : 'timeout',
+        result: self.dead ? 'loss' : winner === SELF ? 'win' : 'timeout',
         ...(names.length > 2
           ? {
               names,
