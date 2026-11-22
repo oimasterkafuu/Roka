@@ -93,6 +93,7 @@ function evaluateFrontMove(s, move) {
     wide,
     anchorDist,
     enemyDist,
+    land,
   } = s;
   const { i, j, own, hostile, strike, send, remaining, support, exposure, intercept, base } = move;
   if (strike) return 2500 + Math.min(100, remaining);
@@ -125,6 +126,15 @@ function evaluateFrontMove(s, move) {
     if (recovery > 0) score += Math.min(300, recovery * 1.5);
     if (b.grid_type[j] >= 50 && b.grid_type[j] < 100 && hostile) score += 90;
     if (s.beforeBurstEnd && economical && !repulse) score += 530 + Math.min(5, remaining);
+    // Land-first (see ./land). On a structurally swamp-heavy clear serial room
+    // the serial tick used to go into army concentration while relay took the
+    // neutral land: the exact leaderboard land race says when that is the
+    // losing trade, so a neutral capture outranks the own-merge march, and the
+    // 26..49 burst pays every captured plain until turn 50.
+    if (land) {
+      if (land.capture && !hostile && !repulse) score += land.capture;
+      if (land.burst) score += land.burst;
+    }
     if (repulse > 0) score -= Math.min(180, 25 + send * 1.4);
   } else if (!b.isolated[j]) {
     if (frontDist[j] < frontDist[i]) score = 25 + Math.min(52, Math.sqrt(send) * 3);
@@ -234,6 +244,21 @@ function evaluateFrontMove(s, move) {
   )
     score -= 260;
   if (b.lastFrom[i] === j && turn - b.lastMove[i] < 7 && s.defense[j] >= s.defense[i]) score -= 150;
+  // Clear-room paint cap (see ./land): while the exact land race is being lost
+  // and the border still has a neutral cell to paint, a plain merge onto our
+  // own cell buys neither land nor income. Defence, site funding and the
+  // closing funnel keep their score (they are priced above the cap anyway).
+  if (
+    land &&
+    own &&
+    !b.isolated[j] &&
+    !strike &&
+    !s.closing &&
+    j !== site &&
+    s.defense[j] >= s.defense[i] &&
+    score > land.paint
+  )
+    score = Math.max(0, Math.min(score, land.paint));
   return score;
 }
 

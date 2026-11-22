@@ -9,7 +9,7 @@ const {
 } = require('./single-front');
 const { openingOrder, END_TICK } = require('./opening');
 const { isMazeBoard, laneBlocked, recordLane, LANE, SINGLE_FROM } = require('./maze');
-const { closingUpdate } = require('./closing');
+const { closingUpdate, closingConfig } = require('./closing');
 const {
   fogConfig,
   fogUpdate,
@@ -41,6 +41,7 @@ const {
   fogOraclePush,
   fogOraclePaint,
 } = require('./fog-oracle');
+const { landConfig, landContext } = require('./land');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
@@ -522,6 +523,28 @@ function chooseOrders(b, turn, leaderboard, multi) {
     mazeFogOpen && fogMazeCfg.paint > 0
       ? fogMazePaintCap(fogMazeCfg, neutralBorder(b, me))
       : Infinity;
+  // Land-first layer (see ./land). Structurally swamp-heavy clear serial rooms
+  // spend the serial tick on army concentration instead of land, and the exact
+  // leaderboard land race says when that is the losing trade. Every field is
+  // inert unless a `BOT3_LAND*` flag is set, so the shipped path stays byte for
+  // byte.
+  const landCfg = landConfig();
+  const land = clearSerial
+    ? landContext(
+        b,
+        {
+          turn,
+          multi,
+          clearSerial,
+          single,
+          size,
+          land: self.land,
+          enemyLand,
+          neutral: landCfg.landfirst ? neutralBorder(b, me) : 0,
+        },
+        landCfg,
+      )
+    : null;
   const fogAim =
     fogOpen &&
     fogCfg.aimFront &&
@@ -609,16 +632,23 @@ function chooseOrders(b, turn, leaderboard, multi) {
       : Infinity;
   // A dead-even attrition on a compact serial room has to be converted by
   // concentration, not by more income; see ./closing for the diagnosis.
+  // Land-first rooms hand the frame back to the land race: the funnel crosses
+  // swamp instead of converting it, so the layer is asked for its verdict but
+  // stays out of the frame (the state stays readable for diagnostics).
   const closing = single
-    ? closingUpdate(b, {
-        turn,
-        multi,
-        size,
-        army: self.army,
-        enemyArmy: rival ? rival.player.army : 0,
-        enemyCrowns: rival ? rival.crowns.length : 0,
-        danger: danger.length,
-      })
+    ? closingUpdate(
+        b,
+        {
+          turn,
+          multi,
+          size,
+          army: self.army,
+          enemyArmy: rival ? rival.player.army : 0,
+          enemyCrowns: rival ? rival.crowns.length : 0,
+          danger: danger.length,
+        },
+        land?.closeSkip ? closingConfig({ enabled: false }) : undefined,
+      )
     : { active: false };
   const closeIn = closing.active === true;
   // Finish layer: when an owned stack can provably take an enemy crown and
@@ -777,6 +807,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // must spend a stack on, plus one army per tick. Only the ceiling moves; the
   // site choice (and its `spread` rule) stays on the normal path.
   if (fogOpen && fogCfg.homes) limit = Math.max(limit, fogCfg.homes);
+  // Island crowns (see ./land): a crown on a rear island is safe income on a
+  // swamp-heavy archipelago room, and the stock ceiling is priced by mobile
+  // army, not by what the map can support. Inert at 0.
+  if (land?.homes) limit = Math.max(limit, land.homes);
   const develop =
     (!single || invest || homes.length <= 2 || turn % 12 < (longFront ? 6 : 5)) && !closeIn;
   const backup = single && !longFront && !ffa && homes.length === 1 && enemyDist[homes[0]] <= 12;
@@ -786,6 +820,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // Off at 0 and only read in a fog multi room, so the shipped path stays byte
   // for byte.
   const fogSite = multi && !clearSerial ? fogMultiConfig().site : 0;
+  const siteSpread = fogOpen ? fogCfg.spread : (land?.spread ?? 0);
   const site =
     develop && turn >= buildingStart && homes.length < limit
       ? selectBuildSite(
@@ -795,7 +830,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
           frontDist,
           homeDist,
           anchorDist,
-          fogOpen ? fogCfg.spread : 0,
+          siteSpread,
           fogSite,
           enemyDist,
         )
@@ -834,6 +869,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       lead: closingLead,
       leadDist: closingLeadDist,
       enemyDist,
+      land,
     };
   }
   const candidates = [];
@@ -848,7 +884,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
     // A new crown inside the old cluster is one raid away from a cascade: the
     // traced losses lose two or three crowns to a single stack. When the fog
     // spread rule is on, a site too close to an existing crown is refused.
-    const tooClose = fogOpen && fogCfg.spread > 0 && homeDist[i] < fogCfg.spread;
+    const tooClose = siteSpread > 0 && homeDist[i] < siteSpread;
     if (!base && !swamp(tile[i]) && !tooClose && units[i] >= 50 && turn >= buildingStart) {
       const city = anchor(tile[i]);
       // A safe upgrade gives a second crown immediately, even if the old
@@ -975,6 +1011,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
       let score = 0;
       if (!own) {
         score = beforeBurstEnd ? 62 : 32;
+        // Land-first burst (see ./land): a neutral capture inside the 26..49
+        // window pays one army per tick until turn 50, so on a swamp-heavy
+        // board it outranks the own-merge marches that score on this path.
+        if (land?.burst) score += land.burst;
+        if (land?.capture && !hostile) score += land.capture;
         if (swamp(tile[j])) score -= beforeBurstEnd && turn < 49 ? 29 : 8;
         score += Math.min(3, opens) * 2 + Math.min(4, remaining - 1) * 1.3;
         if (hostile) score += 17 + Math.min(95, Math.sqrt(cut[j]) * 5);

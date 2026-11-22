@@ -12,6 +12,7 @@ const relayPlanner = require('../relay-bot/planner');
 const { predict: predictShadow, record: recordShadow } = require('./shadow');
 const { isMazeBoard, laneBlocked, laneState, recordLane } = require('./maze');
 const { closingConfig, closingUpdate, freshClosing } = require('./closing');
+const { landConfig, landContext, swampShare } = require('./land');
 const {
   fogConfig,
   fogBoard,
@@ -1559,4 +1560,204 @@ test('default the maze fog bundle on with the crown-economy gate armed', () => {
   assert.equal(layer.econ, 0);
   assert.equal(layer.paint, 0);
   assert.equal(fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_ECON: '6' }).econ, 6);
+});
+
+// Land-first layer (see ./land and LAND.md). The only knob that survived the
+// sixteen-seed swamp screen is the closing stand-down; the capture boost, the
+// clear-room paint cap and the island crowns stay opt-in with their measured
+// verdicts. These tests pin the room gate and the stand-down hand-off.
+test('arm the land-first layer only on a structurally swamp-heavy clear serial room', () => {
+  assert.equal(landConfig({}, {}).landfirst, true);
+  assert.equal(landConfig({}, { BOT3_LANDFIRST: '0' }).landfirst, false);
+  // The measured-negative knobs default to off and stay addressable.
+  assert.equal(landConfig({}, {}).capture, 0);
+  assert.equal(landConfig({}, {}).paint, 0);
+  assert.equal(landConfig({}, { BOT3_LAND_CAPTURE: '130' }).capture, 130);
+  assert.equal(landConfig({}, { BOT3_LAND_PAINT: '155' }).paint, 155);
+  assert.equal(landConfig({}, { BOT3_LAND_BURST: '0' }).burst, 0);
+  assert.equal(landConfig({}, { BOT3_LAND_CLOSE_SKIP: '0' }).closeSkip, 0);
+  assert.equal(landConfig({}, { BOT3_LAND_CLOSE_UNTIL: '200' }).closeUntil, 200);
+
+  const b = createBoard(6, 10, 1);
+  b.grid_type.fill(200);
+  for (let i = 0; i < 24; i++) b.grid_type[i] = 204;
+  assert.equal(swampShare(b), 0.4);
+  const room = {
+    turn: 140,
+    multi: false,
+    clearSerial: true,
+    single: true,
+    size: b.size,
+    land: 12,
+    enemyLand: 15,
+    neutral: 4,
+  };
+  const config = landConfig({}, {});
+  assert.equal(landContext(b, room, config).heavy, true);
+  assert.equal(landContext(b, room, config).trail, true);
+  assert.equal(landContext(b, room, config).closeSkip, true);
+  // Ahead on land, or before the front planner opens, the layer stands down.
+  assert.equal(landContext(b, { ...room, land: 16 }, config).closeSkip, false);
+  assert.equal(landContext(b, { ...room, single: false }, config).closeSkip, false);
+  assert.equal(landContext(b, { ...room, land: 0, enemyLand: 0 }, config).closeSkip, false);
+  // Fog, multi-line, an oversized board and an open map are out of scope.
+  assert.equal(landContext(b, { ...room, clearSerial: false }, config).closeSkip, false);
+  assert.equal(landContext(b, { ...room, multi: true }, config).closeSkip, false);
+  assert.equal(landContext(b, { ...room, size: 900 }, config).closeSkip, false);
+  const open = createBoard(6, 10, 1);
+  open.grid_type.fill(200);
+  assert.equal(swampShare(open), 0);
+  assert.equal(landContext(open, room, config).heavy, false);
+  assert.equal(landContext(open, room, config).closeSkip, false);
+  // `BOT3_LANDFIRST=0` makes every field inert.
+  assert.equal(landContext(b, room, landConfig({}, { BOT3_LANDFIRST: '0' })).closeSkip, false);
+  // The capture boost and the burst window are wired but off by default.
+  const capture = landConfig({}, { BOT3_LAND_CAPTURE: '130' });
+  assert.equal(landContext(b, room, capture).capture, 130);
+  assert.equal(landContext(b, { ...room, enemyLand: 12 }, capture).capture, 0);
+  const burst = landConfig({}, { BOT3_LANDBURST: '1' });
+  assert.equal(landContext(b, { ...room, turn: 26, single: false }, burst).burst, 220);
+  assert.equal(landContext(b, { ...room, turn: 50 }, burst).burst, 0);
+  // The stand-down can end: closing returns from `closeUntil` on.
+  const late = landConfig({}, { BOT3_LAND_CLOSE_UNTIL: '120' });
+  assert.equal(landContext(b, room, late).closeSkip, false);
+  assert.equal(landContext(b, { ...room, turn: 119 }, late).closeSkip, true);
+});
+
+test('stand the closing column down on a swamp-heavy clear room while land trails', () => {
+  const army = (ours, theirs) => [
+    { id: 1, team: 1, army: 300, land: ours, dead: 0 },
+    { id: 2, team: 2, army: 90, land: theirs, dead: 0 },
+  ];
+  const swamp = 204;
+  const build = (terrain) => {
+    const b = createBoard(4, 6, 1);
+    b.grid_type.fill(terrain);
+    b.grid_type[0] = 101;
+    b.army_cnt[0] = 20;
+    b.grid_type[1] = 1;
+    b.army_cnt[1] = 130;
+    b.grid_type[2] = 1;
+    b.army_cnt[2] = 4;
+    b.grid_type[6] = 1;
+    b.army_cnt[6] = 60;
+    for (let i = 12; i < 18; i++) {
+      b.grid_type[i] = 102;
+      b.army_cnt[i] = 3;
+    }
+    return b;
+  };
+  // Trailing on the exact leaderboard land race: the funnel stands down.
+  const trailing = build(swamp);
+  chooseOrders(trailing, 140, army(4, 8), false);
+  assert.equal(trailing.closing.active, false);
+  // Leading on land, an open board, or the layer switched off keep the funnel.
+  const leading = build(swamp);
+  chooseOrders(leading, 140, army(12, 8), false);
+  assert.equal(leading.closing.active, true);
+  const open = build(200);
+  chooseOrders(open, 140, army(4, 8), false);
+  assert.equal(open.closing.active, true);
+  const off = build(swamp);
+  process.env.BOT3_LANDFIRST = '0';
+  try {
+    chooseOrders(off, 140, army(4, 8), false);
+    assert.equal(off.closing.active, true);
+  } finally {
+    delete process.env.BOT3_LANDFIRST;
+  }
+});
+
+test('price the land-first capture boost and merge cap only when enabled', () => {
+  const b = createBoard(1, 6, 1);
+  b.grid_type.set([101, 1, 1, 200, 102, 102]);
+  b.army_cnt.set([2, 40, 200, 0, 5, 3]);
+  const fill = (value) => Int32Array.from({ length: b.size }, () => value);
+  const state = {
+    b,
+    units: Float64Array.from(b.army_cnt),
+    teams: Uint8Array.from([1, 1, 1, 0, 2, 2]),
+    myTeam: 1,
+    turn: 200,
+    goal: Int32Array.from([3, 2, 2, 1, 0, 0]),
+    required: fill(6),
+    homeDist: fill(1),
+    immediate: fill(0),
+    cut: fill(0),
+    rescue: fill(0),
+    frontDist: fill(0),
+    route: Int32Array.from([3, 2, 1, 1, 0, 0]),
+    homes: [0],
+    danger: [],
+    site: -1,
+    self: { army: 250, land: 5 },
+    rival: { player: { army: 50 }, crowns: [4, 5], otherFront: 0, contact: 0 },
+    ffa: false,
+    wide: false,
+    anchorDist: fill(1),
+    enemyDist: Int32Array.from([3, 3, 3, 1, 1, 1]),
+    defense: fill(1),
+    closing: false,
+    push: 1,
+    lead: -1,
+    leadDist: null,
+  };
+  const capture = {
+    i: 2,
+    j: 3,
+    own: false,
+    hostile: false,
+    strike: false,
+    send: 199,
+    remaining: 199,
+    support: 2,
+    exposure: 0,
+    intercept: false,
+    base: false,
+  };
+  // A capture that is not also a crown approach (that case has its own rule):
+  // only the plain gap-filling term moves.
+  const flat = { ...state, goal: fill(3), route: fill(0) };
+  const plain = evaluateFrontMove(flat, capture);
+  assert.equal(
+    evaluateFrontMove({ ...flat, land: { capture: 0, burst: 0, paint: Infinity } }, capture),
+    plain,
+  );
+  assert.equal(
+    evaluateFrontMove({ ...flat, land: { capture: 130, burst: 0, paint: Infinity } }, capture),
+    plain + 130,
+  );
+  assert.equal(
+    evaluateFrontMove({ ...flat, land: { capture: 0, burst: 220, paint: Infinity } }, capture),
+    plain + 220,
+  );
+  // The paint cap clamps a plain own-cell merge and leaves site funding alone.
+  const merge = {
+    i: 1,
+    j: 2,
+    own: true,
+    hostile: false,
+    strike: false,
+    send: 39,
+    remaining: 79,
+    support: 2,
+    exposure: 0,
+    intercept: false,
+    base: false,
+  };
+  const march = evaluateFrontMove(state, merge);
+  assert.ok(march > 150);
+  assert.equal(evaluateFrontMove({ ...state, land: { capture: 0, burst: 0, paint: 150 } }, merge), 150);
+  // Funding the build site and the closing funnel are exempt from the cap.
+  const funded = evaluateFrontMove({ ...state, site: 2 }, merge);
+  assert.ok(funded > 150);
+  assert.equal(
+    evaluateFrontMove({ ...state, site: 2, land: { capture: 0, burst: 0, paint: 150 } }, merge),
+    funded,
+  );
+  const funnel = evaluateFrontMove({ ...state, closing: true }, merge);
+  assert.equal(
+    evaluateFrontMove({ ...state, closing: true, land: { capture: 0, burst: 0, paint: 150 } }, merge),
+    funnel,
+  );
 });
