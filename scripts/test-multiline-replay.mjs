@@ -143,34 +143,105 @@ const live = await record(true);
 const single = await record(false);
 if (process.argv.includes('--write-fixture'))
   await writeFile(fixturePath, JSON.stringify(live.raw, null, 2) + '\n');
-assert.deepEqual(
-  live.raw,
-  JSON.parse(await readFile(fixturePath, 'utf8')),
-  'fixture is reproduced by real play',
-);
+const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
+for (const flag of [
+  'multi_line_burst',
+  'isolated_reinforcement_fix',
+  'auto_crown_transfer',
+  'map_size_version',
+]) {
+  assert.ok(!Object.hasOwn(live.raw.meta, flag));
+  delete fixture.meta[flag];
+}
+assert.deepEqual(live.raw, fixture, 'fixture is reproduced by real play');
 for (const result of [live, single])
   compareReplay(await GameEngine.buildReplayFromActions(result.raw), result.frames);
 
 // Legacy selected-cell streams, including ignored historical line metadata.
-const legacy = structuredClone(single.raw);
-legacy.version = 'ops-v1';
-legacy.player_ops = legacy.player_ops.map((ops) =>
-  ops.flatMap((op) => {
-    if (op.op !== 'q') return [{ ...op, line: 2 }];
-    return op.actions.flatMap((a) => {
-      const selected = { op: 's', x: a.x, y: a.y, line: 2 };
-      if (a.kind !== 'm') return [selected, { op: a.kind, line: 2 }];
-      const d = [
-        [-1, 0],
-        [1, 0],
-        [0, -1],
-        [0, 1],
-      ].findIndex(([x, y]) => a.x + x === a.dx && a.y + y === a.dy);
-      return [selected, { op: 'm', d, ...(a.mode === 2 ? { a: 1 } : a.mode === 1 ? { h: 1 } : {}), line: 2 }];
-    });
-  }),
-);
+function toLegacy(raw) {
+  const legacy = structuredClone(raw);
+  legacy.version = 'ops-v1';
+  legacy.player_ops = legacy.player_ops.map((ops) =>
+    ops.flatMap((op) => {
+      if (op.op !== 'q') return [{ ...op, line: 2 }];
+      return op.actions.flatMap((a) => {
+        const selected = { op: 's', x: a.x, y: a.y, line: 2 };
+        if (a.kind !== 'm') return [selected, { op: a.kind, line: 2 }];
+        const d = [
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1],
+        ].findIndex(([x, y]) => a.x + x === a.dx && a.y + y === a.dy);
+        return [
+          selected,
+          { op: 'm', d, ...(a.mode === 2 ? { a: 1 } : a.mode === 1 ? { h: 1 } : {}), line: 2 },
+        ];
+      });
+    }),
+  );
+  return legacy;
+}
+const legacy = toLegacy(single.raw);
 compareReplay(await GameEngine.buildReplayFromActions(legacy), single.frames);
+
+const [x, y] = live.crown;
+const [dx, dy] = live.branches[0];
+const opening = {
+  ...live.raw,
+  total_turns: 51,
+  player_ops: [[{ op: 'q', actions: [{ kind: 'm', x, y, dx, dy, mode: 2 }] }], []],
+};
+for (const raw of [opening, toLegacy(opening)]) {
+  for (const oldFlags of [
+    {},
+    {
+      multi_line_burst: true,
+      map_size_version: 1,
+      auto_crown_transfer: false,
+      isolated_reinforcement_fix: false,
+    },
+  ]) {
+    const replay = await GameEngine.buildReplayFromActions({ ...raw, meta: { ...raw.meta, ...oldFlags } });
+    assert.equal(replay.patches.length, 51);
+    assert.deepEqual(replay.initial.grid_type, live.frames[0].grid_type);
+    for (const { forward: frame } of replay.patches) {
+      const player = frame.leaderboard.find((entry) => entry.id === 1);
+      const turn = frame.turn;
+      assert.equal(player.land, 2, 'one crown and one connected plain');
+      assert.equal(
+        player.army,
+        1 + turn + Math.floor(turn / 50),
+        `${raw.version}: no multiline burst at tick ${turn}`,
+      );
+    }
+  }
+  for (const op of [{ op: 't', x, y }, { op: 'unknown' }, { op: 'w', n: -1 }]) {
+    await assert.rejects(GameEngine.buildReplayFromActions({ ...raw, player_ops: [[op], []] }), /回放不兼容/);
+  }
+}
+const needsBurst = structuredClone(opening);
+needsBurst.player_ops[0].push(
+  { op: 'w', n: 24 },
+  { op: 'q', actions: [{ kind: 'm', x: dx, y: dy, dx: x, dy: y, mode: 2 }] },
+);
+for (const raw of [needsBurst, toLegacy(needsBurst)]) {
+  await assert.rejects(GameEngine.buildReplayFromActions(raw), /Tick 26.*未能执行/);
+}
+await assert.rejects(
+  GameEngine.buildReplayFromActions({
+    ...opening,
+    player_ops: [[{ op: 'q', actions: [{ kind: 'm', x, y, dx, dy, mode: 3 }] }], []],
+  }),
+  /回放不兼容/,
+);
+await assert.rejects(
+  GameEngine.buildReplayFromActions({ ...legacy, player_ops: [[{ op: 'b' }], []] }),
+  /回放不兼容/,
+);
+console.log(
+  'PASS: both raw formats use current maps and growth; malformed, obsolete and unexecutable actions rejected',
+);
 const malformed = structuredClone(live.raw);
 malformed.meta.multi_line = false;
 await assert.rejects(GameEngine.buildReplayFromActions(malformed), /Single-line replay/);

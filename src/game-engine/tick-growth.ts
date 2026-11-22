@@ -1,7 +1,7 @@
 import { Grid, Tile } from '../map/map-core';
 
 /**
- * 全局爆发期：第 26 ~ 50 Tick，正常状态的普通领土每 Tick 额外 +1 兵。
+ * 单线爆发期：第 26 ~ 50 Tick，正常状态的普通领土每 Tick 额外 +1 兵。
  */
 const BURST_START_TURN = 26;
 const BURST_END_TURN = 50;
@@ -13,6 +13,7 @@ const PLAIN_GROWTH_INTERVAL = 50;
 
 interface TickGrowthInput {
   turn: number;
+  multiLine: boolean;
   n: number;
   m: number;
   gridType: Grid<Tile>;
@@ -31,7 +32,7 @@ interface TickGrowthInput {
  * - 沼泽（2）/ 孤军 / 中立格：永远不生产兵力。
  */
 const applyTickGrowth = (input: TickGrowthInput): void => {
-  const burst = input.turn >= BURST_START_TURN && input.turn <= BURST_END_TURN;
+  const burst = !input.multiLine && input.turn >= BURST_START_TURN && input.turn <= BURST_END_TURN;
   const plainGrowth = input.turn % PLAIN_GROWTH_INTERVAL === 0;
   if (!burst && !plainGrowth) {
     for (let i = 0; i < input.n; i += 1) {
