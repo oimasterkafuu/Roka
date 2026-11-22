@@ -115,9 +115,11 @@ pnpm run test:build-pages
 
 管理员可在「策略 Bot」选择 `relay-bot`，按房间需要允许迷雾和多线。Relay 在开局抢占爆发期可产兵的普通地块，接敌后兼顾攻城路线、主城来兵和补给线上的关键格。多线模式逐 Tick 组合独立指令，迷雾下记录曾经发现的主城。
 
+默认的全视野单线房间使用独立的行动评估。开局比较未来几步能占领的普通地块。接敌后比较各方主城产量，估算进攻路线的沿途兵力、侧翼和补给，按断线兵团规模决定是否抢回连接格。多人 FFA 还会比较目标的主城数、双方距离和其他边界的敌军压力。
+
 在仓库根目录安装依赖后，可通过 `BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:relay` 独立运行。`BOT_SERVER` 默认为 `http://127.0.0.1:23333`，组队时可用 `BOT_TEAM` 选择 1 至 16 队。托管权限与第三方令牌的房间限制见游戏内机器人开发协议。
 
-运行 `pnpm run test:relay` 检查协议与策略。真实引擎换边评测的复现命令和分项结果见 [Relay 评测](bot-template/relay-bot/EVALUATION.md)。
+运行 `pnpm run test:relay` 检查协议与策略。真实引擎的复现命令、对手和分项结果见[明牌单线与 FFA 评测](bot-template/relay-bot/SINGLE-LINE.md)及 [2.14.0 初版评测](bot-template/relay-bot/EVALUATION.md)。
 
 ## 许可
 

@@ -1,5 +1,14 @@
 'use strict';
 
+const {
+  rescueValues,
+  assessOpponents,
+  evaluateFrontMove,
+  searchCampaign,
+  siegeValue,
+} = require('./single-front');
+const { openingOrder } = require('./opening');
+
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
 const crown = (code) => code >= 100 && code < 150;
@@ -154,7 +163,7 @@ function incomingStrength(b, enemies, units, teams, myTeam) {
   return { threat, immediate };
 }
 
-function selectBuildSite(b, units, threat, frontDist, homeDist) {
+function selectBuildSite(b, units, threat, frontDist, homeDist, supplyDistance) {
   const { size, me, neighbors, grid_type: tile } = b;
   // In serial play, depositing several garrisons at the same safe site is
   // cheaper than marching each one to the front. Prefer sites we can finish.
@@ -176,7 +185,8 @@ function selectBuildSite(b, units, threat, frontDist, homeDist) {
       Math.min(units[i], cost) +
       Math.min(largest, cost - Math.min(cost, units[i])) * 0.8 +
       Math.min(4, frontDist[i]) +
-      Math.min(4, homeDist[i]);
+      Math.min(4, homeDist[i]) +
+      (supplyDistance ? 4 * Math.min(8, supplyDistance[i]) : 0);
     if (value > siteValue) {
       siteValue = value;
       site = i;
@@ -230,25 +240,106 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const homeDist = distances(b, homes).dist;
   const frontDist = distances(b, borders, (j) => teams[j] === myTeam).dist;
   const enemyDist = distances(b, enemies).dist;
+  const clearSerial = !multi && !(b.fogMode ?? b.fog.includes(1));
+  if (clearSerial && turn < 25 && homes.length === 1 && borders.every((i) => enemyDist[i] > 4)) {
+    return openingOrder(b, teams, myTeam, homes, turn);
+  }
   const scouting = distances(b, scouts).dist;
-  const { dist: goal, queue } = distances(b, targets);
+  const single = clearSerial && turn >= 28;
+  const self = leaderboard.find((p) => p.id === me);
+  const borderDistance = single ? distances(b, borders).dist : null;
+  const rival = single
+    ? assessOpponents(b, leaderboard, targets, borderDistance, teams, myTeam, units, self)
+    : null;
+  const objectives = single ? (rival?.crowns ?? []) : targets;
+  const { dist: goal, queue } = distances(b, objectives);
   const heading = targets.length ? goal : enemies.length ? enemyDist : scouting;
   const required = assaultStrength(b, queue, goal, units, teams, myTeam);
   const { threat, immediate } = incomingStrength(b, enemies, units, teams, myTeam);
   const danger = homes.filter((i) => threat[i] > units[i]);
   const defense = distances(b, danger, (j) => teams[j] === myTeam && !b.isolated[j]).dist;
-  const self = leaderboard.find((p) => p.id === me);
   const mobileArmy = self.army - self.land;
   const longFront = !multi && size >= 400;
   let route;
-  if (longFront && turn >= 44) {
+  if (longFront && !clearSerial && turn >= 44) {
     const unseen = scouts.filter((i) => b.lastSeen[i] === -1);
     const destinations = targets.length ? targets : unseen.length ? unseen : scouts;
     route = campaignRoute(b, destinations, units, teams, myTeam, Math.max(3, mobileArmy / 70));
   }
-  const limit = Math.max(2, Math.min(longFront ? 12 : 32, 1 + Math.floor(mobileArmy / 185)));
+  let front;
+  const anchorDist = single
+    ? distances(
+        b,
+        anchors.filter((i) => teams[i] === myTeam),
+        (j) => teams[j] === myTeam && !b.isolated[j],
+      ).dist
+    : null;
+  if (single) {
+    for (const i of borders) {
+      for (const j of neighbors[i]) {
+        if (tile[j] !== 201 && teams[j] !== myTeam)
+          anchorDist[j] = Math.min(anchorDist[j], anchorDist[i] + 1);
+      }
+    }
+  }
+  const rivalCrowns = new Map();
+  if (single)
+    for (const i of targets) {
+      const owner = ownerOf(b.memory[i]);
+      rivalCrowns.set(owner, (rivalCrowns.get(owner) ?? 0) + 1);
+    }
+  const ffa = new Set(teamByOwner.values()).size > 2;
+  const productiveTarget = ffa
+    ? 5 + 2 * Math.max(0, ...rivalCrowns.values())
+    : rival
+      ? rival.crowns.length + Math.max(3, Math.ceil(rival.crowns.length * 0.35))
+      : 5;
+  const invest =
+    single &&
+    (homes.length < productiveTarget || mobileArmy > homes.length * 240) &&
+    (!danger.length || homes.length > 2);
+  const limit = single
+    ? invest
+      ? Math.max(productiveTarget, homes.length + 1)
+      : Math.max(2, 1 + Math.floor(mobileArmy / 140))
+    : Math.max(2, Math.min(longFront ? 12 : 32, 1 + Math.floor(mobileArmy / 185)));
+  const develop = !single || invest || homes.length <= 2 || turn % 12 < (longFront ? 6 : 5);
+  const backup = single && !longFront && !ffa && homes.length === 1 && enemyDist[homes[0]] <= 12;
+  const buildingStart = clearSerial ? (backup ? 39 : 50) : 38;
   const site =
-    turn >= 38 && homes.length < limit ? selectBuildSite(b, units, threat, frontDist, homeDist) : -1;
+    develop && turn >= buildingStart && homes.length < limit
+      ? selectBuildSite(b, units, threat, frontDist, homeDist, anchorDist)
+      : -1;
+  if (single) {
+    const route = campaignRoute(b, objectives, units, teams, myTeam, Math.max(3, mobileArmy / 70));
+    const rescue = rescueValues(b, teams, myTeam, units);
+    front = {
+      b,
+      units,
+      teams,
+      myTeam,
+      turn,
+      goal,
+      required,
+      homeDist,
+      immediate,
+      cut,
+      rescue,
+      frontDist,
+      route,
+      homes,
+      danger,
+      site,
+      self,
+      rival,
+      ffa,
+      wide: longFront,
+      anchorDist,
+      defense,
+      invest,
+      backup,
+    };
+  }
   const candidates = [];
   const propose = (score, from, to, mode = 2, build) => {
     if (score > 0) candidates.push({ score, from, to, mode, build });
@@ -258,12 +349,37 @@ function chooseOrders(b, turn, leaderboard, multi) {
     const base = crown(tile[i]),
       critical = base || cut[i] > 20;
     const nearFight = enemyDist[i] < 5;
-    if (!base && !swamp(tile[i]) && units[i] >= 50 && turn >= 38) {
+    if (!base && !swamp(tile[i]) && units[i] >= 50 && turn >= buildingStart) {
       const city = anchor(tile[i]);
       const safe = immediate[i] <= units[i] - 50;
-      if (safe && homes.length < limit && (city || units[i] >= 100 || (cut[i] > 30 && nearFight))) {
-        const buildScore = i === site ? 360 : city ? 195 : units[i] >= 100 ? 150 : 105;
-        propose(buildScore - (nearFight && homes.length > 1 ? 82 : 0), i, i, 2, city ? 'c' : 'b');
+      const outpost = single && anchorDist[i] >= 5 && (cut[i] > 25 || units[i] >= 85);
+      if (
+        safe &&
+        (develop || outpost) &&
+        (homes.length < limit || outpost) &&
+        (city || units[i] >= 100 || (cut[i] > 30 && nearFight) || outpost)
+      ) {
+        const buildScore =
+          i === site
+            ? invest
+              ? 675
+              : single
+                ? 403
+                : 360
+            : outpost
+              ? 420
+              : city
+                ? 195
+                : units[i] >= 100
+                  ? 150
+                  : 105;
+        propose(
+          backup && i === site ? 820 : buildScore - (nearFight && homes.length > 1 ? 82 : 0),
+          i,
+          i,
+          2,
+          city ? 'c' : 'b',
+        );
       }
     }
     if (units[i] < 2) continue;
@@ -297,10 +413,34 @@ function chooseOrders(b, turn, leaderboard, multi) {
         } else continue;
       }
       if (send <= 0) continue;
-      if (!own && send <= units[j]) continue;
+      if (!own && send <= units[j]) {
+        if (front && hostile) propose(siegeValue(front, i, j, send), i, j, mode);
+        continue;
+      }
       const remaining = own ? send + units[j] : send - units[j];
       const opens = neighbors[j].filter((k) => tile[k] !== 201 && teams[k] !== myTeam).length;
       const support = neighbors[j].filter((k) => teams[k] === myTeam && !b.isolated[k]).length;
+      if (front) {
+        propose(
+          evaluateFrontMove(front, {
+            i,
+            j,
+            own,
+            hostile,
+            strike,
+            send,
+            remaining,
+            support,
+            exposure,
+            intercept,
+            base,
+          }),
+          i,
+          j,
+          mode,
+        );
+        continue;
+      }
       let score = 0;
       if (!own) {
         score = turn < 50 ? 62 : 32;
@@ -337,7 +477,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
           );
         }
       }
-      if (turn < 35 && goal[j] > 5 && own) score = Math.min(score, 44 + Math.min(send, 14));
+      if (turn < (clearSerial ? 45 : 35) && goal[j] > 5 && own)
+        score = Math.min(score, 44 + Math.min(send, 14));
       if (turn >= 40 && !strike && !b.isolated[j] && heading[j] < heading[i]) {
         // Gather while advancing. A stack that picks up the next garrison
         // can reach the front intact without a separate collection phase.
@@ -373,6 +514,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       if (score > 0) propose(score, i, j, mode);
     }
   }
+  if (front) searchCampaign(front, candidates);
   candidates.sort((a, c) => c.score - a.score);
   const used = new Set(),
     orders = [];
