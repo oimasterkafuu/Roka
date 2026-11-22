@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
-const { attachStrategy } = require('./strategy');
+const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents } = require('./single-front');
 
 const players = [
@@ -100,6 +100,64 @@ test('remember a hidden crown and clear its location when a scout revisits it', 
   b.fog[4] = 0;
   chooseOrders(b, 57, players, false);
   assert.equal(b.memory[4], 200);
+});
+
+test('ready only with two participants, and resume after a game or deployment', (context) => {
+  const socket = new EventEmitter();
+  context.after(attachStrategy(socket, { room: 'test' }).stop);
+  const requests = [];
+  socket.on('change_ready', (request) => requests.push(request));
+  socket.emit('set_id', 'relay');
+
+  const member = { sid: 'relay', team: 1, ready: false };
+  const second = { sid: 'second', team: 1, ready: false };
+  const snapshot = { players: [member, { sid: 'watching', team: 0 }] };
+  socket.emit('room_update', { players: [member] });
+  socket.emit('room_update', snapshot);
+  snapshot.players.push(second);
+  socket.emit('room_update', { ...snapshot, update_queued: true });
+  socket.emit('room_update', { ...snapshot, in_game: true });
+  assert.deepEqual(requests, []);
+
+  socket.emit('room_update', snapshot);
+  socket.emit('room_update', snapshot);
+  member.ready = true;
+  socket.emit('room_update', snapshot);
+  assert.deepEqual(requests, [{ ready: true }]);
+
+  socket.emit('starting');
+  member.ready = false;
+  socket.emit('room_update', snapshot);
+  socket.emit('init_map', { n: 1, m: 1, general: [-1, -1], player_ids: ['relay'] });
+  socket.emit('room_update', { ...snapshot, in_game: true });
+  assert.equal(requests.length, 1);
+  socket.emit('room_update', snapshot);
+  assert.deepEqual(requests, [{ ready: true }, { ready: true }]);
+});
+
+test('wait for a playing seat and request the configured team once it opens', (context) => {
+  const socket = new EventEmitter();
+  context.after(attachStrategy(socket, { room: 'test', team: 2 }).stop);
+  const teams = [];
+  const readiness = [];
+  socket.on('change_team', (request) => teams.push(request));
+  socket.on('change_ready', (request) => readiness.push(request));
+  socket.emit('set_id', 'relay');
+
+  const member = { sid: 'relay', team: 0, ready: false };
+  const others = Array.from({ length: MAX_TEAMS }, (_, index) => ({ sid: `seat-${index}`, team: 1 }));
+  socket.emit('room_update', { allow_team: true, players: [member, ...others] });
+  assert.deepEqual(teams, []);
+  assert.deepEqual(readiness, []);
+
+  const snapshot = { allow_team: true, players: [member, ...others.slice(1)] };
+  socket.emit('room_update', snapshot);
+  socket.emit('room_update', snapshot);
+  assert.deepEqual(teams, [{ team: 2 }]);
+  assert.deepEqual(readiness, []);
+  member.team = 2;
+  socket.emit('room_update', snapshot);
+  assert.deepEqual(readiness, [{ ready: true }]);
 });
 
 test('rebind with a pending queue, apply diff and retain independent multiline orders', () => {

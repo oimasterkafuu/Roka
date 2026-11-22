@@ -1,6 +1,7 @@
 'use strict';
 
 const { createBoard, chooseOrders } = require('./planner');
+const MAX_TEAMS = 16;
 
 function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
   let id,
@@ -9,26 +10,56 @@ function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
     nextSeq = 1,
     lastTurn = -1;
   const pending = new Set();
+  let lobbyRequest = null;
+  let starting = false;
   const join = () => socket.emit('join_game_room', { room });
   const handlers = {
     set_id(value) {
       id = value;
+      lobbyRequest = null;
+      starting = false;
       join();
     },
     disconnect() {
       board = null;
       pending.clear();
+      lobbyRequest = null;
+      starting = false;
+    },
+    starting() {
+      starting = true;
+      lobbyRequest = null;
     },
     room_update(snapshot) {
       multiLine = snapshot.multi_line === true;
-      if (snapshot.in_game || snapshot.update_queued || !autoReady) return;
-      const self = snapshot.players.find((player) => player.sid === id);
-      if (!self) return;
-      const targetTeam = snapshot.allow_team ? team : 1;
-      if (self.team !== targetTeam) socket.emit('change_team', { team: targetTeam });
-      else if (!self.ready) socket.emit('change_ready', { ready: true });
+      if (starting || snapshot.in_game === true || snapshot.update_queued === true || !autoReady) {
+        lobbyRequest = null;
+        return;
+      }
+      const players = snapshot.players ?? [];
+      const self = players.find((player) => player.sid === id);
+      if (!self) {
+        lobbyRequest = null;
+        return;
+      }
+      const playingCount = players.filter((player) => player.team !== 0).length;
+      const targetTeam = snapshot.allow_team === true ? team : 1;
+      if (self.team !== targetTeam && (self.team !== 0 || playingCount < MAX_TEAMS)) {
+        const request = `team:${self.team}:${targetTeam}`;
+        if (lobbyRequest === request) return;
+        lobbyRequest = request;
+        socket.emit('change_team', { team: targetTeam });
+      } else if (self.team !== 0 && self.ready === false && playingCount >= 2) {
+        if (lobbyRequest === 'ready') return;
+        lobbyRequest = 'ready';
+        socket.emit('change_ready', { ready: true });
+      } else {
+        lobbyRequest = null;
+      }
     },
     init_map(init) {
+      starting = false;
+      lobbyRequest = null;
       const player = init.player_ids.indexOf(id) + 1;
       board = player && init.general[0] >= 0 ? createBoard(init.n, init.m, player) : null;
       multiLine = init.multi_line ?? multiLine;
@@ -88,4 +119,4 @@ function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
   };
 }
 
-module.exports = { attachStrategy };
+module.exports = { attachStrategy, MAX_TEAMS };

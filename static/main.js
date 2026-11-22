@@ -659,42 +659,48 @@ if (!is_replay) {
 // 但节流后的频率仍远高于服务端 600 秒的超时阈值。对局中也照常上报，无副作用。
 // 仅在确认是房间成员后启动（room_update 只发给房内 socket）：未进房的挂着标签页
 // 不再发心跳，服务端对房外心跳也不计入在线状态。
-var room_heartbeat_timer = null;
+var room_heartbeat = null;
 var session_stamp = '';
-function sendRoomHeartbeat() {
+function isRoomHeartbeatActive(heartbeat) {
+  return room_heartbeat === heartbeat && socket.connected && socket.id === heartbeat.socketId;
+}
+async function sendRoomHeartbeat(heartbeat) {
+  if (!isRoomHeartbeatActive(heartbeat) || heartbeat.signing) return;
   var payload = {
     visible: document.visibilityState != 'hidden',
     focused: document.hasFocus(),
   };
-  if (!session_stamp || !client_id || !window.crypto || !crypto.subtle) {
-    socket.emit('room_heartbeat', payload);
-    return;
-  }
-  crypto.subtle
-    .digest('SHA-256', new TextEncoder().encode(session_stamp + ':' + client_id))
-    .then(function (buf) {
+  if (session_stamp && client_id && window.crypto && crypto.subtle) {
+    heartbeat.signing = true;
+    try {
+      var buf = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(session_stamp + ':' + client_id),
+      );
       payload.sig = Array.from(new Uint8Array(buf))
-        .map(function (b) {
-          return b.toString(16).padStart(2, '0');
+        .map(function (byte) {
+          return byte.toString(16).padStart(2, '0');
         })
         .join('');
-      socket.emit('room_heartbeat', payload);
-    })
-    .catch(function () {
-      socket.emit('room_heartbeat', payload);
-    });
+    } catch {}
+    heartbeat.signing = false;
+  }
+  if (isRoomHeartbeatActive(heartbeat)) socket.emit('room_heartbeat', payload);
 }
 function startRoomHeartbeat() {
-  if (is_replay || room_heartbeat_timer !== null) return;
-  room_heartbeat_timer = setInterval(sendRoomHeartbeat, 30000);
+  if (is_replay || !socket.connected || room_heartbeat !== null) return;
+  var heartbeat = { socketId: socket.id, signing: false, timer: null };
+  room_heartbeat = heartbeat;
+  heartbeat.timer = setInterval(function () {
+    sendRoomHeartbeat(heartbeat);
+  }, 30000);
+  sendRoomHeartbeat(heartbeat);
 }
 function stopRoomHeartbeat() {
-  if (room_heartbeat_timer !== null) {
-    clearInterval(room_heartbeat_timer);
-    room_heartbeat_timer = null;
-  }
+  if (room_heartbeat === null) return;
+  clearInterval(room_heartbeat.timer);
+  room_heartbeat = null;
 }
-
 // 连接级真人验证（幂等，可重复调用）：session_stamp、client_id 与 WebCrypto 齐备时
 // 才计算 sig 并上报 client_verify，否则静默不发。目标是在进房之前完成验证——
 // 任何开局时序（含 set_id 晚到的竞态）都不会再把真人误标为 [AI]。
@@ -979,9 +985,8 @@ socket.on('disconnect', function (reason) {
 });
 
 socket.on('room_update', function (data) {
-  // room_update 只发给房间内 socket：收到即确认成员身份，启动房间心跳。
-  sendRoomHeartbeat();
-  startRoomHeartbeat();
+  if (!Array.isArray(data?.players)) return;
+  if (data.players.some((member) => member.sid === client_id)) startRoomHeartbeat();
   setTabVal('game-speed', data.speed + 'x');
   setAllowTeamModeByCode(Boolean(data.allow_team));
   setFogModeByCode(Boolean(data.fog));
@@ -1145,7 +1150,7 @@ socket.on('room_update', function (data) {
     }).length >= 2
   ) {
     $('#force-start').css('display', 'block');
-    $('#force-start').prop('disabled', false);
+    $('#force-start').prop('disabled', selfTeam === 0);
     var counts = data.ready_counts || {};
     var countText = ['human', 'ai']
       .filter(function (kind) {
@@ -1250,12 +1255,12 @@ $(document).ready(function () {
   });
   $('#tabs-custom-team').each(function () {
     for (var i = 1; i < this.children.length; i++) {
-      initTab(this, this.children[i], updateTeam);
+      initTab(this, this.children[i], updateTeam, false);
     }
   });
   $('#tabs-spectate-mode').each(function () {
     for (var i = 1; i < this.children.length; i++) {
-      initTab(this, this.children[i], updateSpectateMode);
+      initTab(this, this.children[i], updateSpectateMode, false);
     }
   });
   // 「全图」tab 常驻 DOM 只绑一次；玩家 tab 由 refreshSpectateViewTabs 生成时绑定。
@@ -1264,9 +1269,8 @@ $(document).ready(function () {
   });
   $('#force-start').on('click', function () {
     // 部署更新排队期间禁止开新局（服务端 change_ready 同样拦截兜底）。
-    if (deploy_queued) return;
-    ready_state ^= 1;
-    socket.emit('change_ready', { ready: ready_state });
+    if (deploy_queued || !self_team) return;
+    socket.emit('change_ready', { ready: !ready_state });
   });
   // 种子仅在失焦（change）时上传：删空后由服务端补随机种子并回填，避免输入中途被覆盖。
   $('#map-token').on('change', delayUpdateMapToken);

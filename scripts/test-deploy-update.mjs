@@ -2,7 +2,7 @@
 // 场景 1（更新排队广播）：对局进行中触发 webhook，服务端进入「更新排队」状态——
 //   响应 queued:true、所有客户端收到 deploy_queued、room_update 携带 update_queued、
 //   对局房间收到宽限期提示消息。
-// 场景 2（排队期禁开局）：排队期间新房间的就绪请求被拒绝（不开局 + 提示消息），
+// 场景 2（排队期禁开局）：排队期间新房间的就绪请求静默拒绝，
 //   后进房客户端的首帧 room_update 同样带 update_queued（按钮禁用依据）。
 // 场景 3（宽限清算）：ROKA_DEPLOY_GRACE_MS 宽限到期后，残余对局按当前名次
 //   强制终局（game_end 帧 + 回放 id + 清算提示 + rating 结算生效）。
@@ -10,6 +10,7 @@
 //   后排队状态解除（deploy_queued {queued:false}），可以重新开局。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 90 秒。
 
+import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -172,6 +173,7 @@ function createRoomClient(baseUrl, { cookie, room, autoReady = true, name }) {
     chats: [],
     deployEvents: [],
     roomUpdates: [],
+    homeRooms: 0,
   };
 
   socket.on('set_id', (id) => {
@@ -192,6 +194,9 @@ function createRoomClient(baseUrl, { cookie, room, autoReady = true, name }) {
   });
   socket.on('deploy_queued', (data) => {
     client.deployEvents.push(data);
+  });
+  socket.on('home_rooms', () => {
+    client.homeRooms += 1;
   });
   socket.on('room_update', (data) => {
     client.roomUpdates.push(data);
@@ -306,23 +311,24 @@ async function main() {
   const c = createRoomClient(baseUrl, { cookie: tokenC, room: ROOM_BLOCKED, autoReady: false, name: 'C' });
   await waitFor(() => c.clientId !== '', 5_000, 'C 进房');
   const d = createRoomClient(baseUrl, { cookie: tokenD, room: ROOM_BLOCKED, autoReady: false, name: 'D' });
-  await waitFor(() => d.clientId !== '', 5_000, 'D 进房');
+  await waitFor(() => lastRoomUpdate(c)?.players.length === 2 && d.homeRooms > 0, 5_000, 'D 进房');
   // 后进房客户端的首帧 room_update 同样带 update_queued（前端据此禁用开始按钮）。
   if (lastRoomUpdate(c)?.update_queued !== true) {
     throw new Error('后进房客户端的 room_update 未携带 update_queued:true');
   }
+  const counts = () =>
+    [c, d].map((client) => [client.roomUpdates.length, client.homeRooms, client.chats.length]);
+  const before = counts();
   c.socket.emit('change_ready', { ready: true });
-  d.socket.emit('change_ready', { ready: true });
-  await waitFor(
-    () => c.chats.some((text) => text.includes('系统即将排队更新，请稍等')),
-    5_000,
-    '就绪被拒提示消息',
+  await sleep(150);
+  assert.equal(lastRoomUpdate(c)?.update_queued, true);
+  assert.equal(
+    lastRoomUpdate(c).players.some((player) => player.ready),
+    false,
   );
-  await sleep(1500);
-  if (c.inits.length > 0 || d.inits.length > 0) {
-    throw new Error('排队期间仍然开局（收到 init_map），禁开局失效');
-  }
-  log('场景 2 通过：排队期间就绪被拒绝、未开局且收到提示');
+  assert.deepEqual(counts(), before);
+  assert.equal(c.inits.length + d.inits.length, 0);
+  log('场景 2 通过：排队期间就绪被静默拒绝、未开局');
 
   // 场景 3：宽限期到期 → 残余对局按当前名次清算（game_end 帧 + 回放 + 提示）。
   const updatesAtWebhook = a.updates;

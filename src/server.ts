@@ -2295,7 +2295,7 @@ const boot = async (listen = true): Promise<void> => {
       }
     });
 
-    socket.on('change_team', (data: { team: unknown }) => {
+    socket.on('change_team', (data?: { team: unknown }) => {
       if (rejectIfBanned()) return;
       const gid = lobbyService.lobbyOfSid.get(socket.id);
       if (!gid) {
@@ -2307,7 +2307,6 @@ const boot = async (listen = true): Promise<void> => {
         // 存活参赛者仍需等对局结束，防止中途换队干扰进行中的对局。
         const runningGame = lobbyService.gameInstances.get(lobbyService.getLobbyVal(gid));
         if (!runningGame || runningGame.isActiveParticipant(socket.id)) {
-          lobbyService.emitRoomUpdate(io, gid);
           return;
         }
       }
@@ -2317,7 +2316,7 @@ const boot = async (listen = true): Promise<void> => {
         return;
       }
 
-      let team = Number.parseInt(String(data.team), 10);
+      let team = Number.parseInt(String(data?.team), 10);
       if (Number.isNaN(team) || team < 0 || team > MAX_TEAMS) {
         return;
       }
@@ -2326,35 +2325,24 @@ const boot = async (listen = true): Promise<void> => {
       }
 
       const players = lobbyService.lobbyPlayers.get(gid);
-      if (!players) {
+      const player = players?.find((item) => item.sid === socket.id);
+      if (!player || player.team === team) {
         return;
       }
 
-      const player = players.find((item) => item.sid === socket.id);
-      if (!player) {
-        return;
-      }
-
-      const currentTeam = player.team;
-      const isCurrentPlayer = currentTeam !== 0;
-      const isNextPlayer = team !== 0;
-      const playingCount = players.filter((item) => item.team !== 0).length;
-      if (isNextPlayer && !isCurrentPlayer && playingCount >= MAX_TEAMS) {
-        lobbyService.emitRoomUpdate(io, gid);
+      if (player.team === 0 && team !== 0 && lobbyService.getPlayingCount(players) >= MAX_TEAMS) {
         return;
       }
 
       // 服务端不做 bot/人类分池修正：换队请求按原样生效，由成员自行决定队伍。
 
-      let nickname = username;
       lobbyService.recordLobbyActivity(socket.id);
       player.team = team;
       if (team === 0) {
         player.ready = false;
       }
-      nickname = player.uid;
+      const nickname = player.uid;
 
-      lobbyService.emitRoomUpdate(io, gid);
       const teamName = team === 0 ? '观战席' : conf.allow_team ? `队伍 ${team}` : '参赛者';
       lobbyService.sendLobbySystemMessage(
         io,
@@ -2362,39 +2350,28 @@ const boot = async (listen = true): Promise<void> => {
         `${nickname} 加入了${teamName}。`,
         { name: nickname, verb: `加入了${teamName}。` },
       );
+      lobbyService.checkReady(io, gid);
       lobbyService.emitHomeRooms(io);
     });
 
-    socket.on('change_ready', (data: { ready: unknown }) => {
+    socket.on('change_ready', (data?: { ready: unknown }) => {
       if (rejectIfBanned()) return;
+      const ready = data?.ready;
+      if (typeof ready !== 'boolean' && ready !== 0 && ready !== 1) return;
       const gid = lobbyService.lobbyOfSid.get(socket.id);
       if (!gid) {
         return;
       }
-      if (lobbyService.isLobbyGameRunning(gid)) {
-        lobbyService.emitRoomUpdate(io, gid);
-        return;
-      }
-      // 部署更新排队期间禁止开新局：拒绝就绪变更并回发房间状态复位前端按钮。
-      if (lobbyService.isUpdateQueued()) {
-        lobbyService.sendLobbySystemMessage(io, lobbyService.getLobbyVal(gid), '系统即将排队更新，请稍等。');
-        lobbyService.emitRoomUpdate(io, gid);
-        return;
-      }
+      if (lobbyService.isLobbyGameRunning(gid) || lobbyService.isUpdateQueued()) return;
 
       const players = lobbyService.lobbyPlayers.get(gid);
-      if (!players) {
-        return;
-      }
+      const player = players?.find((item) => item.sid === socket.id);
+      const nextReady = ready === true || ready === 1;
+      if (!player || player.team === 0 || player.ready === nextReady) return;
+      if (nextReady && lobbyService.getPlayingCount(players) < 2) return;
 
-      for (const player of players) {
-        if (player.sid === socket.id) {
-          lobbyService.recordLobbyActivity(socket.id);
-          player.ready = player.team !== 0 && Boolean(data.ready);
-          break;
-        }
-      }
-
+      lobbyService.recordLobbyActivity(socket.id);
+      player.ready = nextReady;
       lobbyService.checkReady(io, gid);
       lobbyService.emitHomeRooms(io);
     });
