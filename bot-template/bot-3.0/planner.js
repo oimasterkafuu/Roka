@@ -25,6 +25,7 @@ const {
 } = require('./fog');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
+const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -364,9 +365,13 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // neighbour. Aim at the visible front until then (see ./fog), but only when
   // the leaderboard army says we are close enough to afford the attrition:
   // chasing a front from far behind is what costs the anti/archipelago cell.
-  let enemyArmy = 0;
+  let enemyArmy = 0,
+    enemyLand = 0;
   for (const p of leaderboard)
-    if (!p.dead && p.team !== myTeam) enemyArmy = Math.max(enemyArmy, Number(p.army) || 0);
+    if (!p.dead && p.team !== myTeam) {
+      enemyArmy = Math.max(enemyArmy, Number(p.army) || 0);
+      enemyLand = Math.max(enemyLand, Number(p.land) || 0);
+    }
   // Swamp is visible through the fog, so the board's terrain mix is known even
   // before it is explored; archipelago-style rooms use their own aim threshold.
   let swampCells = 0;
@@ -460,6 +465,28 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
   }
   const mobileArmy = self.army - self.land;
+  // Fog multi-line layer (see ./fog-multi): it prices the fog burst by the land
+  // race and, when asked, hands the sixteen orders a focus objective while no
+  // rival crown is known. Off by default, so nothing here changes the baseline.
+  const fogMultiLayer = multi
+    ? fogMultiUpdate(
+        b,
+        {
+          turn,
+          multi,
+          size,
+          fog: Boolean(b.fogMode ?? b.fog.includes(1)),
+          homes,
+          targets,
+          enemies,
+          army: self.army,
+          land: self.land,
+          enemyArmy,
+          enemyLand,
+        },
+        fogMultiConfig(),
+      )
+    : null;
   // Multi-line rooms get their own economy and endgame scoring; see ./multi.
   // Off by default, so `BOT3_MULTI` unset keeps the byte-identical baseline.
   const multiLayer = multiUpdate(b, {
@@ -470,6 +497,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
     teams,
     myTeam,
     targets,
+    fogTargets: fogMultiLayer?.targets,
+    fogBurst: fogMultiLayer?.burst,
     mobileArmy,
     army: self.army,
     enemyArmy,

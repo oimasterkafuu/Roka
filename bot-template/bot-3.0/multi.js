@@ -248,24 +248,33 @@ function multiUpdate(b, input, config = multiConfig()) {
   if (!input || input.multi !== true) return null;
   if (!(Number(input.size) <= config.maxBoard)) return null;
   const turn = Math.max(0, Number(input.turn) || 0);
-  // Whether the burst may spend slots on breadth instead of concentration.
+  // Whether the burst may spend slots on breadth instead of concentration. A
+  // fog room normally drops the burst while the army race is lost; `./fog-multi`
+  // prices that trade by the land race instead and passes its verdict as
+  // `input.fogBurst` (`undefined` keeps the gate below untouched).
   const army = Math.max(0, Number(input.army) || 0);
   const enemyArmy = Math.max(0, Number(input.enemyArmy) || 0);
   const fogBurst =
-    !config.burstFog || input.fog !== true
-      ? true
-      : !config.burstFogLead || enemyArmy <= 0 || army * 100 >= enemyArmy * config.burstFogLead;
+    input.fogBurst !== undefined
+      ? input.fogBurst !== false
+      : !config.burstFog || input.fog !== true
+        ? true
+        : !config.burstFogLead || enemyArmy <= 0 || army * 100 >= enemyArmy * config.burstFogLead;
   const burst = config.burst && fogBurst && turn >= config.burstTurn && turn < BURST_END;
   const focus = config.focus && turn >= config.focusTurn;
   if (!burst && !focus) return null;
   const worth = burst ? BURST_END - turn : 0;
   // The focus block scores moves against the crown distance field, so it needs a
   // rival crown to anchor on: without one (fog rooms that have not seen a crown
-  // yet) the layer stays out of the frame instead of banning paint blindly.
+  // yet) the layer falls back to the fog multi objective, which is the visible
+  // rival frontier or the belief anchors handed over by ./fog-multi.
   let route = null;
-  if (focus && Array.isArray(input.targets) && input.targets.length) {
+  if (focus) {
     const scale = Math.max(3, (Number(input.mobileArmy) || 0) / 70);
-    route = crownRoute(b, input.targets, input.units, input.teams, input.myTeam, scale);
+    if (Array.isArray(input.targets) && input.targets.length)
+      route = crownRoute(b, input.targets, input.units, input.teams, input.myTeam, scale);
+    else if (Array.isArray(input.fogTargets) && input.fogTargets.length)
+      route = crownRoute(b, input.fogTargets, input.units, input.teams, input.myTeam, scale);
   }
   const enemyCut =
     config.cut > 0 && (burst || focus) ? teamCuts(b, input.teams, input.units, rivalTeam(input)) : null;
