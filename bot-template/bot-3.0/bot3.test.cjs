@@ -8,6 +8,8 @@ const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents, evaluateFrontMove } = require('./single-front');
 const { planFinish } = require('./kill');
 const { makeOpening } = require('./opening');
+const relayPlanner = require('../relay-bot/planner');
+const { predict: predictShadow, record: recordShadow } = require('./shadow');
 const { isMazeBoard, laneBlocked, laneState, recordLane } = require('./maze');
 const { closingConfig, closingUpdate, freshClosing } = require('./closing');
 const {
@@ -1197,3 +1199,145 @@ test('fresh fog multi ledger starts empty', () => {
     gated: 0,
   });
 });
+
+// --- shadow layer (./shadow) -------------------------------------------------
+
+// Two-player leaderboard the shadow needs to identify relay's seat.
+const shadowPlayers = [
+  { id: 1, team: 1, army: 10, land: 1, dead: 0 },
+  { id: 2, team: 2, army: 10, land: 1, dead: 0 },
+];
+
+const ownerOf = (code) => (code < 200 ? code % 50 : 0);
+
+// A 3x3 duel: our crown in one corner, relay's in the other, open ground in
+// between. Relay's planner expands toward us, which the shadow replays.
+function shadowBoard() {
+  const b = createBoard(3, 3, 1);
+  b.grid_type.fill(200);
+  b.grid_type[0] = 101;
+  b.grid_type[8] = 102;
+  b.army_cnt[0] = 10;
+  b.army_cnt[8] = 10;
+  b.openingBudget = 160000;
+  return b;
+}
+
+// Apply the predicted order the way the engine would; growth is zero for plain
+// land on the early turns used here and the target of a capture is neutral.
+function applyPrediction(b, pred) {
+  if (pred.build) {
+    b.army_cnt[pred.from] -= 50;
+    b.grid_type[pred.from] = 51;
+    return;
+  }
+  const push = Math.max(0, b.army_cnt[pred.from] - 1);
+  b.army_cnt[pred.from] -= push;
+  const to = pred.to;
+  if (ownerOf(b.grid_type[to]) === 2) {
+    b.army_cnt[to] += push;
+    return;
+  }
+  const defense = b.army_cnt[to];
+  if (push > defense) {
+    b.army_cnt[to] = push - defense;
+    b.grid_type[to] = 2;
+  } else b.army_cnt[to] = defense - push;
+}
+
+function withShadow(run) {
+  const previous = process.env.BOT3_SHADOW;
+  try {
+    return run();
+  } finally {
+    if (previous === undefined) delete process.env.BOT3_SHADOW;
+    else process.env.BOT3_SHADOW = previous;
+  }
+}
+
+test('shadow layer is inert unless enabled', () =>
+  withShadow(() => {
+    const b = shadowBoard();
+    assert.equal(predictShadow(b, 0, shadowPlayers, false), null);
+    assert.equal(b.shadow, undefined);
+  }));
+
+test('shadow replays the relay planner order for the same frame', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    const b = shadowBoard();
+    const pred = predictShadow(b, 0, shadowPlayers, false);
+    // Independent relay board fed the same frame.
+    const reference = relayPlanner.createBoard(3, 3, 2);
+    reference.openingBudget = 160000;
+    reference.fogMode = false;
+    reference.grid_type.set(b.grid_type);
+    reference.army_cnt.set(b.army_cnt);
+    const [order] = relayPlanner.chooseOrders(reference, 0, shadowPlayers, false);
+    assert.ok(order, 'relay plans an order on the opening frame');
+    assert.deepEqual([pred.from, pred.to, pred.mode], [order.from, order.to, order.mode]);
+    assert.equal(pred.armed, false);
+  }));
+
+test('shadow refuses fog, multi-line and non-duel rooms', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    const foggy = shadowBoard();
+    foggy.fog[3] = 1;
+    assert.equal(predictShadow(foggy, 0, shadowPlayers, false), null);
+    assert.equal(predictShadow(shadowBoard(), 0, shadowPlayers, true), null);
+    const ffa = [...shadowPlayers, { id: 3, team: 3, army: 10, land: 1, dead: 0 }];
+    assert.equal(predictShadow(shadowBoard(), 0, ffa, false), null);
+  }));
+
+test('shadow stays inert when the opponent does not follow its plan', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    const b = shadowBoard();
+    for (let turn = 0; turn < 30; turn++) {
+      const pred = predictShadow(b, turn, shadowPlayers, false);
+      recordShadow(b, turn, []);
+      // A different bot does something else entirely: the predicted source cell
+      // is untouched, which the guard classifies as a dropped order, never as
+      // evidence that this is relay.
+      if (pred) assert.equal(pred.armed, false);
+    }
+    assert.equal(b.shadow.armed, false);
+    assert.equal(b.shadow.stats.drift, 0);
+    assert.equal(b.shadow.verified, 0);
+  }));
+
+test('shadow arms on executed predictions and disables itself after drift', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    const b = shadowBoard();
+    let armed = -1;
+    for (let turn = 0; turn < 30 && armed < 0; turn++) {
+      const pred = predictShadow(b, turn, shadowPlayers, false);
+      recordShadow(b, turn, []);
+      if (!pred) continue;
+      if (pred.armed) armed = turn;
+      else applyPrediction(b, pred);
+    }
+    assert.ok(armed > 0, 'the layer armed after executed predictions');
+    assert.equal(b.shadow.armed, true);
+    // A frame where the predicted source cell changes for no modelled reason
+    // proves the shadow is out of sync; the second one disables the layer.
+    let turn = armed + 1;
+    let inject = -1;
+    let disabled = false;
+    while (turn < armed + 30 && !disabled) {
+      const pred = predictShadow(b, turn, shadowPlayers, false);
+      recordShadow(b, turn, []);
+      if (inject >= 0) {
+        b.army_cnt[inject] += 7;
+        inject = -1;
+      }
+      disabled = b.shadow.ok === false;
+      if (pred && !disabled) inject = pred.from;
+      turn++;
+    }
+    assert.equal(disabled, true);
+    assert.ok(b.shadow.stats.drift >= 2);
+    assert.ok(b.shadow.verified >= 6);
+  }));

@@ -46,7 +46,9 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 - `multi.js`：多线 focus 层（burst 已随上游移除而默认关闭；默认关闭，`BOT3_MULTI=1` 开启，见 [MULTI.md](MULTI.md)）。
 - `fog.js`：迷雾单线前线瞄准/柱状推进层（默认开启，`BOT3_FOG=0` 关闭）。
 - `fog-multi.js`：迷雾多线 burst 土地竞赛门控（多线 burst 移除后默认关闭，`BOT3_FOG_MULTI=1` 开启，见 [BOT3_FOG.md](BOT3_FOG.md)）。
-- `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层与协议回归。
+- `shadow.js`：relay 规划器的影子副本，逐帧重放它的 `chooseOrders` 以提前一 Tick 知道它要走的指令，并按引擎结算顺序重新给候选评分（默认关闭，`BOT3_SHADOW=1` 开启，见 [SHADOW.md](SHADOW.md)）。
+- `shadow-probe.cjs`：单局预测精度探针（逐帧对照 relay 实际发出的指令），仅用于测量。
+- `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层、影子层与协议回归。
 - `NEXT.md`：暂停时保留的后续重启方向、负结果与复现方式。
 - `index.js`：独立运行的 CLI。
 

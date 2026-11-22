@@ -26,6 +26,12 @@ const {
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
+const {
+  predict: shadowPredict,
+  contest: shadowContest,
+  adjust: shadowAdjust,
+  record: shadowRecord,
+} = require('./shadow');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -303,6 +309,12 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const frontDist = distances(b, borders, (j) => teams[j] === myTeam).dist;
   const enemyDist = distances(b, enemies).dist;
   const clearSerial = !multi && !(b.fogMode ?? b.fog.includes(1));
+  // Shadow layer (see ./shadow): relay is deterministic in clear serial rooms,
+  // so its next order is known one tick early. The call has to happen on every
+  // frame (including the opening branch below, which returns early) because
+  // relay's private opening bookkeeping is built up frame by frame. Only scores
+  // move here; the candidate set and the untouched planner stay as is.
+  const shadow = shadowPredict(b, turn, leaderboard, multi);
   // Fog single-line layer (see ./fog). `fogOpen` is the room gate that also
   // supplies the objective fallback; the column needs a measured material edge
   // on top of it (`fogUpdate`) and pauses whenever a home is threatened.
@@ -347,7 +359,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
             teams[i] && teams[i] !== myTeam && !b.isolated[i] && units[i] - 1 > units[move.from] - move.send,
         ),
     );
-    if (!approach && !contested && !exposedStem && !tacticalCapture) return orders;
+    if (!approach && !contested && !exposedStem && !tacticalCapture) {
+      if (shadow) shadowRecord(b, turn, orders);
+      return orders;
+    }
     b.opening = null;
   }
   const scouting = distances(b, scouts).dist;
@@ -463,6 +478,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       b.columnTurn = turn;
       b.lastFrom[finish.to] = finish.from;
       b.lastMove[finish.to] = turn;
+      if (shadow) shadowRecord(b, turn, [{ from: finish.from, to: finish.to }]);
       return [{ score: 3000, from: finish.from, to: finish.to, mode: 2 }];
     }
   }
@@ -941,6 +957,9 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
   }
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
+  // Shadow pricing: only the scores of the existing candidates move.
+  const shadowCtx = shadow ? shadowContest(shadow, b, turn, b.me - 1) : null;
+  if (shadowCtx) for (const op of candidates) op.score += shadowAdjust(shadowCtx, b, op);
   candidates.sort((a, c) => c.score - a.score);
   const used = new Set(),
     orders = [];
@@ -978,6 +997,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // A fully blocked frame must not idle: keep the previous behaviour when no
   // lane passed the guard (the cooldown expires within four ticks).
   if (maze && !orders.length && candidates.length) take(candidates[0]);
+  if (shadow) shadowRecord(b, turn, orders);
   return orders;
 }
 
