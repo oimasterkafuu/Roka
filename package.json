@@ -17,6 +17,7 @@
     "bot:bot3": "node bot-template/bot-3.0/index.js",
     "eval:bot3": "node scripts/evaluate-bot3-baseline.cjs",
     "eval:bot3:merge": "node scripts/summarize-bot3-baseline.cjs",
+    "eval:bot3:compare": "node scripts/compare-bot3-baseline.cjs",
     "test:bot3": "node --test bot-template/bot-3.0/bot3.test.cjs",
     "test:server-bot": "node scripts/test-server-bot.mjs",
     "test:server-bot-config": "node scripts/test-server-bot-config.mjs",
