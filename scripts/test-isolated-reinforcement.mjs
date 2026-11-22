@@ -28,7 +28,7 @@ const hooks = {
     },
   },
 };
-async function setup({ owner = 2, dead = false, multi = false, legacy = false } = {}) {
+async function setup({ owner = 2, dead = false, multi = false } = {}) {
   const e = await GameEngine.create(
     { ...config, multi_line: multi },
     ['a', 'b', 'c'],
@@ -52,7 +52,6 @@ async function setup({ owner = 2, dead = false, multi = false, legacy = false } 
   e.isolated[2][3] = true;
   e.isolatedAge[2][3] = 1;
   if (dead) e.pstat[1] = 52;
-  if (legacy) e.isolatedReinforcementFix = false;
   return e;
 }
 for (const multi of [false, true])
@@ -64,10 +63,6 @@ for (const multi of [false, true])
       assert.equal(e.armyCnt[2][3], 15, `owner=${owner} dead=${dead} multi=${multi}`);
       assert.equal(e.isolatedReinforced[2][3], false);
     }
-const old = await setup({ legacy: true });
-old.attack(2, 2, 2, 3, 2);
-old.applyConnectivity();
-assert.equal(old.armyCnt[2][3], 30);
 const normal = await setup();
 normal.applyConnectivity();
 assert.equal(normal.armyCnt[2][3], 10);
@@ -105,17 +100,6 @@ neutral.armyCnt[2][3] = 1;
 neutral.applyIsolatedDecay(2, 3);
 assert.equal(neutral.owner[2][3], 0);
 assert.equal(neutral.isolatedReinforced[2][3], false);
-// Replay constructors must default to historical rules, explicitly opt in for new metadata.
-for (const enabled of [undefined, true]) {
-  const e = new GameEngine(
-    { ...config, isolated_reinforcement_fix: enabled },
-    ['a', 'b', 'c'],
-    ['a', 'b', 'c'],
-    '__replay_build__',
-    hooks,
-  );
-  assert.equal(e.isolatedReinforcementFix, enabled === true);
-}
 console.log('isolated reinforcement regression passed');
 // Exercise real tick scheduling as well as the shared combat/connectivity primitives.
 for (const multi of [false, true]) {

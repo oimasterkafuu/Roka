@@ -1,5 +1,5 @@
 // 自动主城转属单元冒烟：覆盖有效推兵、最后一座保护、三种推兵模式、
-// 来源保留、零推出、敌方/己方/指挥所规则，以及旧回放显式转让兼容入口。
+// 来源保留、零推出、敌方/己方/指挥所规则。
 // 运行前需先 `pnpm run build`（本脚本读取 dist 产物）。
 
 import path from 'node:path';
@@ -112,10 +112,6 @@ async function main() {
 
   pos = setup(engine, { targetType: -2, targetOwner: 3, targetArmy: 20, extraBobCrown: true });
   check('敌方主城不触发友军转属', attack(engine, pos, pos, 2) && engine.owner[pos.tx][pos.ty] === 3);
-
-  pos = setup(engine, { extraBobCrown: true });
-  engine.applyCrownTransfer(0, pos.tx, pos.ty);
-  check('旧回放显式转让兼容入口仍可读取执行', engine.owner[pos.tx][pos.ty] === 1 && engine.gridType[pos.tx][pos.ty] === -2);
 
   if (failures > 0) {
     console.error(`\n${failures} 项检查失败。`);

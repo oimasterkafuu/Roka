@@ -297,7 +297,6 @@ const buildMapExample = async (
     map_region: normalizeMapRegion(mapRegion),
     player_names: playerNames,
     player_teams: playerTeams,
-    map_size_version: 2,
   });
   return {
     map_mode: mapMode,

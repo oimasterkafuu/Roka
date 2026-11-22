@@ -23,6 +23,45 @@ function openingFixture(rows, cols, root, walls = []) {
   return { b, teams };
 }
 
+test('forecast only real plain growth when ordering a push next tick', () => {
+  for (const [turn, singleSend, multiSend] of [
+    [24, 2, 2],
+    [25, 3, 2],
+    [48, 3, 2],
+    [49, 4, 3],
+    [50, 2, 2],
+  ]) {
+    for (const multi of [false, true]) {
+      const board = createBoard(1, 3, 1);
+      board.fogMode = true;
+      board.grid_type.set([101, 1, 200]);
+      board.army_cnt.set([1, 3, 0]);
+      const [push] = chooseOrders(board, turn, players, multi);
+      assert.deepEqual(
+        [push.from, push.to, push.send],
+        [1, 2, multi ? multiSend : singleSend],
+        `turn ${turn}`,
+      );
+    }
+  }
+});
+
+test('only single-line rewards a capture before the burst ends', () => {
+  function captureScore(turn, multi, fogMode) {
+    const board = createBoard(1, 2, 1);
+    board.fogMode = fogMode;
+    board.grid_type.set([101, 200]);
+    board.army_cnt.set([4, 0]);
+    const [capture] = chooseOrders(board, turn, players, multi);
+    assert.deepEqual([capture.from, capture.to, capture.send], [0, 1, 4]);
+    return capture.score;
+  }
+  for (const fogMode of [false, true]) {
+    assert.equal(captureScore(35, true, fogMode), captureScore(50, true, fogMode));
+    assert.ok(captureScore(35, false, fogMode) > captureScore(50, false, fogMode));
+  }
+});
+
 // Independent exhaustive oracle for short games. Try every legal order or
 // wait, advance growth, and merge only identical army distributions.
 function bruteLand(b, root, ticks) {
