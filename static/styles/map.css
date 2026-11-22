@@ -231,6 +231,37 @@
 .selected50 {
   text-shadow: 1px 1px black;
 }
+#map td.selected-secondary {
+  border-color: #9eeeff;
+  border-style: dashed;
+}
+#map td.selected-group-primary {
+  border-color: #ffd36b !important;
+}
+.control-group-label {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-color: rgba(0, 0, 0, 0.78);
+  color: white;
+  font: 600 max(7px, 0.5em) / 1 sans-serif;
+  text-shadow: none;
+  font-variant-numeric: tabular-nums;
+}
+.s1 .control-group-label {
+  font-size: 7px;
+}
+.control-group-army {
+  position: relative;
+  top: -2px;
+  z-index: 1;
+}
+.s1 .control-group-army {
+  top: -3px;
+}
 .attackable {
   opacity: 0.4;
 }
@@ -271,6 +302,16 @@
 
 .build-badge.build-c {
   background-image: url('../crown.png');
+}
+
+.has-control-group .build-badge {
+  top: 0;
+  bottom: auto;
+  background-position: right top;
+}
+.s1.has-control-group .build-badge,
+.s2.has-control-group .build-badge {
+  height: 28%;
 }
 
 #map.burst::after {
