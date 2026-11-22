@@ -41,12 +41,13 @@ function createBoard(rows, cols, me) {
   };
 }
 
-function distances(board, seeds, allowed) {
+function distances(board, seeds, allowed, limit = INF) {
   const dist = new Int32Array(board.size).fill(INF);
   const queue = [...seeds];
   for (const i of seeds) dist[i] = 0;
   for (let head = 0; head < queue.length; head++) {
     const i = queue[head];
+    if (dist[i] >= limit) continue;
     for (const j of board.neighbors[i]) {
       if (dist[j] !== INF || board.grid_type[j] === 201 || (allowed && !allowed(j))) continue;
       dist[j] = dist[i] + 1;
@@ -273,14 +274,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
   }
   if (!homes.length) return [];
-  for (let i = 0; i < size; i++) {
-    if (teams[i] === myTeam && neighbors[i].some((j) => teams[j] !== myTeam && tile[j] !== 201))
-      borders.push(i);
-  }
-  const cut = supplyCuts(b, teams, anchors);
-  const homeDist = distances(b, homes).dist;
-  const frontDist = distances(b, borders, (j) => teams[j] === myTeam).dist;
-  const enemyDist = distances(b, enemies).dist;
+  let cut, enemyDist;
   const clearSerial = !multi && !(b.fogMode ?? b.fog.includes(1));
   // A zero garrison or a disconnected pocket means fighting has already
   // changed the opening economy. Let the tactical planner handle that frame.
@@ -289,7 +283,19 @@ function chooseOrders(b, turn, leaderboard, multi) {
     homes.length === 1 &&
     !tile.some((t, i) => ownerOf(t) === me && (!army[i] || b.isolated[i]))
   ) {
-    const orders = openingOrder(b, teams, homes, turn, enemyDist, multi);
+    const orders = openingOrder(
+      b,
+      teams,
+      homes,
+      turn,
+      () => (enemyDist ??= distances(b, enemies).dist),
+      multi,
+    );
+    if (b.openingHome !== homes[0] || !b.homeApproach || turn === 0) {
+      b.openingHome = homes[0];
+      b.homeApproach = distances(b, homes, undefined, 3).dist;
+    }
+    const homeDist = b.homeApproach;
     const tacticalCapture = enemies.some(
       (i) =>
         crown(tile[i]) &&
@@ -308,15 +314,22 @@ function chooseOrders(b, turn, leaderboard, multi) {
     );
     const exposedStem = orders.some(
       (move) =>
-        cut[move.from] > 0 &&
         neighbors[move.from].some(
           (i) =>
             teams[i] && teams[i] !== myTeam && !b.isolated[i] && units[i] - 1 > units[move.from] - move.send,
-        ),
+        ) && (cut ??= supplyCuts(b, teams, anchors))[move.from] > 0,
     );
     if (!approach && !contested && !exposedStem && !tacticalCapture) return orders;
     b.opening = null;
   }
+  for (let i = 0; i < size; i++) {
+    if (teams[i] === myTeam && neighbors[i].some((j) => teams[j] !== myTeam && tile[j] !== 201))
+      borders.push(i);
+  }
+  cut ??= supplyCuts(b, teams, anchors);
+  const homeDist = distances(b, homes).dist;
+  const frontDist = distances(b, borders, (j) => teams[j] === myTeam).dist;
+  enemyDist ??= distances(b, enemies).dist;
   const scouting = distances(b, scouts).dist;
   const single = clearSerial && turn >= 28;
   const self = leaderboard.find((p) => p.id === me);
@@ -416,9 +429,6 @@ function chooseOrders(b, turn, leaderboard, multi) {
     };
   }
   const candidates = [];
-  const propose = (score, from, to, mode = 2, build) => {
-    if (score > 0) candidates.push({ score, from, to, mode, build });
-  };
   for (let i = 0; i < size; i++) {
     if (ownerOf(tile[i]) !== me || b.isolated[i]) continue;
     const base = crown(tile[i]),
@@ -450,13 +460,13 @@ function chooseOrders(b, turn, leaderboard, multi) {
                 : units[i] >= 100
                   ? 150
                   : 105;
-        propose(
-          backup && i === site ? 820 : buildScore - (nearFight && homes.length > 1 ? 82 : 0),
-          i,
-          i,
-          2,
-          city ? 'c' : 'b',
-        );
+        candidates.push({
+          score: backup && i === site ? 820 : buildScore - (nearFight && homes.length > 1 ? 82 : 0),
+          from: i,
+          to: i,
+          mode: 2,
+          build: city ? 'c' : 'b',
+        });
       }
     }
     if (units[i] < 2) continue;
@@ -503,9 +513,12 @@ function chooseOrders(b, turn, leaderboard, multi) {
       // as spending the guard on a castle. Moving toward the column can
       // still intercept it, or reinforce a threatened crown behind us.
       if (own && j === site && defense[j] >= defense[i] && pressure(i) > units[i] - send) continue;
-      if (trade && send >= 4) propose(920 + Math.min(100, Math.min(units[j], send)), i, j, mode);
+      const propose = (score) => {
+        if (score > 0) candidates.push({ score, from: i, to: j, mode, send });
+      };
+      if (trade && send >= 4) propose(920 + Math.min(100, Math.min(units[j], send)));
       if (!own && send <= units[j]) {
-        if (front && hostile) propose(siegeValue(front, i, j, send), i, j, mode);
+        if (front && hostile) propose(siegeValue(front, i, j, send));
         continue;
       }
       const remaining = own ? send + units[j] : send - units[j];
@@ -526,9 +539,6 @@ function chooseOrders(b, turn, leaderboard, multi) {
             intercept,
             base,
           }),
-          i,
-          j,
-          mode,
         );
         continue;
       }
@@ -602,10 +612,32 @@ function chooseOrders(b, turn, leaderboard, multi) {
       if (!own && support === 1 && !anchor(tile[i]) && exposure >= units[i] - send && !strike) score -= 180;
       if (b.lastFrom[i] === j && turn - b.lastMove[i] <= 4 && defense[j] >= defense[i] && !strike)
         score -= 110;
-      if (score > 0) propose(score, i, j, mode);
+      propose(score);
     }
   }
   if (front) searchCampaign(front, candidates);
+  if (turn >= 50 && !(clearSerial && longFront)) {
+    const forceScale = Math.max(10, Math.sqrt(mobileArmy));
+    for (const op of candidates) {
+      if (op.build) continue;
+      const i = op.from,
+        j = op.to;
+      if (teams[j] === myTeam && !danger.includes(j)) {
+        const send = op.send;
+        const fraction = send / Math.max(1, units[j] + send);
+        const cost = anchor(tile[j]) ? 50 : 100;
+        if (fraction < 0.2 && !(j === site && units[j] < cost && units[j] + send >= cost))
+          op.score *= 0.2 + 3 * fraction;
+        if (b.lastFrom[i] === j && turn - b.lastMove[i] <= 8) op.score -= 260;
+      } else if (teams[j] !== myTeam && !crown(tile[j])) {
+        // Reconnecting a large pocket can recover its garrison in the same
+        // tick. A temporary cut with an immediate recapture has less value.
+        const rescue = front?.rescue[j] ?? 0;
+        if (rescue > forceScale * 2 && op.send > units[j] && (homes.length > 1 || !danger.length))
+          op.score = Math.max(op.score, 780 + Math.min(900, (340 * rescue) / forceScale));
+      }
+    }
+  }
   candidates.sort((a, c) => c.score - a.score);
   const used = new Set(),
     orders = [];

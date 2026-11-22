@@ -11,7 +11,9 @@ const { createBoard, chooseOrders } = require(process.env.PLANNER || '../bot-tem
 async function play(map, count, large, seed, seat, multi, speed) {
   const ids = Array.from({ length: count }, (_, i) => 'p' + i);
   const ratio = resolveMapSizeRatioByPlayers(count) * (large ? 2 : 1);
-  let board, result;
+  let board,
+    result,
+    followupMs = 0;
   const engine = await GameEngine.create(
     {
       width_ratio: ratio,
@@ -49,10 +51,12 @@ async function play(map, count, large, seed, seat, multi, speed) {
         }
         if (frame.turn === 24) {
           result.land = frame.leaderboard.find((p) => p.id === seat + 1).land;
+          result.followupMs = Math.round(followupMs * 1000) / 1000;
           return;
         }
         const at = performance.now();
         const orders = chooseOrders(board, frame.turn, frame.leaderboard, multi);
+        const elapsed = performance.now() - at;
         if (frame.turn === 0)
           result = {
             map,
@@ -62,10 +66,11 @@ async function play(map, count, large, seed, seat, multi, speed) {
             speed,
             seed,
             seat,
-            ms: Math.round((performance.now() - at) * 10) / 10,
+            ms: Math.round(elapsed * 1000) / 1000,
             target: board.opening?.land,
             bound: board.opening?.upper,
           };
+        else followupMs += elapsed;
         for (const op of orders) {
           const xy = (i) => [Math.floor(i / board.cols), i % board.cols];
           engine.addMove(id, ...xy(op.from), ...xy(op.to), op.mode);
