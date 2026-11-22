@@ -5,11 +5,56 @@ const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy } = require('./strategy');
+const { rescueValues, assessOpponents } = require('./single-front');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
   { id: 2, team: 2, army: 100, land: 4, dead: 0 },
 ];
+
+test('value a whole isolated group once per bridge and distinguish a lone outpost', () => {
+  const b = createBoard(2, 4, 1);
+  b.grid_type.set([1, 1, 200, 1, 1, 200, 101, 201]);
+  b.isolated.set([1, 1, 0, 1, 1, 0, 0, 0]);
+  b.army_cnt.set([32, 4, 0, 1, 2, 0, 15, 0]);
+  const teams = Array.from(b.grid_type, (code) => (code < 200 ? code % 50 : 0));
+  const rescue = rescueValues(b, teams, 1, b.army_cnt);
+  assert.equal(rescue[5], 44);
+  assert.equal(rescue[2], 47);
+});
+
+test('prefer the weaker FFA rival with an exposed last crown at comparable range', () => {
+  const b = createBoard(1, 7, 1);
+  b.grid_type.set([102, 2, 200, 101, 200, 3, 103]);
+  b.memory.set(b.grid_type);
+  const standings = [...players, { id: 3, team: 3, army: 800, land: 30, dead: 0 }];
+  const chosen = assessOpponents(
+    b,
+    standings,
+    [0, 6],
+    [3, 2, 1, 0, 1, 2, 3],
+    [2, 2, 0, 1, 0, 3, 3],
+    1,
+    b.army_cnt,
+    players[0],
+  );
+  assert.equal(chosen.player.id, 2);
+});
+
+test('keep the last crown garrison when a neutral advance would leave it open', () => {
+  const b = createBoard(1, 4, 1);
+  b.grid_type.set([102, 2, 101, 200]);
+  b.army_cnt.set([2, 22, 10, 0]);
+  assert.deepEqual(chooseOrders(b, 85, players, false), []);
+});
+
+test('fund a safe second crown before the burst ends on a compact visible front', () => {
+  const b = createBoard(1, 10, 1);
+  b.grid_type.set([101, 1, 1, 200, 200, 200, 200, 200, 2, 102]);
+  b.army_cnt.set([10, 100, 1, 0, 0, 0, 0, 0, 20, 180]);
+  const order = chooseOrders(b, 43, players, false)[0];
+  assert.deepEqual([order.from, order.build], [1, 'b']);
+});
 
 test('reinforce the last crown before advancing an unrelated stack', () => {
   const board = createBoard(1, 6, 1);
@@ -26,6 +71,20 @@ test('take a crown when next-tick growth makes strict capture possible', () => {
   assert.equal(chooseOrders(board, 7, players, false)[0].to, 1);
   board.army_cnt[0] = 6;
   assert.deepEqual(chooseOrders(board, 7, players, false), []);
+});
+
+test('commit the first of two attacks only when a second force can finish', () => {
+  const board = createBoard(2, 7, 1);
+  board.grid_type.fill(201);
+  board.grid_type.set([101, 1, 1, 1, 51, 102, 51]);
+  board.army_cnt.set([5, 1, 1, 1, 65, 80, 65]);
+  const [attack] = chooseOrders(board, 75, players, false);
+  assert.equal(attack.to, 5);
+  assert.ok([4, 6].includes(attack.from));
+  board.grid_type[12] = 2;
+  board.army_cnt[12] = 90;
+  const defended = chooseOrders(board, 76, players, false);
+  assert.ok(!defended.some((op) => op.to === 5));
 });
 
 test('remember a hidden crown and clear its location when a scout revisits it', () => {

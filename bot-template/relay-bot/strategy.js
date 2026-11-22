@@ -44,6 +44,7 @@ function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
         return;
       }
       if (!board) return;
+      if (!frame.is_diff) board.fogMode = Array.isArray(frame.fog);
       const self = frame.leaderboard.find((player) => player.id === board.me);
       if (!self || self.dead || frame.kills?.[id]) return;
       for (const key of ['grid_type', 'army_cnt', 'isolated', 'fog']) {

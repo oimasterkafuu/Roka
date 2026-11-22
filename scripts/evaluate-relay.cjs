@@ -7,7 +7,7 @@ const { mock } = require('node:test');
 const { GameEngine } = require('../dist/game-engine');
 const { resolveMapSizeRatioByPlayers } = require('../dist/map/map-size');
 const { FIXED_SWAMP_RATIO } = require('../dist/server/lobby-service');
-const { attachStrategy } = require('../bot-template/relay-bot/strategy');
+const { attachStrategy } = require(process.env.RELAY_ENTRY || '../bot-template/relay-bot/strategy');
 
 const entries = {
   simple: '../bot-template/simple-strategy-bot/strategy',
@@ -17,16 +17,15 @@ const entries = {
 };
 
 async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
-  const ratio = resolveMapSizeRatioByPlayers(2) * (large ? 2 : 1);
+  const lineup = ['relay', ...opponent.split('+')];
+  const names = lineup.map((_, i) => lineup[(i - seat + lineup.length) % lineup.length]);
+  const ratio = resolveMapSizeRatioByPlayers(names.length) * (large ? 2 : 1);
   const flags = { multi_line: multi, fog };
-  const ids = ['seat1', 'seat2'];
-  const names = [...ids];
-  names[seat] = 'relay';
-  names[1 - seat] = opponent;
+  const ids = names.map((_, i) => 'seat' + (i + 1));
   const sockets = ids.map(() => new EventEmitter());
   const handles = [],
-    sent = [0, 0],
-    executed = [0, 0],
+    sent = names.map(() => 0),
+    executed = names.map(() => 0),
     checkpoints = {};
   let engine, lastFrame;
   mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: Date.now() });
@@ -37,7 +36,7 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
   try {
     for (const [index, socket] of sockets.entries()) {
       const id = ids[index];
-      const template = index === seat ? attachStrategy : require(entries[opponent]).attachStrategy;
+      const template = index === seat ? attachStrategy : require(entries[names[index]]).attachStrategy;
       socket.id = id;
       socket.connected = true;
       socket.on('attack', ({ x, y, dx, dy, mode }) => {
@@ -77,7 +76,7 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
         speed: 1,
         allow_team: false,
         player_names: names,
-        player_teams: [1, 2],
+        player_teams: ids.map((_, i) => i + 1),
       },
       ids,
       ids,
@@ -114,6 +113,7 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
       if (executed.includes(0))
         throw new Error('Inactive seat: ' + JSON.stringify({ opponent, seat, sent, executed }));
       const winner = ended ? lastFrame.leaderboard.find((p) => !p.dead)?.uid : undefined;
+      const self = lastFrame.leaderboard.find((p) => p.uid === 'relay');
       return {
         opponent,
         map,
@@ -123,7 +123,14 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
         seed,
         seat,
         tick,
-        result: ended ? (winner === 'relay' ? 'win' : 'loss') : 'timeout',
+        result: self.dead ? 'loss' : winner === 'relay' ? 'win' : 'timeout',
+        ...(names.length > 2
+          ? {
+              names,
+              alive: lastFrame.leaderboard.filter((p) => !p.dead).length,
+              rank: self.dead ? names.length + 1 - self.dead : ended ? 1 : null,
+            }
+          : {}),
         executed,
         checkpoints,
       };
@@ -135,9 +142,12 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
 }
 
 async function main() {
-  const opponents = (process.env.OPPONENTS || 'simple,anti,apex,v2').split(',');
-  for (const opponent of opponents)
-    if (!Object.hasOwn(entries, opponent)) throw new Error('Unknown opponent: ' + opponent);
+  const opponents = (process.env.OPPONENTS || 'anti,apex,v2').split(',');
+  for (const opponent of opponents) {
+    const others = opponent.split('+');
+    if (new Set(others).size !== others.length || others.some((id) => !Object.hasOwn(entries, id)))
+      throw new Error('Invalid lineup: ' + opponent);
+  }
   const maps = (process.env.MAPS || 'random,maze,archipelago,mediterranean').split(',');
   const seeds = (process.env.SEEDS || 'relay-eval-1').split(',');
   const limit = Number(process.env.TICKS || 1000);
@@ -149,7 +159,7 @@ async function main() {
     for (const seed of seeds)
       for (const map of maps)
         for (const opponent of opponents)
-          for (const seat of [0, 1]) {
+          for (let seat = 0; seat <= opponent.split('+').length; seat++) {
             const result = await play({ opponent, map, large, fog, multi, seed, seat, limit });
             console.log(JSON.stringify(result));
           }
