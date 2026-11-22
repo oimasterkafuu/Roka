@@ -28,7 +28,7 @@ block content
       p
         | 仓库&#32;
         code bot-template/
-        | &#32;下提供四个独立 pnpm 包：
+        | &#32;下提供以下 Bot 模板：
       table.doc-table
         tbody
           tr
@@ -65,6 +65,11 @@ block content
               | &#32;导出&#32;
               code attachStrategy
               | ，支持托管。&#32;
+          tr
+            th
+              code relay-bot
+            td
+              | 支持迷雾记忆、主城回防和多线推进，可由服务端托管。独立运行时在仓库根目录设置 BOT_ROOM 和 BOT_TOKEN，执行 pnpm run bot:relay。
       h3 1.1 获取 token
       p
         | &#32;登录需要图形验证码。使用普通账号运行 bot 时，先在浏览器登录，再从开发者工具的 Cookie 中复制&#32;

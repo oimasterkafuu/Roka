@@ -55,7 +55,7 @@
       </p>
       <section class="doc-panel">
         <h2>1. 快速开始</h2>
-        <p>仓库&#32;<code>bot-template/</code>&#32;下提供四个独立 pnpm 包：</p>
+        <p>仓库&#32;<code>bot-template/</code>&#32;下提供以下 Bot 模板：</p>
         <table class="doc-table">
           <tbody>
             <tr>
@@ -85,6 +85,13 @@
               <td>
                 &#32;战术战役
                 bot，包含救城、建筑处理、集结推进与迷宫策略。<code>strategy.js</code>&#32;导出&#32;<code>attachStrategy</code>，支持托管。&#32;
+              </td>
+            </tr>
+            <tr>
+              <th><code>relay-bot</code></th>
+              <td>
+                支持迷雾记忆、主城回防和多线推进，可由服务端托管。独立运行时在仓库根目录设置 BOT_ROOM 和
+                BOT_TOKEN，执行 pnpm run bot:relay。
               </td>
             </tr>
           </tbody>
