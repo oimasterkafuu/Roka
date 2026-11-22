@@ -6,7 +6,7 @@ const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents } = require('./single-front');
-const { makeOpening } = require('./opening');
+const { makeOpening, openingOrder } = require('./opening');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -69,6 +69,51 @@ test('wait for a column in a single-exit corridor and reach tile thirteen by tic
   const plan = makeOpening(b, teams, [0], 0, Array(25).fill(90));
   assert.deepEqual([plan.land, plan.upper], [13, 13]);
   assert.ok(plan.moves.some((batch) => !batch.length));
+});
+
+test('crop near a board edge without wrapping rows or changing legal opening orders', () => {
+  // Both crowns have the same nine-tick neighbourhood at their right edge.
+  const plan = (rows, cols) => {
+    const root = Math.floor(rows / 2) * cols + cols - 1;
+    const walls = [root - cols - 1, root + cols - 2];
+    const { b, teams } = openingFixture(rows, cols, root, walls);
+    const result = makeOpening(b, teams, [root], 0, Array(b.size).fill(90), 9);
+    const pos = (i) => [Math.floor(i / cols) - Math.floor(rows / 2), (i % cols) - cols + 1];
+    return {
+      land: result.land,
+      upper: result.upper,
+      moves: result.moves.map((batch) => batch.map((op) => [pos(op.from), pos(op.to), op.mode, op.send])),
+    };
+  };
+  assert.deepEqual(plan(81, 93), plan(13, 17));
+});
+
+test('reuse the cached opening without a rival distance search on its next frame', () => {
+  const { b, teams } = openingFixture(1, 17, 0);
+  let calls = 0;
+  const distances = () => {
+    calls++;
+    return Array(17).fill(90);
+  };
+  const ops = openingOrder(b, teams, [0], 0, distances, false);
+  b.army_cnt[0]++;
+  for (const op of ops) {
+    b.army_cnt[op.from] -= op.send;
+    b.army_cnt[op.to] += op.send;
+    b.grid_type[op.to] = 1;
+    teams[op.to] = 1;
+  }
+  openingOrder(b, teams, [0], 1, distances, false);
+  assert.equal(calls, 1);
+});
+
+test('recover a valuable isolated column by taking its connection', () => {
+  const b = createBoard(2, 6, 1);
+  b.grid_type.set([101, 1, 200, 1, 1, 201, 201, 201, 201, 201, 201, 102]);
+  b.army_cnt.set([15, 30, 0, 85, 2, 0, 0, 0, 0, 0, 0, 25]);
+  b.isolated[3] = b.isolated[4] = 1;
+  const [order] = chooseOrders(b, 73, players, false);
+  assert.deepEqual([order.from, order.to], [1, 2]);
 });
 
 test('prefer an uncontested branch when both directions offer the same land', () => {
@@ -278,6 +323,51 @@ test('wait for a playing seat and request the configured team once it opens', (c
   member.team = 2;
   socket.emit('room_update', snapshot);
   assert.deepEqual(readiness, [{ ready: true }]);
+});
+
+test('end a single game only after participating, without returning or readying again', () => {
+  const socket = new EventEmitter();
+  let ended = 0;
+  const returns = [];
+  const readiness = [];
+  const handle = attachStrategy(socket, {
+    room: 'test',
+    onGameEnd() {
+      ended++;
+      handle.stop();
+    },
+  });
+  socket.on('return_room', (request) => returns.push(request));
+  socket.on('change_ready', (request) => readiness.push(request));
+  socket.emit('set_id', 'relay');
+  socket.emit('init_map', { n: 1, m: 1, general: [-1, -1], player_ids: ['other'] });
+  socket.emit('update', { game_end: true });
+  assert.equal(ended, 0);
+
+  socket.emit('init_map', { n: 1, m: 1, general: [0, 0], player_ids: ['relay'] });
+  socket.emit('update', { leaderboard: [{ id: 1, dead: true }], turn: 1 });
+  assert.equal(ended, 0);
+  socket.emit('update', { game_end: true });
+  socket.emit('room_update', {
+    players: [
+      { sid: 'relay', team: 1, ready: false },
+      { sid: 'other', team: 1 },
+    ],
+  });
+  assert.equal(ended, 1);
+  assert.deepEqual(returns, []);
+  assert.deepEqual(readiness, []);
+});
+
+test('return to the room after a completed game by default', (context) => {
+  const socket = new EventEmitter();
+  context.after(attachStrategy(socket, { room: 'test' }).stop);
+  const returns = [];
+  socket.on('return_room', (request) => returns.push(request));
+  socket.emit('set_id', 'relay');
+  socket.emit('init_map', { n: 1, m: 1, general: [0, 0], player_ids: ['relay'] });
+  socket.emit('update', { game_end: true });
+  assert.deepEqual(returns, [{}]);
 });
 
 test('rebind with a pending queue, apply diff and retain independent multiline orders', () => {

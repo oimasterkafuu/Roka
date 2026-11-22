@@ -4,7 +4,7 @@ const { createBoard, chooseOrders } = require('./planner');
 const { openingBudget } = require('./opening');
 const MAX_TEAMS = 16;
 
-function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
+function attachStrategy(socket, { room, team = 1, autoReady = true, onGameEnd } = {}) {
   let id,
     board,
     multiLine = false,
@@ -74,7 +74,10 @@ function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
     },
     update(frame) {
       if (frame.game_end) {
-        if (board) socket.emit('return_room', {});
+        if (board) {
+          if (onGameEnd) onGameEnd();
+          else socket.emit('return_room', {});
+        }
         board = null;
         return;
       }

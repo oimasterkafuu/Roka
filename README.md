@@ -119,9 +119,11 @@ pnpm run test:build-pages
 
 建指挥所、升主城和调兵筹款会估算可见敌军穿过弯道、沿途汇兵后抵达的兵力。守路的驻军付完 50 兵仍能挡住这波进攻，才在该格动工。接敌后按各方产量、侧翼、补给和断线兵团规模决定进攻或救援，FFA 也会计入其他边界的压力。
 
-在仓库根目录安装依赖后，可通过 `BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:relay` 独立运行。`BOT_SERVER` 默认为 `http://127.0.0.1:23333`，组队时可用 `BOT_TEAM` 选择 1 至 16 队。托管权限与第三方令牌的房间限制见游戏内机器人开发协议。
+在仓库根目录安装依赖后，可通过 `BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:relay` 独立运行。设置 `BOT_ONCE=1` 后，Bot 完成一整局便断开连接并退出，不会重新准备；被淘汰后仍等待整局结束。`BOT_SERVER` 默认为 `http://127.0.0.1:23333`，组队时可用 `BOT_TEAM` 选择 1 至 16 队。托管权限与第三方令牌的房间限制见游戏内机器人开发协议。
 
-运行 `pnpm run test:relay` 检查协议与策略。当前结果见 [2.16.0 开局与峡谷评测](bot-template/relay-bot/OPENING.md)。历史结果见 [2.15.0 明牌单线与 FFA 评测](bot-template/relay-bot/SINGLE-LINE.md)及 [2.14.0 初版评测](bot-template/relay-bot/EVALUATION.md)。
+开局搜索按剩余 Tick 裁剪棋盘。执行已缓存的路线时，只有出现接敌风险才检查补给截断。标准图明牌单线会按实际调兵量评估增援：一小队兵只对大兵堆贡献很少时，优先考虑其他行动；来兵能保住主城或凑齐建造费用时，保留增援的优先级。
+
+运行 `pnpm run test:relay` 检查协议与策略。当前结果见 [2.16.1 耗时与换边评测](bot-template/relay-bot/TEMPO.md)。历史结果见 [2.16.0 开局与峡谷评测](bot-template/relay-bot/OPENING.md)、[2.15.0 明牌单线与 FFA 评测](bot-template/relay-bot/SINGLE-LINE.md)及 [2.14.0 初版评测](bot-template/relay-bot/EVALUATION.md)。
 
 ### Bot(3.0) 策略 Bot
 
