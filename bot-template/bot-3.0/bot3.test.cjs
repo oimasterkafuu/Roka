@@ -898,10 +898,10 @@ function multiContext(overrides = {}) {
   };
 }
 
-test('multi-line layer is on by default and clamps its own environment', () => {
-  const off = multiConfig({}, { BOT3_MULTI: '0' });
+test('multi-line layer is off after the burst removal and clamps its own environment', () => {
+  const off = multiConfig({}, {});
   assert.equal(off.enabled, false);
-  assert.equal(multiConfig({}, {}).enabled, true);
+  assert.equal(multiConfig({}, { BOT3_MULTI: '1' }).enabled, true);
   assert.deepEqual(
     [off.burstGain, off.raidBonus, off.mergePenalty, off.marchGain, off.marchBase, off.cut],
     [2, 400, 100, 0, 15, 0],
