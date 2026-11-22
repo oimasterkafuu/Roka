@@ -10,6 +10,7 @@ const {
 const { openingOrder, END_TICK } = require('./opening');
 const { isMazeBoard, laneBlocked, recordLane, LANE, SINGLE_FROM } = require('./maze');
 const { closingUpdate } = require('./closing');
+const { planFinish, finishEnabled, finishOptions } = require('./kill');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -354,6 +355,35 @@ function chooseOrders(b, turn, leaderboard, multi) {
       })
     : { active: false };
   const closeIn = closing.active === true;
+  // Finish layer: when an owned stack can provably take an enemy crown and
+  // keep it, that ends the game and outranks every economy or frontier score.
+  // Off by default (see kill.js): `BOT3_FINISH=1` or `board.finish = true`
+  // enables it. Multi-line play is untouched, the planner already wins there.
+  if (!multi && b.finish !== false && (b.finish === true || finishEnabled())) {
+    const finish = planFinish(
+      b,
+      {
+        turn,
+        teams,
+        myTeam,
+        homes,
+        targets,
+        cut,
+        threat,
+        danger,
+        teamByOwner,
+        rivalTeam: rival ? (teamByOwner.get(rival.player.id) ?? 0) : 0,
+      },
+      finishOptions(),
+    );
+    if (finish.ok) {
+      b.column = finish.to;
+      b.columnTurn = turn;
+      b.lastFrom[finish.to] = finish.from;
+      b.lastMove[finish.to] = turn;
+      return [{ score: 3000, from: finish.from, to: finish.to, mode: 2 }];
+    }
+  }
   const mobileArmy = self.army - self.land;
   // While closing, the empire funnels into its heaviest stack and that stack
   // pushes once it can pay for the remaining path (see ./closing). The lead has
