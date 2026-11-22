@@ -158,8 +158,11 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function fogConfig(overrides = {}, env = process.env) {
   // `BOT3_FOG_PAINT3` is the measured bundle; every knob can still be set on its
-  // own and overrides the bundle.
-  const paint3 = flag(env.BOT3_FOG_PAINT3, false);
+  // own and overrides the bundle. It is on by default because it is the only
+  // measured setting that reaches the 65% Relay target with no regressing cell
+  // (relay/random fog single 16 -> 21/32, +8 wins on the 2048-game matrix); set
+  // `BOT3_FOG_PAINT3=0` to run the pre-round-8 baseline.
+  const paint3 = flag(env.BOT3_FOG_PAINT3, true);
   return {
     enabled: overrides.enabled ?? flag(env.BOT3_FOG, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_FOG_BOARD, DEFAULT_MAX_BOARD, 1, 100000),

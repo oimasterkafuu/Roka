@@ -1225,8 +1225,15 @@ test('cap a fog column merge only while the frontier still has neutral land', ()
   assert.equal(fogPaintCap({ paint: 120, paintFrom: 8 }, 8), 120);
 });
 
-test('default the paint-before-advance cap off and expose the measured bundle', () => {
-  const off = fogConfig({}, {});
+test('default the paint-before-advance cap on and allow the pre-round-8 opt-out', () => {
+  // The measured bundle is the default: it is the only setting that reaches the
+  // 65% Relay target with no regressing cell (see BOT3_FOG.md).
+  const on = fogConfig({}, {});
+  assert.deepEqual(
+    [on.paint, on.paintFrom, on.paintSwamp, on.paintUntil, on.paintArmy],
+    [DEFAULT_PAINT3, 8, DEFAULT_PAINT3_SWAMP, DEFAULT_PAINT3_UNTIL, 0],
+  );
+  const off = fogConfig({}, { BOT3_FOG_PAINT3: '0' });
   assert.deepEqual(
     [off.paint, off.paintFrom, off.paintSwamp, off.paintUntil, off.paintArmy],
     [0, 8, 0, 0, 0],

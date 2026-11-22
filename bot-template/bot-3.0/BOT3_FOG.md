@@ -259,7 +259,7 @@ node scripts/compare-bot3-baseline.cjs /tmp/fog.jsonl data/scratch/round2-baseli
 - 下一步应围绕**防守定价**（按可见最大敌方堆给主城定驻军下限）和**迷雾下的盲攻代价**
   （向 200 格推进时用记忆与信念给对手可能驻军定价），而不是继续调 burst 权重。
 
-## 第五轮：柱状推进的「先涂地」封顶（`BOT3_FOG_PAINT3`，默认关）
+## 第五轮：柱状推进的「先涂地」封顶（`BOT3_FOG_PAINT3`，默认开）
 
 复盘随机图 16 种子（`relay/random/fog+single` 32 局）的逐 Tick 记录：中盘有 40%~87% 的 Tick
 唯一指令是**在自己格子上汇兵**，而我方边界上始终有 16~37 个中立格；同一时间排行榜上对手
@@ -297,13 +297,15 @@ node scripts/compare-bot3-baseline.cjs /tmp/fog.jsonl data/scratch/round2-baseli
 - 完整 2048 局矩阵（16 种子全部对手/地图/模式，`BOT3_FOG_PAINT3=1`）：**1629W/356L/63T** 对基线
   1621/367/60，**没有任何一格低于基线**（`flips`：`lossToWin` 17、`winToLoss` 5、`timeoutToWin` 3、
   `winToTimeout` 7、`lossToTimeout` 1、`timeoutToLoss` 2）。超时 60 → 63，是这套开关唯一的代价形状。
-- 默认路径（不带任何环境变量）在 4 种子 512 局上与记录基线逐局一致（`flips` 全 0）。
+- 默认路径（不带任何环境变量）**就是这个 bundle**：它在本轮 2048 局复核中同样是 1629W/356L/63T、
+  仅 3 格变化且全部为正（`relay/random` +5、`anti/random` +2、`v2/random` +1）。`BOT3_FOG_PAINT3=0`
+  回到 round-4 基线（4 种子 512 局与记录基线逐局一致，`flips` 全 0）。
 
 ### 开关
 
 | 变量 | 默认 | 含义 |
 | ---- | ---- | ---- |
-| `BOT3_FOG_PAINT3` | **关** | 实测 bundle：`PAINT=120`、`PAINT_SWAMP=25`、`PAINT_UNTIL=200` |
+| `BOT3_FOG_PAINT3` | **开** | 实测 bundle：`PAINT=120`、`PAINT_SWAMP=25`、`PAINT_UNTIL=200`；`0` 回到 round-4 基线 |
 | `BOT3_FOG_PAINT` | `0`（bundle 时 `120`） | 柱的自格推进封顶分数（0 = 关闭）；必须低于中立占领分（32~120）才能生效 |
 | `BOT3_FOG_PAINT_FROM` | `8` | 边界中立格数达到该值才启用封顶 |
 | `BOT3_FOG_PAINT_SWAMP` | `0`（bundle 时 `25`） | 沼泽占比达到该百分比时关闭封顶（0 = 从不按沼泽关闭） |
