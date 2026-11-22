@@ -118,3 +118,84 @@ node -e "const c=require('./bot-template/bot-3.0/cut.js');console.log(JSON.strin
 ### 结论
 
 本层**保持默认关闭**。`CUTSAVE` 仍是两个开关里唯一在两个互不相交种子块上都为正的机制（`_MIN=30` 时 1632/+11 与备用种子 1581/+5），但它无法做到零退化格，而组合的 +23 胜也以 5 个 -1 局为代价。若要按总量取舍，推荐 `BOT3_MAZEFOG3=1 BOT3_CUTSAVE=1 BOT3_CUTSAVE_MIN=10`（Relay 281/512，+23 胜），并明确接受那 5 局。
+
+## 第 11 轮：定位门禁（默认仍关闭，推荐组合已满足严格门禁）
+
+第 8 轮的结论是「CUTSAVE 无法零退化」。第 11 轮把问题从**改价**换成**改触发条件**：奖励形状（`GAIN`/`CAP`/`MIN`）在第 8 轮已经证明只能搬运 ±1 局，但哪些**局面**该付这一回合的钱仍然可以筛。本层新增四个无状态定位门禁（默认全关，关闭时与第 8 轮逐局一致）：
+
+| 开关                       | 默认 | 含义                                                                         |
+| -------------------------- | ---- | ---------------------------------------------------------------------------- |
+| `BOT3_CUTSAVE_TURN`        | 0    | 起始回合                                                                     |
+| `BOT3_CUTSAVE_UNTIL`       | 0    | 结束回合（0 = 不设上限）                                                     |
+| `BOT3_CUTSAVE_FOG`         | 关   | 只在迷雾房武装（机制本身非迷雾专属，此门禁仅为可测性保留）                   |
+| `BOT3_CUTSAVE_CLOSING`     | 关   | 收尾相位（`closing.js`）接管计划时停发（`planner.js` 把 `closeIn` 传进本层） |
+| `BOT3_CUTSAVE_BEHIND`      | 0    | 只有己方兵力 <= 对手兵力 × 该系数时才武装（0 = 不限）                        |
+| `BOT3_CUTSAVE_BEHIND_LAND` | 0    | 同上，按实地格数比                                                           |
+| `BOT3_CUTSAVE_SHARE`       | 0    | 孤岛兵力必须 >= 己方兵力 × 该百分比（0 = 不限）                              |
+
+两点实现细节（都是本轮测出来的）：
+
+1. **门禁必须读排行榜，不能读格子**。迷雾房里 `units` 只带可见格子的兵力，用格子求和会系统性低估对手，`BEHIND` 于是在迷雾房永不放行（实测：格子求和版本下 10 个被改变的局全在**全图**单线，迷雾 +1 胜直接丢掉）。现在 `planner.js` 把 `self.army / enemyArmy / self.land / enemyLand` 与 `closeIn` 一起传进 `cutApply`，格子求和只是兜底。
+2. **`SHARE` 是唯一的硬分离器，而且不干净**。逐局追踪（临时 `BOT3_CUTSAVE_TRACE` 钩子，已移除）显示：两个退化真的触发点孤岛只占己方兵力 **8.2% / 8.9%**（`anti/随机/全图单线` 种子 2 座位 0 的 515 兵局 42 兵、`apex/迷宫/全图单线` 种子 2 座位 0 的 360 兵局 32 兵），而保留下来的收益局孤岛占比从 **2% 到 27%** 都有。所以 `SHARE` 不是结构分离器，它只是「小口袋不值得一回合」的经济阈值：抬到 10% 能同时关掉那两局，代价是让 5 个收益局回到基线结果。
+
+### 扫描（屏幕 768 局：anti/apex/relay × 4 图 × 单线 × 全图/迷雾，16 种子 × 双座位；配对基线 546 胜）
+
+| 配置                                            | 屏幕胜 | CUTSAVE 退化格（各 -1）                                                                                  |
+| ----------------------------------------------- | -----: | -------------------------------------------------------------------------------------------------------- |
+| `MAZEFOG3=1`（参照，含默认开启的 `FOG_PAINT3`） |    558 | —（`anti/迷宫/迷雾单线` 的 -1 属迷雾迷宫层，由并行分支修复）                                             |
+| `+ CUTSAVE MIN=10`（无门禁）                    |    563 | `anti/群岛/雾`、`anti/地中海/雾`、`anti/随机/雾`、`apex/迷宫/全`、`apex/随机/全`、`apex/随机/雾`（6 格） |
+| `+ CLOSING=1`                                   |    564 | 同上 6 格（收尾门禁对这 6 局完全是空操作，只额外 +1 `anti/地中海/全`）                                   |
+| `+ BEHIND=1`（按兵力）                          |    563 | `apex/迷宫/全`、`anti/随机/全`（2 格，退化从 6 降到 2）                                                  |
+| `+ BEHIND=1 SHARE=10`                           |    562 | **无**                                                                                                   |
+| `+ BEHIND=1 SHARE=10 CLOSING=1`                 |    562 | 无（与上一行逐局完全相同）                                                                               |
+
+无门禁时本层在屏幕上改变 36 局；`BEHIND` 后 20 局；`BEHIND+SHARE=10` 后 8 局（4 胜、4 个不改变胜负的翻转）。
+
+### 选定配置的全量 2048 局
+
+`BOT3_MAZEFOG3=1 BOT3_CUTSAVE=1 BOT3_CUTSAVE_MIN=10 BOT3_CUTSAVE_BEHIND=1 BOT3_CUTSAVE_SHARE=10`：
+
+**1640/339/69（80.1%，对记录基线 1621/367/60 为 +19 胜）**，63/64 格 >= 基线且 >= 50%，唯一退化格是 `anti/迷宫/迷雾单线` 29/32（迷雾迷宫层的那 1 局，并行分支修复后为 0）。
+
+| 格子（变化格）                         | 候选            | 基线             |                   Δwin |
+| -------------------------------------- | --------------- | ---------------- | ---------------------: |
+| relay/随机/迷雾单线                    | 22/9/1          | 16/16/0          |                +18.8pp |
+| relay/迷宫/迷雾单线                    | 21/11/0         | 16/16/0          |                +15.6pp |
+| relay/迷宫/全图单线                    | 21/11/0         | 21/11/0          |                  0.0pp |
+| relay/地中海/迷雾单线                  | 22/10/0         | 22/10/0          |                  0.0pp |
+| anti/随机/迷雾单线                     | 23/5/4          | 21/9/2           |                 +6.3pp |
+| anti/群岛/全图单线、anti/群岛/迷雾单线 | 20/12/0、23/9/0 | 19/13/0、22/10/0 |         +3.1pp、+3.1pp |
+| apex/群岛/全图单线、apex/迷宫/迷雾单线 | 25/7/0、26/1/5  | 24/8/0、25/3/4   |         +3.1pp、+3.1pp |
+| v2/迷宫/迷雾单线、v2/随机/迷雾单线     | 26/1/5、29/1/2  | 25/2/5、28/2/2   |         +3.1pp、+3.1pp |
+| anti/迷宫/迷雾单线                     | 29/3/0          | 30/2/0           | -3.1pp（属迷雾迷宫层） |
+
+多线 32 格逐格 0.0pp：本层的救援价在多线里仍然换不到任何东西（围岛兵力中位数 1）。
+
+### 结论与建议
+
+- 严格门禁（Relay 目标格 >=65%、其他格 >=50% 且不低于基线）**现在可以满足**：`MAZEFOG3 + CUTSAVE(MIN=10, BEHIND=1, SHARE=10)` 零退化格（并行分支修掉迷雾迷宫层那 1 局之后），全量 +19 胜。
+- 帕累托前沿（屏幕 768 局）：`BEHIND=1` 563 胜 / 2 个 -1 格；`BEHIND=1 SHARE=10` 562 胜 / 0 个 -1 格。用 1 胜换掉 2 个退化格是这一轮唯一值得的交换；无门禁的 563 胜带 6 个退化格，不是备选。
+- **本层仍然默认关闭**（AGENTS 要求不静默默认开启）。要采用时用上面那一行环境变量；`CLOSING`、`FOG`、`TURN`、`BEHIND_LAND` 实测都不改善该组合（`CLOSING` 与 `BEHIND+SHARE` 叠加后逐局 0 变化），保留为可复现的负结果开关。
+- 修复不是「把 ±1 局搬走」：`BEHIND` 把 6 个退化格压到 2 个是因为它改变了**一类局面**（领先时不再花回合连孤岛），`SHARE` 只是最后 2 局的经济阈值。剩余风险见下。
+
+### 复现
+
+```sh
+# 屏幕（768 局，约 3 分钟；SUMMARY 的按格校验对筛选运行不适用，只看 compare）
+cd C:/Users/reson/Downloads/fork/Roka-bot3-r11-repair
+BOT3_MAZEFOG3=1 BOT3_CUTSAVE=1 BOT3_CUTSAVE_MIN=10 \
+BOT3_CUTSAVE_BEHIND=1 BOT3_CUTSAVE_SHARE=10 \
+OPPONENTS=anti,apex,relay MODES=000,010 WORKERS=2 SEED_FROM=1 SEED_TO=16 \
+  OUT=/tmp/r11-screen.jsonl SUMMARY=/tmp/r11-screen.json \
+  node scripts/evaluate-bot3-baseline.cjs
+NO_GATE=1 node scripts/compare-bot3-baseline.cjs /tmp/r11-screen.jsonl
+
+# 全量 2048 局（约 14 分钟，分两批再拼接，单批会超过 900s）
+for range in "1 8 a" "9 16 b"; do set -- $range; \
+  BOT3_MAZEFOG3=1 BOT3_CUTSAVE=1 BOT3_CUTSAVE_MIN=10 \
+  BOT3_CUTSAVE_BEHIND=1 BOT3_CUTSAVE_SHARE=10 \
+  WORKERS=2 SEED_FROM=$1 SEED_TO=$2 OUT=/tmp/r11-full-$3.jsonl SUMMARY=/tmp/r11-full-$3.json \
+    node scripts/evaluate-bot3-baseline.cjs; done
+cat /tmp/r11-full-a.jsonl /tmp/r11-full-b.jsonl > /tmp/r11-full.jsonl
+NO_GATE=1 node scripts/compare-bot3-baseline.cjs /tmp/r11-full.jsonl
+```

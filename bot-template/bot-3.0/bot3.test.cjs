@@ -1265,3 +1265,35 @@ test('stand the corridor layer down once the rival material takes off', () => {
   assert.equal(fogMazeProgress(b, { ...input, turn: 240, army: 900, enemyArmy: 400 }, config).stalled, false);
   assert.equal(fogMazeProgress(b, { ...input, turn: 260, army: 400, enemyArmy: 900 }, config).stalled, true);
 });
+
+test('arm the cut rescue only inside the positional gates', () => {
+  const { cutConfig, saveGate } = require('./cut');
+  // Two cells each: we hold index 0, the rival holds index 1.
+  const ctx = { size: 2, myTeam: 1, teams: [1, 2], units: [40, 100], fog: true, closing: false };
+  const plan = (turn, overrides) => ({ turn, config: cutConfig(overrides, {}) });
+  const base = { enabled: true, min: 0 };
+  // Ungated: the bonus is armed wherever a pocket clears `min`.
+  assert.ok(saveGate(plan(60, { save: base }), ctx));
+  // Fog-only gate blocks clear rooms and keeps fog rooms.
+  assert.ok(saveGate(plan(60, { save: { ...base, fog: true } }), ctx));
+  assert.equal(saveGate(plan(60, { save: { ...base, fog: true } }), { ...ctx, fog: false }), null);
+  // Closing gate blocks only while the endgame phase owns the plan.
+  assert.equal(saveGate(plan(60, { save: { ...base, closing: true } }), { ...ctx, closing: true }), null);
+  assert.ok(saveGate(plan(60, { save: { ...base, closing: true } }), ctx));
+  // Turn window.
+  assert.equal(saveGate(plan(40, { save: { ...base, turn: 60 } }), ctx), null);
+  assert.equal(saveGate(plan(90, { save: { ...base, until: 80 } }), ctx), null);
+  assert.ok(saveGate(plan(60, { save: { ...base, turn: 60, until: 80 } }), ctx));
+  // Behind gates: 40 army against 100 is behind, 140 against 100 is not.
+  assert.ok(saveGate(plan(60, { save: { ...base, behindArmy: 1 } }), ctx));
+  const ahead = { ...ctx, units: [140, 100] };
+  assert.equal(saveGate(plan(60, { save: { ...base, behindArmy: 1 } }), ahead), null);
+  // Land gate reads the ownership counts (one cell each here).
+  assert.ok(saveGate(plan(60, { save: { ...base, behindLand: 1 } }), ctx));
+  assert.equal(saveGate(plan(60, { save: { ...base, behindLand: 0.5 } }), ctx), null);
+  // Exact leaderboard reads win over the cell sums, and feed the share gate.
+  const exact = { ...ctx, army: 400, rivalArmy: 300, land: 10, rivalLand: 20 };
+  assert.equal(saveGate(plan(60, { save: { ...base, behindArmy: 1 } }), exact), null);
+  const sums = saveGate(plan(60, { save: { ...base, share: 25 } }), exact);
+  assert.deepEqual([sums.army, sums.rivalArmy, sums.land, sums.rivalLand], [400, 300, 10, 20]);
+});

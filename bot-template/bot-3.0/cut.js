@@ -124,6 +124,17 @@ function cutConfig(overrides = {}, env = process.env) {
       // A reconnect only pays if the door falls this tick: a failed attack burns
       // the stack and leaves the pocket severed (and decaying).
       sure: save.sure ?? flag(env.BOT3_CUTSAVE_SURE, true),
+      // Positional gates (round 11). The reconnect bonus is a tempo spend: it
+      // pays while the game is still open and the pocket is real material, and
+      // it costs the finishing tick in a room we are already converting. Every
+      // gate is opt-in, so an ungated run is byte identical to round 8.
+      turn: save.turn ?? number(env.BOT3_CUTSAVE_TURN, 0, 0, 5000),
+      until: save.until ?? number(env.BOT3_CUTSAVE_UNTIL, 0, 0, 5000),
+      fog: save.fog ?? flag(env.BOT3_CUTSAVE_FOG, false),
+      closing: save.closing ?? flag(env.BOT3_CUTSAVE_CLOSING, false),
+      behindArmy: save.behindArmy ?? number(env.BOT3_CUTSAVE_BEHIND, 0, 0, 8),
+      behindLand: save.behindLand ?? number(env.BOT3_CUTSAVE_BEHIND_LAND, 0, 0, 8),
+      share: save.share ?? number(env.BOT3_CUTSAVE_SHARE, 0, 0, 100),
     },
   };
 }
@@ -300,6 +311,56 @@ function articBuilds(plan, ctx, candidates) {
   }
 }
 
+// Army and land totals per side, taken from the exact leaderboard reads the
+// planner passes. The cell sums are only what we can see, so in a fog room the
+// `units` array undercounts the rival and would make the gate lie.
+function sideSums(ctx) {
+  if (Number.isFinite(ctx.army) && Number.isFinite(ctx.rivalArmy))
+    return {
+      army: ctx.army,
+      rivalArmy: ctx.rivalArmy,
+      land: ctx.land ?? 0,
+      rivalLand: ctx.rivalLand ?? 0,
+    };
+  const { teams, units, myTeam, size } = ctx;
+  let army = 0,
+    rivalArmy = 0,
+    land = 0,
+    rivalLand = 0;
+  for (let i = 0; i < size; i++) {
+    const team = teams[i];
+    if (!team) continue;
+    if (team === myTeam) {
+      army += units[i];
+      land += 1;
+    } else {
+      rivalArmy += units[i];
+      rivalLand += 1;
+    }
+  }
+  return { army, rivalArmy, land, rivalLand };
+}
+
+// Positional gate for the rescue bonus (round 11). `null` blocks the bonus; the
+// returned totals are reused by the share gate in `cutApply`.
+function saveGate(plan, ctx) {
+  const save = plan.config.save;
+  if (!save.enabled) return null;
+  const turn = plan.turn;
+  if (turn < save.turn) return null;
+  if (save.until > 0 && turn >= save.until) return null;
+  if (save.fog && !ctx.fog) return null;
+  if (save.closing && ctx.closing === true) return null;
+  if (!(save.behindArmy > 0) && !(save.behindLand > 0) && !(save.share > 0)) return {};
+  const sums = sideSums(ctx);
+  // "Behind" is the state the bonus is for: a pocket we can still recover is
+  // material we have not lost yet. While leading, the same tick is better spent
+  // on the finishing column (see CUT.md, round 11).
+  if (save.behindArmy > 0 && !(sums.army <= Math.max(1, sums.rivalArmy) * save.behindArmy)) return null;
+  if (save.behindLand > 0 && !(sums.land <= Math.max(1, sums.rivalLand) * save.behindLand)) return null;
+  return sums;
+}
+
 // Score adjustments. `ctx` carries the arrays the planner already built, so
 // nothing is recomputed here.
 function cutApply(plan, ctx, candidates) {
@@ -308,6 +369,7 @@ function cutApply(plan, ctx, candidates) {
   const approach = plan.approach;
   const rescue = plan.rescue;
   const save = plan.config.save;
+  const gate = rescue && saveGate(plan, ctx);
   for (const op of candidates) {
     if (op.build) continue;
     const to = teams[op.to];
@@ -315,9 +377,16 @@ function cutApply(plan, ctx, candidates) {
     // rival captures along the field are priced, because the column needs mass.
     if (approach && approach.dist[op.to] < approach.dist[op.from] && approach.dist[op.from] < INF)
       op.score += Math.round(approach.gain);
-    if (rescue && to !== myTeam) {
+    if (gate && to !== myTeam) {
       const pocket = rescue[op.to];
-      if (pocket > 0 && (!save.sure || op.send > ctx.units[op.to]))
+      // `share` keeps the bonus for pockets that are real material: recovering a
+      // tenth of the army repays the tick, a 30-unit pocket in a 360-army race
+      // does not (see CUT.md, round 11).
+      if (
+        pocket > 0 &&
+        (!save.sure || op.send > ctx.units[op.to]) &&
+        (!(save.share > 0) || pocket * 100 >= (gate.army || 0) * save.share)
+      )
         op.score += Math.min(save.cap, save.gain * pocket);
     }
     if (!to || to === myTeam) continue;
@@ -331,6 +400,8 @@ module.exports = {
   cutConfig,
   cutUpdate,
   cutApply,
+  saveGate,
+  sideSums,
   cutValue,
   cutApproach,
   cutRescue,
