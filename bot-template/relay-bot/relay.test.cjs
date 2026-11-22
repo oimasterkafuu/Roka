@@ -6,11 +6,131 @@ const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents } = require('./single-front');
+const { makeOpening } = require('./opening');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
   { id: 2, team: 2, army: 100, land: 4, dead: 0 },
 ];
+
+function openingFixture(rows, cols, root, walls = []) {
+  const b = createBoard(rows, cols, 1);
+  b.grid_type.fill(200);
+  for (const wall of walls) b.grid_type[wall] = 201;
+  b.grid_type[root] = 101;
+  b.army_cnt[root] = 1;
+  const teams = Array.from(b.grid_type, (t) => (t === 101 ? 1 : 0));
+  return { b, teams };
+}
+
+// Independent exhaustive oracle for short games. Try every legal order or
+// wait, advance growth, and merge only identical army distributions.
+function bruteLand(b, root, ticks) {
+  let states = [Array.from(b.army_cnt)];
+  for (let t = 0; t < ticks; t++) {
+    const next = new Map();
+    for (const army of states) {
+      army[root]++;
+      next.set(army.join(), army.slice());
+      for (const [i, n] of army.entries()) {
+        if (n < 2) continue;
+        for (const j of b.neighbors[i]) {
+          if (b.grid_type[j] === 201) continue;
+          const other = b.neighbors[i].filter((k) => k !== j && b.grid_type[k] !== 201 && !army[k]).length;
+          for (const send of new Set([n - 1, Math.min(n - 1, Math.floor((n - 1 + other) / 2))])) {
+            if (!send) continue;
+            const copy = army.slice();
+            copy[i] -= send;
+            copy[j] += send;
+            next.set(copy.join(), copy);
+          }
+        }
+      }
+    }
+    states = [...next.values()];
+  }
+  return states.reduce((best, s) => Math.max(best, s.filter(Boolean).length), 0);
+}
+
+test('match exhaustive legal serial play on short openings including blocked exits', () => {
+  for (let mask = 0; mask < 32; mask++) {
+    const walls = [1, 2, 3, 4, 5].filter((i) => mask & (1 << (i - 1)));
+    const { b, teams } = openingFixture(2, 3, 0, walls);
+    for (const ticks of [5, 8]) {
+      const optimal = bruteLand(b, 0, ticks);
+      const plan = makeOpening(b, teams, [0], 0, Array(b.size).fill(90), ticks);
+      assert.deepEqual([plan.land, plan.upper], [optimal, optimal], JSON.stringify({ walls, ticks }));
+    }
+  }
+});
+
+test('wait for a column in a single-exit corridor and reach tile thirteen by tick 24', () => {
+  const { b, teams } = openingFixture(1, 25, 0);
+  const plan = makeOpening(b, teams, [0], 0, Array(25).fill(90));
+  assert.deepEqual([plan.land, plan.upper], [13, 13]);
+  assert.ok(plan.moves.some((batch) => !batch.length));
+});
+
+test('prefer an uncontested branch when both directions offer the same land', () => {
+  const { b, teams } = openingFixture(1, 15, 7);
+  b.grid_type[2] = 102;
+  b.grid_type[14] = 103;
+  teams[2] = 2;
+  teams[14] = 3;
+  const d = Array.from({ length: 15 }, (_, i) => Math.min(Math.abs(i - 2), 14 - i));
+  const plan = makeOpening(b, teams, [7], 0, d, 2);
+  assert.equal(plan.moves.flat()[0].to, 8);
+});
+
+test('expand in parallel from a single crown with executable independent orders', () => {
+  const { b, teams } = openingFixture(9, 9, 40);
+  const distance = Array(81).fill(99);
+  const serial = makeOpening(b, teams, [40], 0, distance);
+  const parallel = makeOpening(b, teams, [40], 0, distance, 24, 25000, true);
+  assert.ok(parallel.land > serial.upper);
+  for (const batch of parallel.moves) {
+    b.army_cnt[40]++;
+    const endpoints = batch.flatMap((op) => [op.from, op.to]);
+    assert.equal(new Set(endpoints).size, endpoints.length);
+    for (const op of batch) {
+      assert.equal(b.army_cnt[op.from], op.source);
+      assert.equal(b.army_cnt[op.to], op.destination);
+      b.army_cnt[op.from] -= op.send;
+      b.army_cnt[op.to] += op.send;
+    }
+  }
+  assert.equal(b.army_cnt.filter((n) => n > 0).length, parallel.land);
+});
+
+test('hold construction funds when an enemy column can round a bend, and build with enough reserve', () => {
+  for (const terrain of [1, 51]) {
+    const b = createBoard(3, 5, 1);
+    b.grid_type.fill(201);
+    for (const [i, t, n] of [
+      [0, 101, 4],
+      [1, terrain, 108],
+      [2, 1, 1],
+      [7, 200, 0],
+      [12, 2, 80],
+      [13, 2, 15],
+      [14, 102, 2],
+    ]) {
+      b.grid_type[i] = t;
+      b.army_cnt[i] = n;
+    }
+    assert.ok(!chooseOrders(b, 62, players, false).some((op) => op.build));
+    b.army_cnt[1] = 170;
+    assert.equal(chooseOrders(b, 62, players, false)[0].build, terrain === 1 ? 'b' : 'c');
+  }
+});
+
+test('trade into a larger invading stack from a side branch to save the crown', () => {
+  const b = createBoard(2, 4, 1);
+  b.grid_type.set([101, 1, 2, 102, 201, 201, 1, 201]);
+  b.army_cnt.set([9, 1, 60, 1, 0, 0, 57, 0]);
+  const [move] = chooseOrders(b, 81, players, false);
+  assert.deepEqual([move.from, move.to], [6, 2]);
+});
 
 test('value a whole isolated group once per bridge and distinguish a lone outpost', () => {
   const b = createBoard(2, 4, 1);

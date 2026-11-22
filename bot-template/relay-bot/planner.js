@@ -7,7 +7,7 @@ const {
   searchCampaign,
   siegeValue,
 } = require('./single-front');
-const { openingOrder } = require('./opening');
+const { openingOrder, END_TICK } = require('./opening');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -163,23 +163,64 @@ function incomingStrength(b, enemies, units, teams, myTeam) {
   return { threat, immediate };
 }
 
-function selectBuildSite(b, units, threat, frontDist, homeDist, supplyDistance) {
+// Project visible columns along terrain-shortest approaches to a particular
+// garrison. Distance decreases on every move, so a column can pick up each
+// friendly stack only once. Separate teams cannot pool troops in an FFA.
+function constructionPressure(b, units, teams, myTeam, enemyDist) {
+  const cache = new Map();
+  return function pressure(target) {
+    if (enemyDist[target] > 7) return 0;
+    if (cache.has(target)) return cache.get(target);
+    const cells = [target],
+      distance = new Map([[target, 0]]),
+      rivals = new Set();
+    for (const i of cells) {
+      if (teams[i] && teams[i] !== myTeam) rivals.add(teams[i]);
+      if (distance.get(i) === 7) continue;
+      for (const j of b.neighbors[i]) {
+        if (b.grid_type[j] === 201 || distance.has(j)) continue;
+        distance.set(j, distance.get(i) + 1);
+        cells.push(j);
+      }
+    }
+    let strongest = 0;
+    for (const rival of rivals) {
+      const arriving = new Map();
+      for (let k = cells.length - 1; k > 0; k--) {
+        const i = cells[k];
+        const incoming = arriving.get(i) ?? 0;
+        const mass = teams[i] === rival ? incoming + (b.isolated[i] ? 0 : units[i]) : incoming - units[i];
+        if (mass <= 1) continue;
+        const send = mass - 1,
+          next = distance.get(i) - 1;
+        for (const j of b.neighbors[i]) {
+          if (distance.get(j) === next && send > (arriving.get(j) ?? 0)) arriving.set(j, send);
+        }
+      }
+      strongest = Math.max(strongest, arriving.get(target) ?? 0);
+    }
+    cache.set(target, strongest);
+    return strongest;
+  };
+}
+
+function selectBuildSite(b, units, pressure, frontDist, homeDist, supplyDistance) {
   const { size, me, neighbors, grid_type: tile } = b;
   // In serial play, depositing several garrisons at the same safe site is
   // cheaper than marching each one to the front. Prefer sites we can finish.
   let site = -1,
     siteValue = -Infinity;
   for (let i = 0; i < size; i++) {
-    if (ownerOf(tile[i]) !== me || crown(tile[i]) || swamp(tile[i]) || b.isolated[i] || threat[i] > 0)
-      continue;
+    if (ownerOf(tile[i]) !== me || crown(tile[i]) || swamp(tile[i]) || b.isolated[i]) continue;
     const city = anchor(tile[i]);
     const cost = city ? 50 : 100;
-    const donors = neighbors[i].filter(
-      (j) => ownerOf(tile[j]) === me && !b.isolated[j] && units[j] > 2 && threat[j] < 2,
-    );
+    const donors = neighbors[i].filter((j) => ownerOf(tile[j]) === me && !b.isolated[j] && units[j] > 2);
     const funds = units[i] + donors.reduce((sum, j) => sum + units[j] - 1, 0);
     if (funds < cost) continue;
-    const largest = Math.max(0, ...donors.map((j) => units[j] - 1));
+    const safeFunds = donors.filter((j) => pressure(j) <= 1);
+    const available = units[i] + safeFunds.reduce((sum, j) => sum + units[j] - 1, 0);
+    if (available < cost || available - 50 < pressure(i)) continue;
+    const largest = Math.max(0, ...safeFunds.map((j) => units[j] - 1));
     const value =
       (city ? 75 : 0) +
       Math.min(units[i], cost) +
@@ -241,8 +282,40 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const frontDist = distances(b, borders, (j) => teams[j] === myTeam).dist;
   const enemyDist = distances(b, enemies).dist;
   const clearSerial = !multi && !(b.fogMode ?? b.fog.includes(1));
-  if (clearSerial && turn < 25 && homes.length === 1 && borders.every((i) => enemyDist[i] > 4)) {
-    return openingOrder(b, teams, myTeam, homes, turn);
+  // A zero garrison or a disconnected pocket means fighting has already
+  // changed the opening economy. Let the tactical planner handle that frame.
+  if (
+    turn < END_TICK &&
+    homes.length === 1 &&
+    !tile.some((t, i) => ownerOf(t) === me && (!army[i] || b.isolated[i]))
+  ) {
+    const orders = openingOrder(b, teams, homes, turn, enemyDist, multi);
+    const tacticalCapture = enemies.some(
+      (i) =>
+        crown(tile[i]) &&
+        neighbors[i].some((j) => ownerOf(tile[j]) === me && !b.isolated[j] && units[j] - 1 > units[i]),
+    );
+    const approach = enemies.some(
+      (i) =>
+        homeDist[i] <= 3 &&
+        units[i] - homeDist[i] > units[homes[0]] - (orders.find((op) => op.from === homes[0])?.send ?? 0),
+    );
+    const contested = orders.some((move) =>
+      neighbors[move.to].some(
+        (i) =>
+          teams[i] && teams[i] !== myTeam && !b.isolated[i] && units[i] - 1 > move.send + move.destination,
+      ),
+    );
+    const exposedStem = orders.some(
+      (move) =>
+        cut[move.from] > 0 &&
+        neighbors[move.from].some(
+          (i) =>
+            teams[i] && teams[i] !== myTeam && !b.isolated[i] && units[i] - 1 > units[move.from] - move.send,
+        ),
+    );
+    if (!approach && !contested && !exposedStem && !tacticalCapture) return orders;
+    b.opening = null;
   }
   const scouting = distances(b, scouts).dist;
   const single = clearSerial && turn >= 28;
@@ -256,7 +329,9 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const heading = targets.length ? goal : enemies.length ? enemyDist : scouting;
   const required = assaultStrength(b, queue, goal, units, teams, myTeam);
   const { threat, immediate } = incomingStrength(b, enemies, units, teams, myTeam);
+  const pressure = constructionPressure(b, units, teams, myTeam, enemyDist);
   const danger = homes.filter((i) => threat[i] > units[i]);
+  const exposedHome = turn >= 38 && homes.length <= 2 ? homes.find((i) => pressure(i) > units[i]) : undefined;
   const defense = distances(b, danger, (j) => teams[j] === myTeam && !b.isolated[j]).dist;
   const mobileArmy = self.army - self.land;
   const longFront = !multi && size >= 400;
@@ -308,7 +383,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const buildingStart = clearSerial ? (backup ? 39 : 50) : 38;
   const site =
     develop && turn >= buildingStart && homes.length < limit
-      ? selectBuildSite(b, units, threat, frontDist, homeDist, anchorDist)
+      ? selectBuildSite(b, units, pressure, frontDist, homeDist, anchorDist)
       : -1;
   if (single) {
     const route = campaignRoute(b, objectives, units, teams, myTeam, Math.max(3, mobileArmy / 70));
@@ -351,7 +426,9 @@ function chooseOrders(b, turn, leaderboard, multi) {
     const nearFight = enemyDist[i] < 5;
     if (!base && !swamp(tile[i]) && units[i] >= 50 && turn >= buildingStart) {
       const city = anchor(tile[i]);
-      const safe = immediate[i] <= units[i] - 50;
+      // A safe upgrade gives a second crown immediately, even if the old
+      // crown is under pressure. Otherwise a forced defence takes this tick.
+      const safe = (city || !danger.length) && pressure(i) <= units[i] - 50;
       const outpost = single && anchorDist[i] >= 5 && (cut[i] > 25 || units[i] >= 85);
       if (
         safe &&
@@ -398,7 +475,16 @@ function chooseOrders(b, turn, leaderboard, multi) {
         send = units[i] - 1;
       // Capturing the threatening stack itself removes that approach.
       const intercept = hostile && send > units[j] && units[j] - 1 >= threat[i];
-      const needed = intercept ? exposure : threat[i];
+      const trade =
+        hostile &&
+        !base &&
+        !strike &&
+        exposedHome !== undefined &&
+        homeDist[j] <= 4 &&
+        units[j] >= Math.max(6, 0.5 * units[exposedHome]) &&
+        units[j] - send <= units[exposedHome] + homeDist[j] &&
+        exposure <= 1;
+      const needed = intercept || trade ? exposure : threat[i];
       if (critical && needed > 1 && !(strike && send > units[j])) {
         const otherDefense = neighbors[i]
           .filter((k) => k !== j && tile[k] !== 201 && teams[k] !== myTeam)
@@ -413,6 +499,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
         } else continue;
       }
       if (send <= 0) continue;
+      // Moving a guard off a choke to fund a rear site opens the same lane
+      // as spending the guard on a castle. Moving toward the column can
+      // still intercept it, or reinforce a threatened crown behind us.
+      if (own && j === site && defense[j] >= defense[i] && pressure(i) > units[i] - send) continue;
+      if (trade && send >= 4) propose(920 + Math.min(100, Math.min(units[j], send)), i, j, mode);
       if (!own && send <= units[j]) {
         if (front && hostile) propose(siegeValue(front, i, j, send), i, j, mode);
         continue;
