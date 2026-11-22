@@ -1073,8 +1073,9 @@ function fogMultiBoard() {
   return b;
 }
 
-test('fog multi layer is opt-in, defaults to the land race, and clamps its knobs', () => {
-  assert.equal(fogMultiConfig({}, {}).enabled, false);
+test('fog multi layer is on by default, prices the land race, and clamps its knobs', () => {
+  assert.equal(fogMultiConfig({}, {}).enabled, true);
+  assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: '0' }).enabled, false);
   assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: '1' }).enabled, true);
   assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: 'off' }).enabled, false);
   const defaults = fogMultiConfig({ enabled: true }, {});
@@ -1116,7 +1117,7 @@ test('only fog multi rooms reach the fog multi layer', () => {
   const b = fogMultiBoard();
   const room = { turn: 30, multi: true, fog: true, size: b.size, land: 2, enemyLand: 4, homes: [0] };
   assert.ok(fogMultiUpdate(b, room, config));
-  assert.equal(fogMultiUpdate(fogMultiBoard(), room, fogMultiConfig({}, {})), null);
+  assert.equal(fogMultiUpdate(fogMultiBoard(), room, fogMultiConfig({}, { BOT3_FOG_MULTI: '0' })), null);
   assert.equal(fogMultiUpdate(fogMultiBoard(), { ...room, multi: false }, config), null);
   assert.equal(fogMultiUpdate(fogMultiBoard(), { ...room, fog: false }, config), null);
   assert.equal(fogMultiUpdate(fogMultiBoard(), { ...room, size: 900 }, config), null);

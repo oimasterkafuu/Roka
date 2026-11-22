@@ -59,12 +59,13 @@ function createBoard(rows, cols, me) {
   };
 }
 
-function distances(board, seeds, allowed) {
+function distances(board, seeds, allowed, limit = INF) {
   const dist = new Int32Array(board.size).fill(INF);
   const queue = [...seeds];
   for (const i of seeds) dist[i] = 0;
   for (let head = 0; head < queue.length; head++) {
     const i = queue[head];
+    if (dist[i] >= limit) continue;
     for (const j of board.neighbors[i]) {
       if (dist[j] !== INF || board.grid_type[j] === 201 || (allowed && !allowed(j))) continue;
       dist[j] = dist[i] + 1;
@@ -638,8 +639,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
     };
   }
   const candidates = [];
-  const propose = (score, from, to, mode = 2, build) => {
-    if (score > 0) candidates.push({ score, from, to, mode, build });
+  const propose = (score, from, to, mode = 2, build, send) => {
+    if (score > 0) candidates.push({ score, from, to, mode, build, send });
   };
   for (let i = 0; i < size; i++) {
     if (ownerOf(tile[i]) !== me || b.isolated[i]) continue;
@@ -741,9 +742,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
       // as spending the guard on a castle. Moving toward the column can
       // still intercept it, or reinforce a threatened crown behind us.
       if (own && j === site && defense[j] >= defense[i] && pressure(i) > units[i] - send) continue;
-      if (trade && send >= 4) propose(920 + Math.min(100, Math.min(units[j], send)), i, j, mode);
+      if (trade && send >= 4)
+        propose(920 + Math.min(100, Math.min(units[j], send)), i, j, mode, undefined, send);
       if (!own && send <= units[j]) {
-        if (front && hostile) propose(siegeValue(front, i, j, send), i, j, mode);
+        if (front && hostile) propose(siegeValue(front, i, j, send), i, j, mode, undefined, send);
         continue;
       }
       const remaining = own ? send + units[j] : send - units[j];
@@ -767,6 +769,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
           i,
           j,
           mode,
+          undefined,
+          send,
         );
         continue;
       }
@@ -905,10 +909,34 @@ function chooseOrders(b, turn, leaderboard, multi) {
       if (!own && support === 1 && !anchor(tile[i]) && exposure >= units[i] - send && !strike) score -= 180;
       if (b.lastFrom[i] === j && turn - b.lastMove[i] <= 4 && defense[j] >= defense[i] && !strike)
         score -= 110;
-      if (score > 0) propose(score, i, j, mode);
+      if (score > 0) propose(score, i, j, mode, undefined, send);
     }
   }
   if (front) searchCampaign(front, candidates);
+  // Upstream reinforcement pricing: a small deposit into an own stack is far
+  // less valuable than a full-stack move, a recently reversed lane is noise,
+  // and reconnecting a large pocket can recover its whole garrison at once.
+  if (turn >= 50 && !(clearSerial && longFront)) {
+    const forceScale = Math.max(10, Math.sqrt(mobileArmy));
+    for (const op of candidates) {
+      if (op.build) continue;
+      const i = op.from,
+        j = op.to;
+      if (teams[j] === myTeam && !danger.includes(j)) {
+        const send = op.send;
+        if (!send) continue;
+        const fraction = send / Math.max(1, units[j] + send);
+        const cost = anchor(tile[j]) ? 50 : 100;
+        if (fraction < 0.2 && !(j === site && units[j] < cost && units[j] + send >= cost))
+          op.score *= 0.2 + 3 * fraction;
+        if (b.lastFrom[i] === j && turn - b.lastMove[i] <= 8) op.score -= 260;
+      } else if (teams[j] !== myTeam && !crown(tile[j])) {
+        const rescue = front?.rescue[j] ?? 0;
+        if (rescue > forceScale * 2 && op.send > units[j] && (homes.length > 1 || !danger.length))
+          op.score = Math.max(op.score, 780 + Math.min(900, (340 * rescue) / forceScale));
+      }
+    }
+  }
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   candidates.sort((a, c) => c.score - a.score);
   const used = new Set(),
