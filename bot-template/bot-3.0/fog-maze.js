@@ -161,6 +161,36 @@ const DEFAULT_MAZEFOG3_DROP = 0;
 // neutral land or an attack is untouched.
 const DEFAULT_MAZEFOG3_PAINT = 120;
 const DEFAULT_PAINT_FROM = 8;
+// Enemy economy gate (`BOT3_FOG_MAZE_ECON`, off at 0). The one measured
+// regression of the layer is not a land or army game, it is an economy game:
+// `anti/maze/fog+single` seed 9 seat 0 swaps its 43-48 land for twenty crowns
+// (leaderboard army 450 -> 968 -> 3775 from tick 100 to 560) while the corridor
+// layer holds two, so the land lead is irrelevant and every army-ratio guard
+// fires after the fact. The crowns themselves are hidden by the fog, but their
+// *income* is not: a crown pays +1 army per tick and nothing else pays on a
+// non-growth tick, so the leaderboard army delta of a non-growth tick is a
+// lower bound on the rival's crown count (`crowns - losses - builds`). That
+// bound is exact, cheap, deterministic and needs no vision.
+const DEFAULT_ECON = 0;
+// The gate's setting inside the `BOT3_MAZEFOG3` bundle. Measured on the 2-cell
+// screen (relay+anti maze fog single, 16 seeds each): `4` is the only threshold
+// that clears both cells - it is the level no relay corridor game ever reaches
+// (32/32 games stay at a trailing median of <= 3) while the anti regression
+// crosses it at tick 96. `5` leaves the regression in place (anti 29/32), `6`
+// never fires, the entry-window and no-gate variants are in BOT3_MAZE.md.
+const DEFAULT_MAZEFOG3_ECON = 4;
+// Our own side of the comparison: the gate only stands the layer down while our
+// own economy is still small, which is the shape of the regression (2 crowns).
+// A corridor empire that has built its own crowns keeps the layer.
+const DEFAULT_ECON_OURS = 3;
+// First tick the gate may fire (the 26-50 burst window is a growth window).
+const DEFAULT_ECON_TURN = 52;
+// Last tick the gate may fire (0 = until the end). A start-of-phase reading is
+// much cheaper to attribute than a mid-game one: the anti regression has
+// already built its crowns before the layer takes the frame.
+const DEFAULT_ECON_UNTIL = 0;
+// Length of the trailing window the median is taken over (non-growth ticks).
+const DEFAULT_ECON_WINDOW = 16;
 // Reserve per remaining step toward the objective: a fogged cell can hide any
 // number of units and a corridor has no detour.
 const DEFAULT_GUESS = 6;
@@ -186,9 +216,11 @@ function flag(raw, fallback = false) {
 
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function fogMazeConfig(overrides = {}, env = process.env) {
-  // `BOT3_MAZEFOG3` is the round-7 bundle: the layer plus the paint cap that
-  // removes its one measured regression (see `fogMazePaintCap`).
-  const bundle = flag(env.BOT3_MAZEFOG3, false);
+  // `BOT3_MAZEFOG3` is the round-7 bundle: the layer plus the paint cap and the
+  // crown-economy gate (`BOT3_FOG_MAZE_ECON`) that removes its one measured
+  // regression. On by default from round 11; `BOT3_MAZEFOG3=0` disables the
+  // whole bundle and restores the round-4 path byte for byte.
+  const bundle = flag(env.BOT3_MAZEFOG3, true);
   return {
     enabled: overrides.enabled ?? (flag(env.BOT3_FOG_MAZE_LAYER, false) || bundle),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_FOG_MAZE_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
@@ -256,6 +288,14 @@ function fogMazeConfig(overrides = {}, env = process.env) {
     // Arm the paint cap only from this many neutral border cells (see
     // `fogMazePaintCap`).
     paintFrom: overrides.paintFrom ?? number(env.BOT3_FOG_MAZE_PAINT_FROM, DEFAULT_PAINT_FROM, 1, 1000),
+    // Enemy economy gate (see `DEFAULT_ECON`): stand the layer down once the
+    // rival's crown lower bound reaches `econ` while we still hold at most
+    // `econOurs` crowns, inside the `econTurn`..`econUntil` window.
+    econ: overrides.econ ?? number(env.BOT3_FOG_MAZE_ECON, bundle ? DEFAULT_MAZEFOG3_ECON : 0, 0, 1000),
+    econOurs: overrides.econOurs ?? number(env.BOT3_FOG_MAZE_ECON_OURS, DEFAULT_ECON_OURS, 0, 1000),
+    econTurn: overrides.econTurn ?? number(env.BOT3_FOG_MAZE_ECON_TURN, DEFAULT_ECON_TURN, 0, 100000),
+    econUntil: overrides.econUntil ?? number(env.BOT3_FOG_MAZE_ECON_UNTIL, DEFAULT_ECON_UNTIL, 0, 100000),
+    econWindow: overrides.econWindow ?? number(env.BOT3_FOG_MAZE_ECON_WINDOW, DEFAULT_ECON_WINDOW, 1, 512),
     // Land-drop guard (see `fogMazeProgress`, 0 = off).
     drop: overrides.drop ?? number(env.BOT3_FOG_MAZE_DROP, bundle ? DEFAULT_MAZEFOG3_DROP : 0, 0, 1000),
     // Paint cap (see `fogMazePaintCap`, 0 = off). Score ceiling for a column
@@ -376,6 +416,63 @@ function fogMazePaintCap(config, neutral) {
   return Number(config.paint);
 }
 
+// A crown pays +1 army on every tick; plains, cities and the 26-50 burst only
+// pay on growth ticks (`src/game-engine/tick-growth.ts`). Single-line rooms only
+// reach this layer (`fogMazeOpen` refuses `multi`), so the burst window applies.
+function econGrowthTick(turn) {
+  if (turn % 50 === 0) return true;
+  return turn >= 26 && turn <= 50;
+}
+
+// Crown-economy ledger (see `DEFAULT_ECON`). The rival's crown count is hidden
+// behind the fog, but `enemyArmy` is the unfogged leaderboard total, and on a
+// non-growth tick the delta is `crowns - losses - builds`, so the delta is a
+// lower bound on the rival's crowns.
+//
+// The *maximum* of that delta is not usable: an isolated cell that is
+// reconnected is doubled by the engine (`game-engine.ts`, "孤军合流"), and one
+// such tick reads a delta of 20-80 on a map with three crowns (measured on 12
+// of the 64 screen games while tracing this layer). The statistic is therefore
+// the median of a short trailing window of non-growth deltas: a single doubling
+// or a single big fight cannot move it, while a genuine crown economy lifts it
+// immediately (+1 per crown, every window). `ours` is our own crown count, which
+// is never fogged (our cells are always visible), so both sides of the
+// comparison are exact and no vision is needed on the rival's side at all.
+function fogMazeEconomy(b, input, config) {
+  const turn = Number(input?.turn) || 0;
+  const enemyArmy = Math.max(0, Number(input?.enemyArmy) || 0);
+  const state = (b.fogMazeEconomy ??= { turn: -1, prevArmy: -1, window: [], bound: 1, ours: 0 });
+  // The delta is only meaningful between two consecutive ticks: the layer can
+  // close for a few ticks (`known`, `landCap`) and a gap would read a hundred
+  // ticks of income as one crown.
+  const consecutive = state.turn >= 0 && turn === state.turn + 1;
+  if (consecutive && state.prevArmy >= 0 && !econGrowthTick(turn)) {
+    state.window.push(enemyArmy - state.prevArmy);
+    while (state.window.length > Number(config?.econWindow || DEFAULT_ECON_WINDOW)) state.window.shift();
+  }
+  const sorted = state.window.slice().sort((a, c) => a - c);
+  state.bound = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 1;
+  let ours = 0;
+  for (let i = 0; i < b.size; i++) {
+    const code = b.grid_type[i];
+    if (code >= 100 && code < 150 && code % 50 === b.me) ours++;
+  }
+  state.turn = turn;
+  state.prevArmy = enemyArmy;
+  state.ours = ours;
+  return state;
+}
+
+// The gate itself: the rival is running a crown economy we are not. `ours` is a
+// ceiling on purpose - a corridor empire that matches the rival's economy keeps
+// the layer, and the predicate can switch back on if we build our own crowns.
+function fogMazeEconGate(economy, turnover, config) {
+  if (!(Number(config?.econ) > 0) || !economy) return false;
+  if (turnover < Number(config.econTurn ?? 0)) return false;
+  if (Number(config.econUntil) > 0 && turnover > Number(config.econUntil)) return false;
+  return economy.bound >= Number(config.econ) && economy.ours <= Number(config.econOurs);
+}
+
 // The layer is a predicate, not a latch: a threat still takes the tick.
 function fogMazeOpen(b, input, config = fogMazeConfig()) {
   if (!config.enabled) return false;
@@ -392,6 +489,8 @@ module.exports = {
   fogMazeOpen,
   fogMazeProgress,
   fogMazePaintCap,
+  fogMazeEconomy,
+  fogMazeEconGate,
   DEFAULT_MAX_BOARD,
   DEFAULT_START_TURN,
   DEFAULT_END_TURN,
@@ -417,6 +516,12 @@ module.exports = {
   DEFAULT_ARMY_TURN,
   DEFAULT_MAZEFOG3_PAINT,
   DEFAULT_PAINT_FROM,
+  DEFAULT_ECON,
+  DEFAULT_MAZEFOG3_ECON,
+  DEFAULT_ECON_OURS,
+  DEFAULT_ECON_TURN,
+  DEFAULT_ECON_UNTIL,
+  DEFAULT_ECON_WINDOW,
   DEFAULT_MAZEFOG3_DROP,
   DEFAULT_BRANCHES,
   DEFAULT_BRANCH,

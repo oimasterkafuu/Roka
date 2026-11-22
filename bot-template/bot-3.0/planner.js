@@ -30,6 +30,8 @@ const {
   fogMazeOpen,
   fogMazeProgress,
   fogMazePaintCap,
+  fogMazeEconomy,
+  fogMazeEconGate,
 } = require('./fog-maze');
 const {
   fogOracleConfig,
@@ -480,6 +482,17 @@ function chooseOrders(b, turn, leaderboard, multi) {
       enemyArmy > 0 &&
       self.army * 100 > enemyArmy * fogMazeCfg.leadCap
     );
+  // Enemy economy gate (see ./fog-maze). The one measured regression of the
+  // layer is an economy game: the rival turns its 43-48 corridor land into
+  // twenty crowns while we hold two, so the layer hands the frame back as soon
+  // as the rival's crown *income* (the leaderboard army delta of a non-growth
+  // tick) says it owns `econ` crowns while we still hold at most `econOurs`.
+  // Off at 0, and no state is allocated while it is off.
+  const mazeFogEcon =
+    mazeFogBase && fogMazeCfg.econ > 0
+      ? fogMazeEconomy(b, { turn, enemyArmy }, fogMazeCfg)
+      : null;
+  const mazeFogBaseOpen = mazeFogBase && !fogMazeEconGate(mazeFogEcon, turn, fogMazeCfg);
   // Progress guard (see ./fog-maze). Off by default (`stall`, `landLead` and
   // `drop` are 0), and skipped entirely while they are so the layer's measured
   // path stays byte for byte. When it is on it hands the frame back to the
@@ -492,16 +505,16 @@ function chooseOrders(b, turn, leaderboard, multi) {
     fogMazeCfg.drop > 0 ||
     fogMazeCfg.behind > 0 ||
     fogMazeCfg.armyBehind > 0;
-  const neutralFront = mazeFogBase && mazeFogGuard ? neutralBorder(b, me) : -1;
+  const neutralFront = mazeFogBaseOpen && mazeFogGuard ? neutralBorder(b, me) : -1;
   const mazeFogProgress =
-    mazeFogBase && mazeFogGuard
+    mazeFogBaseOpen && mazeFogGuard
       ? fogMazeProgress(
           b,
           { turn, land: self.land, enemyLand, army: self.army, enemyArmy, neutralFront },
           fogMazeCfg,
         )
       : null;
-  const mazeFogOpen = mazeFogBase && !mazeFogProgress?.stalled;
+  const mazeFogOpen = mazeFogBaseOpen && !mazeFogProgress?.stalled;
   // Paint cap (see ./fog-maze): `Infinity` unless the bundle is on, so the
   // shipped layer keeps its measured path byte for byte. The border count is
   // only walked while the cap is live.

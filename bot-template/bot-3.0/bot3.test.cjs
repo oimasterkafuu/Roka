@@ -30,7 +30,7 @@ const {
   DEFAULT_PAINT3_UNTIL,
   RAID_SCORE,
 } = require('./fog');
-const { fogMazeConfig, fogMazeProgress } = require('./fog-maze');
+const { fogMazeConfig, fogMazeProgress, fogMazeEconomy, fogMazeEconGate } = require('./fog-maze');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -1465,3 +1465,98 @@ test('shadow disables itself on the first unexplained frame', () =>
     assert.equal(b.shadow.stats.drift, 1);
     assert.equal(b.shadow.armed, false);
   }));
+
+// Two visible own crowns, so `ours` reads 2 without any fog trickery.
+function economyFixture() {
+  return { size: 4, me: 1, grid_type: Int32Array.from([101, 201, 200, 101]) };
+}
+
+// Feed a rival army sequence from `start` and return the ledger's last read.
+function feedEconomy(b, start, deltas) {
+  let army = 400;
+  let last = null;
+  for (const [index, delta] of deltas.entries()) {
+    last = fogMazeEconomy(b, { turn: start + index, enemyArmy: army });
+    army += delta;
+  }
+  return last;
+}
+
+test('read the rival crown income from the unfogged army deltas', () => {
+  const b = economyFixture();
+  // A steady three-crown rival: every non-growth tick pays exactly +3.
+  const steady = feedEconomy(
+    b,
+    60,
+    Array.from({ length: 20 }, () => 3),
+  );
+  assert.equal(steady.ours, 2);
+  assert.equal(steady.bound, 3);
+  // One isolated-cell reconnection more than doubles a stack in a single tick
+  // (`game-engine.ts`), which is not income: the median ignores it.
+  const doubled = feedEconomy(economyFixture(), 60, [
+    ...Array.from({ length: 10 }, () => 3),
+    41,
+    3,
+    3,
+    3,
+    3,
+    3,
+  ]);
+  assert.equal(doubled.bound, 3);
+  // A rival that keeps building crowns lifts the median with it.
+  const growing = feedEconomy(economyFixture(), 60, [
+    ...Array.from({ length: 8 }, () => 3),
+    ...Array.from({ length: 24 }, () => 9),
+  ]);
+  assert.equal(growing.bound, 9);
+});
+
+test('ignore growth ticks and gaps in the crown ledger', () => {
+  const growth = feedEconomy(economyFixture(), 46, [40, 40, 40, 40]);
+  // Turns 46-49 are the burst window: no delta is read at all.
+  assert.equal(growth.window.length, 0);
+  assert.equal(growth.bound, 1);
+  const b = economyFixture();
+  fogMazeEconomy(b, { turn: 60, enemyArmy: 400 });
+  fogMazeEconomy(b, { turn: 100, enemyArmy: 900 });
+  assert.equal(b.fogMazeEconomy.window.length, 0);
+  assert.equal(fogMazeEconGate(b.fogMazeEconomy, 100, fogMazeConfig({ econ: 4 }, {})), false);
+});
+
+test('stand the corridor layer down when the rival economy outgrows ours', () => {
+  const config = fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_ECON: '4' });
+  const rival = feedEconomy(
+    economyFixture(),
+    60,
+    Array.from({ length: 20 }, () => 5),
+  );
+  // The exact anti shape: four crowns against our two.
+  assert.equal(fogMazeEconGate(rival, 80, config), true);
+  // Our own economy matching the rival keeps the layer.
+  assert.equal(fogMazeEconGate({ bound: 5, ours: 5 }, 80, config), false);
+  // A three-crown corridor rival is the relay shape and is not a stand-down.
+  assert.equal(fogMazeEconGate({ bound: 3, ours: 2 }, 300, config), false);
+  // The gate is switched off with the knob at 0.
+  assert.equal(fogMazeEconGate(rival, 80, fogMazeConfig({}, { BOT3_FOG_MAZE_ECON: '0' })), false);
+});
+
+test('default the maze fog bundle on with the crown-economy gate armed', () => {
+  // Round 11 makes the bundle the shipped default: the layer plus the paint cap
+  // plus the gate, which removes its one measured regression (see BOT3_MAZE.md).
+  const on = fogMazeConfig({}, {});
+  assert.equal(on.enabled, true);
+  assert.equal(on.econ, 4);
+  assert.equal(on.paint, 120);
+  const off = fogMazeConfig({}, { BOT3_MAZEFOG3: '0' });
+  assert.equal(off.enabled, false);
+  assert.equal(off.econ, 0);
+  assert.equal(off.paint, 0);
+  // The bare round-7 layer (`BOT3_MAZEFOG3=0` + `BOT3_FOG_MAZE_LAYER=1`) keeps
+  // its measured path: no gate, no paint cap.
+  const layer = fogMazeConfig({}, { BOT3_MAZEFOG3: '0', BOT3_FOG_MAZE_LAYER: '1' });
+  assert.equal(layer.enabled, true);
+  assert.equal(layer.econ, 0);
+  assert.equal(layer.paint, 0);
+  assert.equal(fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_ECON: '6' }).econ, 6);
+});
