@@ -211,6 +211,8 @@ function createBrowserRenderer(n, m) {
     isolated: Array.from({ length: n }, () => Array(m).fill(0)),
     fog: Array.from({ length: n }, () => Array(m).fill(0)),
     cell_elems: cells,
+    extra_selected_cells: [],
+    control_group_labels: new Map(),
     cell_html: Array.from({ length: n }, () => Array(m).fill('')),
     dire_class: ['arrow_u', 'arrow_d', 'arrow_l', 'arrow_r'],
     dire_char: ['↑', '↓', '←', '→'],
