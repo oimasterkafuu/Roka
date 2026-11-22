@@ -567,8 +567,8 @@ test('hand the plan to the closing column only while the layer is on', () => {
 // the column at the visible front instead of at a crown that is never
 // remembered; see ./fog and BOT3_FOG.md for the measured matrix. Opt-in: the
 // default path keeps the round-2 plan byte for byte.
-test('keep the fog layer opt-in and price the hidden part of the route', () => {
-  assert.equal(fogConfig({}, {}).enabled, false);
+test('keep the fog layer on by default and price the hidden part of the route', () => {
+  assert.equal(fogConfig({}, {}).enabled, true);
   assert.equal(fogConfig({}, { BOT3_FOG: '1' }).enabled, true);
   assert.equal(fogConfig({}, { BOT3_FOG: 'off' }).enabled, false);
   const tuned = fogConfig(
@@ -898,8 +898,8 @@ function multiContext(overrides = {}) {
   };
 }
 
-test('multi-line layer is opt-in and clamps its own environment', () => {
-  const off = multiConfig({}, {});
+test('multi-line layer is on by default and clamps its own environment', () => {
+  const off = multiConfig({}, { BOT3_MULTI: '0' });
   assert.equal(off.enabled, false);
   assert.deepEqual(
     [off.burstGain, off.raidBonus, off.mergePenalty, off.marchGain, off.marchBase, off.cut],
@@ -922,7 +922,7 @@ test('only burst and focus turns of a multi-line room reach the layer', () => {
   const on = multiConfig({ enabled: true }, {});
   const { b, input } = multiContext();
   assert.equal(multiUpdate(b, { ...input, multi: false }, on), null);
-  assert.equal(multiUpdate(b, input, multiConfig({}, {})), null);
+  assert.equal(multiUpdate(b, input, multiConfig({}, { BOT3_MULTI: '0' })), null);
   assert.equal(multiUpdate(b, { ...input, turn: 12 }, on), null);
   const big = multiContext({ input: { ...input, size: 900 } });
   assert.equal(multiUpdate(big.b, big.input, on), null);
