@@ -33,16 +33,32 @@
 // the pressure model - stays on the existing path, so a threat still takes the
 // tick and the layer simply pauses (it is a predicate, not a latch).
 //
-// Opt-in: `BOT3_FOG=1` turns the layer on. The default stays off because the
-// Relay fog cells only climb from 50% to 52-56% and never reach the 65% gate,
-// while two other cells lose one game each; `BOT3_FOG=0` therefore restores the
-// previous behaviour byte for byte (verified on the full 2048-game matrix).
-// The measured matrix lives in BOT3_FOG.md.
+// Objective prior. Vision comes from owned land, not from armies, so a lone
+// scout reveals nothing: exploration *is* capture, one serial order per tick.
+// The layer therefore uses two priors for an unseen enemy home, both built from
+// information the fog leaves visible:
+//
+//   * the terrain map - mountains block movement and swamp stays visible, so
+//     the passable map is known before it is explored;
+//   * the spawn rule in `general-selection.ts` - the generals are chosen to
+//     maximise the shortest-path distance between them, so the far region of
+//     the passable map is the best place to look first.
+//
+// `fogBeliefTargets` turns that into a small set of far anchors, `scout` steers
+// the column at them, `belief` hands them the whole objective field, and
+// `raid` adds a gather-then-raid state machine (assemble the heavy stack, hold
+// it while the rear feeds it, then drive it at the anchors). All four are
+// opt-in and were measured; the measured verdicts are in BOT3_FOG.md.
+//
+// Opt-in: `BOT3_FOG=1` turns the layer on. The tuned defaults (aim from tick
+// 60, 60% material edge, 80% on swamp-heavy boards, corridor maps excluded)
+// reach 71.1% on the fog single-line screen - +51 wins with no cell below its
+// paired baseline - and 77.7% on the full 2048-game matrix (+2.5pp, also with
+// no regressing cell). They still leave the Relay cells below the 65% target,
+// so the layer stays opt-in: `BOT3_FOG=0` restores the previous behaviour byte
+// for byte (verified on the full matrix, all flip counts zero).
 
 const DEFAULT_MAX_BOARD = 800;
-// Late enough to keep the opening untouched; the early economy is the same on
-// both sides of a mirror, and the measured gains come from the attrition that
-// follows.
 // Late enough to keep the opening untouched; the early economy is the same on
 // both sides of a mirror, and the measured gains come from the attrition that
 // follows.
@@ -54,11 +70,42 @@ const DEFAULT_GUESS = 8;
 // Do not commit while behind on material: the reserve above is only a guess,
 // the leaderboard army is measured.
 const DEFAULT_FLOOR = 0;
-// The front aim needs a material edge, but only a measured one: requiring the
-// full leaderboard army (`army >= enemyArmy`) is what keeps the anti/archipelago
-// cell from regressing, while a looser ratio buys the relay/archipelago cell at
-// the anti cell's expense. Both ends are recorded in BOT3_FOG.md.
-const DEFAULT_AIM_LEAD = 100;
+// The front aim needs a material edge. On the open maps a loose 60% is the
+// measured optimum (the round-2 doc kept 100 to protect anti/archipelago, but
+// that cell has its own threshold below). The thresholds are re-measured in
+// BOT3_FOG.md; the old 100% default only bought the archipelago cells.
+const DEFAULT_AIM_LEAD = 60;
+// Archipelago keeps 60-70% of the board as swamp, and swamp stays visible in
+// fog. On those rooms a stricter edge is needed before chasing the visible
+// front: 80% is the measured point where every archipelago cell stops
+// regressing (see BOT3_FOG.md).
+const DEFAULT_SWAMP_LEAD = 80;
+// Belief field over the unknown. Relay spawns are the two land cells with the
+// largest shortest-path distance on the board (`general-selection.ts` picks a
+// max-min layout), and mountains stay visible in fog, so the *passable* map is
+// known even where the tiles are not. The cells at `scoutRatio` of the largest
+// reachable distance are therefore the best prior for an unseen enemy crown.
+// Measured over the sixteen seeds: random puts the enemy home in the top three
+// distance cells in 14/16 maps, maze in 16/16, mediterranean in 10/16 (top
+// ten 15/16), archipelago not at all - it is kept out of that cell.
+const DEFAULT_SCOUT_RATIO = 0.7;
+// Two spread-out anchors are enough to cover a far region without flattening
+// the goal field into "anywhere but here".
+const DEFAULT_SCOUT_COUNT = 2;
+// Reject a second anchor within three cells of the first: duplicates would
+// collapse the belief region onto one corner.
+const DEFAULT_SCOUT_SPREAD = 3;
+// Raid doctrine. Assembling a lead stack before the march is what separates a
+// raid from the blind front push: in the traced losses the heaviest stack is
+// 140-150 units and trades evenly, while the recalled crowns sit at 5-30. A
+// 250-unit lead therefore takes a crown per step; anything thinner bounces.
+const DEFAULT_RAID_MASS = 240;
+const DEFAULT_RAID_RATIO = 0.6;
+const DEFAULT_RAID_ABORT = 0.35;
+// Scores. The raid has to outrank the march/merge terms (< 300) and the economy
+// build (675), but stay under the column advance so a remembered crown still
+// wins the frame.
+const RAID_SCORE = 880;
 
 function number(raw, fallback, min, max) {
   const value = Number(raw);
@@ -84,10 +131,94 @@ function fogConfig(overrides = {}, env = process.env) {
     funnel: overrides.funnel ?? flag(env.BOT3_FOG_FUNNEL, false),
     aimFront: overrides.aimFront ?? flag(env.BOT3_FOG_AIM, true),
     aimLead: overrides.aimLead ?? number(env.BOT3_FOG_AIM_LEAD, DEFAULT_AIM_LEAD, 0, 200),
+    // Swamp-heavy boards (archipelago keeps 60-70% swamp visible through the
+    // fog) reward a different front-aim threshold than the open maps. The
+    // separated islands make an unguarded front chase expensive.
+    aimLeadSwamp:
+      overrides.aimLeadSwamp ?? number(env.BOT3_FOG_SWAMP_LEAD, DEFAULT_SWAMP_LEAD, 0, 200),
+    swampShare: overrides.swampShare ?? number(env.BOT3_FOG_SWAMP_SHARE, 0.55, 0, 1),
+    // Keep the whole layer off corridor maps by default: the maze planner
+    // already owns that shape and the fog column only adds one-game noise
+    // there (the measured matrix in BOT3_FOG.md shows a -1 flip).
+    maze: overrides.maze ?? flag(env.BOT3_FOG_MAZE, false),
     expand: overrides.expand ?? flag(env.BOT3_FOG_EXPAND, false),
     invest: overrides.invest ?? flag(env.BOT3_FOG_INVEST, false),
     guard: overrides.guard ?? flag(env.BOT3_FOG_GUARD, false),
+    // Scout: steer the column at the belief region while no crown is known.
+    scout: overrides.scout ?? flag(env.BOT3_FOG_SCOUT, false),
+    // Raid: assemble the heaviest stack first, then drive it at the belief
+    // region (or the remembered crown) instead of feeding the frontier.
+    raid: overrides.raid ?? flag(env.BOT3_FOG_RAID, false),
+    // Raid until the lead stack carries this many units (or this share of the
+    // mobile army), and abort back to the gather phase when it has been spent.
+    raidMass: overrides.raidMass ?? number(env.BOT3_FOG_RAID_MASS, DEFAULT_RAID_MASS, 10, 100000),
+    raidRatio: overrides.raidRatio ?? number(env.BOT3_FOG_RAID_RATIO, DEFAULT_RAID_RATIO, 0, 1),
+    raidAbort: overrides.raidAbort ?? number(env.BOT3_FOG_RAID_ABORT, DEFAULT_RAID_ABORT, 0, 1),
+    // Belief: let the belief region own the whole objective field.
+    belief: overrides.belief ?? flag(env.BOT3_FOG_BELIEF, false),
+    scoutRatio: overrides.scoutRatio ?? number(env.BOT3_FOG_SCOUT_RATIO, DEFAULT_SCOUT_RATIO, 0.1, 1),
+    scoutCount: overrides.scoutCount ?? number(env.BOT3_FOG_SCOUT_COUNT, DEFAULT_SCOUT_COUNT, 1, 8),
+    scoutSpread: overrides.scoutSpread ?? number(env.BOT3_FOG_SCOUT_SPREAD, DEFAULT_SCOUT_SPREAD, 1, 100),
+    // Keep new crowns at least this many steps from every existing crown. A
+    // cluster of crowns is one raid away from elimination: the traced losses
+    // lose two or three crowns in a row to a single enemy stack.
+    spread: overrides.spread ?? number(env.BOT3_FOG_SPREAD, 0, 0, 20),
+    // Raise the crown ceiling in fog. A crown is +1 army per tick and one more
+    // body between a raider and elimination; the stock planner caps the count
+    // by mobile army instead of by what the map can support.
+    homes: overrides.homes ?? number(env.BOT3_FOG_HOMES, 0, 0, 32),
   };
+}
+
+const ownerOf = (code) => (code < 200 ? code % 50 : 0);
+
+// Belief field for the hidden enemy home. BFS runs over the terrain the fog
+// leaves visible (mountains block, everything else is assumed passable), from
+// our own crowns outward. The anchors are the farthest reachable, not-yet-owned
+// cells, spread out so the prior covers a region instead of a single guess.
+// Returns an empty list when the whole reachable map is already ours, which is
+// the only case where the prior has nothing to add.
+function fogBeliefTargets(b, homes, config = fogConfig()) {
+  const { size, cols, neighbors, grid_type: tile } = b;
+  const dist = new Int32Array(size).fill(-1);
+  const queue = [];
+  for (const home of homes) {
+    if (home < 0 || home >= size) continue;
+    dist[home] = 0;
+    queue.push(home);
+  }
+  for (let head = 0; head < queue.length; head++) {
+    const i = queue[head];
+    for (const j of neighbors[i]) {
+      if (dist[j] >= 0 || tile[j] === 201) continue;
+      dist[j] = dist[i] + 1;
+      queue.push(j);
+    }
+  }
+  let far = 0;
+  for (let i = 0; i < size; i++) if (dist[i] > far) far = dist[i];
+  if (!far) return [];
+  const floor = Math.max(1, Math.ceil(far * config.scoutRatio));
+  const candidates = [];
+  for (let i = 0; i < size; i++) {
+    if (dist[i] < floor || ownerOf(tile[i]) === b.me) continue;
+    candidates.push(i);
+  }
+  candidates.sort((x, y) => dist[y] - dist[x] || x - y);
+  const picks = [];
+  for (const i of candidates) {
+    if (picks.length >= config.scoutCount) break;
+    const row = Math.floor(i / cols),
+      col = i % cols;
+    const tooClose = picks.some((p) => {
+      const pr = Math.floor(p / cols),
+        pc = p % cols;
+      return Math.abs(pr - row) + Math.abs(pc - col) < config.scoutSpread;
+    });
+    if (tooClose) continue;
+    picks.push(i);
+  }
+  return picks;
 }
 
 // The planner derives `clearSerial` from the same expression, so a board is in
@@ -179,12 +310,58 @@ function expandScore(send, heading) {
   return 60 + Math.min(140, Math.sqrt(Math.max(0, send)) * 8) + EXPAND_BONUS - Math.min(30, heading);
 }
 
+// Gather-then-raid state machine. The planner is stateless per tick, so the
+// phase has to persist on the board next to the fog layer's own counters.
+// `gather`: the lead stack holds and the other stacks feed it, `raid`: the lead
+// drives at the objective, `idle`: the doctrine is off or paused.
+function freshRaid() {
+  return { phase: 'idle', lead: -1, mass: 0, since: -1, entries: 0 };
+}
+
+function fogRaidUpdate(b, input, config = fogConfig()) {
+  const state = (b.fogRaid ??= freshRaid());
+  const lead = Number(input?.lead) >= 0 ? Number(input.lead) : -1;
+  const leadMass = lead >= 0 ? Math.max(0, Number(input.leadMass) || 0) : 0;
+  const mobile = Math.max(0, Number(input.mobileArmy) || 0);
+  const turn = Number(input?.turn) || 0;
+  const off = { phase: 'idle', lead: -1, mass: state.mass, gather: false, resting: false };
+  if (!config.raid || lead < 0) {
+    state.phase = 'idle';
+    return off;
+  }
+  if ((Number(input.danger) || 0) > 0) {
+    state.phase = 'idle';
+    return { ...off, resting: true };
+  }
+  const target = Math.max(config.raidMass, Math.ceil(mobile * config.raidRatio));
+  if (state.phase !== 'raid') {
+    if (leadMass < target) {
+      state.phase = 'gather';
+      state.lead = lead;
+      return { phase: 'gather', lead, mass: state.mass, gather: true, resting: false };
+    }
+    state.phase = 'raid';
+    state.lead = lead;
+    state.mass = leadMass;
+    state.since = turn;
+    state.entries += 1;
+  } else if (leadMass < Math.max(12, Math.ceil(state.mass * config.raidAbort))) {
+    state.phase = 'gather';
+    state.lead = lead;
+    return { phase: 'gather', lead, mass: state.mass, gather: true, resting: false };
+  }
+  return { phase: 'raid', lead, mass: state.mass, gather: false, resting: false };
+}
+
 module.exports = {
   fogConfig,
   fogBoard,
   fogUpdate,
   fogRequired,
+  fogBeliefTargets,
+  fogRaidUpdate,
   freshFog,
+  freshRaid,
   columnAdvance,
   funnelScore,
   expandScore,
@@ -195,8 +372,16 @@ module.exports = {
   DEFAULT_GUESS,
   DEFAULT_FLOOR,
   DEFAULT_AIM_LEAD,
+  DEFAULT_SWAMP_LEAD,
+  DEFAULT_SCOUT_RATIO,
+  DEFAULT_SCOUT_COUNT,
+  DEFAULT_SCOUT_SPREAD,
   COLUMN_SCORE,
   FUNNEL_SCORE,
   GUARD_SCORE,
   EXPAND_BONUS,
+  RAID_SCORE,
+  DEFAULT_RAID_MASS,
+  DEFAULT_RAID_RATIO,
+  DEFAULT_RAID_ABORT,
 };
