@@ -565,9 +565,9 @@ test('hand the plan to the closing column only while the layer is on', () => {
 
 // Fog single-line layer. It prices the part of a route the fog hides and aims
 // the column at the visible front instead of at a crown that is never
-// remembered; see ./fog and BOT3_FOG.md for the measured matrix. Opt-in: the
-// default path keeps the round-2 plan byte for byte.
-test('keep the fog layer on by default and price the hidden part of the route', () => {
+// remembered; see ./fog and BOT3_FOG.md for the measured matrix. On by default
+// since round 3; `BOT3_FOG=0` restores the round-2 plan byte for byte.
+test('price the hidden part of a fog route and keep the layer switchable', () => {
   assert.equal(fogConfig({}, {}).enabled, true);
   assert.equal(fogConfig({}, { BOT3_FOG: '1' }).enabled, true);
   assert.equal(fogConfig({}, { BOT3_FOG: 'off' }).enabled, false);
@@ -901,6 +901,7 @@ function multiContext(overrides = {}) {
 test('multi-line layer is on by default and clamps its own environment', () => {
   const off = multiConfig({}, { BOT3_MULTI: '0' });
   assert.equal(off.enabled, false);
+  assert.equal(multiConfig({}, {}).enabled, true);
   assert.deepEqual(
     [off.burstGain, off.raidBonus, off.mergePenalty, off.marchGain, off.marchBase, off.cut],
     [2, 400, 100, 0, 15, 0],
@@ -1049,4 +1050,132 @@ test('serial rooms stay byte-identical while the multi layer is enabled', () => 
 
 test('fresh ledger starts empty', () => {
   assert.deepEqual(freshMulti(), { ticks: 0, burstTicks: 0, focusTicks: 0, entered: null });
+});
+
+// --- Fog multi-line layer (./fog-multi) -------------------------------------
+const {
+  fogMultiConfig,
+  fogMultiTargets,
+  fogMultiBurst,
+  fogMultiUpdate,
+  freshFogMulti,
+  DEFAULT_LAND_SLACK,
+} = require('./fog-multi');
+
+// A small fog board whose passable map reaches two far corners, so the belief
+// field has somewhere to point.
+function fogMultiBoard() {
+  const b = createBoard(3, 5, 1);
+  b.fogMode = true;
+  b.grid_type.set([101, 1, 200, 200, 200, 200, 200, 200, 201, 200, 200, 200, 200, 200, 102]);
+  b.army_cnt.set([10, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5]);
+  b.fog.fill(1);
+  return b;
+}
+
+test('fog multi layer is opt-in, defaults to the land race, and clamps its knobs', () => {
+  assert.equal(fogMultiConfig({}, {}).enabled, false);
+  assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: '1' }).enabled, true);
+  assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: 'off' }).enabled, false);
+  const defaults = fogMultiConfig({ enabled: true }, {});
+  assert.equal(defaults.burst, true);
+  assert.equal(defaults.landSlack, DEFAULT_LAND_SLACK);
+  assert.equal(defaults.armyLead, 0);
+  // The belief route measured negative in a multi room, so it stays off.
+  assert.equal(defaults.route, false);
+  const tuned = fogMultiConfig(
+    { enabled: true },
+    { BOT3_FOG_MULTI_LAND: '0.5', BOT3_FOG_MULTI_LEAD: '80', BOT3_FOG_MULTI_ROUTE: '1' },
+  );
+  assert.deepEqual([tuned.landSlack, tuned.armyLead, tuned.route], [0.5, 80, true]);
+  const clamped = fogMultiConfig({ enabled: true }, { BOT3_FOG_MULTI_LAND: '-3', BOT3_FOG_MULTI_COUNT: '99' });
+  assert.equal(clamped.landSlack, 0);
+  assert.equal(clamped.count, 8);
+});
+
+test('release the fog burst while the land race is open, not while army trails', () => {
+  const config = fogMultiConfig({ enabled: true, landSlack: 0.1 });
+  // No rival land is known: nothing to price, release.
+  assert.equal(fogMultiBurst({ turn: 30, land: 20, enemyLand: 0, army: 0, enemyArmy: 0 }, config), true);
+  // Level or behind on land: the race is open, even when the army trails.
+  assert.equal(fogMultiBurst({ turn: 30, land: 20, enemyLand: 20, army: 50, enemyArmy: 200 }, config), true);
+  assert.equal(fogMultiBurst({ turn: 30, land: 19, enemyLand: 25, army: 50, enemyArmy: 200 }, config), true);
+  // Twice the rival's land: the race is won, so the paint is garrison spent.
+  assert.equal(fogMultiBurst({ turn: 30, land: 100, enemyLand: 50, army: 400, enemyArmy: 200 }, config), false);
+  // Outside the burst window the multi layer keeps its own gate.
+  assert.equal(fogMultiBurst({ turn: 24, land: 5, enemyLand: 5 }, config), undefined);
+  assert.equal(fogMultiBurst({ turn: 51, land: 5, enemyLand: 5 }, config), undefined);
+  // An explicit army floor re-adds the army race on top of the land race.
+  const pinned = fogMultiConfig({ enabled: true, landSlack: 10, armyLead: 80 });
+  assert.equal(fogMultiBurst({ turn: 30, land: 10, enemyLand: 10, army: 100, enemyArmy: 100 }, pinned), true);
+  assert.equal(fogMultiBurst({ turn: 30, land: 10, enemyLand: 10, army: 70, enemyArmy: 100 }, pinned), false);
+});
+
+test('only fog multi rooms reach the fog multi layer', () => {
+  const config = fogMultiConfig({ enabled: true });
+  const b = fogMultiBoard();
+  const room = { turn: 30, multi: true, fog: true, size: b.size, land: 2, enemyLand: 4, homes: [0] };
+  assert.ok(fogMultiUpdate(b, room, config));
+  assert.equal(fogMultiUpdate(fogMultiBoard(), room, fogMultiConfig({}, {})), null);
+  assert.equal(fogMultiUpdate(fogMultiBoard(), { ...room, multi: false }, config), null);
+  assert.equal(fogMultiUpdate(fogMultiBoard(), { ...room, fog: false }, config), null);
+  assert.equal(fogMultiUpdate(fogMultiBoard(), { ...room, size: 900 }, config), null);
+  // An open land race releases the burst; a decided one gates it.
+  const open = fogMultiUpdate(fogMultiBoard(), room, config);
+  assert.equal(open.burst, true);
+  assert.deepEqual([open.targets.length, open.source], [0, null]);
+  const won = fogMultiUpdate(fogMultiBoard(), { ...room, land: 40, enemyLand: 10 }, config);
+  assert.equal(won.burst, false);
+});
+
+test('a fog focus objective falls back to the visible frontier, then the belief field', () => {
+  const b = fogMultiBoard();
+  const config = fogMultiConfig({ enabled: true, route: true, count: 1, spread: 1 });
+  const front = fogMultiTargets(b, { enemies: [13, 14], homes: [0] }, config);
+  assert.deepEqual([front.targets, front.source], [[13], 'front']);
+  const belief = fogMultiTargets(b, { enemies: [], homes: [0] }, config);
+  assert.equal(belief.source, 'belief');
+  assert.equal(belief.targets.length, 1);
+  // The visible frontier is measured information: without it the prior takes
+  // over, and with no crown of our own there is nothing to aim from.
+  const noFront = fogMultiTargets(b, { enemies: [], homes: [0] }, { ...config, front: false });
+  assert.equal(noFront.source, 'belief');
+  assert.deepEqual(fogMultiTargets(b, { enemies: [], homes: [] }, config).targets, []);
+  // Post-burst the layer hands the anchors to the multi layer, which needs a
+  // remembered crown to be absent and the route switch to be on.
+  const late = { turn: 60, multi: true, fog: true, size: b.size, homes: [0], targets: [] };
+  assert.equal(fogMultiUpdate(b, late, config).targets.length, 1);
+  assert.equal(fogMultiUpdate(b, late, { ...config, route: false }), null);
+  assert.equal(fogMultiUpdate(b, { ...late, targets: [14] }, config), null);
+  // Releasing the burst stays on the focus turn even without a route.
+  const noRoute = fogMultiUpdate(b, late, { ...config, route: false, burst: true });
+  assert.equal(noRoute, null);
+  const burstTurn = fogMultiUpdate(b, { ...late, turn: 40 }, { ...config, route: false });
+  assert.equal(burstTurn.burst, true);
+});
+
+test('the planner fog burst verdict overrides the multi layer fog gate', () => {
+  const config = multiConfig({ enabled: true, burstFog: true, burstFogLead: 100 }, {});
+  const { b, input } = multiContext();
+  const behind = { ...input, fog: true, army: 58, enemyArmy: 108 };
+  assert.equal(multiUpdate(multiContext().b, behind, config), null);
+  // `fog-multi` releases the burst on a land race and gates it on archipelago.
+  assert.equal(multiUpdate(multiContext().b, { ...behind, fogBurst: true }, config).burst, true);
+  assert.equal(multiUpdate(multiContext().b, { ...behind, fogBurst: false }, config), null);
+  // The multi layer still owns the rest of the room.
+  const ahead = { ...input, fog: true, army: 140, enemyArmy: 108 };
+  assert.equal(multiUpdate(multiContext().b, ahead, config).burst, true);
+});
+
+test('fresh fog multi ledger starts empty', () => {
+  assert.deepEqual(freshFogMulti(), {
+    active: false,
+    source: null,
+    targets: 0,
+    since: -1,
+    entries: 0,
+    burstTicks: 0,
+    released: 0,
+    gated: 0,
+  });
 });
