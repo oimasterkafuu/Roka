@@ -325,6 +325,51 @@ test('wait for a playing seat and request the configured team once it opens', (c
   assert.deepEqual(readiness, [{ ready: true }]);
 });
 
+test('end a single game only after participating, without returning or readying again', () => {
+  const socket = new EventEmitter();
+  let ended = 0;
+  const returns = [];
+  const readiness = [];
+  const handle = attachStrategy(socket, {
+    room: 'test',
+    onGameEnd() {
+      ended++;
+      handle.stop();
+    },
+  });
+  socket.on('return_room', (request) => returns.push(request));
+  socket.on('change_ready', (request) => readiness.push(request));
+  socket.emit('set_id', 'relay');
+  socket.emit('init_map', { n: 1, m: 1, general: [-1, -1], player_ids: ['other'] });
+  socket.emit('update', { game_end: true });
+  assert.equal(ended, 0);
+
+  socket.emit('init_map', { n: 1, m: 1, general: [0, 0], player_ids: ['relay'] });
+  socket.emit('update', { leaderboard: [{ id: 1, dead: true }], turn: 1 });
+  assert.equal(ended, 0);
+  socket.emit('update', { game_end: true });
+  socket.emit('room_update', {
+    players: [
+      { sid: 'relay', team: 1, ready: false },
+      { sid: 'other', team: 1 },
+    ],
+  });
+  assert.equal(ended, 1);
+  assert.deepEqual(returns, []);
+  assert.deepEqual(readiness, []);
+});
+
+test('return to the room after a completed game by default', (context) => {
+  const socket = new EventEmitter();
+  context.after(attachStrategy(socket, { room: 'test' }).stop);
+  const returns = [];
+  socket.on('return_room', (request) => returns.push(request));
+  socket.emit('set_id', 'relay');
+  socket.emit('init_map', { n: 1, m: 1, general: [0, 0], player_ids: ['relay'] });
+  socket.emit('update', { game_end: true });
+  assert.deepEqual(returns, [{}]);
+});
+
 test('rebind with a pending queue, apply diff and retain independent multiline orders', () => {
   const socket = new EventEmitter();
   const handle = attachStrategy(socket, { room: 'test' });
