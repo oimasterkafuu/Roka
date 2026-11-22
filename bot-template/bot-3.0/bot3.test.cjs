@@ -435,12 +435,16 @@ test('open the closing phase only on a dominated, crown-sprawling serial room', 
   assert.deepEqual(closingConfig({}, {}), {
     enabled: true,
     maxBoard: 800,
-    startTurn: 120,
+    startTurn: 60,
     minCrowns: 6,
     armyFloor: 1.35,
+    pushTurn: 0,
+    pushScale: 0.75,
   });
   assert.equal(closingConfig({}, { BOT3_CLOSING: '0' }).enabled, false);
   assert.equal(closingConfig({}, { BOT3_CLOSING_FLOOR: '1.1' }).armyFloor, 1.1);
+  assert.equal(closingConfig({}, { BOT3_CLOSING_TURN: '90' }).startTurn, 90);
+  assert.equal(closingConfig({}, { BOT3_CLOSING_PUSH: '250' }).pushTurn, 250);
 
   const board = { closing: freshClosing() };
   const room = {
@@ -459,7 +463,7 @@ test('open the closing phase only on a dominated, crown-sprawling serial room', 
   assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, size: 900 }).active, false);
   assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, army: 600 }).active, false);
   assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, enemyCrowns: 3 }).active, false);
-  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, turn: 60 }).active, false);
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, turn: 40 }).active, false);
   // A threat pauses the plan instead of latching it away for the rest of the
   // game, which is what the first (latched) cut did.
   assert.equal(closingUpdate(board, { ...room, danger: 1 }).active, false);
@@ -467,6 +471,12 @@ test('open the closing phase only on a dominated, crown-sprawling serial room', 
   assert.equal(closingUpdate(board, room).active, true);
   assert.equal(board.closing.entries, 2);
   assert.equal(closingUpdate(board, room, closingConfig({}, { BOT3_CLOSING: '0' })).active, false);
+  // Late-race pressure: the column commits at `pushScale` of the path price
+  // once `pushTurn` has passed, and keeps the full staging gate before it.
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, turn: 400 }).push, 1);
+  const pushCfg = closingConfig({}, { BOT3_CLOSING_PUSH: '250' });
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, turn: 100 }, pushCfg).push, 1);
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, turn: 250 }, pushCfg).push, 0.75);
 });
 
 test('funnel the empire into its heaviest stack and hold it until it can pay', () => {
@@ -524,6 +534,10 @@ test('funnel the empire into its heaviest stack and hold it until it can pay', (
   const advance = { ...merge, i: 2, j: 3, send: 199, remaining: 199 };
   assert.ok(evaluateFrontMove({ ...state, required: fill(4) }, advance) >= 1000);
   assert.equal(evaluateFrontMove({ ...state, required: fill(400) }, advance), 0);
+  // The late-race commitment lowers that price instead of removing it: a path
+  // priced at 250 is refused with the full gate and taken at 75% of it.
+  assert.equal(evaluateFrontMove({ ...state, required: fill(250) }, advance), 0);
+  assert.ok(evaluateFrontMove({ ...state, required: fill(250), push: 0.75 }, advance) >= 1000);
 });
 
 test('hand the plan to the closing column only while the layer is on', () => {

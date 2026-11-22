@@ -51,10 +51,30 @@
 // converts 15 timeouts into wins without losing a single decided game.
 // `minCrowns` keeps ordinary games out: a 1000-tick stall always shows a rival
 // that has built six or more crowns, while a decided game is over before that.
+//
+// Relay tempo retune (round 6). The current relay builds its crown sprawl and
+// reaches six or more crowns by tick ~110 instead of ~150, so the old 120 gate
+// opened a whole phase too late: every start turn from 40 to 90 now scores the
+// same 19/32 on `relay/mediterranean/clear/single` (baseline 16/32) with no
+// regression on any other relay cell, while 120 leaves those three wins on the
+// table. 60 keeps the phase out of the opening duel (the archived losses that
+// end at ticks 47-141 never reach it) and still opens before the sprawl grows.
+//
+// `pushTurn`/`pushScale` are the late-race half of the same retune and are off
+// by default: the old staging gate waits until the column can pay for the whole
+// remaining path, and the faster relay turns that wait into a stalemate while
+// its own army compounds. `BOT3_CLOSING_PUSH=250 BOT3_CLOSING_PUSH_SCALE=0.75`
+// has the lead commit at 75% of the path price from turn 250 on and is worth
+// one more win on `relay/random/clear/single` (18/32) with no regression on any
+// cell of the 16-seed relay matrix, but it is an experiment, not a default.
 const DEFAULT_MAX_BOARD = 800;
-const DEFAULT_START_TURN = 120;
+const DEFAULT_START_TURN = 60;
 const DEFAULT_MIN_CROWNS = 6;
 const DEFAULT_ARMY_FLOOR = 1.35;
+// Late-race pressure: after `pushTurn` the column commits with only
+// `pushScale` of the staged path price. Off (0) keeps the old staging gate.
+const DEFAULT_PUSH_TURN = 0;
+const DEFAULT_PUSH_SCALE = 0.75;
 
 function number(raw, fallback, min, max) {
   const value = Number(raw);
@@ -76,6 +96,8 @@ function closingConfig(overrides = {}, env = process.env) {
     startTurn: overrides.startTurn ?? number(env.BOT3_CLOSING_TURN, DEFAULT_START_TURN, 0, 100000),
     minCrowns: overrides.minCrowns ?? number(env.BOT3_CLOSING_CROWNS, DEFAULT_MIN_CROWNS, 1, 64),
     armyFloor: overrides.armyFloor ?? number(env.BOT3_CLOSING_FLOOR, DEFAULT_ARMY_FLOOR, 0, 4),
+    pushTurn: overrides.pushTurn ?? number(env.BOT3_CLOSING_PUSH, DEFAULT_PUSH_TURN, 0, 100000),
+    pushScale: overrides.pushScale ?? number(env.BOT3_CLOSING_PUSH_SCALE, DEFAULT_PUSH_SCALE, 0.1, 1),
   };
 }
 
@@ -87,7 +109,7 @@ function freshClosing() {
 // computed; the ledger lives on the board for diagnostics only.
 function closingUpdate(board, input, config = closingConfig()) {
   const state = (board.closing ??= freshClosing());
-  const off = { active: false, state, entries: state.entries, entry: state.entry };
+  const off = { active: false, push: 1, state, entries: state.entries, entry: state.entry };
   if (!config.enabled) return off;
   if (input?.multi) return off;
   if (!(Number(input?.size) <= config.maxBoard)) return off;
@@ -108,7 +130,8 @@ function closingUpdate(board, input, config = closingConfig()) {
     state.exit = threatened ? 'threat' : 'conditions';
   }
   state.active = active;
-  return { active, state, entries: state.entries, entry: state.entry };
+  const push = active && config.pushTurn > 0 && turn >= config.pushTurn ? config.pushScale : 1;
+  return { active, push, state, entries: state.entries, entry: state.entry };
 }
 
 module.exports = {
@@ -119,4 +142,6 @@ module.exports = {
   DEFAULT_START_TURN,
   DEFAULT_MIN_CROWNS,
   DEFAULT_ARMY_FLOOR,
+  DEFAULT_PUSH_TURN,
+  DEFAULT_PUSH_SCALE,
 };

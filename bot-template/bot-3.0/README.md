@@ -51,7 +51,9 @@ Relay 对照是相同策略的镜像局，因此合计接近 50%，只用于检�
 
 `closing.js` 只在小图（`<= 800` 格）、单线、对手已铺开至少 6 座主城、我方兵力不低于对手 1.35 倍、且没有主城受威胁时接管计划：停建主城/指挥所与升级，把帝国兵力汇聚到最大的那一股，这股部队在“打穿剩余路径所需兵力”（`required`）足够前原地等待、其余兵力持续汇入，足够后沿主城距离场推进；主城攻击与两 Tick 围城仍保持更高优先级。威胁出现时该阶段自动暂停并交还防御评分（非一次性闩锁）。
 
-- 开关：`BOT3_CLOSING=0` 恢复基线行为（逐局与基线完全一致）。其余可调项：`BOT3_CLOSING_BOARD`、`BOT3_CLOSING_TURN`、`BOT3_CLOSING_CROWNS`、`BOT3_CLOSING_FLOOR`。
+- 开关：`BOT3_CLOSING=0` 恢复基线行为（逐局与基线完全一致）。其余可调项：`BOT3_CLOSING_BOARD`、`BOT3_CLOSING_TURN`（默认 60）、`BOT3_CLOSING_CROWNS`、`BOT3_CLOSING_FLOOR`、`BOT3_CLOSING_PUSH`（默认 0=关闭）、`BOT3_CLOSING_PUSH_SCALE`（默认 0.75）。
+- 迟速双段：新 relay 在约 110 Tick 就铺开到 6 座主城，旧 120 的启用点整整晚一个阶段；`BOT3_CLOSING_TURN` 降到 60 并用满量矩阵验证零退化。实验开关 `BOT3_CLOSING_PUSH=250 BOT3_CLOSING_PUSH_SCALE=0.75` 会在该 Tick 后让主柱按 `required` 的比例提前投入（把“等凑齐整条路径的兵力”改成“后期按比例压上”），在 16 种子 relay 矩阵上多 1 胜（`relay/random/clear/single` 17 -> 18）且没有任何格子退化，但默认关闭，仍走纯 `required` 门控。
+- 迷雾单线不走这一层：planner 只在 `clearSerial` 房间（非多线、非迷雾）调用 `closingUpdate`，迷雾单线由 `fog.js` 的集结-突袭教条负责。
 - 16 种子满量（2048 局）自基线 1490/424/134 变为 1519/414/115：超时 134 降至 115，25 局超时转胜、4 局超时转负，并且没有任何一局原本获胜的对局被翻转；逐格变化全部为正（Anti-Human 地中海单线 31.3% -> 56.3%，Relay 地中海/随机/迷宫单线 46.1/46.9/44.5% -> 59.4/56.3/46.9%）。多线与迷雾单线走同一份基线代码路径，结果与基线逐局一致。
 
 ## 终结层实验（默认关闭）

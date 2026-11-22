@@ -200,7 +200,7 @@ function evaluateFrontMove(s, move) {
     // A plain mass march (no staging gate) captured three crowns and then lost
     // the column mid-way; the staged version converts the whole hoard first.
     if (i === s.lead) {
-      if (goal[j] < goal[i] && remaining >= required[i])
+      if (goal[j] < goal[i] && remaining >= required[i] * (s.push ?? 1))
         score = Math.max(score, 1000 + Math.min(620, Math.sqrt(Math.max(send, remaining)) * 14));
     } else if (s.leadDist[j] < s.leadDist[i] && enemyDist[i] >= 3) {
       const mass = own ? send + units[j] : send;

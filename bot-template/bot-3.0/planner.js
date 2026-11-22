@@ -635,6 +635,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       invest,
       backup,
       closing: closeIn,
+      push: closing.push ?? 1,
       lead: closingLead,
       leadDist: closingLeadDist,
       enemyDist,
