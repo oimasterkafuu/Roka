@@ -1,12 +1,14 @@
 'use strict';
 
 const { createBoard, chooseOrders } = require('./planner');
+const { openingBudget } = require('./opening');
 const MAX_TEAMS = 16;
 
 function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
   let id,
     board,
     multiLine = false,
+    speed = 1,
     nextSeq = 1,
     lastTurn = -1;
   const pending = new Set();
@@ -32,6 +34,7 @@ function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
     },
     room_update(snapshot) {
       multiLine = snapshot.multi_line === true;
+      speed = snapshot.speed ?? speed;
       if (starting || snapshot.in_game === true || snapshot.update_queued === true || !autoReady) {
         lobbyRequest = null;
         return;
@@ -62,6 +65,7 @@ function attachStrategy(socket, { room, team = 1, autoReady = true } = {}) {
       lobbyRequest = null;
       const player = init.player_ids.indexOf(id) + 1;
       board = player && init.general[0] >= 0 ? createBoard(init.n, init.m, player) : null;
+      if (board) board.openingBudget = openingBudget(speed);
       multiLine = init.multi_line ?? multiLine;
       lastTurn = -1;
       nextSeq = init.next_seq ?? 1;

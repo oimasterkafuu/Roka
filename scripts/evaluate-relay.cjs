@@ -103,7 +103,7 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
       engine.executedTurnMoves.forEach((ops, i) => {
         executed[i] += ops.length;
       });
-      if ([25, 50, 100, 250].includes(tick)) {
+      if ([24, 25, 50, 100, 250].includes(tick)) {
         checkpoints[tick] = names.map((uid) => {
           const p = lastFrame.leaderboard.find((item) => item.uid === uid);
           return [p.land, p.army];
