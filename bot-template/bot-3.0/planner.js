@@ -23,6 +23,21 @@ const {
   guardScore,
   INVEST_SCORE,
 } = require('./fog');
+const {
+  fogMazeConfig,
+  fogMazeObjective,
+  fogMazeOpen,
+  fogMazeProgress,
+  fogMazePaintCap,
+} = require('./fog-maze');
+const {
+  fogOracleConfig,
+  fogOracleUpdate,
+  fogOracleReserve,
+  fogOracleBlocked,
+  fogOraclePush,
+  fogOraclePaint,
+} = require('./fog-oracle');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
@@ -32,6 +47,23 @@ const ownerOf = (code) => (code < 200 ? code % 50 : 0);
 const crown = (code) => code >= 100 && code < 150;
 const anchor = (code) => code >= 50 && code < 150;
 const swamp = (code) => code >= 150 && code !== 200 && code !== 201;
+
+// Neutral cells on our own border: the frontier one painting tick can actually
+// take (see ./fog-maze). Mountains stay visible through the fog and are skipped.
+function neutralBorder(b, me) {
+  const { size, neighbors, grid_type: tile } = b;
+  let open = 0;
+  for (let i = 0; i < size; i++) {
+    if (tile[i] === 201 || ownerOf(tile[i]) !== 0) continue;
+    for (const j of neighbors[i]) {
+      if (ownerOf(tile[j]) === me) {
+        open++;
+        break;
+      }
+    }
+  }
+  return open;
+}
 
 function createBoard(rows, cols, me) {
   const size = rows * cols;
@@ -315,6 +347,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
     (!fogMaze || fogCfg.maze) &&
     size <= fogCfg.maxBoard &&
     turn >= fogCfg.startTurn;
+  // Maze + fog layer (see ./fog-maze). A fogged corridor board is the one room
+  // neither `./fog` (corridor maps excluded) nor `./maze` (the front planner is
+  // clear-serial only) prices, so it gets its own objective. Off by default.
+  const fogMazeCfg = fogMazeConfig();
+  const mazeFogRoom = fogMaze && fogMazeCfg.enabled;
   // A zero garrison or a disconnected pocket means fighting has already
   // changed the opening economy. Let the tactical planner handle that frame.
   if (
@@ -368,18 +405,71 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // the leaderboard army says we are close enough to afford the attrition:
   // chasing a front from far behind is what costs the anti/archipelago cell.
   let enemyArmy = 0,
-    enemyLand = 0;
+    enemyLand = 0,
+    enemyRow = null;
   for (const p of leaderboard)
     if (!p.dead && p.team !== myTeam) {
+      if ((Number(p.army) || 0) >= enemyArmy) enemyRow = p;
       enemyArmy = Math.max(enemyArmy, Number(p.army) || 0);
       enemyLand = Math.max(enemyLand, Number(p.land) || 0);
     }
+  // Fog oracle (see ./fog-oracle). The leaderboard is rebuilt from the unfogged
+  // grids, so `rival.army` / `rival.land` are exact even where the vision is
+  // not: the difference against the visible half is the interior reserve, and
+  // the passed ticks give the rival's crown count. Off by default.
+  const oracleCfg = fogOracleConfig();
+  const oracle =
+    fogOpen && !multi && oracleCfg.enabled && size <= oracleCfg.maxBoard
+      ? fogOracleUpdate(
+          b,
+          { turn, multi, rival: enemyRow, mine: self.army },
+          oracleCfg,
+        )
+      : null;
+  const oraclePaint = oracle ? fogOraclePaint(oracle, oracleCfg) : Infinity;
   // Swamp is visible through the fog, so the board's terrain mix is known even
   // before it is explored; archipelago-style rooms use their own aim threshold.
   let swampCells = 0;
   if (fogOpen)
     for (let i = 0; i < size; i++) if (swamp(tile[i])) swampCells++;
   const aimLead = swampCells >= size * fogCfg.swampShare ? fogCfg.aimLeadSwamp : fogCfg.aimLead;
+  // Maze + fog gate. `leadCap` stands the layer down once the leaderboard says
+  // the game is already won: on the weak-opponent corridor cells the layer's
+  // expansion converts fast wins into 1000-tick timeouts, and those are not
+  // wins. The layer is for the even and losing corridor games.
+  const mazeFogBase =
+    mazeFogRoom &&
+    fogMazeOpen(b, { multi, size, turn }, fogMazeCfg) &&
+    !(fogMazeCfg.endTurn > 0 && turn >= fogMazeCfg.endTurn) &&
+    !(fogMazeCfg.known && targets.length) &&
+    !(fogMazeCfg.landCap > 0 && enemyLand > 0 && self.land * 100 > enemyLand * fogMazeCfg.landCap) &&
+    !(
+      fogMazeCfg.leadCap > 0 &&
+      turn >= fogMazeCfg.leadTurn &&
+      enemyArmy > 0 &&
+      self.army * 100 > enemyArmy * fogMazeCfg.leadCap
+    );
+  // Progress guard (see ./fog-maze). Off by default (`stall`, `landLead` and
+  // `drop` are 0), and skipped entirely while they are so the layer's measured
+  // path stays byte for byte. When it is on it hands the frame back to the
+  // stock planner with a latched verdict: the border has nothing left to paint,
+  // the layer has stopped converting ticks into land, or our land is being
+  // eaten. Measured verdicts are in BOT3_MAZE.md.
+  const mazeFogGuard =
+    fogMazeCfg.stall > 0 || fogMazeCfg.landLead > 0 || fogMazeCfg.drop > 0;
+  const neutralFront = mazeFogBase && mazeFogGuard ? neutralBorder(b, me) : -1;
+  const mazeFogProgress =
+    mazeFogBase && mazeFogGuard
+      ? fogMazeProgress(b, { turn, land: self.land, enemyLand, neutralFront }, fogMazeCfg)
+      : null;
+  const mazeFogOpen = mazeFogBase && !mazeFogProgress?.stalled;
+  // Paint cap (see ./fog-maze): `Infinity` unless the bundle is on, so the
+  // shipped layer keeps its measured path byte for byte. The border count is
+  // only walked while the cap is live.
+  const paintCap =
+    mazeFogOpen && fogMazeCfg.paint > 0
+      ? fogMazePaintCap(fogMazeCfg, neutralBorder(b, me))
+      : Infinity;
   const fogAim =
     fogOpen &&
     fogCfg.aimFront &&
@@ -392,13 +482,34 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // steer the column without moving every garrison off a crown.
   const beliefTargets =
     fogOpen && fogCfg.belief && !targets.length ? fogBeliefTargets(b, homes, fogCfg) : null;
+  // Objective on a fogged corridor board: remembered crowns first (they are the
+  // win condition), then the visible rival frontier plus the far anchors of the
+  // passable tree (see ./fog-maze). Without it `goal` stays infinite and every
+  // advance rule is dead.
+  const mazeFogTargets =
+    mazeFogOpen && !targets.length
+      ? fogMazeObjective(b, { homes, enemies }, fogMazeCfg).targets
+      : null;
+  // Multi-line corridor rooms: the sixteen orders have to walk *different*
+  // branches instead of stacking into one corridor (see ./fog-maze).
+  const mazeFogMulti =
+    mazeFogRoom && multi && size <= fogMazeCfg.maxBoard && turn >= fogMazeCfg.startTurn;
+  const mazeBranches =
+    mazeFogMulti && fogMazeCfg.branches
+      ? fogMazeObjective(b, { homes, enemies }, { ...fogMazeCfg, count: fogMazeCfg.branches })
+          .targets
+      : null;
+  const branchDist =
+    mazeBranches?.length && fogMazeCfg.branch ? distances(b, mazeBranches).dist : null;
   const objectives = single
     ? (rival?.crowns ?? [])
     : beliefTargets?.length
       ? beliefTargets
-      : fogAim
-        ? enemies
-        : targets;
+      : mazeFogTargets?.length
+        ? mazeFogTargets
+        : fogAim
+          ? enemies
+          : targets;
   const { dist: goal, queue } = distances(b, objectives);
   const heading = targets.length ? goal : enemies.length ? enemyDist : scouting;
   const required = assaultStrength(b, queue, goal, units, teams, myTeam);
@@ -418,11 +529,16 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const danger = homes.filter((i) => threat[i] > units[i]);
   const exposedHome = turn >= 38 && homes.length <= 2 ? homes.find((i) => pressure(i) > units[i]) : undefined;
   const defense = distances(b, danger, (j) => teams[j] === myTeam && !b.isolated[j]).dist;
-  const fog = fogOpen
-    ? fogUpdate(b, { turn, multi, size, army: self.army, enemyArmy, danger: danger.length })
-    : { active: false };
-  const fogColumn = fog.active === true && fogCfg.column;
-  const fogReserve = fogColumn && fogCfg.guess ? fogRequired(required, goal, fogCfg.guess) : required;
+  const fog =
+    fogOpen || mazeFogOpen
+      ? fogUpdate(b, { turn, multi, size, army: self.army, enemyArmy, danger: danger.length })
+      : { active: false };
+  const fogColumn = fog.active === true && (mazeFogOpen ? fogMazeCfg.column : fogCfg.column);
+  const fogGuess = mazeFogOpen ? fogMazeCfg.guess : fogCfg.guess;
+  const fogReserve =
+    fogColumn && (fogGuess || oracle)
+      ? fogRequired(required, goal, fogOracleReserve(fogGuess, oracle, oracleCfg))
+      : required;
   // A dead-even attrition on a compact serial room has to be converted by
   // concentration, not by more income; see ./closing for the diagnosis.
   const closing = single
@@ -499,7 +615,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
     teams,
     myTeam,
     targets,
-    fogTargets: fogMultiLayer?.targets,
+    fogTargets:
+      mazeFogMulti && fogMazeCfg.route && mazeBranches?.length
+        ? mazeBranches
+        : fogMultiLayer?.targets,
     fogBurst: fogMultiLayer?.burst,
     mobileArmy,
     army: self.army,
@@ -840,6 +959,44 @@ function chooseOrders(b, turn, leaderboard, multi) {
       }
       if (route && homes.length > 2 && own && defense[j] < defense[i] && defense[i] > 2)
         score = Math.min(score, 170);
+      // Maze fog: on a corridor board a forward neutral capture is both income
+      // and the only way to open vision, and the own-merge march term above is
+      // otherwise what the tick is spent on (see ./fog-maze).
+      if (
+        mazeFogOpen &&
+        fogMazeCfg.capture &&
+        !own &&
+        !hostile &&
+        !strike &&
+        (fogMazeCfg.deep || goal[j] < goal[i])
+      )
+        score = Math.max(
+          score,
+          fogMazeCfg.capture +
+            Math.min(60, Math.sqrt(send) * 6) -
+            Math.min(40, (Number.isFinite(goal[j]) ? goal[j] : 40) * 2),
+        );
+      // Maze fog multi-line: walk the corridor branches instead of stacking all
+      // sixteen orders into the same lane (see ./fog-maze).
+      if (branchDist && fogMazeCfg.branch && !strike) {
+        const closer = branchDist[j] < branchDist[i];
+        if (!own && closer)
+          score = Math.max(
+            score,
+            fogMazeCfg.branch +
+              Math.min(60, Math.sqrt(send) * 6) -
+              Math.min(40, (Number.isFinite(branchDist[j]) ? branchDist[j] : 40) * 2),
+          );
+        else if (own && closer && send >= 2) score = Math.max(score, fogMazeCfg.branch);
+      }
+      // Contact with the visible rival frontier: taking it is the only way the
+      // fogged map shrinks. Scored as a bonus instead of an objective cell so
+      // the column keeps walking the corridor behind it.
+      if (mazeFogOpen && fogMazeCfg.harass && hostile && !strike && !base)
+        score = Math.max(
+          score,
+          fogMazeCfg.harass + Math.min(60, Math.sqrt(send) * 6) - Math.min(30, enemyDist[j] * 3),
+        );
       if (hostile && danger.length && homeDist[j] <= 4 && units[j] >= 8 && intercept)
         score = Math.max(score, 680 + Math.min(100, units[j]));
       // Fog column: the heaviest stack advances and attacks instead of merging
@@ -861,9 +1018,22 @@ function chooseOrders(b, turn, leaderboard, multi) {
             (forward || heading[j] < heading[i])
           )
             score = Math.max(score, expandScore(send, heading[j]));
-          if (forward && send > 1 && remaining >= reserve[i])
-            score = Math.max(score, columnAdvance(send, remaining));
-          else if (
+          if (forward && send > 1 && remaining >= reserve[i]) {
+            // Paint cap: a forward column move onto our own cell is a merge and
+            // buys no land. While the corridor frontier still has a neutral
+            // cell, cap it under the capture term so the serial tick paints
+            // (see ./fog-maze, `BOT3_MAZEFOG3`).
+            let advance = own
+              ? Math.min(columnAdvance(send, remaining), paintCap)
+              : columnAdvance(send, remaining);
+            // Fog oracle: refuse a dive the lead cannot pay for (a fogged step
+            // may hold `density` units), and add a push when the rival's
+            // interior is empty (see ./fog-oracle).
+            if (fogOracleBlocked(oracle, b.fog[j] === 1, send, oracleCfg))
+              advance = Math.min(advance, oracleCfg.blockScore);
+            else if (fogOraclePush(oracle, send, oracleCfg)) advance += oracleCfg.pushScore;
+            score = Math.max(score, advance);
+          } else if (
             fogCfg.guard &&
             !forward &&
             enemyDist[i] >= 4 &&
@@ -910,6 +1080,19 @@ function chooseOrders(b, turn, leaderboard, multi) {
       // A narrow advance is fragile when an adjacent enemy can take the
       // vacated connection. Independent routes and anchors avoid that risk.
       if (!own && support === 1 && !anchor(tile[i]) && exposure >= units[i] - send && !strike) score -= 180;
+      // Paint before merging (see ./fog-oracle): while the leaderboard says the
+      // board still has open neutral land, a plain move onto our own cell buys
+      // no land, no income and no vision, so it may not outrank the capture next
+      // door. Defence modes (0/1), strikes and the campaign route keep their
+      // score: those are what a fogged empire has to keep paying for.
+      if (own && mode === 2 && !strike && !(route && route[j] < route[i]))
+        score = Math.min(score, oraclePaint);
+      // Last crown (see ./fog-oracle): the crown count is read off the rival's
+      // army growth, and once it is one, a remembered home is the whole game.
+      // Opt-in: the ledger is primed at 1 by the spawn rule, so an unconfirmed
+      // read would make this fire from the opening tick.
+      if (oracleCfg.allIn && oracle?.lastCrown && targets.length && goal[j] < goal[i] && send >= 4)
+        score = Math.max(score, oracleCfg.allInScore);
       if (b.lastFrom[i] === j && turn - b.lastMove[i] <= 4 && defense[j] >= defense[i] && !strike)
         score -= 110;
       if (score > 0) propose(score, i, j, mode, undefined, send);
@@ -948,7 +1131,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // edge (or its reverse) unless the move is a real cut, capture or defence.
   const take = (op) => {
     if (used.has(op.from) || used.has(op.to)) return false;
-    if (maze && LANE && !op.build) {
+    if (maze && (LANE || (mazeFogOpen && fogMazeCfg.lane)) && !op.build) {
       const i = op.from,
         j = op.to;
       const hostile = teams[j] && teams[j] !== myTeam;
