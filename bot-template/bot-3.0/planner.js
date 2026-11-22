@@ -1179,7 +1179,28 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // fortifying our own chokepoints. Off by default; one hook, no state.
   cutApply(
     cutUpdate({ b, size, turn, multi, teams, units, cut, myTeam }, cutConfig()),
-    { b, size, turn, multi, teams, units, cut, homes, myTeam, pressure, enemyDist, fog: !clearSerial },
+    {
+      b,
+      size,
+      turn,
+      multi,
+      teams,
+      units,
+      cut,
+      homes,
+      myTeam,
+      pressure,
+      enemyDist,
+      fog: !clearSerial,
+      closing: closeIn,
+      // Exact material reads: the cell sums are only what we can see in a fog
+      // room, and the rescue gate is a positional question, so use the
+      // leaderboard numbers.
+      army: self.army,
+      rivalArmy: enemyArmy,
+      land: self.land,
+      rivalLand: enemyLand,
+    },
     candidates,
   );
   // Upstream reinforcement pricing: a small deposit into an own stack is far
