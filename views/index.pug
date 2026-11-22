@@ -360,11 +360,43 @@ html
 
             // 上一份房间号快照（null = 尚未完成首次加载），用于检测「新建房间」并在后台弹通知。
             var prevRoomIds = null;
+            var ROOMS_REFRESH_INTERVAL_MS = 1000;
+            var roomsRefreshStartedAt = -Infinity;
+            var roomsRefreshInFlight = false;
+            var roomsRefreshPending = false;
+            var roomsRefreshTimer = null;
+
+            function queueRoomsRefresh() {
+              roomsRefreshPending = true;
+              flushRoomsRefresh();
+            }
+
+            async function flushRoomsRefresh() {
+              if (!roomsRefreshPending || roomsRefreshInFlight || roomsRefreshTimer !== null) return;
+              var delay = roomsRefreshStartedAt + ROOMS_REFRESH_INTERVAL_MS - performance.now();
+              if (delay > 0) {
+                roomsRefreshTimer = setTimeout(function () {
+                  roomsRefreshTimer = null;
+                  flushRoomsRefresh();
+                }, Math.ceil(delay));
+                return;
+              }
+              roomsRefreshPending = false;
+              roomsRefreshInFlight = true;
+              roomsRefreshStartedAt = performance.now();
+              try {
+                await loadRooms();
+              } finally {
+                roomsRefreshInFlight = false;
+                flushRoomsRefresh();
+              }
+            }
 
             async function loadRooms() {
               try {
                 var res = await fetch('/api/rooms');
                 if (!res.ok) {
+                  await res.body?.cancel();
                   return;
                 }
                 var rooms = await res.json();
@@ -1137,6 +1169,11 @@ html
 
             /* ---------- 启动 ---------- */
 
+            queueRoomsRefresh();
+            window.addEventListener('pageshow', function (event) {
+              if (event.persisted) queueRoomsRefresh();
+            });
+
             // 页脚版本号：取 /api/version，成功且 commit 非空时显示 v{version} 并链接到
             // GitHub 对应 commit（title 为 commit 短串）；失败或非 git 部署保持隐藏。
             fetch('/api/version')
@@ -1165,7 +1202,6 @@ html
                 // Intro waits until auth has had a chance to show the notification explanation.
                 document.documentElement.dataset.introHomeReady = 'true';
                 document.dispatchEvent(new Event('roka:home-ready'));
-                loadRooms();
                 loadReplays();
                 loadAnnouncement();
                 loadLeaderboard();
@@ -1176,6 +1212,11 @@ html
                 // 各面板改由 socket 失效通知驱动刷新（事件无 payload，收到后重新 fetch）。
                 // query.home 标记首页通知连接；同 sid 不参与游戏连接互斥，跨 sid 仍检查活动冲突。
                 var socket = io({ query: { home: '1' } });
+                var homeSocketHasConnected = false;
+                socket.on('connect', function () {
+                  if (homeSocketHasConnected) queueRoomsRefresh();
+                  homeSocketHasConnected = true;
+                });
                 var sessionReloading = false;
                 function checkHomeSession() {
                   fetch('/api/auth/me').then(function (res) {
@@ -1201,9 +1242,7 @@ html
                 document.addEventListener('visibilitychange', function () {
                   if (!document.hidden && currentUsername) checkHomeSession();
                 });
-                socket.on('home_rooms', function () {
-                  loadRooms();
-                });
+                socket.on('home_rooms', queueRoomsRefresh);
                 socket.on('home_replays', function () {
                   loadReplays();
                 });
