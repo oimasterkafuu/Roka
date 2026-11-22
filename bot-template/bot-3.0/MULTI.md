@@ -119,9 +119,41 @@ regresses**: `anti / archipelago / on(fog) / multi` is `31/1/0` against the
 recorded `32/0/0` (`-3.1pp`, a single game). `BOT3_MULTI_BURST=0` restores that
 cell to `32/0/0`, so the regression is a burst decision, not the endgame.
 
+## Fog burst gate (round-3 combined screen)
+
+The one regressing cell of the table above (`anti / archipelago / on(fog) /
+multi`, `31/1/0` against `32/0/0`) is a burst decision, and no single burst knob
+fixes it: `MERGE=0`, `MERGE=50/200`, `BURST_GAIN=0`, `OUTWARD=0`,
+`OUTWARD_BASE=0`, `PAINT=0`, `FOCUS=0` and `BUILD=0` each stay at `31/32` and
+only shuffle the lost game between seeds 2 and 15 (`RAID=0` is `30/32`). Only
+`BURST=0` restores `32/32`.
+
+That is why the layer now carries a fog gate: `burstFog` (default on) drops the
+burst in a fog room while the leaderboard army is behind `burstFogLead`
+(default 100, i.e. `army >= rivalArmy`). The condition is read per tick, so a
+room that falls behind mid-burst reverts to the baseline planner for the rest
+of the burst.
+
+| configuration (1024 multi games) | Δ wins | cells below the round-2 baseline |
+| --- | ---: | --- |
+| no gate (`BOT3_MULTI_BURST_FOG=0`) | - | `anti/archipelago/fog+multi` `31` vs `32` |
+| fog gate, lead 100 (**default**) | -5 | none |
+| burst off in every fog room | -11 | `relay/random/fog+multi` `15` vs `16` |
+| army-lead gate on the merge penalty | -10 | `anti/archipelago/fog+multi` still `31` |
+
+So the gate trades the 4 relay fog wins the burst buys (`relay/random` 21 -> 17,
+`maze` 19 -> 18, `archipelago` 18 -> 17) for turning the one losing cell into a
+baseline-level cell. A map-specific gate (burst off on archipelago only) would
+keep those wins but the protocol carries no map name and the board encodings do
+not separate archipelago from random, so the state gate above is the narrowest
+one that is actually available.
+
 ## Decision
 
-Keep the layer **opt-in** (`BOT3_MULTI=1`). It is a clear gain on the relay
+Keep the layer **opt-in** (`BOT3_MULTI=1`). With the fog gate the combined
+matrix (`BOT3_MULTI=1 BOT3_FOG=1`) is `1617/349/82 (79.0%)` against
+`1541/395/112 (75.2%)`, and the layer alone is `1579/359/110 (77.1%)`. It is a
+clear gain on the relay
 16-order rooms (`+14.5pp` over 256 games, `64.1%`) and a `+1.9pp` gain over the
 full matrix, but it does not reach the 65% relay target in five of eight cells
 and it costs one game in one cell of the full matrix. The default path must not

@@ -53,6 +53,16 @@
 //     large swing available in a sixteen-order tick and it works during the
 //     burst (a severed plain stops paying `51 - t` army) as well as after it.
 //
+// Fog gate (added in the round-3 combined screen). The burst prices a land race
+// that the fog hides the rival half of: on `anti/archipelago/fog+multi` the
+// layer painted 520 land against 413 while holding 58 army against 108 and lost
+// a game the baseline won. Any single burst knob still loses that game; only
+// releasing the burst whole restores the cell to 32/32. `burstFog` therefore
+// drops the burst in a fog room while the leaderboard army says we are behind
+// (`burstFogLead`, percent of the rival army). Measured on the 1024 multi
+// games: the cell goes 31/1 -> 32/0, at the cost of 5 relay fog wins
+// (archipelago -1, maze -1, random -4) and no cell below the baseline.
+//
 // The layer is off by default (`BOT3_MULTI=1` enables it) so the baseline path
 // stays byte-identical. Every mechanism has its own switch; see MULTI.md for
 // the measured effect of each one.
@@ -72,6 +82,8 @@ const DEFAULT_OUTWARD_BASE = 10;
 // rival crown scored *worse* than the plain distance penalty below it (152/256
 // against 164/256): the winner of the burst walks in on its own schedule.
 const DEFAULT_MERGE_PENALTY = 100;
+// Percent of the rival army the burst gate below requires in a fog room.
+const DEFAULT_BURST_FOG_LEAD = 100;
 const DEFAULT_RAID_BONUS = 400;
 const DEFAULT_PAINT_PENALTY = 1000;
 const DEFAULT_MARCH_GAIN = 0;
@@ -101,6 +113,16 @@ function multiConfig(overrides = {}, env = process.env) {
     enabled: overrides.enabled ?? flag(env.BOT3_MULTI, false),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_MULTI_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     burst: overrides.burst ?? flag(env.BOT3_MULTI_BURST, true),
+    // Fog rooms cannot price the burst: the rival half of the race is invisible,
+    // so the capture/raid bonuses buy land that the endgame cannot convert. The
+    // measured cost is one game in `anti/archipelago/fog+multi` (31/32 against
+    // the recorded 32/32); disabling the burst there restores 32/32.
+    burstFog: overrides.burstFog ?? flag(env.BOT3_MULTI_BURST_FOG, true),
+    // In a fog room the burst is only kept while the leaderboard army says we
+    // are not behind: the land the burst buys is worth the army pool it costs
+    // only if the pool itself is not already losing. Percent of the rival army.
+    burstFogLead:
+      overrides.burstFogLead ?? number(env.BOT3_MULTI_BURST_FOG_LEAD, DEFAULT_BURST_FOG_LEAD, 0, 1000),
     burstTurn: overrides.burstTurn ?? number(env.BOT3_MULTI_BURST_TURN, DEFAULT_BURST_TURN, 0, 1000),
     burstGain: overrides.burstGain ?? number(env.BOT3_MULTI_BURST_GAIN, DEFAULT_BURST_GAIN, 0, 200),
     outwardGain: overrides.outwardGain ?? number(env.BOT3_MULTI_OUTWARD, DEFAULT_OUTWARD_GAIN, 0, 200),
@@ -226,7 +248,14 @@ function multiUpdate(b, input, config = multiConfig()) {
   if (!input || input.multi !== true) return null;
   if (!(Number(input.size) <= config.maxBoard)) return null;
   const turn = Math.max(0, Number(input.turn) || 0);
-  const burst = config.burst && turn >= config.burstTurn && turn < BURST_END;
+  // Whether the burst may spend slots on breadth instead of concentration.
+  const army = Math.max(0, Number(input.army) || 0);
+  const enemyArmy = Math.max(0, Number(input.enemyArmy) || 0);
+  const fogBurst =
+    !config.burstFog || input.fog !== true
+      ? true
+      : !config.burstFogLead || enemyArmy <= 0 || army * 100 >= enemyArmy * config.burstFogLead;
+  const burst = config.burst && fogBurst && turn >= config.burstTurn && turn < BURST_END;
   const focus = config.focus && turn >= config.focusTurn;
   if (!burst && !focus) return null;
   const worth = burst ? BURST_END - turn : 0;
@@ -340,6 +369,7 @@ module.exports = {
   DEFAULT_OUTWARD_GAIN,
   DEFAULT_OUTWARD_BASE,
   DEFAULT_MERGE_PENALTY,
+  DEFAULT_BURST_FOG_LEAD,
   DEFAULT_RAID_BONUS,
   DEFAULT_PAINT_PENALTY,
   DEFAULT_MARCH_GAIN,

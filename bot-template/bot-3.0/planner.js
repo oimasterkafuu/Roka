@@ -471,6 +471,9 @@ function chooseOrders(b, turn, leaderboard, multi) {
     myTeam,
     targets,
     mobileArmy,
+    army: self.army,
+    enemyArmy,
+    fog: Boolean(b.fogMode ?? b.fog.includes(1)),
   });
   // While closing, the empire funnels into its heaviest stack and that stack
   // pushes once it can pay for the remaining path (see ./closing). The lead has
