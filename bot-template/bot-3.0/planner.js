@@ -25,6 +25,7 @@ const {
 } = require('./fog');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
+const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
 
 const INF = 1e6;
@@ -916,6 +917,13 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
   }
   if (front) searchCampaign(front, candidates);
+  // Cut economics layer (see ./cut): windfall timing, articulation pricing and
+  // fortifying our own chokepoints. Off by default; one hook, no state.
+  cutApply(
+    cutUpdate({ b, size, turn, multi, teams, units, cut, myTeam }, cutConfig()),
+    { b, size, turn, multi, teams, units, cut, homes, myTeam, pressure, enemyDist, fog: !clearSerial },
+    candidates,
+  );
   // Upstream reinforcement pricing: a small deposit into an own stack is far
   // less valuable than a full-stack move, a recently reversed lane is noise,
   // and reconnecting a large pocket can recover its whole garrison at once.
