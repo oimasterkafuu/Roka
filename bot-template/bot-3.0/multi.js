@@ -63,8 +63,8 @@
 // games: the cell goes 31/1 -> 32/0, at the cost of 5 relay fog wins
 // (archipelago -1, maze -1, random -4) and no cell below the baseline.
 //
-// The layer is off by default (`BOT3_MULTI=1` enables it) so the baseline path
-// stays byte-identical. Every mechanism has its own switch; see MULTI.md for
+// The layer is on by default; `BOT3_MULTI=0` restores the baseline path
+// byte for byte. Every mechanism has its own switch; see MULTI.md for
 // the measured effect of each one.
 
 const BURST_END = 50;
@@ -110,7 +110,7 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function multiConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.BOT3_MULTI, false),
+    enabled: overrides.enabled ?? flag(env.BOT3_MULTI, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_MULTI_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     burst: overrides.burst ?? flag(env.BOT3_MULTI_BURST, true),
     // Fog rooms cannot price the burst: the rival half of the race is invisible,

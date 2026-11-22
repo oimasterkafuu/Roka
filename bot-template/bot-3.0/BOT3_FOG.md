@@ -45,7 +45,7 @@
 
 | 变量 | 默认 | 含义 |
 | ---- | ---- | ---- |
-| `BOT3_FOG` | **关** | `1` 打开整个迷雾单线层；默认关闭，默认路径与 round-2 基线逐局一致（2048 局 flips 全 0） |
+| `BOT3_FOG` | **开** | `0` 关闭整个迷雾单线层；默认开启，关闭时与 round-2 基线逐局一致（2048 局 flips 全 0） |
 | `BOT3_FOG_TURN` | `60` | 层最早启用的 Tick |
 | `BOT3_FOG_GUESS` | `8` | 每剩余步的保底预备队 |
 | `BOT3_FOG_FLOOR` | `0` | 柱启用所需的军力倍数下限（`army >= enemyArmy * floor`） |
@@ -158,7 +158,7 @@ node scripts/compare-bot3-baseline.cjs /tmp/fog.jsonl data/scratch/round2-baseli
 
 ## 第三轮组合筛查：防线预备队不能整层放大
 
-组合开启（`BOT3_MULTI=1 BOT3_FOG=1`）后，两个 -1 局退化格都是“原本快胜被柱拖成超时/失败”：
+组合开启（默认 `BOT3_MULTI=1 BOT3_FOG=1`）后，两个 -1 局退化格都是“原本快胜被柱拖成超时/失败”：
 
 | 格 | round-2 | 组合 | 差异局 |
 | --- | --- | --- | --- |

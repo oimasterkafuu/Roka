@@ -122,7 +122,7 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function fogConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.BOT3_FOG, false),
+    enabled: overrides.enabled ?? flag(env.BOT3_FOG, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_FOG_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     startTurn: overrides.startTurn ?? number(env.BOT3_FOG_TURN, DEFAULT_START_TURN, 0, 100000),
     guess: overrides.guess ?? number(env.BOT3_FOG_GUESS, DEFAULT_GUESS, 0, 200),

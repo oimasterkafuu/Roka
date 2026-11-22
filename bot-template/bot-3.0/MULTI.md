@@ -150,7 +150,7 @@ one that is actually available.
 
 ## Decision
 
-Keep the layer **opt-in** (`BOT3_MULTI=1`). With the fog gate the combined
+The layer ships **on** (`BOT3_MULTI=0` restores the old path). With the fog gate the combined
 matrix (`BOT3_MULTI=1 BOT3_FOG=1`) is `1617/349/82 (79.0%)` against
 `1541/395/112 (75.2%)`, and the layer alone is `1579/359/110 (77.1%)`. It is a
 clear gain on the relay

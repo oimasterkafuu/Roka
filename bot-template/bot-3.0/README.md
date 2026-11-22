@@ -41,8 +41,8 @@ Relay 对照是相同策略的镜像局，因此合计接近 50%，只用于检�
 - `maze.js`：迷宫（走廊）层：地图判定、集中式前线规划器的推迟启用与可选的走廊换线纪律。
 - `closing.js`：小图单线终局的收尾层（见下节），默认开启。
 - `kill.js`：可选的单线斩杀层（默认关闭，`BOT3_FINISH=1` 开启）。
-- `multi.js`：可选的多线 burst/focus 层（默认关闭，`BOT3_MULTI=1` 开启，见 [MULTI.md](MULTI.md)）。
-- `fog.js`：可选的迷雾单线前线瞄准/柱状推进层（默认关闭，`BOT3_FOG=1` 开启，见 [BOT3_FOG.md](BOT3_FOG.md)）。
+- `multi.js`：多线 burst/focus 层（默认开启，`BOT3_MULTI=0` 关闭，见 [MULTI.md](MULTI.md)）。
+- `fog.js`：迷雾单线前线瞄准/柱状推进层（默认开启，`BOT3_FOG=0` 关闭，见 [BOT3_FOG.md](BOT3_FOG.md)）。
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线层、迷雾层与协议回归。
 - `index.js`：独立运行的 CLI。
 
