@@ -1325,11 +1325,21 @@ function withShadow(run) {
   }
 }
 
-test('shadow layer is inert unless enabled', () =>
+test('shadow layer is inert when disabled with BOT3_SHADOW=0', () =>
   withShadow(() => {
+    process.env.BOT3_SHADOW = '0';
     const b = shadowBoard();
     assert.equal(predictShadow(b, 0, shadowPlayers, false), null);
     assert.equal(b.shadow, undefined);
+  }));
+
+test('shadow layer is on by default', () =>
+  withShadow(() => {
+    delete process.env.BOT3_SHADOW;
+    const b = shadowBoard();
+    const pred = predictShadow(b, 0, shadowPlayers, false);
+    assert.ok(pred, 'default configuration predicts an order');
+    assert.equal(pred.armed, false, 'the strict arming streak still starts at zero');
   }));
 
 test('shadow replays the relay planner order for the same frame', () =>

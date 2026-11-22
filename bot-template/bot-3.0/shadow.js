@@ -15,7 +15,7 @@
 // with the real engine push rule (computePush), never the planner's `send`
 // variable, which is only an intent.
 //
-// Safety. The layer is opt-in (`BOT3_SHADOW=1`, default off), gated to clear
+// Safety. The layer is on by default (`BOT3_SHADOW=0` disables it), gated to clear
 // serial rooms, and self-disabling: it only starts pricing orders after
 // ARM_STRICT consecutive frames in which the predicted order was exactly the
 // order relay executed *and* the two economies look like mirrors of one policy,
@@ -72,7 +72,10 @@ const debugStates = new Set();
 const traceOn = () => process.env.BOT3_SHADOW_TRACE === '1';
 
 function enabled() {
-  return (process.env.BOT3_SHADOW === '1' || process.env.BOT3_SHADOW_DEBUG === '1') && !unavailable;
+  const flag = process.env.BOT3_SHADOW;
+  const off = flag === '0' || flag === 'false' || flag === 'off';
+  const on = flag === undefined || flag === '' || !off;
+  return (on || process.env.BOT3_SHADOW_DEBUG === '1') && !unavailable;
 }
 
 // Engine growth for one cell at the start of `turn` (src/game-engine/tick-growth):

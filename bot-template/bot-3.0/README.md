@@ -50,7 +50,7 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 - `fog-oracle.js`：迷雾情报层：用未迷雾的排行榜反推对手内部驻军密度、剩余中立格与王冠数（默认关闭，`BOT3_FOGORACLE=1` 开启，见 [BOT3_FOG_ORACLE.md](BOT3_FOG_ORACLE.md)）。
 - `cut.js`：隔离/切断经济学实验层（时间、定价、加固、多线、反向救援五个开关，全部默认关闭；反向救援 `BOT3_CUTSAVE` 是第 7/8 轮唯一可复现的正向机制，推荐 `_MIN=10`，见 [CUT.md](CUT.md)）。
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层与协议回归。
-- `shadow.js`：relay 规划器的影子副本，逐帧重放它的 `chooseOrders` 以提前一 Tick 知道它要走的指令，并按引擎结算顺序重新给候选评分（默认关闭，`BOT3_SHADOW=1` 开启，见 [SHADOW.md](SHADOW.md)）。
+- `shadow.js`：relay 规划器的影子副本，逐帧重放它的 `chooseOrders` 以提前一 Tick 知道它要走的指令，并按引擎结算顺序重新给候选评分（默认开启，`BOT3_SHADOW=0` 关闭，见 [SHADOW.md](SHADOW.md)）。
 - `shadow-probe.cjs`：单局预测精度探针（逐帧对照 relay 实际发出的指令），仅用于测量。
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层、影子层与协议回归。
 
