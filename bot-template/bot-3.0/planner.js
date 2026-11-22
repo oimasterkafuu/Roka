@@ -10,6 +10,16 @@ const {
 const { openingOrder, END_TICK } = require('./opening');
 const { isMazeBoard, laneBlocked, recordLane, LANE, SINGLE_FROM } = require('./maze');
 const { closingUpdate } = require('./closing');
+const {
+  fogConfig,
+  fogUpdate,
+  fogRequired,
+  columnAdvance,
+  funnelScore,
+  expandScore,
+  guardScore,
+  INVEST_SCORE,
+} = require('./fog');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
 
@@ -286,6 +296,12 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const frontDist = distances(b, borders, (j) => teams[j] === myTeam).dist;
   const enemyDist = distances(b, enemies).dist;
   const clearSerial = !multi && !(b.fogMode ?? b.fog.includes(1));
+  // Fog single-line layer (see ./fog). `fogOpen` is the room gate that also
+  // supplies the objective fallback; the column needs a measured material edge
+  // on top of it (`fogUpdate`) and pauses whenever a home is threatened.
+  const fogCfg = fogConfig();
+  const fogOpen =
+    !clearSerial && !multi && fogCfg.enabled && size <= fogCfg.maxBoard && turn >= fogCfg.startTurn;
   // A zero garrison or a disconnected pocket means fighting has already
   // changed the opening economy. Let the tactical planner handle that frame.
   if (
@@ -333,7 +349,21 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const rival = single
     ? assessOpponents(b, leaderboard, targets, borderDistance, teams, myTeam, units, self)
     : null;
-  const objectives = single ? (rival?.crowns ?? []) : targets;
+  // Without a remembered enemy crown there is no objective at all: fog vision
+  // is radius 1, so the crowns only appear once our land touches their
+  // neighbour. Aim at the visible front until then (see ./fog), but only when
+  // the leaderboard army says we are close enough to afford the attrition:
+  // chasing a front from far behind is what costs the anti/archipelago cell.
+  let enemyArmy = 0;
+  for (const p of leaderboard)
+    if (!p.dead && p.team !== myTeam) enemyArmy = Math.max(enemyArmy, Number(p.army) || 0);
+  const fogAim =
+    fogOpen &&
+    fogCfg.aimFront &&
+    !maze &&
+    !targets.length &&
+    self.army * 100 >= enemyArmy * fogCfg.aimLead;
+  const objectives = single ? (rival?.crowns ?? []) : fogAim ? enemies : targets;
   const { dist: goal, queue } = distances(b, objectives);
   const heading = targets.length ? goal : enemies.length ? enemyDist : scouting;
   const required = assaultStrength(b, queue, goal, units, teams, myTeam);
@@ -342,6 +372,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const danger = homes.filter((i) => threat[i] > units[i]);
   const exposedHome = turn >= 38 && homes.length <= 2 ? homes.find((i) => pressure(i) > units[i]) : undefined;
   const defense = distances(b, danger, (j) => teams[j] === myTeam && !b.isolated[j]).dist;
+  const fog = fogOpen
+    ? fogUpdate(b, { turn, multi, size, army: self.army, enemyArmy, danger: danger.length })
+    : { active: false };
+  const fogColumn = fog.active === true && fogCfg.column;
+  const fogReserve = fogColumn && fogCfg.guess ? fogRequired(required, goal, fogCfg.guess) : required;
   // A dead-even attrition on a compact serial room has to be converted by
   // concentration, not by more income; see ./closing for the diagnosis.
   const closing = single
@@ -403,7 +438,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // to be chosen here, where the unit counts live.
   let closingLead = -1,
     closingLeadDist = null;
-  if (closeIn) {
+  if (closeIn || fogColumn) {
     let best = 0;
     for (let i = 0; i < size; i++) {
       if (teams[i] !== myTeam || b.isolated[i] || ownerOf(tile[i]) !== me) continue;
@@ -517,26 +552,38 @@ function chooseOrders(b, turn, leaderboard, multi) {
       // crown is under pressure. Otherwise a forced defence takes this tick.
       const safe = (city || !danger.length) && pressure(i) <= units[i] - 50;
       const outpost = single && !closeIn && anchorDist[i] >= 5 && (cut[i] > 25 || units[i] >= 85);
+      // `pressure` projects a seven-step hostile mass and is far too pessimistic
+      // on a fogged small map (it reads 3000+ everywhere), so it would suppress
+      // every build and leave the empire on two crowns for 1000 ticks. A fog
+      // crown only needs to be out of the current line of contact.
+      const fogBuild =
+        fogOpen &&
+        fogCfg.invest &&
+        units[i] >= 100 &&
+        immediate[i] < units[i] &&
+        homes.length < limit;
       if (
-        safe &&
-        (develop || outpost) &&
+        (safe || fogBuild) &&
+        (develop || outpost || fogBuild) &&
         (homes.length < limit || outpost) &&
         (city || units[i] >= 100 || (cut[i] > 30 && nearFight) || outpost)
       ) {
         const buildScore =
-          i === site
-            ? invest
-              ? 675
-              : single
-                ? 403
-                : 360
-            : outpost
-              ? 420
-              : city
-                ? 195
-                : units[i] >= 100
-                  ? 150
-                  : 105;
+          fogBuild
+            ? INVEST_SCORE
+            : i === site
+              ? invest
+                ? 675
+                : single
+                  ? 403
+                  : 360
+              : outpost
+                ? 420
+                : city
+                  ? 195
+                  : units[i] >= 100
+                    ? 150
+                    : 105;
         propose(
           backup && i === site ? 820 : buildScore - (nearFight && homes.length > 1 ? 82 : 0),
           i,
@@ -684,6 +731,44 @@ function chooseOrders(b, turn, leaderboard, multi) {
         score = Math.min(score, 170);
       if (hostile && danger.length && homeDist[j] <= 4 && units[j] >= 8 && intercept)
         score = Math.max(score, 680 + Math.min(100, units[j]));
+      // Fog column: the heaviest stack advances and attacks instead of merging
+      // between its own cells, and rear garrisons funnel into it. `fogReserve`
+      // prices the steps the fog hides, so the column stages instead of walking
+      // a big stack into an ambush (see ./fog for the measured traces).
+      if (fogColumn) {
+        if (i === closingLead) {
+          const forward = goal[j] < goal[i] || (hostile && enemyDist[j] <= enemyDist[i]);
+          if (
+            fogCfg.expand &&
+            !own &&
+            !hostile &&
+            !strike &&
+            !b.isolated[j] &&
+            send >= 2 &&
+            (forward || heading[j] < heading[i])
+          )
+            score = Math.max(score, expandScore(send, heading[j]));
+          if (forward && send > 1 && remaining >= fogReserve[i])
+            score = Math.max(score, columnAdvance(send, remaining));
+          else if (
+            fogCfg.guard &&
+            !forward &&
+            enemyDist[i] >= 4 &&
+            homeDist[i] > 2 &&
+            homeDist[j] < homeDist[i] &&
+            send >= 8
+          )
+            score = Math.max(score, guardScore(send));
+        } else if (
+          fogCfg.funnel &&
+          closingLeadDist &&
+          closingLeadDist[j] < closingLeadDist[i] &&
+          enemyDist[i] >= 3 &&
+          send >= 2
+        ) {
+          score = Math.max(score, funnelScore(own ? send + units[j] : send));
+        }
+      }
       // A narrow advance is fragile when an adjacent enemy can take the
       // vacated connection. Independent routes and anchors avoid that risk.
       if (!own && support === 1 && !anchor(tile[i]) && exposure >= units[i] - send && !strike) score -= 180;
