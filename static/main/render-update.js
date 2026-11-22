@@ -104,10 +104,13 @@ function render() {
     displayGrid[selx][sely] < 200 &&
     displayGrid[selx][sely] % 50 == player;
   var canAttackFromSelected = selx >= 0 && sely >= 0 && (ownSelected || anyRouteQueued());
+  const secondarySelection = new Set(extra_selected_cells.map(([row, col]) => row * m + col));
+  const showControlGroups = !is_replay && player > 0;
   for (var i = 0; i < n; i++) {
     for (var j = 0; j < m; j++) {
       var cls = 's' + scale,
         txt = '';
+      const groupLabel = showControlGroups ? control_group_labels.get(i * m + j) : undefined;
       var cellType = displayGrid[i][j];
       var cellArmy = displayArmy[i][j];
       // 迷雾格（仿原版）：山脉（201）与沼泽（204 / 150~199）保持可见，
@@ -161,12 +164,18 @@ function render() {
           cls += ' selected';
         } else {
           cls += ' selected selected50';
-          txt = '50%';
+          if (secondarySelection.size) cls += ' selected-group-primary';
+          else txt = '50%';
         }
+      } else if (secondarySelection.has(i * m + j)) {
+        cls += ' selected-secondary';
       } else if (canAttackFromSelected && Math.abs(i - selx) + Math.abs(j - sely) == 1 && cellType != 201) {
         cls += ' attackable';
       }
       if (txt.length > 0 && scale == 1) txt = '<div class="txt">' + txt + '</div>';
+      if (groupLabel !== undefined && txt && scale <= 2) {
+        txt = '<div class="control-group-army">' + txt + '</div>';
+      }
       for (var d = 0; d < 4; d++)
         if (have_route[d][i][j]) {
           if (scale > 1) txt += '<div class="' + dire_class[d] + '">' + dire_char[d] + '</div>';
@@ -177,6 +186,10 @@ function render() {
         var hasC = have_build[i][j].indexOf('c') >= 0;
         if (hasB) txt += '<div class="build-badge build-b' + (hasC ? ' with-c' : '') + '"></div>';
         if (hasC) txt += '<div class="build-badge build-c"></div>';
+      }
+      if (groupLabel !== undefined) {
+        cls += ' has-control-group';
+        txt += '<span class="control-group-label" title="' + groupLabel + '">' + groupLabel + '</span>';
       }
       // 格子元素走 init_map 构建的缓存表（issue #87）：避免每帧每格两次
       // id 选择器查找；cell_html 影子表避免每帧 innerHTML 序列化读取。

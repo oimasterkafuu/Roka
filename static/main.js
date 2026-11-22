@@ -163,6 +163,11 @@ var cell_elems, cell_html;
 var route = [];
 var next_seq = 1;
 var general_order = Array();
+var extra_selected_cells = [];
+var match_multi_line = false;
+var control_groups;
+var control_group_labels = new Map();
+const control_group_storage_key = 'roka.controlGroups';
 
 var room_id = '',
   account_name = '',
@@ -386,7 +391,12 @@ function init_map(_n, _m, general) {
   route = Array();
   next_seq = 1;
   general_order = Array();
-  ((selx = -1), (sely = -1), (selt = 1));
+  setSelectedCells([]);
+  selt = 1;
+  if (!is_replay) {
+    control_groups ??= loadControlGroups();
+    refreshControlGroupLabels();
+  }
 
   var ts = '';
   for (var i = 0; i < n; i++) {
@@ -416,45 +426,174 @@ function init_map(_n, _m, general) {
   }
   $('#map').css('left', $(document).width() / 2 + (m / 2 - general[1] - 0.5) * scale_sizes[scale] + 'px');
   $('#map').css('top', $(document).height() / 2 + (n / 2 - general[0] - 0.5) * scale_sizes[scale] + 'px');
-  for (var i = 0; i < n; i++) {
-    for (var j = 0; j < m; j++) {
-      $(cell_elems[i][j]).on('click', Function('click(' + i + ',' + j + ')'));
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < m; col++) {
+      $(cell_elems[row][col]).on('click', function (event) {
+        click(row, col, event.shiftKey);
+      });
     }
   }
 }
 
-function click(x, y) {
-  if (x < 0 || y < 0 || x >= n || y >= m) return;
-  var ownCell = player > 0 && grid_type[x][y] < 200 && grid_type[x][y] % 50 == player;
-  if (!is_replay && !ownCell) {
-    ((selx = -1), (sely = -1));
-    render();
-    return;
+function cellInBounds(row, col) {
+  return row >= 0 && col >= 0 && row < n && col < m;
+}
+
+function isOwnCell(row, col) {
+  return player > 0 && grid_type[row][col] < 200 && grid_type[row][col] % 50 == player;
+}
+
+function isControllableCell(row, col) {
+  return isOwnCell(row, col) && !isolated[row][col] && !fog[row][col];
+}
+
+function multiLineSelectionEnabled() {
+  return (
+    in_game &&
+    !is_replay &&
+    player > 0 &&
+    !lost &&
+    !game_ended &&
+    (match_multi_line || getMultiLineModeCode())
+  );
+}
+
+function setSelectedCells(cells) {
+  [selx, sely] = cells[0] || [-1, -1];
+  extra_selected_cells = cells.slice(1);
+}
+
+function getSelectedCells() {
+  return cellInBounds(selx, sely) ? [[selx, sely], ...extra_selected_cells] : [];
+}
+
+function loadControlGroups() {
+  const groups = {};
+  try {
+    const stored = JSON.parse(localStorage.getItem(control_group_storage_key));
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return groups;
+    for (let number = 0; number < 20; number++) {
+      if (!Array.isArray(stored[number])) continue;
+      const seen = new Set();
+      const cells = stored[number].filter((cell) => {
+        if (!Array.isArray(cell) || cell.length !== 2) return false;
+        const [row, col] = cell;
+        if (!Number.isSafeInteger(row) || !Number.isSafeInteger(col) || row < 0 || col < 0) return false;
+        const key = cell.join('_');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (cells.length) groups[number] = cells;
+    }
+  } catch {}
+  return groups;
+}
+
+function refreshControlGroupLabels() {
+  control_group_labels = new Map();
+  for (const [number, cells] of Object.entries(control_groups)) {
+    for (const [row, col] of cells) {
+      if (!cellInBounds(row, col)) continue;
+      const key = row * m + col;
+      const label = control_group_labels.get(key);
+      control_group_labels.set(key, label === undefined ? number : label + '·' + number);
+    }
   }
-  // 保留 selt：Z 半兵待发状态只被下一次有效 WASD 消耗
-  ((selx = x), (sely = y));
+}
+
+function useControlGroup(number, save) {
+  const multiLine = multiLineSelectionEnabled();
+  if (save) {
+    const cells = getSelectedCells();
+    if (!cells.length) return;
+    control_groups[number] = multiLine ? cells : cells.slice(0, 1);
+    try {
+      localStorage.setItem(control_group_storage_key, JSON.stringify(control_groups));
+    } catch {}
+    refreshControlGroupLabels();
+  } else {
+    const cells = (control_groups[number] || []).filter(([row, col]) => cellInBounds(row, col));
+    if (!cells.length) return;
+    setSelectedCells(multiLine ? cells : cells.slice(0, 1));
+    focusSelectedCells(getSelectedCells());
+  }
   render();
 }
 
-function moveSelected(d, shift) {
-  if (selx < 0 || sely < 0 || d < 0 || d >= dire.length) return;
-  var ownSelected = player > 0 && grid_type[selx][sely] < 200 && grid_type[selx][sely] % 50 == player;
-  var nx = selx + dire[d].x,
-    ny = sely + dire[d].y;
-  if (nx < 0 || ny < 0 || nx >= n || ny >= m) return;
-  // 山脉不可通行；迷雾格中除山脉、沼泽外均已抹成空地，故 201 只代表
-  // 真实山脉，无需额外区分——非迷雾的真实山脉直接阻断入队。
-  if (grid_type[nx][ny] == 201 && !fog[nx][ny]) return;
-  // 命令可能有效时才入队：链式入队（本地队列非空，由服务器执行时校验），或当前选中
-  // 己方正常领土且兵力 > 1（兵力 ≤ 1 时三种模式推出量均为 0；孤军不可推兵）。
-  // 即使不入队、不显示箭头，光标也始终跟随移动——光标保持“活着”。
-  if (anyRouteQueued() || (ownSelected && !isolated[selx][sely] && army_cnt[selx][sely] > 1)) {
-    // 默认全兵（A-1）；Shift = 智能分兵；Z 待发时半兵。Shift 优先且不消耗 Z 待发状态。
-    var mode = shift ? 0 : selt == 2 ? 1 : 2;
-    addroute(selx, sely, d, mode);
-    if (!shift) selt = 1;
+function click(row, col, shift) {
+  if (!cellInBounds(row, col)) return;
+  if (shift && multiLineSelectionEnabled()) {
+    const cells = getSelectedCells();
+    if (cells.some(([selectedRow, selectedCol]) => selectedRow === row && selectedCol === col)) return;
+    setSelectedCells([...cells, [row, col]]);
+  } else {
+    setSelectedCells(is_replay || isOwnCell(row, col) ? [[row, col]] : []);
   }
-  ((selx = nx), (sely = ny));
+  render();
+}
+
+function moveCursor(direction, extend) {
+  if (!cellInBounds(selx, sely)) return;
+  const row = selx + dire[direction].x;
+  const col = sely + dire[direction].y;
+  if (!cellInBounds(row, col)) return;
+  const previous = extend && multiLineSelectionEnabled() ? getSelectedCells() : [];
+  setSelectedCells([
+    [row, col],
+    ...previous.filter(([prevRow, prevCol]) => prevRow !== row || prevCol !== col),
+  ]);
+  focusSelectedCells(getSelectedCells());
+  render();
+}
+
+function selectAllControllableCells() {
+  const cells = [];
+  if (cellInBounds(selx, sely) && isControllableCell(selx, sely)) cells.push([selx, sely]);
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < m; col++) {
+      if ((row !== selx || col !== sely) && isControllableCell(row, col)) cells.push([row, col]);
+    }
+  }
+  setSelectedCells(cells);
+  focusSelectedCells(cells);
+  render();
+}
+
+function moveSelected(direction, shift) {
+  const cells = getSelectedCells();
+  if (!cells.length || !dire[direction]) return;
+  const multiSelect = cells.length > 1 && multiLineSelectionEnabled();
+  const queuedDestinations = new Set();
+  if (multiSelect) {
+    for (const op of route) {
+      if (op.build) continue;
+      const step = dire[op.d];
+      if (step) queuedDestinations.add((op.x + step.x) * m + op.y + step.y);
+    }
+  }
+  const mode = shift ? 0 : selt == 2 ? 1 : 2;
+  const nextCells = [];
+  const seen = new Set();
+  for (const [row, col] of multiSelect ? cells : cells.slice(0, 1)) {
+    let nextRow = row + dire[direction].x;
+    let nextCol = col + dire[direction].y;
+    if (!cellInBounds(nextRow, nextCol) || grid_type[nextRow][nextCol] == 201) {
+      nextRow = row;
+      nextCol = col;
+    } else if (grid_type[row][col] != 201) {
+      const chained = multiSelect ? queuedDestinations.has(row * m + col) : anyRouteQueued();
+      if (chained || (isControllableCell(row, col) && army_cnt[row][col] > 1)) {
+        if (addroute(row, col, direction, mode) && !shift) selt = 1;
+      }
+    }
+    const key = nextRow * m + nextCol;
+    if (!seen.has(key)) {
+      seen.add(key);
+      nextCells.push([nextRow, nextCol]);
+    }
+  }
+  setSelectedCells(nextCells);
   render();
 }
 
@@ -493,8 +632,33 @@ function isCellVisible(bx, by) {
   return cx >= 0 && cx <= $(document).width() && cy >= 0 && cy <= $(document).height();
 }
 
+function focusSelectedCells(cells) {
+  if (cells.every(([row, col]) => isCellVisible(row, col))) return;
+  let minRow = n;
+  let minCol = m;
+  let maxRow = 0;
+  let maxCol = 0;
+  for (const [row, col] of cells) {
+    minRow = Math.min(minRow, row);
+    maxRow = Math.max(maxRow, row);
+    minCol = Math.min(minCol, col);
+    maxCol = Math.max(maxCol, col);
+  }
+  const centerRow = (minRow + maxRow) / 2;
+  const centerCol = (minCol + maxCol) / 2;
+  $('#map').css('left', $(document).width() / 2 + (m / 2 - centerCol - 0.5) * scale_sizes[scale] + 'px');
+  $('#map').css('top', $(document).height() / 2 + (n / 2 - centerRow - 0.5) * scale_sizes[scale] + 'px');
+}
+
 function jumpToGeneral() {
   if (player <= 0 || general_order.length == 0) return;
+  if (multiLineSelectionEnabled()) {
+    const cells = general_order.map((key) => key.split('_').map(Number));
+    setSelectedCells(cells);
+    focusSelectedCells(cells);
+    render();
+    return;
+  }
   var rx = selx >= 0 ? selx : n / 2 - 0.5,
     ry = sely >= 0 ? sely : m / 2 - 0.5;
   var bx = -1,
@@ -511,27 +675,69 @@ function jumpToGeneral() {
     }
   }
   if (bx < 0) return;
-  // 目标主城已在视野内时只移动光标，镜头保持不动；不在视野内才把镜头居中过去。
-  if (!isCellVisible(bx, by)) {
-    $('#map').css('left', $(document).width() / 2 + (m / 2 - by - 0.5) * scale_sizes[scale] + 'px');
-    $('#map').css('top', $(document).height() / 2 + (n / 2 - bx - 0.5) * scale_sizes[scale] + 'px');
-  }
-  // 保留 selt：Z 半兵待发状态只被下一次有效 WASD 消耗
-  ((selx = bx), (sely = by));
+  setSelectedCells([[bx, by]]);
+  focusSelectedCells([[bx, by]]);
   render();
 }
 
-function keypress(key, shift) {
-  if (in_game && is_replay) {
-    if (key == 'a' || key == 37) {
+function keypress(event) {
+  if (
+    event.defaultPrevented ||
+    event.isDefaultPrevented?.() ||
+    event.isComposing ||
+    event.originalEvent?.isComposing
+  )
+    return;
+  const target = event.target;
+  if (chat_focus || target?.isContentEditable || target?.matches?.('input, textarea, select')) return;
+
+  const key = event.key?.toLowerCase();
+  const shift = event.shiftKey;
+  const alt = event.altKey;
+  const modified = event.ctrlKey || event.metaKey || alt;
+  if (is_replay) {
+    if (!in_game || modified) return;
+    if (key == 'a' || key == 'arrowleft') {
       backTurn();
-    } else if (key == 'd' || key == 39) {
+    } else if (key == 'd' || key == 'arrowright') {
       nextTurn();
     } else if (key == ' ') {
+      event.preventDefault();
       switchAutoplay();
     }
-  } else if (in_game) {
-    if (key == 27) {
+    return;
+  }
+
+  if (in_game && player > 0 && !lost && !game_ended) {
+    const platform = navigator.userAgentData?.platform || navigator.platform || '';
+    const mac = /^mac/i.test(platform);
+    const primary = mac ? event.metaKey : event.ctrlKey;
+    const otherModifier = mac ? event.ctrlKey : event.metaKey;
+    const code = event.code || event.originalEvent?.code;
+    const digit = /^[0-9]$/.test(key) ? key : /^Digit[0-9]$/.test(code) ? code.slice(-1) : null;
+    if (!shift && !otherModifier && digit !== null) {
+      event.preventDefault();
+      useControlGroup(Number(digit) + (alt ? 10 : 0), primary);
+      return;
+    }
+    if (key == 'a' && primary && !otherModifier && !alt && !shift && multiLineSelectionEnabled()) {
+      event.preventDefault();
+      selectAllControllableCells();
+      return;
+    }
+    if (!modified) {
+      const direction = ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].indexOf(key);
+      if (direction >= 0) {
+        event.preventDefault();
+        moveCursor(direction, shift);
+        return;
+      }
+    }
+  }
+
+  if (modified) return;
+  if (in_game) {
+    if (key == 'escape') {
       if (!canSurrender()) {
         hideSurrenderAlert();
         return;
@@ -541,13 +747,13 @@ function keypress(key, shift) {
     } else if (key == 'z') {
       selt = 3 - selt;
       render();
-    } else if (key == 'w' || key == 38) {
+    } else if (key == 'w') {
       moveSelected(0, shift);
-    } else if (key == 's' || key == 40) {
+    } else if (key == 's') {
       moveSelected(1, shift);
-    } else if (key == 'a' || key == 37) {
+    } else if (key == 'a') {
       moveSelected(2, shift);
-    } else if (key == 'd' || key == 39) {
+    } else if (key == 'd') {
       moveSelected(3, shift);
     } else if (key == 'x') {
       buildSelected('b');
@@ -558,33 +764,24 @@ function keypress(key, shift) {
     } else if (key == 'e') {
       pop_queue();
     } else if (key == 't') {
-      if (!chat_focus) {
-        is_team = true;
-        setTimeout(function () {
-          $('#chatroom-input').focus();
-          checkChat();
-        }, 0);
-      }
-    } else if (key == 13) {
-      if (!chat_focus) {
-        is_team = false;
-        setTimeout(function () {
-          $('#chatroom-input').focus();
-          checkChat();
-        }, 0);
-      }
+      focusGameChat(true);
+    } else if (key == 'enter') {
+      focusGameChat(false);
     } else if (key == ' ') {
+      event.preventDefault();
       jumpToGeneral();
     }
-  } else if (!is_replay) {
-    if (key == 13 && !chat_focus) {
-      is_team = false;
-      setTimeout(function () {
-        $('#chatroom-input').focus();
-        checkChat();
-      }, 0);
-    }
+  } else if (key == 'enter') {
+    focusGameChat(false);
   }
+}
+
+function focusGameChat(team) {
+  is_team = team;
+  setTimeout(function () {
+    $('#chatroom-input').focus();
+    checkChat();
+  }, 0);
 }
 
 function submitChatInput() {
@@ -617,14 +814,10 @@ function refreshSpectateMode() {
 }
 
 $(document).ready(function () {
-  $('body').on('keypress', function (e) {
-    keypress(e.key.toLowerCase(), e.shiftKey);
-  });
-  $('body').on('keydown', function (e) {
-    keypress(e.keyCode, e.shiftKey);
-  });
-  $('#map_back').on('click', function (e) {
-    ((selx = -1), (sely = -1), (selt = 1));
+  $('body').on('keydown', keypress);
+  $('#map_back').on('click', function () {
+    setSelectedCells([]);
+    selt = 1;
     render();
   });
   $('body').bind('mousewheel', function (e) {
@@ -792,11 +985,11 @@ function anyRouteQueued() {
 function addroute(x, y, d, mode) {
   // 服务端静默丢弃场景（未在对局/已结束/已出局）下不入队不发送：
   // 否则本地自增 seq 而服务端未入队，两端 next_seq 永久错位（lst_moves 摘不到队列项）。
-  if (lost === true || game_ended === true || in_game !== true) return;
+  if (lost === true || game_ended === true || in_game !== true) return false;
   var seq = next_seq++;
   route.push({ x: x, y: y, d: d, mode: mode, seq: seq });
   socket.emit('attack', { x: x, y: y, dx: x + dire[d].x, dy: y + dire[d].y, mode: mode });
-  render();
+  return true;
 }
 function addbuild(x, y, op) {
   // 与 addroute 同一防线：服务端必然丢弃时不入队不发送，保持两端 seq 一致。
@@ -810,8 +1003,10 @@ function retract_last() {
   if (!route.length) return;
   var tmp = route.pop();
   socket.emit('pop_queue', {});
-  if (!tmp.build && tmp.x + dire[tmp.d].x == selx && tmp.y + dire[tmp.d].y == sely)
-    ((selx = tmp.x), (sely = tmp.y));
+  if (!tmp.build && tmp.x + dire[tmp.d].x == selx && tmp.y + dire[tmp.d].y == sely) {
+    const others = extra_selected_cells.filter(([row, col]) => row !== tmp.x || col !== tmp.y);
+    setSelectedCells([[tmp.x, tmp.y], ...others]);
+  }
   render();
 }
 function clear_queue() {
@@ -837,6 +1032,7 @@ socket.on('set_id', function (data) {
 
 socket.on('init_map', function (data) {
   init_map(data.n, data.m, data.general);
+  match_multi_line = data.multi_line === true;
   if (typeof data.next_seq == 'number') next_seq = data.next_seq;
   in_game = true;
   game_ended = false;
@@ -875,7 +1071,7 @@ socket.on('init_map', function (data) {
   if (typeof data.next_seq == 'number') next_seq = data.next_seq;
   // 开局默认选中己方主城，无需先按空格即可直接操作。
   if (player > 0 && data.general && data.general[0] >= 0) {
-    ((selx = data.general[0]), (sely = data.general[1]), (selt = 1));
+    setSelectedCells([data.general]);
   }
   refreshSpectateMode();
 });

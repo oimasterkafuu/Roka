@@ -525,6 +525,12 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 - Apex PR163 聚焦修复：`bot-template/apex-bot/bot/rules.cjs`、`bot/planner.cjs` 为多线 board 对象缓存预演、路线安全与纯战术分析；`bot/multiline.cjs` 只为入选副线预演，保护大图主攻送兵链。大图主计划不再让可选截断抢占持续进攻，并取消远距兵堆硬排除；单线规划保持原路径。`test/multiline.test.cjs` 增加大图送兵链保护和跨帧/多线预演隔离回归。
 - Apex `planner.cjs` 的多线夺冠续攻在选定突破口后直接继续该计划，避免被尚为空的通用候选覆盖；单线保留旧路径，回归断言下一座皇冠和实际前进方向。
 
+### 实时对局光标与数字编队
+
+- `static/main.js` 处理方向键光标、WASD 推兵、多线选区与数字编队。编队 0–19 使用本地 `roka.controlGroups` 存储，队列继续使用现有 `attack` 指令。
+- `static/main/render-update.js` 与 `static/styles/map.css` 渲染主光标、附加选格与右下角编号。文字教程由 `views/tutorial-text.pug` 生成 `static/tutorial-text.html`。
+- `scripts/test-cursor-control-groups.mjs` 用 VM 执行真实客户端键鼠、队列和渲染逻辑，并验证文字教程生成物。`pnpm run test:cursor-control-groups` 纳入 `pnpm test`。
+
 ### 多线争锋回放录制与重建
 
 - `src/game-engine.ts` 每 Tick 按实战执行顺序采集所有成功动作，失效出队只通过实时 `lst_moves` 确认；保持全局队列按入度并行与单线每玩家每 Tick 最多一个成功动作的规则。

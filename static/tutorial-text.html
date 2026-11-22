@@ -310,8 +310,8 @@
           <li>
             房主可在房间设置的「多线争锋」开关中开启（默认关闭；房间内有不支持多线的 Bot
             参战时不可用）。开启后战线<b>条数不设上限</b>：指令按出发格自动归入战线——同一出发点、
-            同一方向的指令并入同一条战线；同一出发点、不同方向的指令<b>分兵</b>各自成线； 系统每 Tick
-            并行调度所有战线（每条非空战线各执行一条），操作方式与单线完全相同。
+            同一方向的指令并入同一条战线；同一出发点、不同方向的指令<b>分兵</b>各自成线；系统每 Tick
+            并行调度所有战线（每条非空战线各执行一条）。
           </li>
           <li>
             每条战线跟踪自己的<b>起始点</b>并随执行沿指令链推进。新指令的出发格若已是某条战线的
@@ -319,12 +319,8 @@
             B 移到 C」，两条指令依次入队同一战线，A→B 执行后 B→C 自动接续执行，与单线局手动排队完全一致。
           </li>
           <li>
-            界面与普通对局完全一致：没有战线切换按键，所有待发指令的箭头一视同仁；地图上可能同时
-            存在多组待发箭头，一次结算的移动数也可能更多。<span class="kbd">Q</span> 清空整个操作队列，<span
-              class="kbd"
-              >E</span
-            >
-            撤回<b>全局最后一条</b>指令（按入队时间序）。
+            所有待发指令的箭头一视同仁；地图上可以同时显示多组待发箭头。<span class="kbd">Q</span>
+            清空整个操作队列，<span class="kbd">E</span> 撤回<b>全局最后一条</b>指令（按入队时间序）。
           </li>
         </ul>
       </section>
@@ -333,21 +329,47 @@
         <h3>选中与视角</h3>
         <ul>
           <li>鼠标左键点击己方格：选中；点击空白背景：取消选中；拖动地图平移，滚轮缩放。</li>
-          <li><span class="kbd">空格</span>：跳转选中到曼哈顿距离最近的己方主城。</li>
+          <li>方向键只移动光标，可穿过或停在山脉、沼泽、空地和迷雾格；碰到地图边界时停住。</li>
+          <li><span class="kbd">空格</span>单线选中曼哈顿距离最近的己方主城，多线选中所有己方主城。</li>
+        </ul>
+        <h3>多线选区</h3>
+        <ul>
+          <li>Shift+方向键把光标移到相邻格并保留已有选区。Shift+点击追加格子，普通点击恢复单选。</li>
+          <li>
+            Windows/Linux 用 Ctrl+A，macOS 用
+            Command+A，选中所有可操控的己方格。孤军、敌格、空格和山脉不计入。
+          </li>
+          <li>
+            WASD 让每个选中格各自尝试同方向推兵。遇到障碍的光标留在原格，其他光标照常推进。山脉上的光标按 WASD
+            只能移向非障碍格，不会推兵或入队。
+          </li>
+        </ul>
+        <h3>数字编队 0–19</h3>
+        <ul>
+          <li>
+            Windows/Linux 用 Ctrl+数字设置 0–9，Ctrl+Alt+数字设置 10–19。macOS 对应用 Command+数字和
+            Command+Option+数字设置。
+          </li>
+          <li>
+            直接按数字跳转 0–9，按 Alt+数字（macOS 用 Option+数字）跳转
+            10–19。跳转只恢复选区，未设置的编号保持原选区。
+          </li>
+          <li>
+            编号显示在格子右下角，保存在当前浏览器。再次设置可覆盖原编号，编号不可删除。多线保存整组选区，单线跳转时只取首格。
+          </li>
         </ul>
         <h3>推兵（移动/进攻）</h3>
         <ul>
           <li>
-            <span class="kbd">W/A/S/D</span> 或方向键：从选中格向对应方向推兵。默认<b>全兵</b>推出（只留 1
-            兵看守）。
+            <span class="kbd">W/A/S/D</span>从选中格向对应方向推兵。默认<b>全兵</b>推出（只留 1 兵看守）。
           </li>
-          <li><span class="kbd">Z</span> + 方向：下一步<b>半兵</b>（50%，一次性，执行后失效）。</li>
+          <li><span class="kbd">Z</span>后按 WASD：下一步<b>半兵</b>（50%，一次性，执行后失效）。</li>
           <li>
-            <span class="kbd">Shift</span> + 方向：<b>智能分兵</b>——为其他方向的威胁保留兵力。设起点兵力为
+            <span class="kbd">Shift</span> + WASD：<b>智能分兵</b>——为其他方向的威胁保留兵力。设起点兵力为
             \(A\)，其余三个方向相邻格中「非山脉且非己方」格子的驻军之和为 \(B\)： \[ B =
             \sum_{\text{威胁方向}} (\text{兵力} - 1), \qquad push = \max(0,\ A - B - 1) \] 不消耗 Z。
           </li>
-          <li>推兵进入操作队列，每 Tick 每名玩家最多执行一条队列操作。</li>
+          <li>推兵进入操作队列。单线每 Tick 每名玩家最多执行一条，多线可并行执行各战线的指令。</li>
         </ul>
         <h3>建造</h3>
         <ul>
@@ -400,7 +422,7 @@
             第 11 Tick 起进入衰减期，每 2 Tick： \[ n \leftarrow n - \max\left(1, \lceil 0.05\, n
             \rceil\right) \] 兵力归零后变为中立格。
           </li>
-          <li>孤军不可选中、不可推兵、不可建造、不产兵、无爆发加成。</li>
+          <li>全选会跳过孤军。孤军不可推兵、不可建造、不产兵、无爆发加成。</li>
           <li>
             孤军重新连通回己方（或同队存活成员）主城/指挥所时立即恢复正常，且每格兵力翻倍（\(n \leftarrow
             2n\)）。
@@ -418,10 +440,8 @@
         <h2>快捷键</h2>
         <ul>
           <li>
-            <span class="kbd">W/A/S/D</span> 或方向键推兵；<span class="kbd">Z</span> 半兵；<span class="kbd"
-              >Shift</span
-            >
-            智能分兵。
+            <span class="kbd">W/A/S/D</span>推兵，方向键移动光标；<span class="kbd">Z</span>后按 WASD
+            半兵；<span class="kbd">Shift</span> + WASD 智能分兵。
           </li>
           <li>
             <span class="kbd">X</span> 建指挥所；<span class="kbd">C</span> 升级主城；<span class="kbd"
@@ -430,9 +450,8 @@
             清空队列；<span class="kbd">E</span> 撤销队尾。
           </li>
           <li>
-            <span class="kbd">空格</span>跳到最近主城；<span class="kbd">Enter</span>公屏；<span class="kbd"
-              >T</span
-            >队伍聊天；<span class="kbd">Esc</span>投降确认。
+            <span class="kbd">空格</span>选中己方主城（单线最近一座，多线全部）；<span class="kbd">Enter</span
+            >公屏；<span class="kbd">T</span>队伍聊天；<span class="kbd">Esc</span>投降确认。
           </li>
         </ul>
       </section>
