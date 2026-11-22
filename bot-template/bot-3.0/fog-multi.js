@@ -45,7 +45,7 @@
 //      It therefore stays opt-in and off by default; `BOT3_FOG_MULTI_ROUTE=1`
 //      turns it on.
 //
-// Everything is opt-in: `BOT3_FOG_MULTI=1` turns the layer on, and with the
+// The layer is on by default; `BOT3_FOG_MULTI=0` turns it off, and with the
 // variable unset the planner never asks for it, so the default path stays
 // byte-identical to the round-3 baseline. Measured verdicts are in
 // BOT3_FOG.md.
@@ -86,7 +86,7 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function fogMultiConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.BOT3_FOG_MULTI, false),
+    enabled: overrides.enabled ?? flag(env.BOT3_FOG_MULTI, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_FOG_MULTI_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     // Burst gate override, read by `multi.js` through `input.fogBurst`.
     burst: overrides.burst ?? flag(env.BOT3_FOG_MULTI_BURST, true),

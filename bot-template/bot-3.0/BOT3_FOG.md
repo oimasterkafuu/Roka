@@ -206,7 +206,7 @@ node scripts/compare-bot3-baseline.cjs /tmp/fog.jsonl data/scratch/round2-baseli
 
 | 变量 | 默认 | 含义 |
 | ---- | ---- | ---- |
-| `BOT3_FOG_MULTI` | **关** | 整个迷雾多线层；默认关时 2048 局与 round-3 基线逐局一致（4 种子 512 局 flips 全 0 实测） |
+| `BOT3_FOG_MULTI` | **开** | 整个迷雾多线层；默认关时 2048 局与 round-3 基线逐局一致（4 种子 512 局 flips 全 0 实测） |
 | `BOT3_FOG_MULTI_BURST` | 开 | 放行迷雾 burst（按土地竞赛） |
 | `BOT3_FOG_MULTI_LAND` | `0.1` | 放行阈值：己方土地 ≤ 对手土地 × (1 + 该值)。`10` = 永远放行 |
 | `BOT3_FOG_MULTI_LEAD` | `0` | 额外军力条件（对手军力百分比，0 = 不用） |

@@ -42,7 +42,8 @@ Relay 对照是相同策略的镜像局，因此合计接近 50%，只用于检�
 - `closing.js`：小图单线终局的收尾层（见下节），默认开启。
 - `kill.js`：可选的单线斩杀层（默认关闭，`BOT3_FINISH=1` 开启）。
 - `multi.js`：多线 burst/focus 层（默认开启，`BOT3_MULTI=0` 关闭，见 [MULTI.md](MULTI.md)）。
-- `fog.js`：迷雾单线前线瞄准/柱状推进层（默认开启，`BOT3_FOG=0` 关闭，见 [BOT3_FOG.md](BOT3_FOG.md)）。
+- `fog.js`：迷雾单线前线瞄准/柱状推进层（默认开启，`BOT3_FOG=0` 关闭）。
+- `fog-multi.js`：迷雾多线 burst 土地竞赛门控（默认开启，`BOT3_FOG_MULTI=0` 关闭，见 [BOT3_FOG.md](BOT3_FOG.md)）。
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线层、迷雾层与协议回归。
 - `index.js`：独立运行的 CLI。
 
