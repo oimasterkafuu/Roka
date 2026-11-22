@@ -17,13 +17,18 @@ const {
   fogRequired,
   fogBeliefTargets,
   fogRaidUpdate,
+  fogPaintCap,
   freshRaid,
   DEFAULT_START_TURN,
   DEFAULT_GUESS,
   DEFAULT_AIM_LEAD,
   DEFAULT_SWAMP_LEAD,
+  DEFAULT_PAINT3,
+  DEFAULT_PAINT3_SWAMP,
+  DEFAULT_PAINT3_UNTIL,
   RAID_SCORE,
 } = require('./fog');
+const { fogMazeConfig, fogMazeProgress } = require('./fog-maze');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -587,7 +592,13 @@ test('price the hidden part of a fog route and keep the layer switchable', () =>
   assert.equal(fogConfig({}, { BOT3_FOG: 'off' }).enabled, false);
   const tuned = fogConfig(
     {},
-    { BOT3_FOG: '1', BOT3_FOG_TURN: '220', BOT3_FOG_GUESS: '12', BOT3_FOG_AIM_LEAD: '40', BOT3_FOG_FUNNEL: '1' },
+    {
+      BOT3_FOG: '1',
+      BOT3_FOG_TURN: '220',
+      BOT3_FOG_GUESS: '12',
+      BOT3_FOG_AIM_LEAD: '40',
+      BOT3_FOG_FUNNEL: '1',
+    },
   );
   assert.equal(tuned.startTurn, 220);
   assert.equal(tuned.guess, 12);
@@ -771,7 +782,8 @@ test('never touch a visible board while the fog layer is on', () => {
 
 // Finish layer fixtures. Owners follow the engine encoding (`50 * owner + kind`),
 // so `101`/`102` are a crown of player 1 / player 2 and `1`/`2` plain land.
-function finishBoard(kinds, armies, rows = 1) {  const b = createBoard(rows, kinds.length / rows, 1);
+function finishBoard(kinds, armies, rows = 1) {
+  const b = createBoard(rows, kinds.length / rows, 1);
   b.grid_type.set(kinds);
   b.army_cnt.set(armies);
   return b;
@@ -861,7 +873,10 @@ test('refuse a corridor that an enemy stack can cut before the column arrives', 
   cut[2] = 40;
   const threat = new Float64Array(b.size);
   threat[2] = 90;
-  const plan = planFinish(b, finishContext(b, [4, 6], { cut, threat, homes: [0, 7] }), { maxEta: 7, surplus: 25 });
+  const plan = planFinish(b, finishContext(b, [4, 6], { cut, threat, homes: [0, 7] }), {
+    maxEta: 7,
+    surplus: 25,
+  });
   assert.equal(plan.ok, false);
   assert.equal(plan.reason, 'cut');
 });
@@ -1106,7 +1121,10 @@ test('fog multi layer is off after the burst removal and clamps its knobs', () =
     { BOT3_FOG_MULTI_LAND: '0.5', BOT3_FOG_MULTI_LEAD: '80', BOT3_FOG_MULTI_ROUTE: '1' },
   );
   assert.deepEqual([tuned.landSlack, tuned.armyLead, tuned.route], [0.5, 80, true]);
-  const clamped = fogMultiConfig({ enabled: true }, { BOT3_FOG_MULTI_LAND: '-3', BOT3_FOG_MULTI_COUNT: '99' });
+  const clamped = fogMultiConfig(
+    { enabled: true },
+    { BOT3_FOG_MULTI_LAND: '-3', BOT3_FOG_MULTI_COUNT: '99' },
+  );
   assert.equal(clamped.landSlack, 0);
   assert.equal(clamped.count, 8);
 });
@@ -1119,7 +1137,10 @@ test('release the fog burst while the land race is open, not while army trails',
   assert.equal(fogMultiBurst({ turn: 30, land: 20, enemyLand: 20, army: 50, enemyArmy: 200 }, config), true);
   assert.equal(fogMultiBurst({ turn: 30, land: 19, enemyLand: 25, army: 50, enemyArmy: 200 }, config), true);
   // Twice the rival's land: the race is won, so the paint is garrison spent.
-  assert.equal(fogMultiBurst({ turn: 30, land: 100, enemyLand: 50, army: 400, enemyArmy: 200 }, config), false);
+  assert.equal(
+    fogMultiBurst({ turn: 30, land: 100, enemyLand: 50, army: 400, enemyArmy: 200 }, config),
+    false,
+  );
   // Outside the burst window the multi layer keeps its own gate.
   assert.equal(fogMultiBurst({ turn: 24, land: 5, enemyLand: 5 }, config), undefined);
   assert.equal(fogMultiBurst({ turn: 51, land: 5, enemyLand: 5 }, config), undefined);
@@ -1196,4 +1217,44 @@ test('fresh fog multi ledger starts empty', () => {
     released: 0,
     gated: 0,
   });
+});
+
+test('cap a fog column merge only while the frontier still has neutral land', () => {
+  assert.equal(fogPaintCap({ paint: 0, paintFrom: 8 }, 40), Infinity);
+  assert.equal(fogPaintCap({ paint: 120, paintFrom: 8 }, 7), Infinity);
+  assert.equal(fogPaintCap({ paint: 120, paintFrom: 8 }, 8), 120);
+});
+
+test('default the paint-before-advance cap off and expose the measured bundle', () => {
+  const off = fogConfig({}, {});
+  assert.deepEqual(
+    [off.paint, off.paintFrom, off.paintSwamp, off.paintUntil, off.paintArmy],
+    [0, 8, 0, 0, 0],
+  );
+  const bundle = fogConfig({}, { BOT3_FOG_PAINT3: '1' });
+  assert.deepEqual(
+    [bundle.paint, bundle.paintSwamp, bundle.paintUntil],
+    [DEFAULT_PAINT3, DEFAULT_PAINT3_SWAMP, DEFAULT_PAINT3_UNTIL],
+  );
+  const over = fogConfig({}, { BOT3_FOG_PAINT3: '1', BOT3_FOG_PAINT: '90', BOT3_FOG_PAINT_SWAMP: '0' });
+  assert.deepEqual([over.paint, over.paintSwamp, over.paintUntil], [90, 0, DEFAULT_PAINT3_UNTIL]);
+});
+
+test('stand the corridor layer down only inside the land-behind window', () => {
+  const config = fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_BEHIND: '90' });
+  const input = { land: 33, enemyLand: 40, army: 300, enemyArmy: 300, neutralFront: 5 };
+  const b = {};
+  assert.equal(fogMazeProgress(b, { ...input, turn: 60 }, config).stalled, true);
+  assert.equal(fogMazeProgress({}, { ...input, turn: 40 }, config).stalled, false);
+  assert.equal(fogMazeProgress({}, { ...input, turn: 90 }, config).stalled, false);
+  // The verdict latches: a recovered land count does not reopen the layer.
+  assert.equal(fogMazeProgress(b, { ...input, turn: 120, land: 60, enemyLand: 40 }, config).stalled, true);
+});
+
+test('stand the corridor layer down once the rival material takes off', () => {
+  const config = fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_ARMY_BEHIND: '200' });
+  const input = { land: 50, enemyLand: 48, neutralFront: 5 };
+  const b = {};
+  assert.equal(fogMazeProgress(b, { ...input, turn: 240, army: 900, enemyArmy: 400 }, config).stalled, false);
+  assert.equal(fogMazeProgress(b, { ...input, turn: 260, army: 400, enemyArmy: 900 }, config).stalled, true);
 });

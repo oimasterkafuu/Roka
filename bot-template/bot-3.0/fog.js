@@ -106,6 +106,42 @@ const DEFAULT_RAID_ABORT = 0.35;
 // build (675), but stay under the column advance so a remembered crown still
 // wins the frame.
 const RAID_SCORE = 880;
+// Paint before advancing (off by default, `BOT3_FOG_PAINT` / `_PAINT_FROM`).
+// The column advance is 1000+, so as soon as the goal field has a step the lead
+// stack is allowed to take, it may take it *onto its own cell*: the traced
+// `relay/random` screens spend 40-87% of the mid-game ticks merging inside our
+// own territory while 16-37 neutral cells sit on our border. The cap only
+// applies to a column move that does not take land, and only while the border
+// still has `paintFrom` neutral cells, so painting and attacking are untouched.
+// It is the same rule that removed the corridor regression under
+// `BOT3_MAZEFOG3` (see BOT3_MAZE.md); measured verdicts on the open maps are in
+// BOT3_FOG.md.
+const DEFAULT_PAINT = 0;
+const DEFAULT_PAINT_FROM = 8;
+// Stop the paint cap once the land race is won: the cap exists to convert the
+// early merge ticks into land, not to keep a winning empire dispersed. Measured
+// on the mediterranean cell, where the cap costs long games (see BOT3_FOG.md).
+const DEFAULT_PAINT_LEAD = 0;
+const DEFAULT_PAINT_UNTIL = 0;
+// Swamp gate for the cap (percent of the board, 0 = always arm). A swamp cell
+// pays no income, so on a swamp-heavy board the merge the cap blocks is the
+// staging move that crosses it, not a wasted tick: the measured mediterranean
+// (45.7% swamp) and archipelago (66.7%) cells both lose wins under the cap,
+// while the open random map (7.2% swamp) gains five (see BOT3_FOG.md).
+const DEFAULT_PAINT_SWAMP = 0;
+// Material stop for the cap (percent of the rival army, 0 = never). An empire
+// that already dominates on material does not need merge ticks converted into
+// land; it needs to finish. Measured on the weak-opponent random cells, where
+// the cap without a stop turns wins into 1000-tick timeouts (see BOT3_FOG.md).
+const DEFAULT_PAINT_ARMY = 0;
+// The measured bundle (`BOT3_FOG_PAINT3`): cap at 120 while the board is not
+// swamp-heavy and the game is younger than 200 ticks. It is the only setting in
+// this file that reaches the 65% Relay target without a single regressing cell
+// on the 2048-game matrix (relay/random fog single 16 -> 21/32, +8 wins overall,
+// timeout 60 -> 63; see BOT3_FOG.md).
+const DEFAULT_PAINT3 = 120;
+const DEFAULT_PAINT3_SWAMP = 25;
+const DEFAULT_PAINT3_UNTIL = 200;
 
 function number(raw, fallback, min, max) {
   const value = Number(raw);
@@ -121,6 +157,9 @@ function flag(raw, fallback = false) {
 
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function fogConfig(overrides = {}, env = process.env) {
+  // `BOT3_FOG_PAINT3` is the measured bundle; every knob can still be set on its
+  // own and overrides the bundle.
+  const paint3 = flag(env.BOT3_FOG_PAINT3, false);
   return {
     enabled: overrides.enabled ?? flag(env.BOT3_FOG, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_FOG_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
@@ -134,8 +173,7 @@ function fogConfig(overrides = {}, env = process.env) {
     // Swamp-heavy boards (archipelago keeps 60-70% swamp visible through the
     // fog) reward a different front-aim threshold than the open maps. The
     // separated islands make an unguarded front chase expensive.
-    aimLeadSwamp:
-      overrides.aimLeadSwamp ?? number(env.BOT3_FOG_SWAMP_LEAD, DEFAULT_SWAMP_LEAD, 0, 200),
+    aimLeadSwamp: overrides.aimLeadSwamp ?? number(env.BOT3_FOG_SWAMP_LEAD, DEFAULT_SWAMP_LEAD, 0, 200),
     swampShare: overrides.swampShare ?? number(env.BOT3_FOG_SWAMP_SHARE, 0.55, 0, 1),
     // Keep the whole layer off corridor maps by default: the maze planner
     // already owns that shape and the fog column only adds one-game noise
@@ -167,7 +205,28 @@ function fogConfig(overrides = {}, env = process.env) {
     // body between a raider and elimination; the stock planner caps the count
     // by mobile army instead of by what the map can support.
     homes: overrides.homes ?? number(env.BOT3_FOG_HOMES, 0, 0, 32),
+    // Cap a column advance that does not take land while the border still has
+    // neutral cells to paint (see `fogPaintCap`).
+    paint: overrides.paint ?? number(env.BOT3_FOG_PAINT, paint3 ? DEFAULT_PAINT3 : DEFAULT_PAINT, 0, 10000),
+    paintFrom: overrides.paintFrom ?? number(env.BOT3_FOG_PAINT_FROM, DEFAULT_PAINT_FROM, 1, 1000),
+    paintLead: overrides.paintLead ?? number(env.BOT3_FOG_PAINT_LEAD, DEFAULT_PAINT_LEAD, 0, 1000),
+    paintUntil:
+      overrides.paintUntil ??
+      number(env.BOT3_FOG_PAINT_UNTIL, paint3 ? DEFAULT_PAINT3_UNTIL : DEFAULT_PAINT_UNTIL, 0, 100000),
+    paintSwamp:
+      overrides.paintSwamp ??
+      number(env.BOT3_FOG_PAINT_SWAMP, paint3 ? DEFAULT_PAINT3_SWAMP : DEFAULT_PAINT_SWAMP, 0, 100),
+    paintArmy: overrides.paintArmy ?? number(env.BOT3_FOG_PAINT_ARMY, DEFAULT_PAINT_ARMY, 0, 1000),
   };
+}
+
+// Paint-before-advance (see `DEFAULT_PAINT`). Returns `Infinity` when the cap is
+// off or the frontier has nothing left to paint, so the caller can use it as an
+// unconditional `Math.min`.
+function fogPaintCap(config, neutral) {
+  if (!(Number(config?.paint) > 0)) return Infinity;
+  if (!(Number(neutral) >= Number(config.paintFrom ?? 1))) return Infinity;
+  return Number(config.paint);
 }
 
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -358,6 +417,7 @@ module.exports = {
   fogBoard,
   fogUpdate,
   fogRequired,
+  fogPaintCap,
   fogBeliefTargets,
   fogRaidUpdate,
   freshFog,
@@ -381,6 +441,15 @@ module.exports = {
   GUARD_SCORE,
   EXPAND_BONUS,
   RAID_SCORE,
+  DEFAULT_PAINT,
+  DEFAULT_PAINT_FROM,
+  DEFAULT_PAINT_LEAD,
+  DEFAULT_PAINT_UNTIL,
+  DEFAULT_PAINT_SWAMP,
+  DEFAULT_PAINT_ARMY,
+  DEFAULT_PAINT3,
+  DEFAULT_PAINT3_SWAMP,
+  DEFAULT_PAINT3_UNTIL,
   DEFAULT_RAID_MASS,
   DEFAULT_RAID_RATIO,
   DEFAULT_RAID_ABORT,

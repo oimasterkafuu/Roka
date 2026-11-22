@@ -71,6 +71,14 @@ const DEFAULT_LAND_SLACK = 0.1;
 const DEFAULT_COUNT = 2;
 const DEFAULT_RATIO = 0.7;
 const DEFAULT_SPREAD = 3;
+// Crown placement in a fogged multi-line room (`BOT3_FOG_MULTI_SITE`, steps,
+// off at 0). A crown is only a target for the rival once its own land has
+// touched the neighbourhood (fog vision is Chebyshev radius 1), so a new crown
+// placed `site` steps away from the visible rival frontier is a crown the rival
+// cannot see, remember or route to. The multi focus block in `./multi` anchors
+// its route on *remembered* crowns, which is exactly the list this keeps short.
+// It is a placement rule, not an economy rule: the build itself is untouched.
+const DEFAULT_SITE = 0;
 
 function number(raw, fallback, min, max) {
   const value = Number(raw);
@@ -93,8 +101,7 @@ function fogMultiConfig(overrides = {}, env = process.env) {
     burst: overrides.burst ?? flag(env.BOT3_FOG_MULTI_BURST, true),
     // Release the burst while our land is at most `1 + landSlack` times the
     // best rival's. `landSlack = 10` releases it always.
-    landSlack:
-      overrides.landSlack ?? number(env.BOT3_FOG_MULTI_LAND, DEFAULT_LAND_SLACK, 0, 10),
+    landSlack: overrides.landSlack ?? number(env.BOT3_FOG_MULTI_LAND, DEFAULT_LAND_SLACK, 0, 10),
     // Optional extra army condition (percent of the rival army, 0 = off). The
     // measured default keeps the army gate out of the way: the land race is the
     // one the burst prices.
@@ -109,6 +116,7 @@ function fogMultiConfig(overrides = {}, env = process.env) {
     // Prefer the visible rival frontier over the unknown region while there is
     // one: it is measured information, the belief anchors are a prior.
     front: overrides.front ?? flag(env.BOT3_FOG_MULTI_FRONT, true),
+    site: overrides.site ?? number(env.BOT3_FOG_MULTI_SITE, DEFAULT_SITE, 0, 100),
   };
 }
 
@@ -186,7 +194,7 @@ function fogMultiUpdate(b, input, config = fogMultiConfig()) {
   }
   let targets = [];
   let source = null;
-  if (config.route && turn >= config.startTurn && !(input.targets?.length)) {
+  if (config.route && turn >= config.startTurn && !input.targets?.length) {
     ({ targets, source } = fogMultiTargets(b, input, config));
   }
   if (burst === undefined && !targets.length) {
@@ -219,4 +227,5 @@ module.exports = {
   DEFAULT_COUNT,
   DEFAULT_RATIO,
   DEFAULT_SPREAD,
+  DEFAULT_SITE,
 };
