@@ -589,7 +589,13 @@ test('price the hidden part of a fog route and keep the layer switchable', () =>
   assert.equal(fogConfig({}, { BOT3_FOG: 'off' }).enabled, false);
   const tuned = fogConfig(
     {},
-    { BOT3_FOG: '1', BOT3_FOG_TURN: '220', BOT3_FOG_GUESS: '12', BOT3_FOG_AIM_LEAD: '40', BOT3_FOG_FUNNEL: '1' },
+    {
+      BOT3_FOG: '1',
+      BOT3_FOG_TURN: '220',
+      BOT3_FOG_GUESS: '12',
+      BOT3_FOG_AIM_LEAD: '40',
+      BOT3_FOG_FUNNEL: '1',
+    },
   );
   assert.equal(tuned.startTurn, 220);
   assert.equal(tuned.guess, 12);
@@ -773,7 +779,8 @@ test('never touch a visible board while the fog layer is on', () => {
 
 // Finish layer fixtures. Owners follow the engine encoding (`50 * owner + kind`),
 // so `101`/`102` are a crown of player 1 / player 2 and `1`/`2` plain land.
-function finishBoard(kinds, armies, rows = 1) {  const b = createBoard(rows, kinds.length / rows, 1);
+function finishBoard(kinds, armies, rows = 1) {
+  const b = createBoard(rows, kinds.length / rows, 1);
   b.grid_type.set(kinds);
   b.army_cnt.set(armies);
   return b;
@@ -863,7 +870,10 @@ test('refuse a corridor that an enemy stack can cut before the column arrives', 
   cut[2] = 40;
   const threat = new Float64Array(b.size);
   threat[2] = 90;
-  const plan = planFinish(b, finishContext(b, [4, 6], { cut, threat, homes: [0, 7] }), { maxEta: 7, surplus: 25 });
+  const plan = planFinish(b, finishContext(b, [4, 6], { cut, threat, homes: [0, 7] }), {
+    maxEta: 7,
+    surplus: 25,
+  });
   assert.equal(plan.ok, false);
   assert.equal(plan.reason, 'cut');
 });
@@ -1108,7 +1118,10 @@ test('fog multi layer is off after the burst removal and clamps its knobs', () =
     { BOT3_FOG_MULTI_LAND: '0.5', BOT3_FOG_MULTI_LEAD: '80', BOT3_FOG_MULTI_ROUTE: '1' },
   );
   assert.deepEqual([tuned.landSlack, tuned.armyLead, tuned.route], [0.5, 80, true]);
-  const clamped = fogMultiConfig({ enabled: true }, { BOT3_FOG_MULTI_LAND: '-3', BOT3_FOG_MULTI_COUNT: '99' });
+  const clamped = fogMultiConfig(
+    { enabled: true },
+    { BOT3_FOG_MULTI_LAND: '-3', BOT3_FOG_MULTI_COUNT: '99' },
+  );
   assert.equal(clamped.landSlack, 0);
   assert.equal(clamped.count, 8);
 });
@@ -1121,7 +1134,10 @@ test('release the fog burst while the land race is open, not while army trails',
   assert.equal(fogMultiBurst({ turn: 30, land: 20, enemyLand: 20, army: 50, enemyArmy: 200 }, config), true);
   assert.equal(fogMultiBurst({ turn: 30, land: 19, enemyLand: 25, army: 50, enemyArmy: 200 }, config), true);
   // Twice the rival's land: the race is won, so the paint is garrison spent.
-  assert.equal(fogMultiBurst({ turn: 30, land: 100, enemyLand: 50, army: 400, enemyArmy: 200 }, config), false);
+  assert.equal(
+    fogMultiBurst({ turn: 30, land: 100, enemyLand: 50, army: 400, enemyArmy: 200 }, config),
+    false,
+  );
   // Outside the burst window the multi layer keeps its own gate.
   assert.equal(fogMultiBurst({ turn: 24, land: 5, enemyLand: 5 }, config), undefined);
   assert.equal(fogMultiBurst({ turn: 51, land: 5, enemyLand: 5 }, config), undefined);
@@ -1246,12 +1262,15 @@ function applyPrediction(b, pred) {
 }
 
 function withShadow(run) {
-  const previous = process.env.BOT3_SHADOW;
+  const saved = {};
+  for (const key of ['BOT3_SHADOW', 'BOT3_SHADOW_ARM', 'BOT3_SHADOW_MIRROR']) saved[key] = process.env[key];
   try {
     return run();
   } finally {
-    if (previous === undefined) delete process.env.BOT3_SHADOW;
-    else process.env.BOT3_SHADOW = previous;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 }
 
@@ -1307,26 +1326,70 @@ test('shadow stays inert when the opponent does not follow its plan', () =>
     assert.equal(b.shadow.verified, 0);
   }));
 
-test('shadow arms on executed predictions and disables itself after drift', () =>
+test('shadow arms only after a strict streak of exact executions', () =>
   withShadow(() => {
     process.env.BOT3_SHADOW = '1';
+    process.env.BOT3_SHADOW_ARM = '6';
     const b = shadowBoard();
     let armed = -1;
-    for (let turn = 0; turn < 30 && armed < 0; turn++) {
+    for (let turn = 0; turn < 40 && armed < 0; turn++) {
+      const pred = predictShadow(b, turn, shadowPlayers, false);
+      recordShadow(b, turn, []);
+      if (!pred) continue;
+      // Strict gate: nothing is priced before the sixth consecutive exact frame.
+      if (b.shadow.streak < 6) assert.equal(pred.armed, false);
+      if (pred.armed) armed = turn;
+      else applyPrediction(b, pred);
+    }
+    assert.ok(armed > 0, 'the layer armed after the strict streak');
+    assert.equal(b.shadow.armed, true);
+    assert.ok(b.shadow.streak >= 6);
+    assert.ok(typeof b.shadow.stats.armedTurn === 'number');
+  }));
+
+test('shadow stays unarmed when the two economies are not mirrors', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    process.env.BOT3_SHADOW_ARM = '6';
+    process.env.BOT3_SHADOW_MIRROR = '1';
+    // Our board plays relay's plan, but the leaderboard says the two sides are
+    // nowhere near mirrored (a relay-derived bot with its own policy).
+    const skewed = [
+      { id: 1, team: 1, army: 40, land: 9, dead: 0 },
+      { id: 2, team: 2, army: 120, land: 4, dead: 0 },
+    ];
+    const b = shadowBoard();
+    for (let turn = 0; turn < 40; turn++) {
+      const pred = predictShadow(b, turn, skewed, false);
+      recordShadow(b, turn, []);
+      if (!pred) continue;
+      if (pred.armed) assert.fail('a skewed economy must not arm the layer');
+      applyPrediction(b, pred);
+    }
+    assert.equal(b.shadow.armed, false);
+    assert.ok(b.shadow.streak >= 6, 'the streak itself still completes');
+  }));
+
+test('shadow disables itself on the first unexplained frame', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    process.env.BOT3_SHADOW_ARM = '6';
+    const b = shadowBoard();
+    let armed = -1;
+    for (let turn = 0; turn < 40 && armed < 0; turn++) {
       const pred = predictShadow(b, turn, shadowPlayers, false);
       recordShadow(b, turn, []);
       if (!pred) continue;
       if (pred.armed) armed = turn;
       else applyPrediction(b, pred);
     }
-    assert.ok(armed > 0, 'the layer armed after executed predictions');
-    assert.equal(b.shadow.armed, true);
-    // A frame where the predicted source cell changes for no modelled reason
-    // proves the shadow is out of sync; the second one disables the layer.
+    assert.ok(armed > 0);
+    // One frame whose army change matches neither "executed" nor "dropped"
+    // proves the shadow is out of sync: the layer is gone for good.
     let turn = armed + 1;
     let inject = -1;
     let disabled = false;
-    while (turn < armed + 30 && !disabled) {
+    while (turn < armed + 10 && !disabled) {
       const pred = predictShadow(b, turn, shadowPlayers, false);
       recordShadow(b, turn, []);
       if (inject >= 0) {
@@ -1338,6 +1401,6 @@ test('shadow arms on executed predictions and disables itself after drift', () =
       turn++;
     }
     assert.equal(disabled, true);
-    assert.ok(b.shadow.stats.drift >= 2);
-    assert.ok(b.shadow.verified >= 6);
+    assert.equal(b.shadow.stats.drift, 1);
+    assert.equal(b.shadow.armed, false);
   }));

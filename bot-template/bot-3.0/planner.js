@@ -30,6 +30,7 @@ const {
   predict: shadowPredict,
   contest: shadowContest,
   adjust: shadowAdjust,
+  plan: shadowPlan,
   record: shadowRecord,
 } = require('./shadow');
 
@@ -957,9 +958,21 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
   }
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
-  // Shadow pricing: only the scores of the existing candidates move.
+  // Shadow pricing: the scores of the existing candidates move, and the
+  // prediction also creates the candidates re-ranking cannot produce (see
+  // ./shadow: an approach step toward its next objective, the counter-capture
+  // of the tile it abandons, a reinforcement it cannot invalidate).
   const shadowCtx = shadow ? shadowContest(shadow, b, turn, b.me - 1) : null;
-  if (shadowCtx) for (const op of candidates) op.score += shadowAdjust(shadowCtx, b, op);
+  if (shadowCtx) {
+    for (const op of candidates) op.score += shadowAdjust(shadowCtx, b, op);
+    shadowPlan(shadowCtx, b, turn, candidates);
+    // A vetoed order is validated after relay's already landed and would be
+    // spent for nothing; the single serial slot goes to the next best order.
+    // If every candidate is vetoed, keep them: an idle tick is worse.
+    const kept = candidates.filter((op) => !op.veto);
+    if (kept.length && kept.length !== candidates.length)
+      candidates.splice(0, candidates.length, ...kept);
+  }
   candidates.sort((a, c) => c.score - a.score);
   const used = new Set(),
     orders = [];
