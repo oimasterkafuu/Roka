@@ -29,6 +29,7 @@ const {
   RAID_SCORE,
 } = require('./fog');
 const { fogMazeConfig, fogMazeProgress } = require('./fog-maze');
+const { archipelagoConfig, archipelagoUpdate, archipelagoWaterBlocked } = require('./archipelago');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -1264,4 +1265,146 @@ test('stand the corridor layer down once the rival material takes off', () => {
   const b = {};
   assert.equal(fogMazeProgress(b, { ...input, turn: 240, army: 900, enemyArmy: 400 }, config).stalled, false);
   assert.equal(fogMazeProgress(b, { ...input, turn: 260, army: 400, enemyArmy: 900 }, config).stalled, true);
+});
+
+// Archipelago layer (see ./archipelago). Three 4x4 plain islands in a swamp sea:
+// ours (top left), one unclaimed (bottom left) and one rival (bottom right).
+function archipelagoFixture() {
+  const b = createBoard(15, 15, 1);
+  b.grid_type.fill(204);
+  const put = (x, y, code) => (b.grid_type[x * 15 + y] = code);
+  for (let x = 1; x < 5; x++) for (let y = 1; y < 5; y++) put(x, y, 1);
+  put(1, 1, 101);
+  for (let x = 1; x < 5; x++) for (let y = 9; y < 13; y++) put(x, y, 200);
+  for (let x = 9; x < 13; x++) for (let y = 9; y < 13; y++) put(x, y, 2);
+  put(9, 9, 102);
+  const homeDist = new Int32Array(b.size);
+  const enemyDist = new Int32Array(b.size);
+  const teams = new Uint8Array(b.size);
+  for (let i = 0; i < b.size; i++) {
+    const x = Math.floor(i / 15),
+      y = i % 15;
+    homeDist[i] = Math.abs(x - 1) + Math.abs(y - 1);
+    enemyDist[i] = Math.abs(x - 11) + Math.abs(y - 11);
+    if (x >= 9 && x < 13 && y >= 9 && y < 13) teams[i] = 2;
+    else if (x >= 1 && x < 5 && y >= 1 && y < 5) teams[i] = 1;
+  }
+  return {
+    b,
+    context: {
+      turn: 40,
+      tile: b.grid_type,
+      teams,
+      myTeam: 1,
+      homes: [16],
+      homeDist,
+      enemyDist,
+      enemies: [9 * 15 + 10],
+      fog: false,
+      multi: false,
+    },
+  };
+}
+
+test('keep the archipelago layer switched off until a mechanism is asked for', () => {
+  const { b, context } = archipelagoFixture();
+  const idle = archipelagoUpdate(b, context, archipelagoConfig({}, {}));
+  assert.equal(idle.active, false);
+  assert.equal(idle.targets, null);
+  assert.equal(idle.waterCap, 0);
+  // The measured bundle is opt-in and only the two measured mechanisms.
+  const bundle = archipelagoConfig({}, { BOT3_ARCH: '1' });
+  assert.equal(bundle.land, true);
+  assert.equal(bundle.front, true);
+  assert.equal(bundle.water, false);
+  assert.equal(bundle.crown, false);
+  // A single flag overrides the bundle.
+  assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_LAND: '0' }).land, false);
+});
+
+test('gate the archipelago layer on the swamp share, not on the map name', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  assert.equal(archipelagoUpdate(b, context, { ...config, swampShare: 1.1 }).active, false);
+  const swamp = archipelagoUpdate(b, context, config);
+  assert.equal(swamp.active, true);
+  assert.ok(swamp.swampShare > 0.55);
+  // A plain board with the same shape is left alone by the default gate.
+  const dry = createBoard(15, 15, 1);
+  dry.grid_type.fill(200);
+  assert.equal(archipelagoUpdate(dry, { ...context, tile: dry.grid_type }, config).active, false);
+});
+
+test('aim the land phase at the nearest unclaimed island only during the burst', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  const early = archipelagoUpdate(b, context, config);
+  assert.equal(early.aimLand, true);
+  assert.ok(early.focus >= 0);
+  assert.ok(early.targets.length > 0);
+  // Every target is unclaimed plain land on the unclaimed island.
+  assert.deepEqual([...new Set(early.targets.map((i) => i % 15))].sort((a, c) => a - c), [9, 10, 11, 12]);
+  assert.ok(early.targets.every((i) => b.grid_type[i] === 200));
+  // After the burst the rival crown is the objective again.
+  assert.equal(archipelagoUpdate(b, { ...context, turn: 60 }, config).aimLand, false);
+  // A rival next to our home outranks any land grab.
+  const near = new Int32Array(b.size).fill(1);
+  assert.equal(archipelagoUpdate(b, { ...context, enemyDist: near }, config).aimLand, false);
+  // A contested island is never a land target.
+  const contested = Uint8Array.from(context.teams);
+  for (let x = 1; x < 5; x++) for (let y = 9; y < 13; y++) contested[x * 15 + y] = 2;
+  assert.equal(archipelagoUpdate(b, { ...context, teams: contested }, config).aimLand, false);
+});
+
+test('latch the focus island while it still has plain land', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  const first = archipelagoUpdate(b, context, config);
+  const focus = first.focus;
+  const claimed = Uint8Array.from(b.grid_type);
+  claimed[first.targets[0]] = 1;
+  const again = archipelagoUpdate(b, { ...context, tile: claimed }, config);
+  assert.equal(again.focus, focus);
+  assert.ok(!again.targets.includes(first.targets[0]));
+});
+
+test('cap a swamp capture that walks away from plain land and allow a crossing', () => {
+  const { b, context } = archipelagoFixture();
+  const arch = archipelagoUpdate(b, context, archipelagoConfig({ water: true }));
+  assert.equal(arch.waterCap, 18);
+  // A crossing step that shortens the run to the unclaimed island is allowed.
+  assert.equal(b.grid_type[0 * 15 + 8], 204);
+  assert.equal(arch.plainDist[0 * 15 + 8] < arch.plainDist[0 * 15 + 7], true);
+  assert.equal(archipelagoWaterBlocked(arch, b.grid_type, 0 * 15 + 7, 0 * 15 + 8), false);
+  // The landing itself is a plain capture, never capped.
+  const landing = 1 * 15 + 9;
+  assert.equal(b.grid_type[landing], 200);
+  assert.equal(archipelagoWaterBlocked(arch, b.grid_type, 0 * 15 + 9, landing), false);
+  // A swamp cell that is no closer to any plain cell buys nothing.
+  assert.equal(archipelagoWaterBlocked(arch, b.grid_type, 7 * 15 + 1, 7 * 15 + 0), true);
+  // Plain captures and the switched-off layer are never blocked.
+  assert.equal(archipelagoWaterBlocked(arch, b.grid_type, 7 * 15 + 0, 1 * 15 + 9), false);
+  const off = archipelagoUpdate(b, context, archipelagoConfig({}));
+  assert.equal(archipelagoWaterBlocked(off, b.grid_type, 7 * 15 + 1, 7 * 15 + 0), false);
+});
+
+test('arm the island crown only on a fully owned island clear of the rival', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ crown: true });
+  const arch = archipelagoUpdate(b, context, config);
+  assert.equal(arch.crownIslands[arch.island[2 * 15 + 2]], 1);
+  // The contested island and the unclaimed island are never crown sites.
+  assert.equal(arch.crownIslands[arch.island[9 * 15 + 9]], 0);
+  assert.equal(arch.crownIslands[arch.island[1 * 15 + 9]], 0);
+  // A rival within reach removes the safe-income claim.
+  const near = archipelagoUpdate(b, context, { ...config, crownEnemy: 40 });
+  assert.equal(near.crownIslands[near.island[2 * 15 + 2]], 0);
+  assert.equal(archipelagoConfig({ crown: false }).crown, false);
+});
+
+test('leave multi-line archipelago rooms alone unless asked', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  assert.equal(archipelagoUpdate(b, { ...context, multi: true }, config).active, false);
+  assert.equal(archipelagoUpdate(b, { ...context, multi: true }, { ...config, multi: true }).active, true);
 });
