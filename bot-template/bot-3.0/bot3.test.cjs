@@ -1559,6 +1559,7 @@ test('default the maze fog bundle on with the crown-economy gate armed', () => {
   assert.equal(layer.econ, 0);
   assert.equal(layer.paint, 0);
   assert.equal(fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_ECON: '6' }).econ, 6);
+});
 
 test('arm the cut rescue only inside the positional gates', () => {
   const { cutConfig, saveGate } = require('./cut');
