@@ -1,5 +1,7 @@
 'use strict';
 
+const { archipelagoWaterBlocked } = require('./archipelago');
+
 // A bridge cell can reconnect several pockets. Count each component once,
 // including its surviving garrisons, without feeding units into isolation.
 function rescueValues(b, teams, myTeam, units) {
@@ -234,6 +236,12 @@ function evaluateFrontMove(s, move) {
   )
     score -= 260;
   if (b.lastFrom[i] === j && turn - b.lastMove[i] < 7 && s.defense[j] >= s.defense[i]) score -= 150;
+  // Water discipline (see ./archipelago): a swamp capture that does not move
+  // closer to unclaimed plain land buys no income on a swamp-heavy board, so it
+  // is capped under the land capture next door. Crossings still pass: every hop
+  // of a shortest strait lowers the plain field.
+  if (!own && !hostile && !strike && archipelagoWaterBlocked(s.arch, b.grid_type, i, j))
+    score = Math.min(score, s.arch.waterCap);
   return score;
 }
 

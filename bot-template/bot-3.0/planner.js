@@ -52,6 +52,11 @@ const {
   plan: shadowPlan,
   record: shadowRecord,
 } = require('./shadow');
+const {
+  archipelagoConfig,
+  archipelagoUpdate,
+  archipelagoWaterBlocked,
+} = require('./archipelago');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -466,6 +471,16 @@ function chooseOrders(b, turn, leaderboard, multi) {
   if (fogOpen)
     for (let i = 0; i < size; i++) if (swamp(tile[i])) swampCells++;
   const aimLead = swampCells >= size * fogCfg.swampShare ? fogCfg.aimLeadSwamp : fogCfg.aimLead;
+  // Archipelago layer (see ./archipelago). Swamp-heavy rooms are a land race, not
+  // an open front: the objective becomes the nearest unclaimed island while the
+  // burst is live, deep-water swamp captures are capped, and a fully owned
+  // island may raise a crown. Gated on the board's swamp share, never on the map
+  // name, and off by default.
+  const arch = archipelagoUpdate(
+    b,
+    { turn, tile, teams, myTeam, homes, homeDist, enemyDist, enemies, fog: !clearSerial, multi },
+    archipelagoConfig(),
+  );
   // Maze + fog gate. `leadCap` stands the layer down once the leaderboard says
   // the game is already won: on the weak-opponent corridor cells the layer's
   // expansion converts fast wins into 1000-tick timeouts, and those are not
@@ -553,9 +568,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
       : null;
   const branchDist =
     mazeBranches?.length && fogMazeCfg.branch ? distances(b, mazeBranches).dist : null;
-  const objectives = single
-    ? (rival?.crowns ?? [])
-    : beliefTargets?.length
+  const objectives = arch.targets?.length
+    ? arch.targets
+    : single
+      ? (rival?.crowns ?? [])
+      : beliefTargets?.length
       ? beliefTargets
       : mazeFogTargets?.length
         ? mazeFogTargets
@@ -834,6 +851,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       lead: closingLead,
       leadDist: closingLeadDist,
       enemyDist,
+      arch,
     };
   }
   const candidates = [];
@@ -849,7 +867,19 @@ function chooseOrders(b, turn, leaderboard, multi) {
     // traced losses lose two or three crowns to a single stack. When the fog
     // spread rule is on, a site too close to an existing crown is refused.
     const tooClose = fogOpen && fogCfg.spread > 0 && homeDist[i] < fogCfg.spread;
-    if (!base && !swamp(tile[i]) && !tooClose && units[i] >= 50 && turn >= buildingStart) {
+    // Island crown (see ./archipelago): on a swamp-heavy room a crown is the
+    // only income that compounds (+1/tick, swamp pays nothing), so a fully
+    // owned island the rival cannot reach may raise one without waiting for
+    // `develop`/`buildingStart` and without a 100-unit stack.
+    const archCrown =
+      Boolean(arch.crownIslands) && arch.island[i] >= 0 && arch.crownIslands[arch.island[i]] === 1;
+    if (
+      !base &&
+      !swamp(tile[i]) &&
+      !tooClose &&
+      units[i] >= 50 &&
+      (turn >= buildingStart || (archCrown && turn >= arch.crownTurn))
+    ) {
       const city = anchor(tile[i]);
       // A safe upgrade gives a second crown immediately, even if the old
       // crown is under pressure. Otherwise a forced defence takes this tick.
@@ -866,27 +896,31 @@ function chooseOrders(b, turn, leaderboard, multi) {
         immediate[i] < units[i] &&
         homes.length < limit;
       if (
-        (safe || fogBuild) &&
-        (develop || outpost || fogBuild) &&
-        (homes.length < limit || outpost) &&
-        (city || units[i] >= 100 || (cut[i] > 30 && nearFight) || outpost)
+        (safe || fogBuild || archCrown) &&
+        (develop || outpost || fogBuild || archCrown) &&
+        (homes.length < limit || outpost || archCrown) &&
+        (city || units[i] >= 100 || (cut[i] > 30 && nearFight) || outpost || archCrown)
       ) {
         const buildScore =
-          fogBuild
-            ? INVEST_SCORE
-            : i === site
-              ? invest
-                ? 675
-                : single
-                  ? 403
-                  : 360
-              : outpost
-                ? 420
-                : city
-                  ? 195
-                  : units[i] >= 100
-                    ? 150
-                    : 105;
+          archCrown && i === site
+            ? Math.max(arch.crownScore, 675)
+            : archCrown
+              ? arch.crownScore
+              : fogBuild
+                ? INVEST_SCORE
+                : i === site
+                  ? invest
+                    ? 675
+                    : single
+                      ? 403
+                      : 360
+                  : outpost
+                    ? 420
+                    : city
+                      ? 195
+                      : units[i] >= 100
+                        ? 150
+                        : 105;
         propose(
           backup && i === site ? 820 : buildScore - (nearFight && homes.length > 1 ? 82 : 0),
           i,
@@ -1171,6 +1205,12 @@ function chooseOrders(b, turn, leaderboard, multi) {
         score = Math.max(score, oracleCfg.allInScore);
       if (b.lastFrom[i] === j && turn - b.lastMove[i] <= 4 && defense[j] >= defense[i] && !strike)
         score -= 110;
+      // Water discipline (see ./archipelago): on a swamp-heavy board a swamp
+      // capture that does not shorten the distance to the nearest unclaimed
+      // plain cell pays no income, so it may not outrank the land capture next
+      // door. Strikes and hostile captures keep their score.
+      if (!own && !hostile && !strike && archipelagoWaterBlocked(arch, tile, i, j))
+        score = Math.min(score, arch.waterCap);
       if (score > 0) propose(score, i, j, mode, undefined, send);
     }
   }
