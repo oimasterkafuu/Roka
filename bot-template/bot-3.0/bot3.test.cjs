@@ -15,9 +15,14 @@ const {
   fogBoard,
   fogUpdate,
   fogRequired,
+  fogBeliefTargets,
+  fogRaidUpdate,
+  freshRaid,
   DEFAULT_START_TURN,
   DEFAULT_GUESS,
   DEFAULT_AIM_LEAD,
+  DEFAULT_SWAMP_LEAD,
+  RAID_SCORE,
 } = require('./fog');
 
 const players = [
@@ -607,6 +612,104 @@ test('open the fog column only on a late serial fog room with a material edge', 
   assert.equal(fogUpdate(board, room, config).active, true);
   assert.equal(board.fogLayer.entries, 2);
   assert.equal(fogUpdate({}, room, fogConfig({ enabled: false }, {})).active, false);
+});
+
+// Fog scout / memory / raid layer. The belief field is the prior over an
+// unseen enemy home: spawn placement in `general-selection.ts` maximises the
+// shortest-path distance between the generals, and mountains stay visible in
+// fog, so the passable map - and its far region - is known before it is
+// explored. These tests pin the field, the gather-then-raid state machine and
+// the two room gates that keep the layer off shapes it does not fit.
+function beliefBoard(walls = []) {
+  const b = createBoard(1, 12, 1);
+  b.grid_type.fill(200);
+  b.grid_type[0] = 101;
+  b.army_cnt[0] = 1;
+  for (const wall of walls) b.grid_type[wall] = 201;
+  return b;
+}
+
+test('aim the fog belief field at the far region and never at our own land', () => {
+  const b = beliefBoard();
+  const config = fogConfig({ enabled: true, scoutRatio: 0.7, scoutCount: 2, scoutSpread: 3 }, {});
+  // Distances 0..11; the 70% band starts at 8 and the spread rule keeps the
+  // second anchor three cells away from the first.
+  assert.deepEqual(fogBeliefTargets(b, [0], config), [11, 8]);
+  // A wall at index 10 cuts the band off: nothing beyond it is reachable, and
+  // the remaining band is one cell wide so the spread rule keeps one anchor.
+  const walled = beliefBoard([10]);
+  assert.deepEqual(fogBeliefTargets(walled, [0], config), [9]);
+  // A fully owned corridor has no unknown region left to aim at.
+  const owned = beliefBoard();
+  owned.grid_type.fill(101);
+  assert.deepEqual(fogBeliefTargets(owned, [0], config), []);
+});
+
+test('gather a lead stack before raiding and fall back when it is spent', () => {
+  const b = {};
+  const config = fogConfig({ raid: true, raidMass: 100, raidRatio: 0.5, raidAbort: 0.5 }, {});
+  const room = { lead: 5, leadMass: 40, mobileArmy: 100, turn: 90, danger: 0 };
+  assert.equal(fogRaidUpdate(b, room, config).phase, 'gather');
+  assert.equal(fogRaidUpdate(b, { ...room, leadMass: 120 }, config).phase, 'raid');
+  assert.equal(b.fogRaid.entries, 1);
+  // The lead was spent below the abort share: back to gathering, not idle.
+  assert.equal(fogRaidUpdate(b, { ...room, leadMass: 40 }, config).phase, 'gather');
+  // A threatened home pauses the doctrine without losing the learned mass.
+  assert.deepEqual(
+    [fogRaidUpdate(b, { ...room, leadMass: 120, danger: 1 }, config).resting, b.fogRaid.phase],
+    [true, 'idle'],
+  );
+  assert.equal(fogRaidUpdate(b, { ...room, lead: -1 }, config).phase, 'idle');
+  assert.equal(fogRaidUpdate(b, room, fogConfig({ raid: false }, {})).phase, 'idle');
+  assert.deepEqual(freshRaid(), { phase: 'idle', lead: -1, mass: 0, since: -1, entries: 0 });
+  assert.ok(RAID_SCORE > 675);
+});
+
+test('default the fog belief, spread, crown and raid experiments off', () => {
+  const d = fogConfig({}, {});
+  assert.equal(d.scout, false);
+  assert.equal(d.raid, false);
+  assert.equal(d.belief, false);
+  assert.equal(d.spread, 0);
+  assert.equal(d.homes, 0);
+  assert.equal(d.maze, false);
+  assert.equal(d.aimLead, DEFAULT_AIM_LEAD);
+  assert.equal(d.aimLeadSwamp, DEFAULT_SWAMP_LEAD);
+  assert.ok(d.aimLeadSwamp > d.aimLead);
+  const tuned = fogConfig({}, { BOT3_FOG_SCOUT: '1', BOT3_FOG_RAID: '1', BOT3_FOG_SPREAD: '4' });
+  assert.deepEqual([tuned.scout, tuned.raid, tuned.spread], [true, true, 4]);
+});
+
+test('keep the fog layer off corridor boards unless it is asked for', () => {
+  const army = [
+    { id: 1, team: 1, army: 300, land: 9, dead: 0 },
+    { id: 2, team: 2, army: 90, land: 6, dead: 0 },
+  ];
+  const build = () => {
+    const b = createBoard(5, 5, 1);
+    b.grid_type.fill(200);
+    // Eight walls out of twenty-five is a corridor share (32% > maze's 30%).
+    for (const i of [1, 2, 3, 4, 5, 9, 14, 19]) b.grid_type[i] = 201;
+    b.grid_type[0] = 101;
+    b.army_cnt[0] = 60;
+    b.grid_type[6] = 102;
+    b.army_cnt[6] = 5;
+    b.fogMode = true;
+    return b;
+  };
+  process.env.BOT3_FOG = '1';
+  try {
+    const off = build();
+    chooseOrders(off, 80, army, false);
+    assert.equal(off.fogLayer, undefined);
+    const on = build();
+    process.env.BOT3_FOG_MAZE = '1';
+    chooseOrders(on, 80, army, false);
+    assert.notEqual(on.fogLayer, undefined);
+  } finally {
+    delete process.env.BOT3_FOG;
+    delete process.env.BOT3_FOG_MAZE;
+  }
 });
 
 test('never touch a visible board while the fog layer is on', () => {

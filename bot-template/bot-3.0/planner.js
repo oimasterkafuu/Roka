@@ -14,6 +14,9 @@ const {
   fogConfig,
   fogUpdate,
   fogRequired,
+  fogBeliefTargets,
+  fogRaidUpdate,
+  RAID_SCORE,
   columnAdvance,
   funnelScore,
   expandScore,
@@ -218,7 +221,7 @@ function constructionPressure(b, units, teams, myTeam, enemyDist) {
   };
 }
 
-function selectBuildSite(b, units, pressure, frontDist, homeDist, supplyDistance) {
+function selectBuildSite(b, units, pressure, frontDist, homeDist, supplyDistance, minHomeDist = 0) {
   const { size, me, neighbors, grid_type: tile } = b;
   // In serial play, depositing several garrisons at the same safe site is
   // cheaper than marching each one to the front. Prefer sites we can finish.
@@ -226,6 +229,7 @@ function selectBuildSite(b, units, pressure, frontDist, homeDist, supplyDistance
     siteValue = -Infinity;
   for (let i = 0; i < size; i++) {
     if (ownerOf(tile[i]) !== me || crown(tile[i]) || swamp(tile[i]) || b.isolated[i]) continue;
+    if (minHomeDist && homeDist[i] < minHomeDist) continue;
     const city = anchor(tile[i]);
     const cost = city ? 50 : 100;
     const donors = neighbors[i].filter((j) => ownerOf(tile[j]) === me && !b.isolated[j] && units[j] > 2);
@@ -300,8 +304,14 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // supplies the objective fallback; the column needs a measured material edge
   // on top of it (`fogUpdate`) and pauses whenever a home is threatened.
   const fogCfg = fogConfig();
+  const fogMaze = isMazeBoard(b);
   const fogOpen =
-    !clearSerial && !multi && fogCfg.enabled && size <= fogCfg.maxBoard && turn >= fogCfg.startTurn;
+    !clearSerial &&
+    !multi &&
+    fogCfg.enabled &&
+    (!fogMaze || fogCfg.maze) &&
+    size <= fogCfg.maxBoard &&
+    turn >= fogCfg.startTurn;
   // A zero garrison or a disconnected pocket means fighting has already
   // changed the opening economy. Let the tactical planner handle that frame.
   if (
@@ -357,16 +367,45 @@ function chooseOrders(b, turn, leaderboard, multi) {
   let enemyArmy = 0;
   for (const p of leaderboard)
     if (!p.dead && p.team !== myTeam) enemyArmy = Math.max(enemyArmy, Number(p.army) || 0);
+  // Swamp is visible through the fog, so the board's terrain mix is known even
+  // before it is explored; archipelago-style rooms use their own aim threshold.
+  let swampCells = 0;
+  if (fogOpen)
+    for (let i = 0; i < size; i++) if (swamp(tile[i])) swampCells++;
+  const aimLead = swampCells >= size * fogCfg.swampShare ? fogCfg.aimLeadSwamp : fogCfg.aimLead;
   const fogAim =
     fogOpen &&
     fogCfg.aimFront &&
     !maze &&
     !targets.length &&
-    self.army * 100 >= enemyArmy * fogCfg.aimLead;
-  const objectives = single ? (rival?.crowns ?? []) : fogAim ? enemies : targets;
+    self.army * 100 >= enemyArmy * aimLead;
+  // Belief region for the hidden enemy home (see ./fog). `belief` also lets it
+  // take over the objective field, so every advance rule (not just the column)
+  // pushes at the far region. Keeping it off by default means the prior can
+  // steer the column without moving every garrison off a crown.
+  const beliefTargets =
+    fogOpen && fogCfg.belief && !targets.length ? fogBeliefTargets(b, homes, fogCfg) : null;
+  const objectives = single
+    ? (rival?.crowns ?? [])
+    : beliefTargets?.length
+      ? beliefTargets
+      : fogAim
+        ? enemies
+        : targets;
   const { dist: goal, queue } = distances(b, objectives);
   const heading = targets.length ? goal : enemies.length ? enemyDist : scouting;
   const required = assaultStrength(b, queue, goal, units, teams, myTeam);
+  // `scout` only steers the fog column. It is the same belief field, priced the
+  // same conservative way, so a column that reaches the far region can still
+  // stage instead of walking a stack into an unseen garrison.
+  const scoutTargets =
+    fogOpen && (fogCfg.scout || fogCfg.raid) && !targets.length && !beliefTargets?.length
+      ? fogBeliefTargets(b, homes, fogCfg)
+      : null;
+  const scout = scoutTargets?.length ? distances(b, scoutTargets) : null;
+  const scoutRequired = scout ? assaultStrength(b, scout.queue, scout.dist, units, teams, myTeam) : null;
+  const scoutReserve =
+    scout && fogCfg.guess ? fogRequired(scoutRequired, scout.dist, fogCfg.guess) : scoutRequired;
   const { threat, immediate } = incomingStrength(b, enemies, units, teams, myTeam);
   const pressure = constructionPressure(b, units, teams, myTeam, enemyDist);
   const danger = homes.filter((i) => threat[i] > units[i]);
@@ -438,7 +477,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // to be chosen here, where the unit counts live.
   let closingLead = -1,
     closingLeadDist = null;
-  if (closeIn || fogColumn) {
+  const fogRaidRoom = fogOpen && fogCfg.raid && !closeIn;
+  if (closeIn || fogColumn || fogRaidRoom) {
     let best = 0;
     for (let i = 0; i < size; i++) {
       if (teams[i] !== myTeam || b.isolated[i] || ownerOf(tile[i]) !== me) continue;
@@ -447,9 +487,25 @@ function chooseOrders(b, turn, leaderboard, multi) {
         closingLead = i;
       }
     }
-    if (closingLead >= 0)
-      closingLeadDist = distances(b, [closingLead], (j) => !b.isolated[j]).dist;
+    if (closingLead >= 0) closingLeadDist = distances(b, [closingLead], (j) => !b.isolated[j]).dist;
   }
+  // Gather-then-raid doctrine (see ./fog). While no enemy crown is remembered,
+  // the heaviest stack is held back and fed by the rest of the empire; once it
+  // carries enough mass it drives at the belief region / remembered crown.
+  const fogRaid = fogRaidRoom
+    ? fogRaidUpdate(
+        b,
+        {
+          turn,
+          lead: closingLead,
+          leadMass: closingLead >= 0 ? units[closingLead] : 0,
+          mobileArmy,
+          danger: danger.length,
+        },
+        fogCfg,
+      )
+    : { phase: 'idle', lead: -1, mass: 0, gather: false, resting: false };
+  const raidOn = fogRaid.phase === 'gather' || fogRaid.phase === 'raid';
   const longFront = !multi && size >= 400;
   let route;
   if (longFront && !clearSerial && turn >= 44) {
@@ -490,18 +546,30 @@ function chooseOrders(b, turn, leaderboard, multi) {
     !closeIn &&
     (homes.length < productiveTarget || mobileArmy > homes.length * 240) &&
     (!danger.length || homes.length > 2);
-  const limit = single
+  let limit = single
     ? invest
       ? Math.max(productiveTarget, homes.length + 1)
       : Math.max(2, 1 + Math.floor(mobileArmy / 140))
     : Math.max(2, Math.min(longFront ? 12 : 32, 1 + Math.floor(mobileArmy / 185)));
+  // Fog mirrors are attrition: each extra crown is one more target the raider
+  // must spend a stack on, plus one army per tick. Only the ceiling moves; the
+  // site choice (and its `spread` rule) stays on the normal path.
+  if (fogOpen && fogCfg.homes) limit = Math.max(limit, fogCfg.homes);
   const develop =
     (!single || invest || homes.length <= 2 || turn % 12 < (longFront ? 6 : 5)) && !closeIn;
   const backup = single && !longFront && !ffa && homes.length === 1 && enemyDist[homes[0]] <= 12;
   const buildingStart = clearSerial ? (backup ? 39 : 50) : 38;
   const site =
     develop && turn >= buildingStart && homes.length < limit
-      ? selectBuildSite(b, units, pressure, frontDist, homeDist, anchorDist)
+      ? selectBuildSite(
+          b,
+          units,
+          pressure,
+          frontDist,
+          homeDist,
+          anchorDist,
+          fogOpen ? fogCfg.spread : 0,
+        )
       : -1;
   if (single) {
     const route = campaignRoute(b, objectives, units, teams, myTeam, Math.max(3, mobileArmy / 70));
@@ -546,7 +614,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
     const base = crown(tile[i]),
       critical = base || cut[i] > 20;
     const nearFight = enemyDist[i] < 5;
-    if (!base && !swamp(tile[i]) && units[i] >= 50 && turn >= buildingStart) {
+    // A new crown inside the old cluster is one raid away from a cascade: the
+    // traced losses lose two or three crowns to a single stack. When the fog
+    // spread rule is on, a site too close to an existing crown is refused.
+    const tooClose = fogOpen && fogCfg.spread > 0 && homeDist[i] < fogCfg.spread;
+    if (!base && !swamp(tile[i]) && !tooClose && units[i] >= 50 && turn >= buildingStart) {
       const city = anchor(tile[i]);
       // A safe upgrade gives a second crown immediately, even if the old
       // crown is under pressure. Otherwise a forced defence takes this tick.
@@ -736,8 +808,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
       // prices the steps the fog hides, so the column stages instead of walking
       // a big stack into an ambush (see ./fog for the measured traces).
       if (fogColumn) {
+        const aim = scout ? scout.dist : goal;
+        const reserve = scout ? scoutReserve : fogReserve;
         if (i === closingLead) {
-          const forward = goal[j] < goal[i] || (hostile && enemyDist[j] <= enemyDist[i]);
+          const forward = aim[j] < aim[i] || (hostile && enemyDist[j] <= enemyDist[i]);
           if (
             fogCfg.expand &&
             !own &&
@@ -748,7 +822,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
             (forward || heading[j] < heading[i])
           )
             score = Math.max(score, expandScore(send, heading[j]));
-          if (forward && send > 1 && remaining >= fogReserve[i])
+          if (forward && send > 1 && remaining >= reserve[i])
             score = Math.max(score, columnAdvance(send, remaining));
           else if (
             fogCfg.guard &&
@@ -767,6 +841,31 @@ function chooseOrders(b, turn, leaderboard, multi) {
           send >= 2
         ) {
           score = Math.max(score, funnelScore(own ? send + units[j] : send));
+        }
+      }
+      // Gather-then-raid doctrine. `gather` holds the assembly point and pulls
+      // the rest of the empire into it; `raid` drives the assembled stack at
+      // the objective field. Both are additive with the fog column above; the
+      // lead only keeps a real capture or a defence while it assembles.
+      if (raidOn && closingLeadDist) {
+        if (i === fogRaid.lead) {
+          if (fogRaid.phase === 'raid') {
+            const ahead = (scout ? scout.dist[j] < scout.dist[i] : goal[j] < goal[i]) ||
+              (hostile && enemyDist[j] <= enemyDist[i]);
+            const reserve = scout ? scoutReserve : fogReserve;
+            if (ahead && send > 1 && remaining >= reserve[i])
+              score = Math.max(score, RAID_SCORE + 100 + Math.min(120, Math.sqrt(remaining) * 6));
+          } else if (!strike && !hostile) {
+            score = 0;
+          }
+        } else if (
+          own &&
+          send >= 2 &&
+          !crown(tile[i]) &&
+          !danger.length &&
+          closingLeadDist[j] < closingLeadDist[i]
+        ) {
+          score = Math.max(score, RAID_SCORE + Math.min(60, send * 2));
         }
       }
       // A narrow advance is fragile when an adjacent enemy can take the
