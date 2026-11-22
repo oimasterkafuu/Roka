@@ -11,6 +11,7 @@ const { openingOrder, END_TICK } = require('./opening');
 const { isMazeBoard, laneBlocked, recordLane, LANE, SINGLE_FROM } = require('./maze');
 const { closingUpdate } = require('./closing');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
+const { multiUpdate, applyMulti } = require('./multi');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -385,6 +386,18 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
   }
   const mobileArmy = self.army - self.land;
+  // Multi-line rooms get their own economy and endgame scoring; see ./multi.
+  // Off by default, so `BOT3_MULTI` unset keeps the byte-identical baseline.
+  const multiLayer = multiUpdate(b, {
+    turn,
+    multi,
+    size,
+    units,
+    teams,
+    myTeam,
+    targets,
+    mobileArmy,
+  });
   // While closing, the empire funnels into its heaviest stack and that stack
   // pushes once it can pay for the remaining path (see ./closing). The lead has
   // to be chosen here, where the unit counts live.
@@ -680,6 +693,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
   }
   if (front) searchCampaign(front, candidates);
+  if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   candidates.sort((a, c) => c.score - a.score);
   const used = new Set(),
     orders = [];

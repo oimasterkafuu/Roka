@@ -657,3 +657,176 @@ test('order the kill step before construction and expansion', () => {
   b.finish = false;
   assert.ok(!chooseOrders(b, 100, players, false).some((op) => op.score === 3000));
 });
+
+// --- Multi-line economy layer (./multi) -------------------------------------
+const { multiConfig, multiUpdate, applyMulti, crownRoute, teamCuts, freshMulti } = require('./multi');
+
+function multiContext(overrides = {}) {
+  const b = createBoard(1, 5, 1);
+  b.grid_type.set([101, 1, 200, 2, 102]);
+  b.army_cnt.set([10, 30, 0, 6, 3]);
+  const teams = new Uint8Array([1, 1, 0, 2, 2]);
+  const units = new Float64Array([10, 30, 0, 6, 3]);
+  return {
+    b,
+    teams,
+    units,
+    input: {
+      turn: 30,
+      multi: true,
+      size: b.size,
+      units,
+      teams,
+      myTeam: 1,
+      targets: [4],
+      mobileArmy: 34,
+    },
+    ctx: {
+      tile: b.grid_type,
+      teams,
+      units,
+      neighbors: b.neighbors,
+      myTeam: 1,
+      frontDist: new Int32Array([3, 2, 1, 2, 3]),
+    },
+    ...overrides,
+  };
+}
+
+test('multi-line layer is opt-in and clamps its own environment', () => {
+  const off = multiConfig({}, {});
+  assert.equal(off.enabled, false);
+  assert.deepEqual(
+    [off.burstGain, off.raidBonus, off.mergePenalty, off.marchGain, off.marchBase, off.cut],
+    [2, 400, 100, 0, 15, 0],
+  );
+  const on = multiConfig(
+    {},
+    { BOT3_MULTI: '1', BOT3_MULTI_RAID: '900', BOT3_MULTI_MARCH: '4', BOT3_MULTI_FOCUS: 'off' },
+  );
+  assert.equal(on.enabled, true);
+  assert.equal(on.raidBonus, 900);
+  assert.equal(on.marchGain, 4);
+  assert.equal(on.focus, false);
+  const clamped = multiConfig({}, { BOT3_MULTI_RAID: '-5', BOT3_MULTI_BUILD: 'abc' });
+  assert.equal(clamped.raidBonus, 0);
+  assert.equal(clamped.buildPenalty, 220);
+});
+
+test('only burst and focus turns of a multi-line room reach the layer', () => {
+  const on = multiConfig({ enabled: true }, {});
+  const { b, input } = multiContext();
+  assert.equal(multiUpdate(b, { ...input, multi: false }, on), null);
+  assert.equal(multiUpdate(b, input, multiConfig({}, {})), null);
+  assert.equal(multiUpdate(b, { ...input, turn: 12 }, on), null);
+  const big = multiContext({ input: { ...input, size: 900 } });
+  assert.equal(multiUpdate(big.b, big.input, on), null);
+  const burst = multiUpdate(b, input, on);
+  assert.deepEqual([burst.burst, burst.worth, burst.focus], [true, 20, false]);
+  assert.equal(b.multiLine.burstTicks, 1);
+  const later = multiContext();
+  const focus = multiUpdate(later.b, { ...later.input, turn: 60 }, on);
+  assert.deepEqual([focus.burst, focus.focus], [false, true]);
+  assert.ok(focus.route[4] < focus.route[0]);
+});
+
+test('burst scoring paints cheap neutrals and stops banking army into a crown', () => {
+  const config = multiConfig({ enabled: true }, {});
+  const { b, input } = multiContext();
+  const plan = multiUpdate(b, input, config);
+  const candidates = [
+    { score: 300, from: 1, to: 1, mode: 2, build: 'b' },
+    { score: 62, from: 1, to: 2, mode: 2 },
+    { score: 62, from: 4, to: 3, mode: 2 },
+    { score: 40, from: 0, to: 1, mode: 2 },
+  ];
+  applyMulti(plan, multiContext().ctx, candidates);
+  assert.equal(candidates[0].score, 300 - config.buildPenalty);
+  // A free neutral pays the rest of the burst; its neighbours are already
+  // owned by either side, so no breadth bonus applies.
+  assert.equal(candidates[1].score, 62 + 2 * 20);
+  // Raiding a rival cell is worth a full raid bonus on top of its capture.
+  assert.equal(candidates[2].score, 62 + config.raidBonus);
+  // Stacking our own frontier loses a slot, and outward merges keep the front.
+  assert.equal(
+    candidates[3].score,
+    40 - config.mergePenalty + config.outwardBase + Math.sqrt(10) * config.outwardGain,
+  );
+  // The outward bonus is what makes a merge into the frontier bearable: the
+  // same merge away from it only pays the penalty.
+  assert.ok(candidates[3].score > 40 - config.mergePenalty);
+});
+
+test('focus scoring refuses paint and prices the march by its remaining ground', () => {
+  const config = multiConfig({ enabled: true }, {});
+  const b = createBoard(1, 7, 1);
+  b.grid_type.set([200, 200, 1, 1, 1, 1, 102]);
+  b.army_cnt.set([0, 0, 4, 4, 4, 4, 6]);
+  const teams = new Uint8Array([0, 0, 1, 1, 1, 1, 2]);
+  const units = new Float64Array([0, 0, 4, 4, 4, 4, 6]);
+  const input = {
+    turn: 60,
+    multi: true,
+    size: b.size,
+    units,
+    teams,
+    myTeam: 1,
+    targets: [6],
+    mobileArmy: 20,
+  };
+  const plan = multiUpdate(b, input, config);
+  assert.deepEqual(Array.from(plan.route.slice(2)), [10, 8, 6, 4, 0]);
+  const candidates = [
+    { score: 300, from: 2, to: 1, mode: 2 },
+    { score: 300, from: 5, to: 6, mode: 2 },
+    { score: 300, from: 3, to: 4, mode: 2 },
+    { score: 300, from: 4, to: 5, mode: 2 },
+  ];
+  applyMulti(plan, { tile: b.grid_type, teams, units, neighbors: b.neighbors, myTeam: 1 }, candidates);
+  assert.equal(candidates[0].score, 300 - config.paintPenalty);
+  // A march onto the rival crown is a strike, not a march: the layer leaves it
+  // to the planner's own (higher) siege and campaign scores.
+  assert.equal(candidates[1].score, 300);
+  // The rest of the path pays a base bonus minus two per remaining step.
+  assert.equal(candidates[2].score, 300 + config.marchBase - 2 * plan.route[4]);
+  assert.equal(candidates[3].score, 300 + config.marchBase - 2 * plan.route[5]);
+  assert.ok(candidates[3].score > candidates[2].score);
+});
+
+test('price a rival cell by the army its capture severs from the rival anchors', () => {
+  const b = createBoard(1, 7, 1);
+  b.grid_type.set([200, 200, 2, 2, 2, 2, 102]);
+  b.army_cnt.set([0, 0, 3, 3, 3, 3, 3]);
+  const teams = new Uint8Array([0, 0, 2, 2, 2, 2, 2]);
+  const units = new Float64Array([0, 0, 3, 3, 3, 3, 3]);
+  const lost = teamCuts(b, teams, units, 2);
+  assert.deepEqual(Array.from(lost), [0, 0, 0, 5, 10, 15, 20]);
+  const route = crownRoute(b, [6], units, teams, 1, 10);
+  assert.deepEqual(Array.from(route), [12, 10, 8, 6, 4, 2, 0]);
+});
+
+test('serial rooms stay byte-identical while the multi layer is enabled', () => {
+  const make = () => {
+    const b = createBoard(1, 6, 1);
+    b.grid_type.set([101, 1, 1, 200, 2, 102]);
+    b.army_cnt.set([10, 40, 1, 0, 20, 5]);
+    return b;
+  };
+  const serial = chooseOrders(make(), 44, players, false);
+  process.env.BOT3_MULTI = '1';
+  try {
+    const enabled = make();
+    assert.deepEqual(chooseOrders(enabled, 44, players, false), serial);
+    assert.equal(enabled.multiLine, undefined);
+    const multi = make();
+    chooseOrders(multi, 44, players, true);
+    assert.ok(multi.multiLine instanceof Object);
+    assert.equal(multi.multiLine.burstTicks, 1);
+  } finally {
+    delete process.env.BOT3_MULTI;
+  }
+});
+
+test('fresh ledger starts empty', () => {
+  assert.deepEqual(freshMulti(), { ticks: 0, burstTicks: 0, focusTicks: 0, entered: null });
+});
