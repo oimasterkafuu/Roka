@@ -117,10 +117,10 @@ function cutConfig(overrides = {}, env = process.env) {
       turn: multiCut.turn ?? number(env.BOT3_MULTICUT_TURN, 0, 0, 5000),
     },
     save: {
-      enabled: save.enabled ?? flag(env.BOT3_CUTSAVE, false),
+      enabled: save.enabled ?? flag(env.BOT3_CUTSAVE, true),
       gain: save.gain ?? number(env.BOT3_CUTSAVE_GAIN, 3, 0, 200),
       cap: save.cap ?? number(env.BOT3_CUTSAVE_CAP, 1400, 0, 50000),
-      min: save.min ?? number(env.BOT3_CUTSAVE_MIN, 30, 0, 20000),
+      min: save.min ?? number(env.BOT3_CUTSAVE_MIN, 10, 0, 20000),
       // A reconnect only pays if the door falls this tick: a failed attack burns
       // the stack and leaves the pocket severed (and decaying).
       sure: save.sure ?? flag(env.BOT3_CUTSAVE_SURE, true),
@@ -132,9 +132,9 @@ function cutConfig(overrides = {}, env = process.env) {
       until: save.until ?? number(env.BOT3_CUTSAVE_UNTIL, 0, 0, 5000),
       fog: save.fog ?? flag(env.BOT3_CUTSAVE_FOG, false),
       closing: save.closing ?? flag(env.BOT3_CUTSAVE_CLOSING, false),
-      behindArmy: save.behindArmy ?? number(env.BOT3_CUTSAVE_BEHIND, 0, 0, 8),
+      behindArmy: save.behindArmy ?? number(env.BOT3_CUTSAVE_BEHIND, 1, 0, 8),
       behindLand: save.behindLand ?? number(env.BOT3_CUTSAVE_BEHIND_LAND, 0, 0, 8),
-      share: save.share ?? number(env.BOT3_CUTSAVE_SHARE, 0, 0, 100),
+      share: save.share ?? number(env.BOT3_CUTSAVE_SHARE, 10, 0, 100),
     },
   };
 }

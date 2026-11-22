@@ -48,10 +48,11 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 - `fog-multi.js`：迷雾多线 burst 土地竞赛门控（多线 burst 移除后默认关闭，`BOT3_FOG_MULTI=1` 开启，见 [BOT3_FOG.md](BOT3_FOG.md)）。
 - `fog-maze.js`：迷雾迷宫层：走廊目标场、中立格涂色加分、柱状推进、换线纪律与王冠经济门控（第 11 轮起默认开启，`BOT3_MAZEFOG3=0` 关闭，见 [BOT3_MAZE.md](BOT3_MAZE.md)）。
 - `fog-oracle.js`：迷雾情报层：用未迷雾的排行榜反推对手内部驻军密度、剩余中立格与王冠数（默认关闭，`BOT3_FOGORACLE=1` 开启，见 [BOT3_FOG_ORACLE.md](BOT3_FOG_ORACLE.md)）。
-- `cut.js`：隔离/切断经济学实验层（时间、定价、加固、多线、反向救援五个开关，全部默认关闭；反向救援 `BOT3_CUTSAVE` 是第 7/8/11 轮唯一可复现的正向机制，推荐 `BOT3_CUTSAVE=1 BOT3_CUTSAVE_MIN=10 BOT3_CUTSAVE_BEHIND=1 BOT3_CUTSAVE_SHARE=10`，见 [CUT.md](CUT.md)）。
+- `cut.js`：隔离/切断经济学实验层（默认仅反向救援 `BOT3_CUTSAVE` 开启：`_MIN=10 _BEHIND=1 _SHARE=10`；其余时间/定价/加固/多线开关默认关闭；`BOT3_CUTSAVE=0` 关闭，见 [CUT.md](CUT.md)）。
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层与协议回归。
 - `shadow.js`：relay 规划器的影子副本，逐帧重放它的 `chooseOrders` 以提前一 Tick 知道它要走的指令，并按引擎结算顺序重新给候选评分（默认开启，`BOT3_SHADOW=0` 关闭，见 [SHADOW.md](SHADOW.md)）。
 - `shadow-probe.cjs`：单局预测精度探针（逐帧对照 relay 实际发出的指令），仅用于测量。
+- `archipelago.js`：群岛（沼泽占比 ≥55%）陆地竞速层（默认开启，`BOT3_ARCH=0` 关闭）：`BOT3_ARCH_LAND` 把 burst 期目标换成最近无人小岛（默认仅清晰房间，`BOT3_ARCH_LAND_FOG=1` 允许迷雾）、`BOT3_ARCH_FRONT` 用可见敌方前线替代远处主城、`BOT3_ARCH_WATER` 封顶远离陆地的沼泽推进、`BOT3_ARCH_CROWN` 在独占小岛放宽建城（见 [BOT3_ARCH.md](BOT3_ARCH.md)）。
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层、影子层与协议回归。
 
 - `NEXT.md`：暂停时保留的后续重启方向、负结果与复现方式。

@@ -123,13 +123,17 @@ function archipelagoConfig(overrides = {}, env = process.env) {
   // `BOT3_ARCH` is the measured bundle (land-first objective + clear-serial
   // frontier objective). Each mechanism still has its own flag, which wins over
   // the bundle, so a single mechanism can be A/B'd on its own.
-  const bundle = flag(env.BOT3_ARCH, false);
+  const bundle = flag(env.BOT3_ARCH, true);
   return {
     land: overrides.land ?? (env.BOT3_ARCH_LAND === undefined ? bundle : flag(env.BOT3_ARCH_LAND, false)),
     water: overrides.water ?? flag(env.BOT3_ARCH_WATER, false),
     crown: overrides.crown ?? flag(env.BOT3_ARCH_CROWN, false),
     front: overrides.front ?? (env.BOT3_ARCH_FRONT === undefined ? bundle : flag(env.BOT3_ARCH_FRONT, false)),
     frontFog: overrides.frontFog ?? flag(env.BOT3_ARCH_FRONT_FOG, false),
+    // The land phase is a clear-serial rule by default: in fog it converts one
+    // relay archipelago win into a timeout (measured -1 cell), while the clear
+    // room keeps the +21.9pp interaction with the frontier objective.
+    landFog: overrides.landFog ?? flag(env.BOT3_ARCH_LAND_FOG, false),
     multi: overrides.multi ?? flag(env.BOT3_ARCH_MULTI, false),
     swampShare: overrides.swampShare ?? number(env.BOT3_ARCH_SWAMP_SHARE, DEFAULT_SWAMP_SHARE, 0, 1),
     until: overrides.until ?? number(env.BOT3_ARCH_UNTIL, DEFAULT_UNTIL, 0, 100000),
@@ -262,7 +266,7 @@ function archipelagoUpdate(b, context, config = archipelagoConfig()) {
   }
   b.archFocus = focus;
   let targets = null;
-  if (config.land && focus >= 0) {
+  if (config.land && (config.landFog || !context.fog) && focus >= 0) {
     targets = [];
     for (let i = 0; i < size; i++) if (island[i] === focus && tile[i] === 200) targets.push(i);
     if (!targets.length) targets = null;

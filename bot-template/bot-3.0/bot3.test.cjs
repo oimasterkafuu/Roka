@@ -1567,7 +1567,7 @@ test('arm the cut rescue only inside the positional gates', () => {
   // Two cells each: we hold index 0, the rival holds index 1.
   const ctx = { size: 2, myTeam: 1, teams: [1, 2], units: [40, 100], fog: true, closing: false };
   const plan = (turn, overrides) => ({ turn, config: cutConfig(overrides, {}) });
-  const base = { enabled: true, min: 0 };
+  const base = { enabled: true, min: 0, behindArmy: 0, behindLand: 0, share: 0, turn: 0, until: 0 };
   // Ungated: the bonus is armed wherever a pocket clears `min`.
   assert.ok(saveGate(plan(60, { save: base }), ctx));
   // Fog-only gate blocks clear rooms and keeps fog rooms.
@@ -1633,18 +1633,21 @@ function archipelagoFixture() {
   };
 }
 
-test('keep the archipelago layer switched off until a mechanism is asked for', () => {
+test('default the measured archipelago bundle on and allow opting out', () => {
   const { b, context } = archipelagoFixture();
-  const idle = archipelagoUpdate(b, context, archipelagoConfig({}, {}));
+  const idle = archipelagoUpdate(b, context, archipelagoConfig({}, { BOT3_ARCH: '0' }));
   assert.equal(idle.active, false);
   assert.equal(idle.targets, null);
   assert.equal(idle.waterCap, 0);
-  // The measured bundle is opt-in and only the two measured mechanisms.
-  const bundle = archipelagoConfig({}, { BOT3_ARCH: '1' });
+  // The measured bundle is the default and only the two measured mechanisms.
+  const bundle = archipelagoConfig({}, {});
   assert.equal(bundle.land, true);
   assert.equal(bundle.front, true);
   assert.equal(bundle.water, false);
   assert.equal(bundle.crown, false);
+  // The land phase is clear-serial by default; the frontier phase keeps its own gate.
+  assert.equal(bundle.landFog, false);
+  assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_LAND_FOG: '1' }).landFog, true);
   // A single flag overrides the bundle.
   assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_LAND: '0' }).land, false);
 });
