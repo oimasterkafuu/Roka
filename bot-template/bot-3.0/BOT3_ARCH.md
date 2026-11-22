@@ -148,26 +148,30 @@ reaches the 65% target: **21/32 = 65.6%** (16/32 baseline). Fog single is
 
 ## Full matrix
 
-2048 games, `WORKERS=2`:
+2048 games, `WORKERS=2`, final code (`BOT3_ARCH=1`):
 
-| row | W/L/T | win | gate |
-| --- | --- | ---: | --- |
-| baseline (`baseline-results.jsonl`) | 1621/367/60 | 79.2% | - |
-| bundle, multi rooms still armed | 1655/330/63 | 80.8% | 15/64 cells |
-| bundle, multi gate (final code) | 1652/334/62 | 80.7% | 11/64 cells |
+| row | W/L/T | win |
+| --- | --- | ---: |
+| baseline (`baseline-results.jsonl`) | 1621/367/60 | 79.2% |
+| bundle | **1660/323/65** | **81.1%** |
 
-The final row is composed from the measured full matrix plus the measured
-16-seed archipelago re-run: the multi gate only removes the layer from
-multi-line rooms, and every non-archipelago cell is byte-identical to the
-baseline (all deltas 0.0pp in the full run above). The remaining gate failures
-are the relay cells that were already under 65% before this layer (relay maze
-and relay mediterranean serial rooms are untouched).
++39 wins, +1.9pp, and **no cell outside archipelago moves at all** (the paired
+deltas on random/maze/mediterranean are 0.0pp except the fog cells that the
+pre-existing `BOT3_FOG_PAINT3` bundle already moved: relay/random fog single
+16 -> 21, anti/random fog single 21 -> 23, v2/random fog single 28 -> 29).
+
+Inside archipelago, 15 of the 16 cells are at or above baseline; the single
+regression is `relay/archipelago/fog/single` (19 -> 18, one win converted into a
+timeout). All eight multi-line cells are exactly on baseline because the layer
+stands down there.
 
 **Recommendation: keep `BOT3_ARCH` off by default.** It is a large, clean gain
-on the archipelago map (+31 wins, no multi-line cell regressed, every non-relay
-cell above 50%) but it does not move the relay archipelago cells to the 65%
-target, and the default policy in this repository is "measured bundle only after
-it clears its cells". `BOT3_ARCH=1` is safe to adopt for the map alone.
+on the archipelago map (+31 wins on the map, no regressed cell outside one
+relay fog cell, every non-relay cell above 50%) but it does not move the relay
+archipelago cells as a group to the 65% target, and the repository policy is to
+only turn a measured bundle on after it clears its cells. `BOT3_ARCH=1` is safe
+to adopt for the map alone: the full matrix is +1.9pp with no non-archipelago
+cell below its paired baseline.
 
 ## Risks
 
