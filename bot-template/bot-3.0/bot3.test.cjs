@@ -832,6 +832,21 @@ test('only burst and focus turns of a multi-line room reach the layer', () => {
   assert.ok(focus.route[4] < focus.route[0]);
 });
 
+test('the fog burst gate only releases the burst while the army race is held', () => {
+  const base = multiContext();
+  const at = (army, enemyArmy, fog) => multiContext({ input: { ...base.input, army, enemyArmy, fog } });
+  const config = multiConfig({ enabled: true, burstFog: true, burstFogLead: 100 }, {});
+  const behind = at(58, 108, true);
+  assert.equal(multiUpdate(behind.b, behind.input, config), null);
+  const ahead = at(140, 108, true);
+  assert.equal(multiUpdate(ahead.b, ahead.input, config).burst, true);
+  const clear = at(58, 108, false);
+  assert.equal(multiUpdate(clear.b, clear.input, config).burst, true);
+  const off = multiConfig({ enabled: true, burstFog: false }, {});
+  const ungated = at(58, 108, true);
+  assert.equal(multiUpdate(ungated.b, ungated.input, off).burst, true);
+});
+
 test('burst scoring paints cheap neutrals and stops banking army into a crown', () => {
   const config = multiConfig({ enabled: true }, {});
   const { b, input } = multiContext();

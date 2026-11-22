@@ -107,6 +107,30 @@ node scripts/compare-bot3-baseline.cjs data/scratch/fog-on-full.jsonl data/scrat
 
 `WORKERS<=4`、前台运行，单次 128 局筛查约 60 秒，2048 局约 6 分钟。
 
+## 第三轮组合筛查：防线预备队不能整层放大
+
+组合开启（`BOT3_MULTI=1 BOT3_FOG=1`）后，两个 -1 局退化格都是“原本快胜被柱拖成超时/失败”：
+
+| 格 | round-2 | 组合 | 差异局 |
+| --- | --- | --- | --- |
+| `apex/archipelago/fog` | 24/5/3 | 23/5/4 | seed 2 seat 1 胜(234) → 超时；seed 10 seat 1 胜(279) → 负(891) |
+| `v2/maze/fog` | 25/0/7 | 24/2/6 | seed 1/9/11 seat 1 胜(131/320/710) → 超时；seed 5/6 seat 0 超时 → 负 |
+
+`BOT3_FOG_COLUMN=0` 把两格都还原到 round-2，但会把地中海/随机格的增益一起丢掉，所以不能整层关。
+按“未知路线的预备队”整层放大 `GUESS` 是唯一有效的单旋钮，但收益和代价一样大：
+
+| `BOT3_FOG_GUESS` | 迷雾单线（1024 局）Δ胜 vs round-2 | 仍低于 round-2 的格 |
+| --- | ---: | --- |
+| 8（默认） | +81 | `apex/archipelago` 23 vs 24、`v2/maze` 24 vs 25 |
+| 16 | 修好 `v2/maze` 的 3 局胜局 | `apex/archipelago` 的 seed 2 反而变负(759) |
+| 20 | +35 | `apex/archipelago` 23 vs 24、`relay/mediterranean` 14 vs 15、`relay/random` 13 vs 15 |
+| 22 | +27 | `anti/archipelago` 19 vs 21、`apex/archipelago` 23 vs 24、`relay/random` 13 vs 15 |
+| 24 | +10 | `anti/random` 15 vs 17、`relay/archipelago` 15 vs 16、`relay/random` 13 vs 15 |
+
+结论：柱是否该接管是**局面问题**，不是预备队大小的问题。同一个 `GUESS` 在 anti/apex/v2/relay 的迷雾格上方向相反，
+整层放大只是把一处单局翻转换成另一处。因此默认仍为 `GUESS=8`，本轮不为“组合零退化”改动迷雾层；
+要真正收敛需要按局面特征（谁在收紧、皇冠是否已知、时间压力）回退柱，而不是权重微调。
+
 ## 未解决
 
 - **Relay 迷雾单线四格仍只有 50%~56%，达不到 65%**。这四格是“同一张图的座位互换”，round-2 基线里胜者由座位/地图细微差异决定（15/15/2、16/16/0 的对称结果），要赢下两局就必须真正强于 Relay 的迷雾打法，而不是评分微调。所有开关组合下 Relay 四格合计都落在 52%~56%，单格 ±12.5pp 的波动是噪声而非收益。
