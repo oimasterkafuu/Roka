@@ -6,6 +6,7 @@ const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents } = require('./single-front');
+const { planFinish } = require('./kill');
 const { makeOpening } = require('./opening');
 
 const players = [
@@ -105,6 +106,10 @@ test('expand in parallel from a single crown with executable independent orders'
 test('hold construction funds when an enemy column can round a bend, and build with enough reserve', () => {
   for (const terrain of [1, 51]) {
     const b = createBoard(3, 5, 1);
+    // The fixture leaves one exposed enemy crown within reach, so the finish
+    // layer is switched off here: this test is about the planner's own
+    // construction policy, and the companion test below covers the takeover.
+    b.finish = false;
     b.grid_type.fill(201);
     for (const [i, t, n] of [
       [0, 101, 4],
@@ -331,4 +336,113 @@ test('rebind with a pending queue, apply diff and retain independent multiline o
     handle.stop();
     assert.equal(socket.listenerCount('update'), 0);
   }
+});
+
+// Finish layer fixtures. Owners follow the engine encoding (`50 * owner + kind`),
+// so `101`/`102` are a crown of player 1 / player 2 and `1`/`2` plain land.
+function finishBoard(kinds, armies, rows = 1) {
+  const b = createBoard(rows, kinds.length / rows, 1);
+  b.grid_type.set(kinds);
+  b.army_cnt.set(armies);
+  return b;
+}
+
+function finishContext(b, targets, overrides = {}) {
+  const teamByOwner = new Map([
+    [1, 1],
+    [2, 2],
+    [3, 3],
+  ]);
+  const teams = new Uint8Array(b.size).map((_, i) => teamByOwner.get(b.grid_type[i] % 50) ?? 0);
+  return {
+    turn: 100,
+    teams,
+    myTeam: 1,
+    homes: [0],
+    targets,
+    cut: new Float64Array(b.size),
+    threat: new Float64Array(b.size),
+    danger: [],
+    teamByOwner,
+    rivalTeam: 2,
+    ...overrides,
+  };
+}
+
+test('finish the last enemy crown through open ground with a spare stack', () => {
+  const b = finishBoard([101, 1, 200, 200, 102, 200], [5, 40, 0, 0, 3, 0]);
+  // The shipped default only allows two-tick routes; the machinery is tested
+  // with the wider window the README documents for experiments.
+  const plan = planFinish(b, finishContext(b, [4]), { maxEta: 7, surplus: 25 });
+  assert.equal(plan.ok, true);
+  assert.equal(plan.decap, true);
+  // Three ticks of travel, and the crown grows on every one of them.
+  assert.equal(plan.eta, 3);
+  assert.equal(plan.goal, 4);
+  assert.deepEqual([plan.from, plan.to, plan.mode], [1, 2, 2]);
+  // 40 - 1 leaves the tap, three arrival guards stay behind, six units of
+  // defender growth are paid: 31 units hold the crown.
+  assert.equal(plan.delivered, 31);
+});
+
+test('decline a route whose stack cannot pay for the defenders on it', () => {
+  const b = finishBoard([101, 1, 200, 2, 102, 200], [5, 20, 0, 30, 3, 0]);
+  const plan = planFinish(b, finishContext(b, [4]));
+  assert.equal(plan.ok, false);
+  assert.ok(['no-route', 'no-tap', 'surplus'].includes(plan.reason), plan.reason);
+});
+
+test('decline a decapitation the opponent reaches first', () => {
+  // Our 60-stack and their 30-stack both neighbour a crown; only the enemy can
+  // take ours on the next tick, so the race must be lost.
+  const b = finishBoard([101, 200, 1, 102, 2, 200, 200, 200], [5, 0, 60, 20, 30, 0, 0, 0], 2);
+  const plan = planFinish(b, finishContext(b, [3]));
+  assert.equal(plan.ok, false);
+  assert.equal(plan.reason, 'race');
+});
+
+test('decline a stale fog memory and hidden ground on the route', () => {
+  const b = finishBoard([101, 1, 200, 200, 102, 200], [5, 40, 0, 0, 3, 0]);
+  b.fogMode = true;
+  b.fog[4] = 1;
+  assert.equal(planFinish(b, finishContext(b, [4])).reason, 'no-goal');
+  b.fog[4] = 0;
+  b.fog[2] = 1;
+  const plan = planFinish(b, finishContext(b, [4]), { maxEta: 7, surplus: 25 });
+  assert.equal(plan.ok, false);
+  assert.equal(plan.reason, 'no-route');
+});
+
+test('decline a long expedition from a single crown but take the decapitation', () => {
+  // Two enemy crowns: the far one is a normal capture, not a decapitation.
+  const b = finishBoard([101, 1, 200, 200, 102, 200, 102], [5, 200, 0, 0, 3, 0, 3]);
+  const plan = planFinish(b, finishContext(b, [4, 6]), { maxEta: 7, surplus: 25 });
+  assert.equal(plan.ok, false);
+  assert.equal(plan.reason, 'sole-crown');
+  // A second own crown removes the objection; the surplus then decides.
+  b.grid_type[6] = 101;
+  b.army_cnt[6] = 5;
+  assert.equal(planFinish(b, finishContext(b, [4]), { maxEta: 7, surplus: 25 }).ok, true);
+});
+
+test('refuse a corridor that an enemy stack can cut before the column arrives', () => {
+  const b = finishBoard([101, 1, 1, 200, 102, 200, 102, 101], [5, 40, 10, 0, 3, 0, 3, 5]);
+  const cut = new Float64Array(b.size);
+  cut[2] = 40;
+  const threat = new Float64Array(b.size);
+  threat[2] = 90;
+  const plan = planFinish(b, finishContext(b, [4, 6], { cut, threat, homes: [0, 7] }), { maxEta: 7, surplus: 25 });
+  assert.equal(plan.ok, false);
+  assert.equal(plan.reason, 'cut');
+});
+
+test('order the kill step before construction and expansion', () => {
+  const b = finishBoard([101, 1, 200, 102], [5, 300, 0, 3]);
+  // Off by default: the same board only produces the strike when asked.
+  assert.ok(!chooseOrders(b, 100, players, false).some((op) => op.score === 3000));
+  b.finish = true;
+  const [order] = chooseOrders(b, 100, players, false);
+  assert.deepEqual([order.from, order.to, order.mode, order.score], [1, 2, 2, 3000]);
+  b.finish = false;
+  assert.ok(!chooseOrders(b, 100, players, false).some((op) => op.score === 3000));
 });

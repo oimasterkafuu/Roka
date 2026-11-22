@@ -8,6 +8,7 @@ const {
   siegeValue,
 } = require('./single-front');
 const { openingOrder, END_TICK } = require('./opening');
+const { planFinish, finishEnabled, finishOptions } = require('./kill');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -333,6 +334,35 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const danger = homes.filter((i) => threat[i] > units[i]);
   const exposedHome = turn >= 38 && homes.length <= 2 ? homes.find((i) => pressure(i) > units[i]) : undefined;
   const defense = distances(b, danger, (j) => teams[j] === myTeam && !b.isolated[j]).dist;
+  // Finish layer: when an owned stack can provably take an enemy crown and
+  // keep it, that ends the game and outranks every economy or frontier score.
+  // Off by default (see kill.js): `BOT3_FINISH=1` or `board.finish = true`
+  // enables it. Multi-line play is untouched, the planner already wins there.
+  if (!multi && b.finish !== false && (b.finish === true || finishEnabled())) {
+    const finish = planFinish(
+      b,
+      {
+        turn,
+        teams,
+        myTeam,
+        homes,
+        targets,
+        cut,
+        threat,
+        danger,
+        teamByOwner,
+        rivalTeam: rival ? (teamByOwner.get(rival.player.id) ?? 0) : 0,
+      },
+      finishOptions(),
+    );
+    if (finish.ok) {
+      b.column = finish.to;
+      b.columnTurn = turn;
+      b.lastFrom[finish.to] = finish.from;
+      b.lastMove[finish.to] = turn;
+      return [{ score: 3000, from: finish.from, to: finish.to, mode: 2 }];
+    }
+  }
   const mobileArmy = self.army - self.land;
   const longFront = !multi && size >= 400;
   let route;
