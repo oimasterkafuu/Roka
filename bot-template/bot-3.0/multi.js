@@ -35,11 +35,23 @@
 //     player with spare stacks paints instead of banking 50 army into a crown;
 //     outward merges (toward our own frontier) are boosted so the next tick
 //     still has sixteen stack-bearing captures available;
-//   * focus: from `focusTurn` on, neutral captures are removed and moves that
-//     shorten the garrison-weighted distance to the nearest enemy crown are
-//     boosted by their stack mass, so the empire funnels into a column that
-//     walks the crown distance field. Optional `skirmish` penalty removes
-//     attacks on plain enemy cells that cannot end the game.
+//   * raid: taking a rival cell during the burst is worth a flat bonus on top
+//     of its capture, because that cell is income denied to the rival and
+//     income gained for us for every remaining burst tick. This is the largest
+//     single knob in the layer;
+//   * focus: from `focusTurn` on, neutral captures are removed and a move down
+//     the garrison-weighted crown distance field pays `marchBase` minus two per
+//     remaining step (capped at eighty), so the empire gathers instead of
+//     walking a thin column into the rival line before it can pay for the
+//     crown. `marchGain` re-adds a mass-scaled bonus on top, which measured
+//     *worse* than the plain distance penalty. Optional `skirmish` penalty
+//     removes attacks on plain enemy cells that cannot end the game.
+//   * cut: capturing an articulation cell of the rival territory severs it
+//     from every rival anchor, which immediately halves the severed army and
+//     stops its production (isolation), so those attacks are scored by the
+//     army they cut off instead of by the cell they take. This is the cheapest
+//     large swing available in a sixteen-order tick and it works during the
+//     burst (a severed plain stops paying `51 - t` army) as well as after it.
 //
 // The layer is off by default (`BOT3_MULTI=1` enables it) so the baseline path
 // stays byte-identical. Every mechanism has its own switch; see MULTI.md for
@@ -49,17 +61,27 @@ const BURST_END = 50;
 const DEFAULT_MAX_BOARD = 800;
 const DEFAULT_BURST_TURN = 25;
 const DEFAULT_FOCUS_TURN = 51;
-const DEFAULT_BURST_GAIN = 5;
+const DEFAULT_BURST_GAIN = 2;
 const DEFAULT_BUILD_PENALTY = 220;
 const DEFAULT_OUTWARD_GAIN = 5;
 const DEFAULT_OUTWARD_BASE = 10;
-const DEFAULT_MERGE_PENALTY = 0;
-const DEFAULT_RAID_BONUS = 0;
+// Measured defaults (see MULTI.md). The burst is where the game is decided:
+// in the paired screen the win rate is 15% when our tick-50 army is below 0.9x
+// the rival's and 97% when it is above 1.1x, so every knob below is tuned on
+// army at tick 50. `marchGain` stays 0 because a mass-scaled march toward the
+// rival crown scored *worse* than the plain distance penalty below it (152/256
+// against 164/256): the winner of the burst walks in on its own schedule.
+const DEFAULT_MERGE_PENALTY = 100;
+const DEFAULT_RAID_BONUS = 400;
 const DEFAULT_PAINT_PENALTY = 1000;
-const DEFAULT_MARCH_GAIN = 9;
-const DEFAULT_MARCH_BASE = 60;
+const DEFAULT_MARCH_GAIN = 0;
+const DEFAULT_MARCH_BASE = 15;
 const DEFAULT_SKIRMISH_PENALTY = 0;
 const DEFAULT_CROWN_BONUS = 0;
+const DEFAULT_CUT_GAIN = 0;
+const DEFAULT_CUT_CAP = 600;
+const DEFAULT_FOCUS_RAID = 0;
+const DEFAULT_MASS_GAIN = 0;
 
 function number(raw, fallback, min, max) {
   const value = Number(raw);
@@ -80,28 +102,24 @@ function multiConfig(overrides = {}, env = process.env) {
     maxBoard: overrides.maxBoard ?? number(env.BOT3_MULTI_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     burst: overrides.burst ?? flag(env.BOT3_MULTI_BURST, true),
     burstTurn: overrides.burstTurn ?? number(env.BOT3_MULTI_BURST_TURN, DEFAULT_BURST_TURN, 0, 1000),
-    burstGain:
-      overrides.burstGain ?? number(env.BOT3_MULTI_BURST_GAIN, DEFAULT_BURST_GAIN, 0, 200),
-    outwardGain:
-      overrides.outwardGain ?? number(env.BOT3_MULTI_OUTWARD, DEFAULT_OUTWARD_GAIN, 0, 200),
-    outwardBase:
-      overrides.outwardBase ?? number(env.BOT3_MULTI_OUTWARD_BASE, DEFAULT_OUTWARD_BASE, 0, 1000),
-    mergePenalty:
-      overrides.mergePenalty ?? number(env.BOT3_MULTI_MERGE, DEFAULT_MERGE_PENALTY, 0, 5000),
+    burstGain: overrides.burstGain ?? number(env.BOT3_MULTI_BURST_GAIN, DEFAULT_BURST_GAIN, 0, 200),
+    outwardGain: overrides.outwardGain ?? number(env.BOT3_MULTI_OUTWARD, DEFAULT_OUTWARD_GAIN, 0, 200),
+    outwardBase: overrides.outwardBase ?? number(env.BOT3_MULTI_OUTWARD_BASE, DEFAULT_OUTWARD_BASE, 0, 1000),
+    mergePenalty: overrides.mergePenalty ?? number(env.BOT3_MULTI_MERGE, DEFAULT_MERGE_PENALTY, 0, 5000),
     raidBonus: overrides.raidBonus ?? number(env.BOT3_MULTI_RAID, DEFAULT_RAID_BONUS, 0, 5000),
-    buildPenalty:
-      overrides.buildPenalty ?? number(env.BOT3_MULTI_BUILD, DEFAULT_BUILD_PENALTY, 0, 5000),
+    buildPenalty: overrides.buildPenalty ?? number(env.BOT3_MULTI_BUILD, DEFAULT_BUILD_PENALTY, 0, 5000),
     focus: overrides.focus ?? flag(env.BOT3_MULTI_FOCUS, true),
     focusTurn: overrides.focusTurn ?? number(env.BOT3_MULTI_FOCUS_TURN, DEFAULT_FOCUS_TURN, 0, 5000),
-    paintPenalty:
-      overrides.paintPenalty ?? number(env.BOT3_MULTI_PAINT, DEFAULT_PAINT_PENALTY, 0, 10000),
+    paintPenalty: overrides.paintPenalty ?? number(env.BOT3_MULTI_PAINT, DEFAULT_PAINT_PENALTY, 0, 10000),
     marchGain: overrides.marchGain ?? number(env.BOT3_MULTI_MARCH, DEFAULT_MARCH_GAIN, 0, 200),
     marchBase: overrides.marchBase ?? number(env.BOT3_MULTI_MARCH_BASE, DEFAULT_MARCH_BASE, 0, 2000),
-    skirmish:
-      overrides.skirmish ?? number(env.BOT3_MULTI_SKIRMISH, DEFAULT_SKIRMISH_PENALTY, 0, 5000),
-    crownBonus:
-      overrides.crownBonus ?? number(env.BOT3_MULTI_CROWN, DEFAULT_CROWN_BONUS, 0, 5000),
+    skirmish: overrides.skirmish ?? number(env.BOT3_MULTI_SKIRMISH, DEFAULT_SKIRMISH_PENALTY, 0, 5000),
+    crownBonus: overrides.crownBonus ?? number(env.BOT3_MULTI_CROWN, DEFAULT_CROWN_BONUS, 0, 5000),
     crownTurn: overrides.crownTurn ?? number(env.BOT3_MULTI_CROWN_TURN, DEFAULT_FOCUS_TURN, 0, 5000),
+    cut: overrides.cut ?? number(env.BOT3_MULTI_CUT, DEFAULT_CUT_GAIN, 0, 100),
+    cutCap: overrides.cutCap ?? number(env.BOT3_MULTI_CUT_CAP, DEFAULT_CUT_CAP, 0, 5000),
+    focusRaid: overrides.focusRaid ?? number(env.BOT3_MULTI_FOCUS_RAID, DEFAULT_FOCUS_RAID, 0, 5000),
+    massGain: overrides.massGain ?? number(env.BOT3_MULTI_MASS, DEFAULT_MASS_GAIN, 0, 100),
   };
 }
 
@@ -133,6 +151,74 @@ function crownRoute(b, targets, units, teams, myTeam, scale) {
   return distance;
 }
 
+// The rival team is the non-own team that owns the most visible cells (1v1
+// rooms have exactly one, FFA rooms get the largest one).
+function rivalTeam(input) {
+  const teams = input.teams;
+  if (!teams) return 0;
+  let best = 0,
+    bestCount = 0;
+  const count = new Map();
+  for (let i = 0; i < teams.length; i++) {
+    const team = teams[i];
+    if (!team || team === input.myTeam) continue;
+    const c = (count.get(team) ?? 0) + 1;
+    count.set(team, c);
+    if (c > bestCount) {
+      best = team;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+
+// Army that the rival loses if we take cell `i`: the same subtree accounting
+// as the planner's `supplyCuts`, rooted at the rival anchors and weighted by
+// the rival's garrisons plus the two units a plain pays per burst tick.
+function teamCuts(b, teams, units, team) {
+  const lost = new Float64Array(b.size);
+  const order = new Int32Array(b.size),
+    low = new Int32Array(b.size);
+  const parent = new Int32Array(b.size).fill(-1),
+    cursor = new Uint8Array(b.size);
+  const weight = new Float64Array(b.size);
+  const anchor = (tile) => tile >= 50 && tile < 150;
+  let time = 0;
+  const roots = [];
+  for (let i = 0; i < b.size; i++) if (teams[i] === team && anchor(b.grid_type[i])) roots.push(i);
+  if (!roots.length) for (let i = 0; i < b.size; i++) if (teams[i] === team) roots.push(i);
+  for (const root of roots) {
+    if (order[root]) continue;
+    const stack = [root];
+    order[root] = ++time;
+    while (stack.length) {
+      const i = stack.at(-1);
+      const adj = b.neighbors[i];
+      if (cursor[i] < adj.length) {
+        const j = adj[cursor[i]++];
+        if (teams[j] !== teams[i] || b.isolated[j] || j === parent[i]) continue;
+        if (order[j]) low[i] = Math.min(low[i], order[j]);
+        else {
+          parent[j] = i;
+          order[j] = ++time;
+          low[j] = anchor(b.grid_type[j]) ? 0 : order[j];
+          stack.push(j);
+        }
+      } else {
+        stack.pop();
+        weight[i] += units[i] + 2;
+        const p = parent[i];
+        if (p >= 0) {
+          if (low[i] >= order[p]) lost[p] += weight[i];
+          low[p] = Math.min(low[p], low[i]);
+          weight[p] += weight[i];
+        }
+      }
+    }
+  }
+  return lost;
+}
+
 // One call per planning tick. Returns null when the layer has nothing to say,
 // which keeps the planner on the exact baseline path.
 function multiUpdate(b, input, config = multiConfig()) {
@@ -144,21 +230,32 @@ function multiUpdate(b, input, config = multiConfig()) {
   const focus = config.focus && turn >= config.focusTurn;
   if (!burst && !focus) return null;
   const worth = burst ? BURST_END - turn : 0;
+  // The focus block scores moves against the crown distance field, so it needs a
+  // rival crown to anchor on: without one (fog rooms that have not seen a crown
+  // yet) the layer stays out of the frame instead of banning paint blindly.
   let route = null;
   if (focus && Array.isArray(input.targets) && input.targets.length) {
     const scale = Math.max(3, (Number(input.mobileArmy) || 0) / 70);
     route = crownRoute(b, input.targets, input.units, input.teams, input.myTeam, scale);
   }
+  const enemyCut =
+    config.cut > 0 && (burst || focus) ? teamCuts(b, input.teams, input.units, rivalTeam(input)) : null;
   const state = (b.multiLine ??= freshMulti());
   if (!state.entered) state.entered = { turn, burst, focus };
   state.ticks += 1;
   if (burst) state.burstTicks += 1;
   if (route) state.focusTicks += 1;
-  return { config, turn, burst, worth, focus: route !== null, route, state };
+  return { config, turn, burst, worth, focus: route !== null, route, enemyCut, state };
 }
 
 // Score adjustments. `ctx` carries the arrays the planner already built, so
 // nothing has to be recomputed here.
+function cutBonus(plan, config, to) {
+  const value = plan.enemyCut[to];
+  if (!value) return 0;
+  return Math.min(config.cutCap, Math.sqrt(value) * config.cut);
+}
+
 function applyMulti(plan, ctx, candidates) {
   const { config } = plan;
   const { tile, teams, units, neighbors, myTeam, frontDist } = ctx;
@@ -176,13 +273,13 @@ function applyMulti(plan, ctx, candidates) {
         const garrison = Math.max(0, units[op.to]);
         const opens = neighbors[op.to].filter((k) => tile[k] !== 201 && !teams[k]).length;
         op.score +=
-          config.burstGain * (plan.worth - Math.min(plan.worth, garrison)) +
-          Math.min(24, opens * 3);
+          config.burstGain * (plan.worth - Math.min(plan.worth, garrison)) + Math.min(24, opens * 3);
       } else if (to !== myTeam) {
         // Taking a rival cell during the burst is doubly valued: it stops the
         // rival's production on that cell and it earns ours for the rest of
         // the burst.
         if (config.raidBonus) op.score += config.raidBonus;
+        if (plan.enemyCut) op.score += cutBonus(plan, config, op.to);
       } else if (to === myTeam) {
         // Breadth beats depth while the burst is running: one cell can issue a
         // single order per tick, so stacking a frontier cell costs a slot and
@@ -213,12 +310,15 @@ function applyMulti(plan, ctx, candidates) {
         if (config.skirmish && !(tile[op.to] >= 100 && tile[op.to] < 150)) {
           op.score -= config.skirmish;
         }
+        if (config.focusRaid) op.score += config.focusRaid;
+        if (plan.enemyCut) op.score += cutBonus(plan, config, op.to);
         continue;
       }
+      if (config.massGain && units[op.to] > units[op.from])
+        op.score += Math.min(200, config.massGain * Math.sqrt(units[op.to]));
       if (route[op.to] < route[op.from]) {
         const mass = Math.max(0, units[op.from]);
-        op.score +=
-          config.marchBase + config.marchGain * Math.sqrt(mass) - Math.min(80, route[op.to] * 2);
+        op.score += config.marchBase + config.marchGain * Math.sqrt(mass) - Math.min(80, route[op.to] * 2);
       }
     }
   }
@@ -229,6 +329,7 @@ module.exports = {
   multiUpdate,
   applyMulti,
   crownRoute,
+  teamCuts,
   freshMulti,
   BURST_END,
   DEFAULT_MAX_BOARD,
@@ -245,4 +346,8 @@ module.exports = {
   DEFAULT_MARCH_BASE,
   DEFAULT_SKIRMISH_PENALTY,
   DEFAULT_CROWN_BONUS,
+  DEFAULT_CUT_GAIN,
+  DEFAULT_CUT_CAP,
+  DEFAULT_FOCUS_RAID,
+  DEFAULT_MASS_GAIN,
 };

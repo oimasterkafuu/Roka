@@ -294,11 +294,6 @@ function chooseOrders(b, turn, leaderboard, multi) {
     !tile.some((t, i) => ownerOf(t) === me && (!army[i] || b.isolated[i]))
   ) {
     const orders = openingOrder(b, teams, homes, turn, enemyDist, multi);
-    if (process.env.BOT3_TRACE && turn >= 22)
-      console.log(
-        'OPEN ' +
-          JSON.stringify({ turn, me, multi, land: b.opening?.land, upper: b.opening?.upper, nodes: b.opening?.nodes, orders: orders?.length }),
-      );
     const tacticalCapture = enemies.some(
       (i) =>
         crown(tile[i]) &&
@@ -736,70 +731,6 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // A fully blocked frame must not idle: keep the previous behaviour when no
   // lane passed the guard (the cooldown expires within four ticks).
   if (maze && !orders.length && candidates.length) take(candidates[0]);
-  if (process.env.BOT3_TRACE2 && turn >= 44 && turn <= 90) {
-    const mine = [];
-    for (let i = 0; i < size; i++)
-      if (ownerOf(tile[i]) === me && army[i] >= 8) mine.push([i, army[i], tile[i]]);
-    mine.sort((a, c) => c[1] - a[1]);
-    console.log(
-      'T2 ' +
-        JSON.stringify({
-          turn,
-          me,
-          homes: homes.map((i) => [i, army[i], enemies.filter((e) => neighbors[i].includes(e)).length]),
-          targets: targets.map((i) => [i, army[i], Math.min(999, ...neighbors[i].map((j) => army[j]))]),
-          stacks: mine.slice(0, 5),
-          orders: orders.map((o) => [o.from, o.to, o.build ? o.build : o.mode, Math.round(candidates.find((c) => c.from === o.from && c.to === o.to)?.score ?? -1)]),
-        }),
-    );
-  }
-  if (process.env.BOT3_TRACE) {
-    const land = tile.reduce((n, t, i) => n + Number(ownerOf(t) === me), 0);
-    let ownArmy = 0;
-    for (let i = 0; i < size; i++) if (ownerOf(tile[i]) === me) ownArmy += army[i];
-    console.log(
-      'TRACE ' +
-        JSON.stringify({
-          turn,
-          me,
-          multi,
-          homes: homes.length,
-          land,
-          ownArmy,
-          selfArmy: self.army,
-          borders: borders.length,
-          enemies: enemies.length,
-          targets: targets.length,
-          orders: orders.length,
-          cands: candidates.length,
-          builds: orders.filter((o) => o.build).length,
-          single,
-          topCand: candidates.slice(0, 6).map((c) => [c.score | 0, c.from, c.to, c.build ?? '']),
-          kind: orders.map((o) => (o.build ? 'b' : !teams[o.to] ? 'n' : teams[o.to] === myTeam ? 'o' : 'h')),
-          expandable: (() => {
-            let n = 0;
-            for (let i = 0; i < size; i++) {
-              if (teams[i] !== myTeam || units[i] < 2) continue;
-              if (neighbors[i].some((j) => !teams[j] && tile[j] !== 201)) n++;
-            }
-            return n;
-          })(),
-          neutralFront: (() => {
-            let best = 1e9, sum = 0, cnt = 0;
-            for (let i = 0; i < size; i++) {
-              if (teams[i] !== myTeam) continue;
-              for (const j of neighbors[i]) {
-                if (teams[j] || tile[j] === 201) continue;
-                best = Math.min(best, units[j]);
-                sum += units[j];
-                cnt++;
-              }
-            }
-            return [cnt, best === 1e9 ? -1 : best, cnt ? Math.round(sum / cnt) : -1];
-          })(),
-        }),
-    );
-  }
   return orders;
 }
 
