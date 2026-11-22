@@ -5,7 +5,6 @@ import vm from 'node:vm';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 const require = createRequire(import.meta.url);
 const { GameEngine } = require('../dist/game-engine.js');
 const { deserialize, serialize } = require('node:v8');
@@ -139,16 +138,10 @@ const evidence = readFileSync(new URL('./fixtures/replay-143-danrgjM9hfR7.rpl', 
 assert.equal(getReplayId(evidence), 'danrgjM9hfR7');
 const raw = deserialize(brotliDecompressSync(evidence));
 assert.equal(raw.total_turns, 2151);
-assert.equal(raw.afk_surrenders, undefined, 'old recordings remain supported');
+assert.equal(raw.afk_surrenders, undefined, 'the recording contains no explicit AFK events');
 const original = await GameEngine.buildReplayFromActions(raw);
 assert.equal(original.patches.length, 2151);
 assert.equal(original.patches[599].forward.game_end, false);
 assert.equal(original.patches[599].forward.leaderboard.filter((p) => p.class_ !== 'dead').length, 2);
 assert.equal(original.patches.at(-1).forward.game_end, true);
 console.log('public raw replay danrgjM9hfR7 reaches tick 2151; tick 600 is not terminal');
-
-assert.equal(
-  createHash('sha256').update(encodeReplayPatchBinary(original)).digest('hex'),
-  '7d78a64e30035dad60ac115ed94dfb41dac16687d65938b05397ef57543b6813',
-  'legacy reconstruction remains byte-identical to the public RPB captured during investigation',
-);

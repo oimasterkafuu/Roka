@@ -555,7 +555,10 @@ socket.on('set_id', (id) =&gt; {
             </tr>
             <tr>
               <th>爆发期</th>
-              <td>第 26~50 Tick，正常普通领土每 Tick 额外 +1；第 50 Tick 可与基础增兵叠加。</td>
+              <td>
+                仅单线模式在第 26~50 Tick 为正常普通领土每 Tick 额外 +1，第 50 Tick 合计
+                +2。多线模式没有爆发期，第 50 Tick 仅按基础规则 +1。
+              </td>
             </tr>
             <tr>
               <th>沼泽与中立格</th>

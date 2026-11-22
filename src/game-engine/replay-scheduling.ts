@@ -1,91 +1,89 @@
 import { MOVE_DX, MOVE_DY } from '../map/map-core';
-import { MoveMode, ReplayActionData, ReplayMoveDirection, ReplayExecutedOp } from '../types';
+import type { ReplayActionData, ReplayExecutedOp } from '../types';
 
-type Move = [number, number, number, number, MoveMode];
-
-interface ScheduledBuild {
-  kind: 'b' | 'c';
-  x: number;
-  y: number;
-}
-
-interface ScheduledReplayActions {
-  scheduledBatches: Array<Map<number, ReplayExecutedOp[]>>;
-  scheduledMoves: Array<Map<number, Move>>;
-  scheduledBuilds: Array<Map<number, ScheduledBuild>>;
-  scheduledSurrenders: Array<Set<number>>;
-  scheduledTransfers: Array<Map<number, { x: number; y: number }>>;
-}
-
-const buildScheduledReplayActions = (replay: ReplayActionData): ScheduledReplayActions => {
+const buildScheduledReplayActions = (replay: ReplayActionData, rows: number, cols: number) => {
+  if (
+    !Number.isSafeInteger(replay.total_turns) ||
+    replay.total_turns < 0 ||
+    !Array.isArray(replay.player_ops) ||
+    replay.player_ops.length !== replay.meta.player_names.length ||
+    replay.player_ops.length !== replay.meta.player_teams.length
+  ) {
+    throw new Error('回放不兼容：无效的回合数或玩家操作流。');
+  }
   const scheduledBatches = replay.player_ops.map(() => new Map<number, ReplayExecutedOp[]>());
-  const scheduledMoves = replay.player_ops.map(() => new Map<number, Move>());
-  const scheduledBuilds = replay.player_ops.map(() => new Map<number, ScheduledBuild>());
   const scheduledSurrenders = replay.player_ops.map(() => new Set<number>());
-  const scheduledTransfers = replay.player_ops.map(() => new Map<number, { x: number; y: number }>());
+  const onMap = (x: number, y: number) =>
+    Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < rows && y >= 0 && y < cols;
 
-  for (let p = 0; p < replay.player_ops.length; p += 1) {
-    const ops = replay.player_ops[p];
-    let cursorTurn = 1;
+  for (const [player, ops] of replay.player_ops.entries()) {
+    let turn = 1;
     let selected: [number, number] | null = null;
+    const invalid = () => new Error(`回放不兼容：玩家 ${player + 1} 在 Tick ${turn} 的操作无效。`);
+    const batch = (actions: ReplayExecutedOp[]) => {
+      if (!Array.isArray(actions) || !actions.length) throw invalid();
+      if (!replay.meta.multi_line && actions.length > 1) {
+        throw new Error('Single-line replay contains multiple actions in one tick.');
+      }
+      for (const action of actions) {
+        if (!action || !onMap(action.x, action.y)) throw invalid();
+        if (action.kind === 'm') {
+          if (!onMap(action.dx, action.dy) || ![0, 1, 2].includes(action.mode)) throw invalid();
+        } else if (action.kind !== 'b' && action.kind !== 'c') throw invalid();
+      }
+      scheduledBatches[player].set(turn++, actions);
+    };
 
+    if (!Array.isArray(ops)) throw invalid();
     for (const op of ops) {
-      if (op.op === 'q') {
-        if (!replay.meta.multi_line && op.actions.length > 1) {
-          throw new Error('Single-line replay contains multiple actions in one tick.');
+      if (!op || turn > replay.total_turns) throw invalid();
+      switch (op.op) {
+        case 'w':
+          if (!Number.isSafeInteger(op.n) || op.n < 1 || op.n > replay.total_turns - turn + 1)
+            throw invalid();
+          turn += op.n;
+          break;
+        case 's':
+          if (!onMap(op.x, op.y)) throw invalid();
+          selected = [op.x, op.y];
+          break;
+        case 'r':
+          scheduledSurrenders[player].add(turn++);
+          selected = null;
+          break;
+        case 'q':
+          batch(op.actions);
+          selected = null;
+          break;
+        case 'b':
+        case 'c':
+          if (!selected) throw invalid();
+          batch([{ kind: op.op, x: selected[0], y: selected[1] }]);
+          break;
+        case 'm': {
+          if (
+            !selected ||
+            !Number.isInteger(op.d) ||
+            op.d < 0 ||
+            op.d >= MOVE_DX.length ||
+            (op.a !== undefined && op.a !== 1) ||
+            (op.h !== undefined && op.h !== 1) ||
+            (op.a && op.h)
+          )
+            throw invalid();
+          const [x, y]: [number, number] = selected;
+          const dx: number = x + MOVE_DX[op.d];
+          const dy: number = y + MOVE_DY[op.d];
+          batch([{ kind: 'm', x, y, dx, dy, mode: op.a ? 2 : op.h ? 1 : 0 }]);
+          selected = [dx, dy];
+          break;
         }
-        scheduledBatches[p].set(cursorTurn, op.actions);
-        cursorTurn += 1;
-        selected = null;
-        continue;
+        default:
+          throw invalid();
       }
-      if (op.op === 'w') {
-        cursorTurn += Math.max(0, op.n);
-        continue;
-      }
-      if (op.op === 's') {
-        selected = [op.x, op.y];
-        continue;
-      }
-      if (op.op === 'r') {
-        scheduledSurrenders[p].add(cursorTurn);
-        selected = null;
-        cursorTurn += 1;
-        continue;
-      }
-      // 历史 ops-v1 显式转让记录：自带目标坐标，不经过 selected。
-      if (op.op === 't') {
-        scheduledTransfers[p].set(cursorTurn, { x: op.x, y: op.y });
-        cursorTurn += 1;
-        continue;
-      }
-      if (!selected) {
-        continue;
-      }
-      if (op.op === 'b' || op.op === 'c') {
-        scheduledBuilds[p].set(cursorTurn, { kind: op.op, x: selected[0], y: selected[1] });
-        cursorTurn += 1;
-        continue;
-      }
-
-      const dir = op.d as ReplayMoveDirection;
-      const dx = selected[0] + MOVE_DX[dir];
-      const dy = selected[1] + MOVE_DY[dir];
-      const mode: MoveMode = op.a === 1 ? 2 : op.h === 1 ? 1 : 0;
-      scheduledMoves[p].set(cursorTurn, [selected[0], selected[1], dx, dy, mode]);
-      selected = [dx, dy];
-      cursorTurn += 1;
     }
   }
-
-  return {
-    scheduledBatches,
-    scheduledMoves,
-    scheduledBuilds,
-    scheduledSurrenders,
-    scheduledTransfers,
-  };
+  return { scheduledBatches, scheduledSurrenders };
 };
 
 export { buildScheduledReplayActions };
-export type { ScheduledBuild };

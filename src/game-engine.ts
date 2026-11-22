@@ -124,13 +124,6 @@ const clampMapSizeRatio = (value: number): number => {
   return Math.max(0.2, Math.min(3, value));
 };
 
-const resolveRuntimeMapSizeRatio = (ratio: number, mapSizeVersion: 1 | 2): number => {
-  if (mapSizeVersion === 1) {
-    return ratio / 2 + 0.5;
-  }
-  return ratio;
-};
-
 const MOVE_DX = [-1, 1, 0, 0];
 const MOVE_DY = [0, 0, -1, 1];
 
@@ -249,9 +242,6 @@ export class GameEngine {
 
   private readonly replayAfkSurrenders: Array<[number, number]> = [];
 
-  /** 历史 ops-v1 未标记自动转属，重建时必须沿用旧推兵语义。 */
-  private readonly autoCrownTransfer: boolean;
-  private readonly isolatedReinforcementFix: boolean;
   private isolatedReinforced: Grid<boolean> = [];
 
   private readonly externalSpectatorSids: Set<string>;
@@ -350,19 +340,12 @@ export class GameEngine {
     this.rng = new SeededRandom(this.mapSeed);
     const seededCityRatio = resolveSeededTerrainRatio(this.mapSeed, 'city_ratio');
     const seededMountainRatio = resolveSeededTerrainRatio(this.mapSeed, 'mountain_ratio');
-    const mapSizeVersion: 1 | 2 = gameConf.map_size_version ?? (gid === '__replay_build__' ? 1 : 2);
-
-    this.widthRatio = clampMapSizeRatio(resolveRuntimeMapSizeRatio(gameConf.width_ratio, mapSizeVersion));
-    this.heightRatio = clampMapSizeRatio(resolveRuntimeMapSizeRatio(gameConf.height_ratio, mapSizeVersion));
+    this.widthRatio = clampMapSizeRatio(gameConf.width_ratio);
+    this.heightRatio = clampMapSizeRatio(gameConf.height_ratio);
     this.cityRatio = seededCityRatio;
     this.mountainRatio = seededMountainRatio;
     this.swampRatio = gameConf.swamp_ratio;
-    this.autoCrownTransfer = gid !== '__replay_build__' || gameConf.auto_crown_transfer === true;
-    this.isolatedReinforcementFix =
-      gid !== '__replay_build__' || gameConf.isolated_reinforcement_fix === true;
     this.replayMeta = {
-      isolated_reinforcement_fix: this.isolatedReinforcementFix,
-      auto_crown_transfer: true,
       width_ratio: gameConf.width_ratio,
       height_ratio: gameConf.height_ratio,
       city_ratio: seededCityRatio,
@@ -377,7 +360,6 @@ export class GameEngine {
       map_region: this.mapRegion,
       player_names: [...gameConf.player_names],
       player_teams: [...gameConf.player_teams],
-      map_size_version: mapSizeVersion,
       map_size: gameConf.map_size === 'large' ? 'large' : 'normal',
     };
 
@@ -450,7 +432,6 @@ export class GameEngine {
         allow_team: meta.allow_team ?? false,
         fog: meta.fog === true,
         multi_line: meta.multi_line === true,
-        map_size_version: meta.map_size_version ?? 1,
         map_size: meta.map_size ?? 'normal',
         map_region: normalizeMapRegion(meta.map_region),
       },
@@ -493,11 +474,8 @@ export class GameEngine {
         allow_team: replay.meta.allow_team ?? false,
         fog: replay.meta.fog === true,
         multi_line: replay.meta.multi_line === true,
-        map_size_version: replay.meta.map_size_version ?? 1,
         map_size: replay.meta.map_size ?? 'normal',
         map_region: normalizeMapRegion(replay.meta.map_region),
-        auto_crown_transfer: replay.meta.auto_crown_transfer === true,
-        isolated_reinforcement_fix: replay.meta.isolated_reinforcement_fix === true,
       },
       dummyPlayerSids,
       dummyPlayerIds,
@@ -518,11 +496,20 @@ export class GameEngine {
     await engine.initializeMap();
     engine.selectGenerals();
 
-    const { scheduledBatches, scheduledMoves, scheduledBuilds, scheduledSurrenders, scheduledTransfers } =
-      buildScheduledReplayActions(replay);
+    const { scheduledBatches, scheduledSurrenders } = buildScheduledReplayActions(replay, engine.n, engine.m);
 
     const afkSurrenders = new Map<number, number[]>();
     for (const [turn, player] of replay.afk_surrenders ?? []) {
+      if (
+        !Number.isInteger(turn) ||
+        turn < 1 ||
+        turn > replay.total_turns ||
+        !Number.isInteger(player) ||
+        player < 0 ||
+        player >= dummyPlayerSids.length
+      ) {
+        throw new Error('回放不兼容：无效的挂机投降记录。');
+      }
       const players = afkSurrenders.get(turn) ?? [];
       players.push(player);
       afkSurrenders.set(turn, players);
@@ -537,28 +524,9 @@ export class GameEngine {
         if (!scheduledSurrenders[p].has(nextTurn)) {
           continue;
         }
-        engine.surrender(engine.playerSids[p]);
-      }
-      for (let p = 0; p < scheduledTransfers.length; p += 1) {
-        const transfer = scheduledTransfers[p].get(nextTurn);
-        if (!transfer) {
-          continue;
+        if (!engine.applySurrenderByIndex(p, 'manual_surrender')) {
+          throw new Error(`回放不兼容：玩家 ${p + 1} 无法在 Tick ${nextTurn} 投降。`);
         }
-        engine.applyCrownTransfer(p, transfer.x, transfer.y);
-      }
-      for (let p = 0; p < scheduledBuilds.length; p += 1) {
-        const build = scheduledBuilds[p].get(nextTurn);
-        if (!build) {
-          continue;
-        }
-        engine.addBuild(engine.playerSids[p], build.x, build.y, build.kind);
-      }
-      for (let p = 0; p < scheduledMoves.length; p += 1) {
-        const move = scheduledMoves[p].get(nextTurn);
-        if (!move) {
-          continue;
-        }
-        engine.addMove(engine.playerSids[p], move[0], move[1], move[2], move[3], move[4]);
       }
 
       // These are already-executed batches, not pending topology/queue snapshots.
@@ -571,6 +539,14 @@ export class GameEngine {
         }
       }
       const gameEnd = await engine.gameTick(afkSurrenders.get(nextTurn), executedPlayers);
+      for (const player of executedPlayers) {
+        if (engine.executedTurnMoves[player].length !== scheduledBatches[player].get(nextTurn)!.length) {
+          throw new Error(`回放不兼容：玩家 ${player + 1} 在 Tick ${nextTurn} 的操作未能执行。`);
+        }
+      }
+      if (gameEnd && nextTurn < replay.total_turns) {
+        throw new Error(`回放不兼容：对局在 Tick ${nextTurn} 提前结束。`);
+      }
       const isFinalFrame = gameEnd || engine.turn >= replay.total_turns;
       const nextFrame = engine.buildReplayFrame(isFinalFrame);
       patches.push(buildReplayPatch(prevFrame, nextFrame));
@@ -587,7 +563,7 @@ export class GameEngine {
     return {
       n: engine.n,
       m: engine.m,
-      meta: replay.meta,
+      meta: engine.replayMeta,
       initial,
       patches,
     };
@@ -1450,12 +1426,7 @@ export class GameEngine {
     const attacker = this.owner[x][y];
     const defender = this.owner[dx][dy];
 
-    if (
-      this.isolatedReinforcementFix &&
-      this.isolated[dx][dy] &&
-      defender > 0 &&
-      this.team[defender - 1] === this.team[attacker - 1]
-    ) {
+    if (this.isolated[dx][dy] && defender > 0 && this.team[defender - 1] === this.team[attacker - 1]) {
       // 接收新兵后，本次孤军周期不再享有重连翻倍（含自有及存活/已故队友）。
       this.isolatedReinforced[dx][dy] = true;
     }
@@ -1471,7 +1442,7 @@ export class GameEngine {
       this.armyCnt[dx][dy] += cnt;
       if (
         this.gridType[dx][dy] !== -2 ||
-        (this.autoCrownTransfer && this.pstat[defender - 1] !== LEFT_GAME && this.countCrowns(defender) >= 2)
+        (this.pstat[defender - 1] !== LEFT_GAME && this.countCrowns(defender) >= 2)
       ) {
         this.owner[dx][dy] = attacker;
       }
@@ -1670,6 +1641,7 @@ export class GameEngine {
 
     applyTickGrowth({
       turn: this.turn,
+      multiLine: this.multiLine,
       n: this.n,
       m: this.m,
       gridType: this.gridType,
@@ -1798,7 +1770,9 @@ export class GameEngine {
     }
     // Recorded AFK events occur after moves/connectivity, just like the live check.
     for (const player of replayAfkSurrenders) {
-      this.applySurrenderByIndex(player, 'afk');
+      if (!this.applySurrenderByIndex(player, 'afk')) {
+        throw new Error(`回放不兼容：玩家 ${player + 1} 无法在 Tick ${this.turn} 挂机投降。`);
+      }
     }
     this.applyAfkSurrender(nowMs);
 
@@ -1838,30 +1812,6 @@ export class GameEngine {
     }
     this.sendSystemMessage(`${this.names[id]} 投降并转为观战。`);
     this.scheduleImmediateTick();
-  }
-
-  /** 仅用于重建旧 ops-v1 的显式转让操作；实时对局不再提供该入口。 */
-  private applyCrownTransfer(requester: number, x: number, y: number): boolean {
-    if (this.finished || !this.chkxy(x, y)) {
-      return false;
-    }
-    const giverId = this.owner[x][y];
-    if (giverId <= 0) {
-      return false;
-    }
-    const giver = giverId - 1;
-    if (
-      this.gridType[x][y] !== -2 ||
-      giver === requester ||
-      this.team[giver] !== this.team[requester] ||
-      this.pstat[giver] === LEFT_GAME ||
-      this.pstat[requester] === LEFT_GAME ||
-      this.countCrowns(giverId) < 2
-    ) {
-      return false;
-    }
-    this.owner[x][y] = requester + 1;
-    return true;
   }
 
   private applyAfkSurrender(nowMs: number): void {

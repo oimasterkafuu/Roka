@@ -131,7 +131,7 @@ _一句话：统一 presence：touch/在线窗口/落盘节流/重启恢复。_
 
 **src/game-engine.ts** — 对局核心：全状态 + Tick 主循环；默认无迷雾全图广播，迷雾对局按接收者视野过滤（见 fog-vision.ts）。
 
-`GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X 建指挥所、C 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连 ×2）→ AFK 判定 → 胜负判定 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量；`buildSnapshotFor` 按接收者出快照：迷雾对局中存活参赛者经 fog-vision 过滤并附 `fog` 数组，观战/出局者默认全视野+全 0 fog，`fogLast` 按玩家做 diff 基线；观战者经 `spectatorViewTeams`（sid→队伍）选了玩家视角时改收该队伍迷雾帧——`setSpectatorView` 校验非存活参赛者后记录偏好并立即补发全量帧同步 diff 基线；外部观战者按 `spectatorSnapshotLast` 独立维护差分基线，复用 tick 级 visionCache，不退回每 tick 全量；队伍全员淘汰后已选/新选该视角均安全回退全图，存活但尚未选主城的队伍仍保持自身迷雾视野）。v3 全局队列：每玩家一个全局大队列（`pmove: QueuedOp[]`，操作按到达顺序入队，入队分配单调递增 seq），不再有战线编号与队列路由。Tick 调度按房间开关 `multi_line`（`multiLine`）分派两种模式：单线串行（默认，`multi_line=false`）——每 Tick 每玩家只从大队列头部依次弹出指令，丢弃失效指令（chkMove/attack 失败、chkBuildCity/chkUpgradeCrown 不满足），直到成功执行第一条有效指令为止，本 Tick 不再执行后续；全局队列并行（`multi_line=true`，issue #107）——把队列里的移动指令看作有向边 (x,y)→(dx,dy)，所有入度为 0 的头部指令各执行一步（chkMove+attack，失效即丢弃），头部出队后下一格指令下一 Tick 自动成为新头部；拓扑剥离后仍成环的移动指令每 Tick 按入队序强制尝试 seq 最小的一条以打破死锁（失效则正常丢弃，issue #121）；建造指令（b/c）不参与入度图，当该格不再是任何待发移动指令的出发格时尝试执行，条件不满足即丢弃；空队列不耗 Tick，单链节奏与单线一致。两种模式的汇报协议同为 `lst_moves: number[]`（本 Tick 所有出队项的 seq，含执行与丢弃，客户端按 seq 摘除本地镜像队列）；`init_map` 开局附 `next_seq/queue_ops`，多线对局另附 `multi_line: true`（单线缺省即旧协议行为）；回放 ops-v1 协议不变，旧回放 `lst_move` 标量格式在回放重建路径兼容。Q/E（`retractLast`）撤回大队列尾部最后一条指令。对外接口：`addMove/addBuild/retractLast/clearQueue/popQueue/addSpectator/setSpectatorView/sendMessage/surrender/leaveGame`（server.ts 把 `pop_queue` 分派到 `retractLast` 撤回全局最后一条（E 键），`clear_queue` 不分模式一律分派到 `clearQueue` 清空操作队列（Q 键，issue #120））。友军推兵进入存活队友主城时累兵；当刻原拥有者主城数 ≥2 则 owner 自动转属出兵玩家，最后一座只累兵；`auto_crown_transfer` 回放元数据标记新规则，旧回放缺省时保持旧推兵语义并可读取显式 `t` 转让。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、迁移观战视角偏好、补发 `init_map`（携带 `next_seq`/`queue_ops` 序号同步字段，客户端据此对齐本地 seq 计数，修复断线重连后 lst_moves 错位）+全量帧——迷雾对局按该玩家视野或其选择的观战视角过滤，并把 diff 基线对齐到补发快照）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。部署清算 `forceFinish(endMessage)`：停表后走正常终局路径（`sendMap(true)` 存档回放 + `finishGame` 结算，`buildGameResult` 以当前排行榜名次出结果），与正常终局共用 `finished` 幂等守卫防重复结算；`finishGame` 支持自定义结束消息（清算时不报「获胜」）。回放：终局 `saveHistory` 存 ops-v1 操作流；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（回放重建、地图示例均走此路，回放始终全视野不含 fog）。
+`GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X 建指挥所、C 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连 ×2）→ AFK 判定 → 胜负判定 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量；`buildSnapshotFor` 按接收者出快照：迷雾对局中存活参赛者经 fog-vision 过滤并附 `fog` 数组，观战/出局者默认全视野+全 0 fog，`fogLast` 按玩家做 diff 基线；观战者经 `spectatorViewTeams`（sid→队伍）选了玩家视角时改收该队伍迷雾帧——`setSpectatorView` 校验非存活参赛者后记录偏好并立即补发全量帧同步 diff 基线；外部观战者按 `spectatorSnapshotLast` 独立维护差分基线，复用 tick 级 visionCache，不退回每 tick 全量；队伍全员淘汰后已选/新选该视角均安全回退全图，存活但尚未选主城的队伍仍保持自身迷雾视野）。v3 全局队列：每玩家一个全局大队列（`pmove: QueuedOp[]`，操作按到达顺序入队，入队分配单调递增 seq），不再有战线编号与队列路由。Tick 调度按房间开关 `multi_line`（`multiLine`）分派两种模式：单线串行（默认，`multi_line=false`）——每 Tick 每玩家只从大队列头部依次弹出指令，丢弃失效指令（chkMove/attack 失败、chkBuildCity/chkUpgradeCrown 不满足），直到成功执行第一条有效指令为止，本 Tick 不再执行后续；全局队列并行（`multi_line=true`，issue #107）——把队列里的移动指令看作有向边 (x,y)→(dx,dy)，所有入度为 0 的头部指令各执行一步（chkMove+attack，失效即丢弃），头部出队后下一格指令下一 Tick 自动成为新头部；拓扑剥离后仍成环的移动指令每 Tick 按入队序强制尝试 seq 最小的一条以打破死锁（失效则正常丢弃，issue #121）；建造指令（b/c）不参与入度图，当该格不再是任何待发移动指令的出发格时尝试执行，条件不满足即丢弃；空队列不耗 Tick，单链节奏与单线一致。两种模式的汇报协议同为 `lst_moves: number[]`（本 Tick 所有出队项的 seq，含执行与丢弃，客户端按 seq 摘除本地镜像队列）；`init_map` 开局附 `next_seq/queue_ops`，多线对局另附 `multi_line: true`（单线缺省即旧协议行为）；回放 ops-v1 协议不变，旧回放 `lst_move` 标量格式在回放重建路径兼容。Q/E（`retractLast`）撤回大队列尾部最后一条指令。对外接口：`addMove/addBuild/retractLast/clearQueue/popQueue/addSpectator/setSpectatorView/sendMessage/surrender/leaveGame`（server.ts 把 `pop_queue` 分派到 `retractLast` 撤回全局最后一条（E 键），`clear_queue` 不分模式一律分派到 `clearQueue` 清空操作队列（Q 键，issue #120））。友军推兵进入存活队友主城时累兵；当刻原拥有者主城数 ≥2 则 owner 自动转属出兵玩家，最后一座只累兵；原始回放一律按当前推兵规则重建，显式 `t` 转让不兼容。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、迁移观战视角偏好、补发 `init_map`（携带 `next_seq`/`queue_ops` 序号同步字段，客户端据此对齐本地 seq 计数，修复断线重连后 lst_moves 错位）+全量帧——迷雾对局按该玩家视野或其选择的观战视角过滤，并把 diff 基线对齐到补发快照）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。部署清算 `forceFinish(endMessage)`：停表后走正常终局路径（`sendMap(true)` 存档回放 + `finishGame` 结算，`buildGameResult` 以当前排行榜名次出结果），与正常终局共用 `finished` 幂等守卫防重复结算；`finishGame` 支持自定义结束消息（清算时不报「获胜」）。回放：终局 `saveHistory` 存 ops-v2 操作流；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（回放重建、地图示例均走此路，回放始终全视野不含 fog）。
 
 **src/game-engine/constants.ts** — 数值常量集中地。
 `LEFT_GAME=52`、`AFK_MIN_TURNS=60`/`AFK_MIN_MS=60_000`（挂机投降需同时满足）、`DISCONNECT_GRACE_MS=10_000`（掉线宽限，1 倍速=20 tick）、`ISOLATED_DECAY_RATIO=0.05`、`ISOLATED_GRACE_TICKS=10`、`FOG_VISION_RADIUS=1`（迷雾视野切比雪夫半径）。调平衡数值只改这里。
@@ -157,16 +157,16 @@ _一句话：队伍视野计算 + 视野外快照过滤。_
 `getDiff` 生成 `[index, value]` 对（实时 diff 帧同用）；`buildReplayPatch` 生成 forward/backward 双向 patch；`toMoveDirection` 坐标→方向索引。
 _一句话：回放/实时帧 diff 与 patch 构建。_
 
-**src/game-engine/replay-turns.ts** — 每 tick 操作 → ops-v1 紧凑操作流（存储格式）。
-无操作累加 `w n`、投降 `r`、历史主城转让 `t x y`（兼容读取，自带坐标、不动 selected 链）、选中变化 `s x y`、建造 `b/c`、移动 `m`+方向+`h/a` 修饰。与 `replay-scheduling.ts` 互为逆变换，**改动需成对检查**。
-_一句话：每 tick 操作 → ops-v1 紧凑操作流。_
+**src/game-engine/replay-turns.ts** — 每 tick 操作 → ops-v2 紧凑操作流（存储格式）。
+无操作累加 `w n`，投降记录为 `r`，成功的推兵、建造与升级按实际执行顺序记录为 `q.actions`。与 `replay-scheduling.ts` 互为逆变换，**改动需成对检查**。
+_一句话：每 tick 操作 → ops-v2 紧凑操作流。_
 
-**src/game-engine/replay-scheduling.ts** — ops-v1 操作流 → 按回合调度的动作表。
-遍历 op 序列还原 `scheduledMoves/Builds/Surrenders/Transfers` 四张 per-player turn→action 表，供 `buildReplayFromActions` 逐 tick 喂回引擎。
-_一句话：ops-v1 操作流 → 按回合调度的动作表。_
+**src/game-engine/replay-scheduling.ts** — ops-v1 / ops-v2 操作流 → 按回合调度的动作表。
+校验坐标、操作和回合，将选中格指令或动作批次解码为 `scheduledBatches` 与 `scheduledSurrenders`。`buildReplayFromActions` 按当前规则逐 tick 重建，无法执行任何一条已记录操作即判为不兼容。
+_一句话：ops-v1 / ops-v2 操作流 → 按回合调度的动作表。_
 
 **src/game-engine/tick-growth.ts** — 兵力增长规则。
-主城每 tick +1；普通格每 50 tick +1（孤军不产）；26–50 tick 爆发期普通格每 tick 额外 +1；指挥所不吃爆发；沼泽/中立永不产兵。
+主城每 tick +1；正常普通格与指挥所每 50 tick +1。仅单线的正常普通格在第 26–50 tick 每 tick 额外 +1（第 50 tick 合计 +2）；多线没有爆发加成。孤军、沼泽和中立格不产兵。`scripts/test-tick-growth.mjs` 覆盖两种模式下的增长边界，纳入 `pnpm test`。
 _一句话：主城/地块/爆发期兵力增长规则。_
 
 ### 地图生成（src/map/，纯函数层）
@@ -427,13 +427,13 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **scripts/test-storage.mjs** — `pnpm run test:storage`：存储层回归（issue #67）——临时数据目录驱动 dist 四个 Store：突发连续写入状态完整（合并写不丢状态）、`.bak` 备份生成与主文件损坏自动回退、旧格式（v8+brotli q6 历史写法）文件原样可读、回放索引内存缓存/重启恢复/index.bin 损坏回退/deleteReplay 清理、公告损坏回退；需先 `pnpm run build`。
 - **scripts/test-mentions.mjs** — `pnpm run test:mentions`：@提及回归（issue #74）——`parseMentionTokens` 边界（去重/邮箱/短于 3 位/长于 20 位/`@@`/词内）与 `renderMentionsInHtml` 行为（命中渲染链接、未命中降级文本、code/pre/a 内不替换、邮箱样文本不替换）＋ `renderRichTextWithMentions` 消毒集成；再用临时数据目录驱动 dist `FeedStore` 验证动态/评论 mentions 落库、重启保留，并手写不含 mentions 的旧格式 `feeds.bin` 验证向后兼容；需先 `pnpm run build`。
 
-- **scripts/test-crown-transfer.mjs** — `pnpm run test:crown-transfer`：自动主城转属单元冒烟——直接驱动 dist `GameEngine`（运行时访问 private 字段布置棋盘），覆盖同队多主城自动转属、最后一座仅累兵、来源保留、cnt=0、三种推兵模式、普通地/指挥所/敌方主城回归，以及旧显式转让入口兼容；需先 `pnpm run build`。
+- **scripts/test-crown-transfer.mjs** — `pnpm run test:crown-transfer`：自动主城转属单元冒烟——直接驱动 dist `GameEngine`（运行时访问 private 字段布置棋盘），覆盖同队多主城自动转属、最后一座仅累兵、来源保留、cnt=0、三种推兵模式、普通地/指挥所/敌方主城回归；需先 `pnpm run build`。
 - **scripts/test-admin-badge.mjs** — `pnpm run test:admin-badge`：管理员与封禁用户名外观（issue #95/#97）回归——第一部分用 node vm + 最小 jQuery/fetch 桩驱动 `static/username.js`（管理员 rt-admin + Headquarters tooltip、无徽标、普通用户不变、撤权恢复 rating）；第二部分临时数据目录起 dist 服务，断言 /api/user-colors、/api/users/search、/api/profile、/api/leaderboard、/api/online、/api/feeds 帖子与评论、/api/admin/users 的管理员与普通用户外观；需先 `pnpm run build`。
 - **scripts/test-asset-versioning.mjs** — `pnpm run test:asset-versioning`（纳入 `pnpm test`）：静态资源版本号注入回归——临时数据目录起 dist 服务，断言首页与对局页（/games/:id，造用户登录）响应中全部本地 .js/.css 引用携带 `?v=<package.json version>`、/main.css 响应的 @import 行携带同一版本号、带 ?v= 的静态资源请求返回 200 且内容正确（模板文件占位符已替换、@fastify/static 直发文件忽略未知 query）、模板路由 ETag/If-None-Match 304 缓存语义保持；需先 `pnpm run build`。
 - **scripts/analyze-replay-compression.mjs** — 回放存储压缩评估（issue #67）：扫描 `data/replays/*.rpl` 统计操作流特征（op 类型分布、选中切换占比）并对比候选编码体积（现状 v8+brotli q6 / q11 / 文本 DSL / 二进制打包）；`--limit=N` 限定扫描数量。
 - **scripts/observe-bot-match.mjs** — `pnpm run observe:bot`：对局观测/病理分析——临时数据目录起 dist 服务 + 进程内观战 recorder 逐 turn 录完整盘面（`frames.jsonl`），按 `OBS_BOTS` 启动 bot 组合（`strategy:`/`random:`/`legacy:` 前缀，`legacy` 从 git main 导出旧版做 A/B 基准），赛后生成 `report.txt`（往返抖动/送兵/前线停滞/切断无救援/主城沦陷时闲散兵力）；环境变量 `OBS_SPEED`/`OBS_MAP_TOKEN`/`OBS_MAP_MODE`/`OBS_OUT`/`OBS_MAX_MS`，输出默认 `data/observe-*/`（gitignored）。
 - **scripts/replay-bot-decisions.mjs** — bot 决策离线复盘：假 socket 驱动真实 `strategy.js` 逐 turn 重放观测目录的 `frames.jsonl`（队列执行按服务端 `chkMove`/`chkBuild` 语义模拟），完整复现跨 tick 决策状态；支持 `--validate`（与 bot 日志逐 op 比对）、`--from/--to`、`--board`、`--cell` 盘面解释；配 `BOT_TRACE=1/2` 输出进攻评估/焦点/候选榜。
-- **scripts/extract-replay-frames.mjs** — 回放转帧：从 `data/replays/<id>.rpl`（ops-v1）经 dist 引擎重放提取逐 turn 全量帧，输出 `data/observe-<id>/frames.jsonl` + `meta.json`，供 replay-bot-decisions.mjs 与分析脚本使用。
+- **scripts/extract-replay-frames.mjs** — 回放转帧：从 `data/replays/<id>.rpl`（ops-v1 / ops-v2）经 `buildReplayFromActions` 校验、重建并展开逐 turn 全量帧，输出 `data/observe-<id>/frames.jsonl` + `meta.json`，供 replay-bot-decisions.mjs 与分析脚本使用。
 - **scripts/analyze-game.mjs** — 对局病理分析：基于 observe 目录帧 + 回放 ops 流，汇总逐 turn 双方 land/army、bot 大兵堆位置与距敌距离、进攻时间线。
 - **scripts/show-board.mjs** — 复盘打印：输出 observe 目录指定 turn 的 ASCII 棋盘与每格兵力。
 - **bot-template/relay-bot/** — `index.js` 为 CLI，支持 `BOT_ONCE=1` 在完成一整局后断开并退出；`strategy.js` 处理托管、逐座位帧、队列确认及结算回调。`opening.js` 在裁剪棋盘上规划前 24 Tick 的等待、调兵与并行扩张。`planner.js` 评估建造后的防守兵力、调兵贡献和迷雾局势，`single-front.js` 评估单线对手、补给、救援、围城和集结路线。`relay.test.cjs` 含短局穷举、裁剪边界与峡谷回归。`scripts/evaluate-relay-opening.cjs` 分别测量首帧与后续执行耗时，`scripts/evaluate-relay.cjs` 运行真实引擎的双人换边与多人 FFA 对照。当前报告和逐局数据见 `TEMPO.md` 与 `tempo-results.jsonl`。历史报告见 `OPENING.md`、`SINGLE-LINE.md` 与 `EVALUATION.md`。
@@ -472,8 +472,9 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 房间查询使用 `GET /api/rooms`；首页为 `/`。实时移动必须提供数值 `mode`，队列操作不接受 `line`；出队确认仅下发 `lst_moves` 序号数组，重连通过 `init_map.next_seq/queue_ops` 恢复。返回房间事件为 `return_room`。房间快照和列表的准备门槛仅使用 `ready_counts`。地图区域请求仅接受现行 `MapRegion`，旧地区转换保留在内部回放读取。部署入口只接受 JSON 与 GitHub HMAC 签名。未知路径返回 404。`scripts/test-api-contract.mjs` 覆盖淘汰接口与当前契约的端到端回归。
 
-- `src/game-engine.ts`：`isolatedReinforced` 记录本次孤军周期是否接兵，新局通过 `isolated_reinforcement_fix` meta 启用重连翻倍抑制，旧 ops-v1 缺省沿用历史规则。
-- `scripts/test-isolated-reinforcement.mjs`：真实引擎接兵/重连/生命周期回归，纳入 `pnpm test`；`scripts/audit-isolated-replay.cjs`：只读原始 ops 对照审计。
+- `src/game-engine.ts`：`isolatedReinforced` 记录本次孤军周期是否接兵；实战与回放均抑制接兵后的重连翻倍。
+- `scripts/test-multiline-replay.mjs` 验证原始操作回放与实时对局使用相同地图尺寸和增兵规则；多线无爆发，依赖旧规则的无效操作会被拒绝。
+- `scripts/test-isolated-reinforcement.mjs`：真实引擎接兵/重连/生命周期回归，纳入 `pnpm test`；`scripts/audit-isolated-replay.cjs`：按当前规则审计原始 ops。
 
 - 逐文件 CDN 回归：`scripts/test-per-file-cdn.mjs` 使用真实临时 Git 历史检查独立版本与安全回源；`scripts/test-css-per-file-cdn.mjs` 用浏览器检查嵌套 CSS、字体、图片与运行时 import/fetch 的逐文件候选。
 
@@ -528,7 +529,7 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 
 - `src/game-engine.ts` 每 Tick 按实战执行顺序采集所有成功动作，失效出队只通过实时 `lst_moves` 确认；保持全局队列按入度并行与单线每玩家每 Tick 最多一个成功动作的规则。
 - `src/game-engine/replay-turns.ts` 写 `ops-v2`：`q.actions` 是一个 Tick 内成功移动/建造/升级的有序数组（坐标、mode，不写战线编号或实时 seq），空 Tick 用 `w` 压缩。`replay-scheduling.ts` 将其还原为 Tick 批次；重建按记录顺序结算成功动作，不再次拓扑调度已经摘除的队列。单线批次超过一个动作会拒绝。
-- `GameEngine.buildReplayFromActions`（当前回放重建入口）与 `ReplayStore.buildReplayFromRaw` 同时读取旧 `ops-v1` 选择/移动/等待/投降/转让流和新 `ops-v2`。RPB4 编码、浏览器差分消费与 seek 保持原格式；旧 RPB1/RPB2 仍可读（RPB1 无孤军字段）。历史文件中已漏录的并行动作无法推导恢复。
+- `GameEngine.buildReplayFromActions`（当前回放重建入口）与 `ReplayStore.buildReplayFromRaw` 同时读取旧 `ops-v1` 选择/移动/建造/等待/投降流和新 `ops-v2`。RPB4 编码、浏览器差分消费与 seek 保持原格式；旧 RPB1/RPB2 仍可读（RPB1 无孤军字段）。历史文件中已漏录的并行动作无法推导恢复。
 - `scripts/test-multiline-replay.mjs` / `scripts/fixtures/multiline-replay.json`：固定地图真实引擎对局、正常终局录制，250 帧逐 Tick 比对地图/兵力/孤军/排行榜与正反补丁；覆盖同 Tick 独立动作、链等待、移动后建造升级、失效确认、单线及旧格式。`pnpm run test:multiline-replay` 纳入 `pnpm test`；加 `--browser` 使用临时 Fastify 服务、真实用户鉴权与 `/api/replay-upload` 转码，再用 Playwright/Chromium 加载真实 `static/game.html` 与全部回放脚本，验收 seek/自动播放与旧标量帧。通过 `ROKA_PLAYWRIGHT_MODULE` / `CHROMIUM_PATH` 指定本地浏览器依赖，`ROKA_REPLAY_ARTIFACT_DIR` 可导出原始 `.rpl` 与观看 `.rpb`，`ROKA_REPLAY_SCREENSHOT` 可保存验收截图。无生产请求。
 
 ### 回放查询与缓存维护

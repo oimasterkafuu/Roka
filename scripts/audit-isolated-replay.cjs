@@ -4,7 +4,7 @@ const fs = require('fs'),
 const { GameEngine } = require('../dist/game-engine.js');
 const replay = v8.deserialize(z.brotliDecompressSync(fs.readFileSync(process.argv[2])));
 console.log(JSON.stringify({ meta: replay.meta, total_turns: replay.total_turns }));
-let events = [],
+const events = [],
   deaths = [];
 const attack = GameEngine.prototype.attack,
   conn = GameEngine.prototype.applyConnectivity;
@@ -39,14 +39,8 @@ GameEngine.prototype.applyConnectivity = function () {
     deaths.push({ tick: this.turn, pstat: this.pstat[ssr], deadOrder: this.deadOrder[ssr] });
 };
 (async () => {
-  for (const fix of [false, true]) {
-    events = [];
-    deaths = [];
-    const r = structuredClone(replay);
-    if (fix) r.meta.isolated_reinforcement_fix = true;
-    const built = await GameEngine.buildReplayFromActions(r);
-    console.log(JSON.stringify({ fix, ssr: deaths, events, patches: built.patches.length }));
-  }
+  const built = await GameEngine.buildReplayFromActions(replay);
+  console.log(JSON.stringify({ ssr: deaths, events, patches: built.patches.length }));
 })().catch((e) => {
   console.error(e);
   process.exitCode = 1;
