@@ -478,7 +478,19 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // name, and off by default.
   const arch = archipelagoUpdate(
     b,
-    { turn, tile, teams, myTeam, homes, homeDist, enemyDist, enemies, fog: !clearSerial, multi },
+    {
+      turn,
+      tile,
+      teams,
+      myTeam,
+      homes,
+      homeDist,
+      enemyDist,
+      enemies,
+      known: targets.length,
+      fog: !clearSerial,
+      multi,
+    },
     archipelagoConfig(),
   );
   // Maze + fog gate. `leadCap` stands the layer down once the leaderboard says

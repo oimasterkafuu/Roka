@@ -90,7 +90,11 @@ serial land race.
 | `BOT3_ARCH_FRONT` | frontier objective: outside the land phase, aim at the visible rival frontier instead of the remembered crown, so a reachable step always exists. Clear-serial only unless `BOT3_ARCH_FRONT_FOG=1`. |
 | `BOT3_ARCH_WATER` | water discipline: a swamp capture that does not shorten the distance to the nearest unclaimed plain cell is capped at `BOT3_ARCH_WATER_CAP` (18) - under the land capture next door, above a plain merge. A strait crossing still passes, because every hop of a shortest crossing lowers the field. |
 | `BOT3_ARCH_CROWN` | island crown: on a fully owned, rival-free island, the build gates (`develop`, `buildingStart`, `units >= 100`) are relaxed so a rear crown can pay +1/tick. |
-| `BOT3_ARCH` | the measured bundle: `LAND` + `FRONT` with `BOT3_ARCH_UNTIL=51`. |
+| `BOT3_ARCH_LAND_FOG` | arm the land phase in fog-rooled rooms too (on by default, behind the fog-safe gate below). `=0` restores the round-12 behaviour (land in clear rooms only). |
+| `BOT3_ARCH_FOG_QUIET` | the fog-safe gate (on by default): in fog the land phase only aims at unclaimed plain land while no rival cell is visible. One visible rival cell hands the frame back to the remembered crowns. `=0` restores the ungated fog land phase, which loses the relay cell. |
+| `BOT3_ARCH_FOG_KNOWN` | stricter neighbour of the gate: also stand down as soon as a rival crown is remembered (off; measured -1 relay win). |
+| `BOT3_ARCH_FOG_UNTIL` / `BOT3_ARCH_FOG_NEAR` | fog-only end of the land phase (`0` = `BOT3_ARCH_UNTIL`) and a maximum distance from an owned crown to the focus island (`0` = off). Both were swept; the sweeps are below. |
+| `BOT3_ARCH` | the measured bundle: `LAND` + `FRONT` with `BOT3_ARCH_UNTIL=51`, plus the gated fog land phase. |
 
 `BOT3_ARCH_UNTIL` ends the land phase with the burst. Measured 8-seed screens
 (relay+anti, all four modes, 128 games, `MODES=000,001,010,011`):
@@ -140,11 +144,89 @@ the land/front gain when stacked with it.
 
 Total 413/86/13 (80.7%) against 382/119/11 (74.6%): **+6.1pp, +31 wins** on the
 map, with every multi-line cell exactly on baseline and one single-line cell
-still behind (relay fog single, one win converted into a timeout).
+still behind (relay fog single, one win converted into a timeout). This is the
+round-12 table; the round-13 fog gate below fixes that cell.
 
-`relay / archipelago / clear / single` is the only relay archipelago cell that
-reaches the 65% target: **21/32 = 65.6%** (16/32 baseline). Fog single is
-18/32 = 56.3%, so the relay cells as a group still fail the gate.
+`relay / archipelago / clear / single` and `relay / archipelago / fog /
+single` are the two relay archipelago cells that reach the 65% target: **23/32 =
+71.9%** each (16/32 and 19/32 baseline). The round-13 fog gate below is what
+lifts the fog cell; before it, the fog cell was 18/32 = 56.3%.
+
+## Round 13: the fog land phase
+
+Round 12 kept the land phase clear-only because `BOT3_ARCH_LAND_FOG=1` cost the
+relay archipelago fog cell one win (19 -> 18, one win converted into a timeout).
+Re-measured against the round-13 integration default (16 seeds, relay+anti,
+archipelago fog single, 64 games) the ungated fog land phase is not one flip but
+eight: `19 -> 18` on relay (-1) and `23 -> 23` on anti, with 20 game flips.
+
+**Diagnosis.** The flip is not an economy loss - the ungated phase is clearly
+better on land and army. `bot3-baseline-9` seat 0 is representative: at t50 the
+ungated fog phase holds 45 plain / 547 army against the default's 30 / 379, and
+still loses at t134 (default wins at t715). The trace shows the land phase
+running to t51 while a rival is already in vision (`enemies` becomes non-empty
+at t43, `contact` 7), then handing back a spread-out empire to an objective
+field whose remembered crowns are two straits away. Both seats of seed 9 flip
+the same way, so it is the mechanism, not a seat artefact.
+
+The fog-safe gate is the cheapest structural fix: vision is radius 1 in fog, so
+a rival cell is only *visible* once our land touches it. While nothing is
+visible the grab is free, and the moment something is visible the tick belongs
+to the remembered crowns again. That is `BOT3_ARCH_FOG_QUIET`.
+
+**Sweep** (16 seeds, relay+anti, archipelago fog single, 64 games, paired
+against the round-13 integration default 19/23):
+
+| config | relay | anti | total |
+| --- | --- | --- | ---: |
+| default (land clear-only, round 12) | 19/32 | 23/32 | 42/64 |
+| land in fog, ungated (`LAND_FOG=1`) | 18 (-1) | 23 (0) | 41 (-1) |
+| `FRONT_FOG=1` alone | 18 (-1) | 15 (-8) | 33 (-9) |
+| fog until 30 / 34 / 36 / 40 / 42 / 45 | 14 / 20 / 19 / 19 / 20 / 20 | 20 / 22 / 23 / 24 / 25 / 24 | -8 .. +3 |
+| fog focus within 4 / 6 / 9 steps of a home | **23** / 22 / 17 | 20 / 22 / 23 | +1 / +2 / -2 |
+| fog stand-down on a remembered crown | 18 (-1) | 23 (0) | -1 |
+| **fog stand-down on a visible rival cell** | **23 (+4)** | **23 (0)** | **+4** |
+| visible-rival gate + fog until 42 / 45 | 22 / 21 | 24 / 23 | +4 / +2 |
+| visible-rival gate + focus within 6 | 22 | 21 | +1 |
+
+The deadline sweeps are flat noise (+3, +1, 0, -2 wins for the nearby values of
+the same knob), which is why no new deadline is used; the visible-rival gate is
+the only variant with a mechanism, and it is also the best measured one.
+
+All four opponents, 16 seeds, archipelago fog single (128 games; paired against
+the round-13 integration default 19/23/25/24, itself already carrying the round-12
+clear-room gain):
+
+| opponent | default | ungated fog land | visible-rival gate |
+| --- | --- | --- | --- |
+| relay | 19/32 | 18 | **23/32 (71.9%)** |
+| anti | 23/32 | 23 | 23/32 |
+| apex | 25/32 | 30 | 30/32 |
+| v2 | 24/32 | 30 | 30/32 |
+| total | 91/128 | 101/128 | **106/128 (+15 wins)** |
+| timeouts | 6 | 4 | **1** |
+
+No cell regresses, the relay cell clears 65% for the first time, and the gate
+also removes all but one of the timeouts the ungated phase creates (apex/v2 keep
+their +5/+6 from the land phase itself).
+
+**Full matrix.** Defaults only (`WORKERS=2`, 2048 games):
+
+| row | W/L/T | win |
+| --- | --- | ---: |
+| baseline (`baseline-results.jsonl`) | 1621/367/60 | 79.2% |
+| round-12 integration default | 1668/312/68 | 81.4% |
+| round-13 default (this change) | **1683/302/63** | **82.2%** |
+
++15 wins over the round-12 default, 25 game flips and **all of them on
+`archipelago/fog/single`** (relay +4, apex +5, v2 +6, anti 0) - every other cell
+of the 2048-game matrix is byte-identical, because the gate can only fire on a
+swamp-heavy fog single-line room.
+
+**Recommendation: keep the fog land phase on, behind `BOT3_ARCH_FOG_QUIET`.**
+That is the shipped default (`BOT3_ARCH_LAND_FOG` / `BOT3_ARCH_FOG_QUIET` both
+on); `BOT3_ARCH_FOG_QUIET=0` restores the measured losing ungated variant, and
+`BOT3_ARCH_LAND_FOG=0` restores the round-12 clear-only phase.
 
 ## Full matrix
 
@@ -165,22 +247,23 @@ regression is `relay/archipelago/fog/single` (19 -> 18, one win converted into a
 timeout). All eight multi-line cells are exactly on baseline because the layer
 stands down there.
 
-**Recommendation: keep `BOT3_ARCH` off by default.** It is a large, clean gain
-on the archipelago map (+31 wins on the map, no regressed cell outside one
-relay fog cell, every non-relay cell above 50%) but it does not move the relay
-archipelago cells as a group to the 65% target, and the repository policy is to
-only turn a measured bundle on after it clears its cells. `BOT3_ARCH=1` is safe
-to adopt for the map alone: the full matrix is +1.9pp with no non-archipelago
-cell below its paired baseline.
+**Recommendation: `BOT3_ARCH` is on by default** (round 13). It is a large,
+clean gain on the archipelago map and, with the round-13 fog gate, it no longer
+has a regressing cell. The table above is the round-12 measurement that
+triggered the gate; the round-13 rows are in "Round 13: the fog land phase".
 
 ## Risks
 
 - Timeouts: the bundle converts a few wins into 1000-tick games (archipelago
   timeouts 11 -> 13). `FRONT` alone is much worse (1 -> 10 on the 8-seed screen),
   which is why it is serial-only and only used together with the land phase.
-- `relay/archipelago/fog/single` loses one win to a timeout; the land phase ends
-  at t51 and the frontier objective is already fog-disabled, so the remaining
-  difference is the extra land it holds.
+- `relay/archipelago/fog/single` now clears the target (23/32) but leaves one
+  timeout (`bot3-baseline-6` seat 0) that the default wins at t163. The gate is a
+  visibility predicate, not a plan: a rival that stays one cell away from our
+  land while we grab a far island can still keep the phase armed.
+- The gate makes the fog land phase depend on *vision*, so a rival that never
+  touches our land ends the phase at the burst deadline (51) as before; the
+  measured cells are insensitive to that deadline (see the sweep).
 - The focus island is latched on the board (`b.archFocus`). If a rival beaches
   the focused island the latch drops and the next island is chosen, but a rival
   can still force a re-target by touching every rim island.
@@ -191,7 +274,34 @@ cell below its paired baseline.
 ## Reproduce
 
 ```sh
-# diagnosis screens (8 seeds, relay+anti, all four modes)
+# the archipelago fog single cell (16 seeds, relay+anti): defaults vs the gate
+WORKERS=2 SEED_FROM=1 SEED_TO=16 OPPONENTS=relay,anti MAPS=archipelago \
+  MODES=010 OUT=/tmp/af-def.jsonl SUMMARY=/tmp/af-def.json \
+  node scripts/evaluate-bot3-baseline.cjs
+BOT3_ARCH_LAND_FOG=0 BOT3_ARCH_FOG_QUIET=0 WORKERS=2 SEED_FROM=1 SEED_TO=16 \
+  OPPONENTS=relay,anti MAPS=archipelago MODES=010 \
+  OUT=/tmp/af-old.jsonl SUMMARY=/tmp/af-old.json \
+  node scripts/evaluate-bot3-baseline.cjs
+
+# the ungated fog land phase (the measured negative the gate removes)
+BOT3_ARCH_FOG_QUIET=0 WORKERS=2 SEED_FROM=1 SEED_TO=16 OPPONENTS=relay,anti \
+  MAPS=archipelago MODES=010 OUT=/tmp/af-ungated.jsonl SUMMARY=/tmp/af-ungated.json \
+  node scripts/evaluate-bot3-baseline.cjs
+
+# all four opponents on the fog single cell
+WORKERS=2 SEED_FROM=1 SEED_TO=16 OPPONENTS=relay,anti,apex,v2 \
+  MAPS=archipelago MODES=010 OUT=/tmp/af-4.jsonl SUMMARY=/tmp/af-4.json \
+  node scripts/evaluate-bot3-baseline.cjs
+
+# full matrix, defaults only, paired against the round-12 default
+WORKERS=2 OUT=/tmp/af-full.jsonl SUMMARY=/tmp/af-full.json \
+  node scripts/evaluate-bot3-baseline.cjs
+BOT3_ARCH_LAND_FOG=0 BOT3_ARCH_FOG_QUIET=0 WORKERS=2 \
+  OUT=/tmp/af-old-full.jsonl SUMMARY=/tmp/af-old-full.json \
+  node scripts/evaluate-bot3-baseline.cjs
+NO_GATE=1 node scripts/compare-bot3-baseline.cjs /tmp/af-full.jsonl
+
+# round-12 diagnosis screens (8 seeds, relay+anti, all four modes)
 WORKERS=2 SEED_FROM=1 SEED_TO=8 OPPONENTS=relay,anti MAPS=archipelago \
   MODES=000,001,010,011 OUT=/tmp/ar-s8.jsonl SUMMARY=/tmp/ar-s8.json \
   node scripts/evaluate-bot3-baseline.cjs

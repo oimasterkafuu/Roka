@@ -1645,9 +1645,12 @@ test('default the measured archipelago bundle on and allow opting out', () => {
   assert.equal(bundle.front, true);
   assert.equal(bundle.water, false);
   assert.equal(bundle.crown, false);
-  // The land phase is clear-serial by default; the frontier phase keeps its own gate.
-  assert.equal(bundle.landFog, false);
-  assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_LAND_FOG: '1' }).landFog, true);
+  // The land phase is armed in fog too, but only behind the fog-safe gate
+  // (`fogQuiet`); `BOT3_ARCH_FOG_QUIET=0` restores the measured losing variant.
+  assert.equal(bundle.landFog, true);
+  assert.equal(bundle.fogQuiet, true);
+  assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_LAND_FOG: '0' }).landFog, false);
+  assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_FOG_QUIET: '0' }).fogQuiet, false);
   // A single flag overrides the bundle.
   assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_LAND: '0' }).land, false);
 });
@@ -1684,6 +1687,29 @@ test('aim the land phase at the nearest unclaimed island only during the burst',
   const contested = Uint8Array.from(context.teams);
   for (let x = 1; x < 5; x++) for (let y = 9; y < 13; y++) contested[x * 15 + y] = 2;
   assert.equal(archipelagoUpdate(b, { ...context, teams: contested }, config).aimLand, false);
+});
+
+test('stand the fog land phase down as soon as the rival is in vision', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  // Clear rooms keep the burst deadline: the quiet gate is fog-only.
+  const clear = archipelagoUpdate(b, { ...context, enemies: [] }, config);
+  assert.equal(clear.aimLand, true);
+  // In fog nothing is visible yet, so the grab is free and the phase is armed.
+  const fogged = { ...context, fog: true, enemies: [] };
+  const quiet = archipelagoUpdate(b, fogged, config);
+  assert.equal(quiet.aimLand, true);
+  assert.ok(quiet.targets.length > 0);
+  // One visible rival cell hands the frame back to the remembered crowns.
+  const seen = archipelagoUpdate(b, { ...fogged, enemies: [9 * 15 + 10] }, config);
+  assert.equal(seen.aimLand, false);
+  // `fogKnown` extends the gate to a remembered crown.
+  assert.equal(archipelagoUpdate(b, { ...fogged, known: 1 }, config).aimLand, true);
+  const wrong = archipelagoUpdate(b, { ...fogged, known: 1 }, { ...config, fogKnown: true });
+  assert.equal(wrong.aimLand, false);
+  // The fog deadline ends the phase without touching the clear deadline.
+  assert.equal(archipelagoUpdate(b, fogged, { ...config, fogUntil: 30 }).aimLand, false);
+  assert.equal(archipelagoUpdate(b, { ...fogged, turn: 20 }, { ...config, fogUntil: 30 }).aimLand, true);
 });
 
 test('latch the focus island while it still has plain land', () => {

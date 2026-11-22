@@ -52,7 +52,7 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层与协议回归。
 - `shadow.js`：relay 规划器的影子副本，逐帧重放它的 `chooseOrders` 以提前一 Tick 知道它要走的指令，并按引擎结算顺序重新给候选评分（默认开启，`BOT3_SHADOW=0` 关闭，见 [SHADOW.md](SHADOW.md)）。
 - `shadow-probe.cjs`：单局预测精度探针（逐帧对照 relay 实际发出的指令），仅用于测量。
-- `archipelago.js`：群岛（沼泽占比 ≥55%）陆地竞速层（默认开启，`BOT3_ARCH=0` 关闭）：`BOT3_ARCH_LAND` 把 burst 期目标换成最近无人小岛（默认仅清晰房间，`BOT3_ARCH_LAND_FOG=1` 允许迷雾）、`BOT3_ARCH_FRONT` 用可见敌方前线替代远处主城、`BOT3_ARCH_WATER` 封顶远离陆地的沼泽推进、`BOT3_ARCH_CROWN` 在独占小岛放宽建城（见 [BOT3_ARCH.md](BOT3_ARCH.md)）。
+- `archipelago.js`：群岛（沼泽占比 ≥55%）陆地竞速层（默认开启，`BOT3_ARCH=0` 关闭）：`BOT3_ARCH_LAND` 把 burst 期目标换成最近无人小岛（迷雾房间同样生效，但只在看不到任何敌方格时推进，`BOT3_ARCH_FOG_QUIET=0` 取消该迷雾门控；`BOT3_ARCH_LAND_FOG=0` 退回仅清晰房间）、`BOT3_ARCH_FRONT` 用可见敌方前线替代远处主城、`BOT3_ARCH_WATER` 封顶远离陆地的沼泽推进、`BOT3_ARCH_CROWN` 在独占小岛放宽建城（见 [BOT3_ARCH.md](BOT3_ARCH.md)）。
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层、影子层与协议回归。
 
 - `NEXT.md`：暂停时保留的后续重启方向、负结果与复现方式。

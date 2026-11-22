@@ -91,6 +91,24 @@ const DEFAULT_UNTIL = 51;
 // Stop aiming at land while a visible rival is this close to a home. Chasing a
 // far island with a rival stack next door is how the traced losses died.
 const DEFAULT_CONTACT = 3;
+// Fog land gates (see `BOT3_ARCH.md`). Vision is radius 1 in fog, so the rival
+// is invisible until it is adjacent and a land grab can spend the tick while a
+// remembered crown sits reachable, or while the rival is already at the door.
+//   `fogUntil` - fog-specific end of the land phase; the clear room keeps the
+//                measured burst deadline (`until`). 0 = use `until`.
+//   `fogNear`  - only aim at a focus island whose nearest unclaimed plain cell
+//                is within this many steps of an owned crown (0 = off), so a
+//                capture never spends ticks on a far strait in the dark.
+//   `fogQuiet` / `fogKnown` - stand the land phase down as soon as a rival cell
+//                or a remembered rival crown is visible. `fogQuiet` is on by
+//                default: the land phase only spends ticks on unclaimed plain
+//                land while nothing of the rival is in vision, i.e. while the
+//                grab is free. Measured (16 seeds, archipelago fog single):
+//                quiet 23/23/30/30 (relay/anti/apex/v2) against 18/23/30/30 for
+//                the ungated fog land phase and 19/23/25/24 for clear-only.
+const DEFAULT_FOG_UNTIL = 0;
+const DEFAULT_FOG_NEAR = 0;
+const DEFAULT_FOG_QUIET = true;
 // Score cap for a swamp capture that moves away from the nearest unclaimed
 // plain cell. Below every land capture (63+), above a plain merge (14-25).
 const DEFAULT_WATER_CAP = 18;
@@ -130,10 +148,15 @@ function archipelagoConfig(overrides = {}, env = process.env) {
     crown: overrides.crown ?? flag(env.BOT3_ARCH_CROWN, false),
     front: overrides.front ?? (env.BOT3_ARCH_FRONT === undefined ? bundle : flag(env.BOT3_ARCH_FRONT, false)),
     frontFog: overrides.frontFog ?? flag(env.BOT3_ARCH_FRONT_FOG, false),
-    // The land phase is a clear-serial rule by default: in fog it converts one
-    // relay archipelago win into a timeout (measured -1 cell), while the clear
-    // room keeps the +21.9pp interaction with the frontier objective.
-    landFog: overrides.landFog ?? flag(env.BOT3_ARCH_LAND_FOG, false),
+    // The land phase is armed in fog too, but only behind the fog-safe gate
+    // below (`fogQuiet`): measured on the 16-seed archipelago fog single cells,
+    // `BOT3_ARCH_FOG_QUIET=0` turns the relay cell from 23/32 back to 18/32 and
+    // puts three timeouts on the anti cell, so the gate is the default.
+    landFog: overrides.landFog ?? flag(env.BOT3_ARCH_LAND_FOG, true),
+    fogUntil: overrides.fogUntil ?? number(env.BOT3_ARCH_FOG_UNTIL, DEFAULT_FOG_UNTIL, 0, 100000),
+    fogNear: overrides.fogNear ?? number(env.BOT3_ARCH_FOG_NEAR, DEFAULT_FOG_NEAR, 0, 1000),
+    fogQuiet: overrides.fogQuiet ?? flag(env.BOT3_ARCH_FOG_QUIET, DEFAULT_FOG_QUIET),
+    fogKnown: overrides.fogKnown ?? flag(env.BOT3_ARCH_FOG_KNOWN, false),
     multi: overrides.multi ?? flag(env.BOT3_ARCH_MULTI, false),
     swampShare: overrides.swampShare ?? number(env.BOT3_ARCH_SWAMP_SHARE, DEFAULT_SWAMP_SHARE, 0, 1),
     until: overrides.until ?? number(env.BOT3_ARCH_UNTIL, DEFAULT_UNTIL, 0, 100000),
@@ -272,10 +295,18 @@ function archipelagoUpdate(b, context, config = archipelagoConfig()) {
     if (!targets.length) targets = null;
   }
   // Keep the land objective only while the burst is live and no rival is next
-  // to a home; after that the rival crowns are the objective again.
+  // to a home; after that the rival crowns are the objective again. In fog the
+  // phase can end earlier (`fogUntil`) and only arm while the grab is safe:
+  // near a home, with no visible rival and no remembered crown.
   let contact = INF;
   for (const home of homes) if (enemyDist[home] < contact) contact = enemyDist[home];
-  const aimLand = Boolean(targets) && turn < config.until && contact > config.contact;
+  const deadline = fog && config.fogUntil > 0 ? config.fogUntil : config.until;
+  const fogLandSafe =
+    !fog ||
+    ((!config.fogQuiet || !context.enemies?.length) &&
+      (!config.fogKnown || !context.known) &&
+      (!(config.fogNear > 0) || (focus >= 0 && near[focus] <= config.fogNear)));
+  const aimLand = Boolean(targets) && turn < deadline && contact > config.contact && fogLandSafe;
   // Frontier objective: after the land phase the nearest rival cell is a
   // reachable step even when the rival crown is two straits away.
   let frontTargets = null;
@@ -331,6 +362,9 @@ module.exports = {
   DEFAULT_SWAMP_SHARE,
   DEFAULT_UNTIL,
   DEFAULT_CONTACT,
+  DEFAULT_FOG_UNTIL,
+  DEFAULT_FOG_NEAR,
+  DEFAULT_FOG_QUIET,
   DEFAULT_WATER_CAP,
   DEFAULT_CROWN_TURN,
   DEFAULT_CROWN_ISLAND,
