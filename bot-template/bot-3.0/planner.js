@@ -8,6 +8,7 @@ const {
   siegeValue,
 } = require('./single-front');
 const { openingOrder, END_TICK } = require('./opening');
+const { closingUpdate } = require('./closing');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -333,7 +334,38 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const danger = homes.filter((i) => threat[i] > units[i]);
   const exposedHome = turn >= 38 && homes.length <= 2 ? homes.find((i) => pressure(i) > units[i]) : undefined;
   const defense = distances(b, danger, (j) => teams[j] === myTeam && !b.isolated[j]).dist;
+  // A dead-even attrition on a compact serial room has to be converted by
+  // concentration, not by more income; see ./closing for the diagnosis.
+  const closing = single
+    ? closingUpdate(b, {
+        turn,
+        multi,
+        size,
+        army: self.army,
+        enemyArmy: rival ? rival.player.army : 0,
+        enemyCrowns: rival ? rival.crowns.length : 0,
+        danger: danger.length,
+      })
+    : { active: false };
+  const closeIn = closing.active === true;
   const mobileArmy = self.army - self.land;
+  // While closing, the empire funnels into its heaviest stack and that stack
+  // pushes once it can pay for the remaining path (see ./closing). The lead has
+  // to be chosen here, where the unit counts live.
+  let closingLead = -1,
+    closingLeadDist = null;
+  if (closeIn) {
+    let best = 0;
+    for (let i = 0; i < size; i++) {
+      if (teams[i] !== myTeam || b.isolated[i] || ownerOf(tile[i]) !== me) continue;
+      if (units[i] > best) {
+        best = units[i];
+        closingLead = i;
+      }
+    }
+    if (closingLead >= 0)
+      closingLeadDist = distances(b, [closingLead], (j) => !b.isolated[j]).dist;
+  }
   const longFront = !multi && size >= 400;
   let route;
   if (longFront && !clearSerial && turn >= 44) {
@@ -371,6 +403,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       : 5;
   const invest =
     single &&
+    !closeIn &&
     (homes.length < productiveTarget || mobileArmy > homes.length * 240) &&
     (!danger.length || homes.length > 2);
   const limit = single
@@ -378,7 +411,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
       ? Math.max(productiveTarget, homes.length + 1)
       : Math.max(2, 1 + Math.floor(mobileArmy / 140))
     : Math.max(2, Math.min(longFront ? 12 : 32, 1 + Math.floor(mobileArmy / 185)));
-  const develop = !single || invest || homes.length <= 2 || turn % 12 < (longFront ? 6 : 5);
+  const develop =
+    (!single || invest || homes.length <= 2 || turn % 12 < (longFront ? 6 : 5)) && !closeIn;
   const backup = single && !longFront && !ffa && homes.length === 1 && enemyDist[homes[0]] <= 12;
   const buildingStart = clearSerial ? (backup ? 39 : 50) : 38;
   const site =
@@ -413,6 +447,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
       defense,
       invest,
       backup,
+      closing: closeIn,
+      lead: closingLead,
+      leadDist: closingLeadDist,
+      enemyDist,
     };
   }
   const candidates = [];
@@ -429,7 +467,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       // A safe upgrade gives a second crown immediately, even if the old
       // crown is under pressure. Otherwise a forced defence takes this tick.
       const safe = (city || !danger.length) && pressure(i) <= units[i] - 50;
-      const outpost = single && anchorDist[i] >= 5 && (cut[i] > 25 || units[i] >= 85);
+      const outpost = single && !closeIn && anchorDist[i] >= 5 && (cut[i] > 25 || units[i] >= 85);
       if (
         safe &&
         (develop || outpost) &&

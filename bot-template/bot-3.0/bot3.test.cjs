@@ -5,8 +5,9 @@ const { EventEmitter } = require('node:events');
 const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy, MAX_TEAMS } = require('./strategy');
-const { rescueValues, assessOpponents } = require('./single-front');
+const { rescueValues, assessOpponents, evaluateFrontMove } = require('./single-front');
 const { makeOpening } = require('./opening');
+const { closingConfig, closingUpdate, freshClosing } = require('./closing');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -330,5 +331,139 @@ test('rebind with a pending queue, apply diff and retain independent multiline o
   } finally {
     handle.stop();
     assert.equal(socket.listenerCount('update'), 0);
+  }
+});
+
+// Closing layer. The phase exists to convert a material edge into a kill on a
+// compact serial room; see ./closing for the replay diagnosis it encodes.
+test('open the closing phase only on a dominated, crown-sprawling serial room', () => {
+  assert.deepEqual(closingConfig({}, {}), {
+    enabled: true,
+    maxBoard: 800,
+    startTurn: 120,
+    minCrowns: 6,
+    armyFloor: 1.35,
+  });
+  assert.equal(closingConfig({}, { BOT3_CLOSING: '0' }).enabled, false);
+  assert.equal(closingConfig({}, { BOT3_CLOSING_FLOOR: '1.1' }).armyFloor, 1.1);
+
+  const board = { closing: freshClosing() };
+  const room = {
+    turn: 140,
+    multi: false,
+    size: 221,
+    army: 800,
+    enemyArmy: 500,
+    enemyCrowns: 7,
+    danger: 0,
+  };
+  assert.equal(closingUpdate(board, room).active, true);
+  // A multi-line room, a room that is a war of equals and a threatened home
+  // all stay on the baseline plan.
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, multi: true }).active, false);
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, size: 900 }).active, false);
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, army: 600 }).active, false);
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, enemyCrowns: 3 }).active, false);
+  assert.equal(closingUpdate({ closing: freshClosing() }, { ...room, turn: 60 }).active, false);
+  // A threat pauses the plan instead of latching it away for the rest of the
+  // game, which is what the first (latched) cut did.
+  assert.equal(closingUpdate(board, { ...room, danger: 1 }).active, false);
+  assert.equal(board.closing.exit, 'threat');
+  assert.equal(closingUpdate(board, room).active, true);
+  assert.equal(board.closing.entries, 2);
+  assert.equal(closingUpdate(board, room, closingConfig({}, { BOT3_CLOSING: '0' })).active, false);
+});
+
+test('funnel the empire into its heaviest stack and hold it until it can pay', () => {
+  const b = createBoard(1, 6, 1);
+  b.grid_type.set([101, 1, 1, 200, 102, 102]);
+  b.army_cnt.set([2, 40, 200, 0, 5, 3]);
+  const fill = (value) => Int32Array.from({ length: b.size }, () => value);
+  const state = {
+    b,
+    units: Float64Array.from(b.army_cnt),
+    teams: Uint8Array.from([1, 1, 1, 0, 2, 2]),
+    myTeam: 1,
+    turn: 200,
+    goal: Int32Array.from([3, 2, 2, 1, 0, 0]),
+    required: fill(6),
+    homeDist: fill(1),
+    immediate: fill(0),
+    cut: fill(0),
+    rescue: fill(0),
+    frontDist: fill(0),
+    route: Int32Array.from([3, 2, 1, 1, 0, 0]),
+    homes: [0],
+    danger: [],
+    site: -1,
+    self: { army: 250, land: 5 },
+    rival: { player: { army: 50 }, crowns: [4, 5], otherFront: 0, contact: 0 },
+    ffa: false,
+    wide: false,
+    anchorDist: fill(1),
+    enemyDist: Int32Array.from([3, 3, 3, 1, 1, 1]),
+    defense: fill(1),
+    closing: true,
+    lead: 2,
+    leadDist: Int32Array.from([2, 1, 0, 1, 2, 3]),
+  };
+  const merge = {
+    i: 1,
+    j: 2,
+    own: true,
+    hostile: false,
+    strike: false,
+    send: 39,
+    remaining: 79,
+    support: 2,
+    exposure: 0,
+    intercept: false,
+    base: false,
+  };
+  assert.ok(evaluateFrontMove(state, merge) >= 1000);
+  assert.ok(evaluateFrontMove({ ...state, closing: false }, merge) < 500);
+  // Frontier garrisons stay home: only rear stacks are funnelled.
+  assert.ok(evaluateFrontMove({ ...state, enemyDist: fill(1) }, merge) < 500);
+  // The lead pushes when it can pay for the remaining path and holds when it
+  // cannot, so the rear keeps arriving instead of feeding a doomed column.
+  const advance = { ...merge, i: 2, j: 3, send: 199, remaining: 199 };
+  assert.ok(evaluateFrontMove({ ...state, required: fill(4) }, advance) >= 1000);
+  assert.equal(evaluateFrontMove({ ...state, required: fill(400) }, advance), 0);
+});
+
+test('hand the plan to the closing column only while the layer is on', () => {
+  const army = [
+    { id: 1, team: 1, army: 300, land: 9, dead: 0 },
+    { id: 2, team: 2, army: 90, land: 6, dead: 0 },
+  ];
+  const build = () => {
+    const b = createBoard(3, 6, 1);
+    b.grid_type.fill(200);
+    b.grid_type[0] = 101;
+    b.army_cnt[0] = 20;
+    b.grid_type[2] = 1;
+    b.army_cnt[2] = 130;
+    b.grid_type[3] = 1;
+    b.army_cnt[3] = 4;
+    b.grid_type[4] = 1;
+    b.army_cnt[4] = 60;
+    for (let i = 12; i < 18; i++) {
+      b.grid_type[i] = 102;
+      b.army_cnt[i] = 3;
+    }
+    return b;
+  };
+  const board = build();
+  const closed = chooseOrders(board, 140, army, false);
+  assert.equal(board.closing.active, true);
+  assert.ok(closed[0].score >= 1000);
+  const off = build();
+  process.env.BOT3_CLOSING = '0';
+  try {
+    const baseline = chooseOrders(off, 140, army, false);
+    assert.equal(off.closing.active, false);
+    assert.ok(baseline[0].score < closed[0].score);
+  } finally {
+    delete process.env.BOT3_CLOSING;
   }
 });
