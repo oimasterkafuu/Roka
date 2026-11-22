@@ -92,6 +92,7 @@ function evaluateFrontMove(s, move) {
     ffa,
     wide,
     anchorDist,
+    enemyDist,
   } = s;
   const { i, j, own, hostile, strike, send, remaining, support, exposure, intercept, base } = move;
   if (strike) return 2500 + Math.min(100, remaining);
@@ -184,6 +185,28 @@ function evaluateFrontMove(s, move) {
   }
   if (hostile && units[j] > 3 && !repulse && homeDist[j] < 6)
     score = Math.max(score, 130 + Math.min(360, (230 * units[j]) / Math.max(12, self.army * 0.12)));
+  if (s.closing && s.lead >= 0 && s.leadDist && !b.isolated[j] && send >= 12) {
+    // Closing phase on a compact serial room: the whole empire funnels into its
+    // heaviest stack, and that stack pushes only once it can pay for the rest
+    // of the path. sqrt(mass) keeps the funnel ordered (a 2000-army pool 1547
+    // outranks a 55-unit detachment 1003) and both sit above the economy build
+    // (675) and land (630) scores, so a tick is never spent on a 50-unit
+    // deposit while 2000 army waits at the back of the map.
+    //
+    // `required` already prices every defender on the route and one unit lost
+    // per step, so a 119-army lead facing a fifteen-cell approach through
+    // defended cells stages at the frontier instead of walking into the enemy
+    // line to die, and the rear garrisons keep arriving until it can commit.
+    // A plain mass march (no staging gate) captured three crowns and then lost
+    // the column mid-way; the staged version converts the whole hoard first.
+    if (i === s.lead) {
+      if (goal[j] < goal[i] && remaining >= required[i])
+        score = Math.max(score, 1000 + Math.min(620, Math.sqrt(Math.max(send, remaining)) * 14));
+    } else if (s.leadDist[j] < s.leadDist[i] && enemyDist[i] >= 3) {
+      const mass = own ? send + units[j] : send;
+      score = Math.max(score, 940 + Math.min(500, Math.sqrt(mass) * 14));
+    }
+  }
   if (!rival && route[j] < route[i] && !b.isolated[j] && send >= 6 && !repulse) {
     score = Math.max(
       score,
