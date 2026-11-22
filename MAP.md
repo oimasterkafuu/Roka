@@ -263,6 +263,9 @@ _一句话：共享类型/协议定义汇总。_
 
 **views/index.pug → static/index.html**（~1000 行，脚本基本内联）— 首页/大厅：个人信息、房间列表、回放列表与上传、动态、公告、排行榜、在线人数与「在线」列表。回放板块固定显示最新 10 条，无分页与统计图，上传操作区提供「全部回放」入口。回放列表名次列按队伍合并展示：索引项带 `teams`（终局队伍分组，组序=队伍名次序）时同队一组（组内 `, `、组间 `›`，不展示玩家配色色块），旧数据无 `teams` 回退 `rank` 平铺；名次列成员名与房间列表房主名统一走 `username.js` 组件（rating 颜色 + 点击跳主页，接口不带颜色时经 `/api/user-colors` 批量补色）。
 数据走 REST，socket 以 `?home=1` 连接监听 `home_rooms/home_replays/home_leaderboard/home_announcement/home_feeds/home_online` 失效通知（事件无 payload）。顶栏在线人数与右栏「在线」列表（排行榜下方，按最后活动倒序的前 8 位用户及其相对活动时间，含自己与当前在线者）由 `/api/online` 驱动。排行榜与在线条目把完整外观 DTO 直接传给 `usernameLink(item.username, item)`，首次渲染即写入含 `starred` 的缓存并显示 Star 前半名，不依赖个人页或 `/api/user-colors` 二次请求。`home_online` 收到后对比在线人数快照，增加时经 `notify.js` 弹「有玩家上线」后台通知；`home_rooms` 收到后对比房间号快照，出现新房间时弹「有新的房间」后台通知。公告缓存 `announcementRawText` 供编辑回填、注入服务端消毒的 `data.html`；动态列表为就地增量渲染（issue #85）：刷新时已存在的动态在原 DOM 上只更新变化字段并按序重排，新帖插入、消失帖移除，评论展开态与正在输入的评论框/内联编辑态不被打断；最新动态与评论 `authorInfo` 经 `usernameCacheSeed` 同步到既有用户名节点，含 Star 前半名授予与撤销；动态原文与渲染 HTML 分别存 `$item.data('raw-text'/'raw-html')` 供编辑回填与变更检测；动态正文/评论渲染后经 `ensureUsernameColors` 为服务端注入的 @提及链接（`data-username`）批量补 rating 颜色，发帖框与评论框带 `data-mention` 由 mention-autocomplete.js 提供 @提及补全；上传回放 POST `/api/replay-upload` 后以 base64 存 sessionStorage 跳 `/replays/local`。
+
+房间列表在首页脚本启动时立即请求 `/api/rooms`，`home_rooms`、Socket.IO 重连成功和 BFCache 恢复共用调度：请求开始间隔至少 1000 ms，同一文档最多一个请求（含响应体处理）在途，期间的失效信号合并为一次后续刷新。首次连接和普通 `pageshow` 不重复请求，无轮询或失败自动重试。
+
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
 **views/game.pug → static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。
@@ -374,6 +377,8 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:rate-limit-html、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 
 - **scripts/build-pages.mjs / test-build-pages.mjs** — 自动枚举并用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出全部 13 个同名 `static/*.html`；测试断言 Pug/HTML 同名集合完全相等、连续两次构建字节一致，检查各页关键 DOM、脚本顺序、favicon/`{{V}}` 资源及 standards/quirks 模式，并断言共享 Header 仅用于指定七页、其余六页无共享 Header 资源且保留专用控件，replays 另断言当前导航、唯一 h1 与原有功能控件，纳入 `pnpm test`。
+
+- **scripts/test-home-room-refresh.mjs** — `pnpm run test:home-room-refresh`（纳入 `pnpm test`，需先生成首页并准备 Playwright Chromium）：运行生成的首页，使用内存 API/Socket 替身与浏览器假时钟，验证房间刷新合并、慢响应、失败恢复、重连、模拟 BFCache、渲染及进房返回。不访问生产环境。
 
 - **scripts/test-rate-limit-html.mjs** — `pnpm run test:rate-limit-html`（纳入 `pnpm test`，需先构建）：以真实 dist 服务和 `app.inject` 覆盖认证页 60 次/分钟、认证操作 20 次/分钟与全局 1000 次/分钟；验证浏览器 HTML 导航的中文 429、真实 TTL/`Retry-After` 一致性、HEAD，以及默认 `Accept: */*`、API、静态资源、socket 的原有 JSON 错误结构。
 
