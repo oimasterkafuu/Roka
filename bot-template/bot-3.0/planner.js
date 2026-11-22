@@ -16,6 +16,7 @@ const {
   fogRequired,
   fogBeliefTargets,
   fogRaidUpdate,
+  fogPaintCap,
   RAID_SCORE,
   columnAdvance,
   funnelScore,
@@ -255,7 +256,17 @@ function constructionPressure(b, units, teams, myTeam, enemyDist) {
   };
 }
 
-function selectBuildSite(b, units, pressure, frontDist, homeDist, supplyDistance, minHomeDist = 0) {
+function selectBuildSite(
+  b,
+  units,
+  pressure,
+  frontDist,
+  homeDist,
+  supplyDistance,
+  minHomeDist = 0,
+  minEnemyDist = 0,
+  enemyDist = null,
+) {
   const { size, me, neighbors, grid_type: tile } = b;
   // In serial play, depositing several garrisons at the same safe site is
   // cheaper than marching each one to the front. Prefer sites we can finish.
@@ -264,6 +275,9 @@ function selectBuildSite(b, units, pressure, frontDist, homeDist, supplyDistance
   for (let i = 0; i < size; i++) {
     if (ownerOf(tile[i]) !== me || crown(tile[i]) || swamp(tile[i]) || b.isolated[i]) continue;
     if (minHomeDist && homeDist[i] < minHomeDist) continue;
+    // A crown the rival's vision has never touched cannot be remembered as a
+    // target (see ./fog-multi `DEFAULT_SITE`).
+    if (minEnemyDist && enemyDist && enemyDist[i] < minEnemyDist) continue;
     const city = anchor(tile[i]);
     const cost = city ? 50 : 100;
     const donors = neighbors[i].filter((j) => ownerOf(tile[j]) === me && !b.isolated[j] && units[j] > 2);
@@ -456,11 +470,19 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // the layer has stopped converting ticks into land, or our land is being
   // eaten. Measured verdicts are in BOT3_MAZE.md.
   const mazeFogGuard =
-    fogMazeCfg.stall > 0 || fogMazeCfg.landLead > 0 || fogMazeCfg.drop > 0;
+    fogMazeCfg.stall > 0 ||
+    fogMazeCfg.landLead > 0 ||
+    fogMazeCfg.drop > 0 ||
+    fogMazeCfg.behind > 0 ||
+    fogMazeCfg.armyBehind > 0;
   const neutralFront = mazeFogBase && mazeFogGuard ? neutralBorder(b, me) : -1;
   const mazeFogProgress =
     mazeFogBase && mazeFogGuard
-      ? fogMazeProgress(b, { turn, land: self.land, enemyLand, neutralFront }, fogMazeCfg)
+      ? fogMazeProgress(
+          b,
+          { turn, land: self.land, enemyLand, army: self.army, enemyArmy, neutralFront },
+          fogMazeCfg,
+        )
       : null;
   const mazeFogOpen = mazeFogBase && !mazeFogProgress?.stalled;
   // Paint cap (see ./fog-maze): `Infinity` unless the bundle is on, so the
@@ -539,6 +561,22 @@ function chooseOrders(b, turn, leaderboard, multi) {
     fogColumn && (fogGuess || oracle)
       ? fogRequired(required, goal, fogOracleReserve(fogGuess, oracle, oracleCfg))
       : required;
+  // Paint-before-advance on the open fog room (see ./fog `fogPaintCap`): the
+  // column advance may only merge between our own cells while the border has
+  // nothing left to paint. `Infinity` unless the knob is on, so the shipped path
+  // stays byte for byte. The stops keep the cap off once the land race is won,
+  // the board is swamp-heavy (swamp pays no income) or the phase is over: the
+  // cap converts early merge ticks into land, and a leading empire needs its
+  // concentration back. Land, army and turn are all exact reads.
+  const paintWon =
+    (fogCfg.paintLead > 0 && enemyLand > 0 && self.land * 100 > enemyLand * fogCfg.paintLead) ||
+    (fogCfg.paintUntil > 0 && turn >= fogCfg.paintUntil) ||
+    (fogCfg.paintSwamp > 0 && swampCells * 100 >= size * fogCfg.paintSwamp) ||
+    (fogCfg.paintArmy > 0 && enemyArmy > 0 && self.army * 100 > enemyArmy * fogCfg.paintArmy);
+  const fogPaint =
+    fogColumn && fogCfg.paint > 0 && !paintWon
+      ? fogPaintCap(fogCfg, neutralBorder(b, me))
+      : Infinity;
   // A dead-even attrition on a compact serial room has to be converted by
   // concentration, not by more income; see ./closing for the diagnosis.
   const closing = single
@@ -712,6 +750,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
     (!single || invest || homes.length <= 2 || turn % 12 < (longFront ? 6 : 5)) && !closeIn;
   const backup = single && !longFront && !ffa && homes.length === 1 && enemyDist[homes[0]] <= 12;
   const buildingStart = clearSerial ? (backup ? 39 : 50) : 38;
+  // Crown placement in a fogged multi-line room (see ./fog-multi `site`): a
+  // site the rival's vision has never touched cannot be remembered as a target.
+  // Off at 0 and only read in a fog multi room, so the shipped path stays byte
+  // for byte.
+  const fogSite = multi && !clearSerial ? fogMultiConfig().site : 0;
   const site =
     develop && turn >= buildingStart && homes.length < limit
       ? selectBuildSite(
@@ -722,6 +765,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
           homeDist,
           anchorDist,
           fogOpen ? fogCfg.spread : 0,
+          fogSite,
+          enemyDist,
         )
       : -1;
   if (single) {
@@ -1024,7 +1069,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
             // cell, cap it under the capture term so the serial tick paints
             // (see ./fog-maze, `BOT3_MAZEFOG3`).
             let advance = own
-              ? Math.min(columnAdvance(send, remaining), paintCap)
+              ? Math.min(columnAdvance(send, remaining), paintCap, fogPaint)
               : columnAdvance(send, remaining);
             // Fog oracle: refuse a dive the lead cannot pay for (a fogged step
             // may hold `density` units), and add a push when the rival's

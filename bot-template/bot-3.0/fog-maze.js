@@ -120,6 +120,28 @@ const DEFAULT_STALL = 0;
 const DEFAULT_STALL_TURN = 100;
 const DEFAULT_LAND_LEAD = 0;
 const DEFAULT_LAND_LEAD_TURN = 0;
+// Land-behind guard (`BOT3_FOG_MAZE_BEHIND`, percent, off at 0). The layer's
+// early expansion is measured to *win* the weak-opponent corridor games that the
+// stock path already wins, and its one regression (`anti/maze/fog+single` seed 9
+// seat 0, a baseline win turned into a 580-tick loss) is a game the layer starts
+// behind on land and never catches up in material. The guard is scoped to the
+// start of the phase on purpose: the mid-game land-drop guard (`drop`) is
+// measured worse (anti 28/32 against 29/32) because the layer's mid-game
+// expansion is what wins the other anti games, while a corridor empire that is
+// already behind when the layer takes the frame has nothing to lose by handing
+// it back. Measured verdicts are in BOT3_MAZE.md.
+const DEFAULT_BEHIND = 0;
+const DEFAULT_BEHIND_TURN = 50;
+const DEFAULT_BEHIND_UNTIL = 80;
+// Material-behind guard (`BOT3_FOG_MAZE_ARMY_BEHIND`, percent of the rival army,
+// off at 0, from `BOT3_FOG_MAZE_ARMY_TURN`). The measured `anti` regression is
+// not a land-behind game: it holds 50+ land against 43-48 for 300 ticks and
+// still loses because the rival converts its 43 cells into twenty crowns
+// (leaderboard army 450 -> 968 -> 3775 from tick 100 to 560) while the corridor
+// layer keeps two. The leaderboard army is the exact read of that conversion,
+// and it is the one signal a fogged board cannot hide.
+const DEFAULT_ARMY_BEHIND = 0;
+const DEFAULT_ARMY_TURN = 250;
 // Land-drop guard (`BOT3_FOG_MAZE_DROP`, off by default). Hand the frame back
 // once our land has fallen this far below its own record. The traced
 // `anti/maze/fog+single` loss does not stall on a full frontier, it is eaten: 53
@@ -223,6 +245,14 @@ function fogMazeConfig(overrides = {}, env = process.env) {
     landLead: overrides.landLead ?? number(env.BOT3_FOG_MAZE_LAND_LEAD, DEFAULT_LAND_LEAD, 0, 1000),
     landLeadTurn:
       overrides.landLeadTurn ?? number(env.BOT3_FOG_MAZE_LAND_LEAD_TURN, DEFAULT_LAND_LEAD_TURN, 0, 100000),
+    // Land-behind guard (see `DEFAULT_BEHIND`): stand down when the corridor race
+    // is already lost on land inside the guard's window.
+    behind: overrides.behind ?? number(env.BOT3_FOG_MAZE_BEHIND, DEFAULT_BEHIND, 0, 1000),
+    behindTurn: overrides.behindTurn ?? number(env.BOT3_FOG_MAZE_BEHIND_TURN, DEFAULT_BEHIND_TURN, 0, 100000),
+    behindUntil:
+      overrides.behindUntil ?? number(env.BOT3_FOG_MAZE_BEHIND_UNTIL, DEFAULT_BEHIND_UNTIL, 0, 100000),
+    armyBehind: overrides.armyBehind ?? number(env.BOT3_FOG_MAZE_ARMY_BEHIND, DEFAULT_ARMY_BEHIND, 0, 1000),
+    armyTurn: overrides.armyTurn ?? number(env.BOT3_FOG_MAZE_ARMY_TURN, DEFAULT_ARMY_TURN, 0, 100000),
     // Arm the paint cap only from this many neutral border cells (see
     // `fogMazePaintCap`).
     paintFrom: overrides.paintFrom ?? number(env.BOT3_FOG_MAZE_PAINT_FROM, DEFAULT_PAINT_FROM, 1, 1000),
@@ -294,6 +324,8 @@ function fogMazeProgress(b, input, config) {
   const turn = Number(input?.turn) || 0;
   const land = Number(input?.land) || 0;
   const enemyLand = Number(input?.enemyLand) || 0;
+  const army = Number(input?.army) || 0;
+  const enemyArmy = Number(input?.enemyArmy) || 0;
   const state = (b.fogMazeProgress ??= { best: -1, since: turn, stalled: false });
   if (state.stalled) return state;
   if (land > state.best) {
@@ -305,6 +337,21 @@ function fogMazeProgress(b, input, config) {
     turn >= config.landLeadTurn &&
     enemyLand > 0 &&
     land * 100 > enemyLand * config.landLead
+  )
+    state.stalled = true;
+  else if (
+    config.behind > 0 &&
+    turn >= config.behindTurn &&
+    turn <= config.behindUntil &&
+    enemyLand > 0 &&
+    land * 100 < enemyLand * config.behind
+  )
+    state.stalled = true;
+  else if (
+    config.armyBehind > 0 &&
+    turn >= config.armyTurn &&
+    enemyArmy > 0 &&
+    army * 100 < enemyArmy * config.armyBehind
   )
     state.stalled = true;
   else if (turn < config.stallTurn) {
@@ -363,6 +410,11 @@ module.exports = {
   DEFAULT_STALL_TURN,
   DEFAULT_LAND_LEAD,
   DEFAULT_LAND_LEAD_TURN,
+  DEFAULT_BEHIND,
+  DEFAULT_BEHIND_TURN,
+  DEFAULT_BEHIND_UNTIL,
+  DEFAULT_ARMY_BEHIND,
+  DEFAULT_ARMY_TURN,
   DEFAULT_MAZEFOG3_PAINT,
   DEFAULT_PAINT_FROM,
   DEFAULT_MAZEFOG3_DROP,
