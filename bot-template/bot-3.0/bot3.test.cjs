@@ -7,6 +7,7 @@ const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents } = require('./single-front');
 const { makeOpening } = require('./opening');
+const { isMazeBoard, laneBlocked, laneState, recordLane } = require('./maze');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -118,9 +119,11 @@ test('hold construction funds when an enemy column can round a bend, and build w
       b.grid_type[i] = t;
       b.army_cnt[i] = n;
     }
-    assert.ok(!chooseOrders(b, 62, players, false).some((op) => op.build));
+    // A corridor board defers the concentrated front planner to turn 250, so
+    // the reserve behaviour is asserted once it owns the frame.
+    assert.ok(!chooseOrders(b, 262, players, false).some((op) => op.build));
     b.army_cnt[1] = 170;
-    assert.equal(chooseOrders(b, 62, players, false)[0].build, terrain === 1 ? 'b' : 'c');
+    assert.equal(chooseOrders(b, 262, players, false)[0].build, terrain === 1 ? 'b' : 'c');
   }
 });
 
@@ -198,12 +201,12 @@ test('commit the first of two attacks only when a second force can finish', () =
   board.grid_type.fill(201);
   board.grid_type.set([101, 1, 1, 1, 51, 102, 51]);
   board.army_cnt.set([5, 1, 1, 1, 65, 80, 65]);
-  const [attack] = chooseOrders(board, 75, players, false);
+  const [attack] = chooseOrders(board, 275, players, false);
   assert.equal(attack.to, 5);
   assert.ok([4, 6].includes(attack.from));
   board.grid_type[12] = 2;
   board.army_cnt[12] = 90;
-  const defended = chooseOrders(board, 76, players, false);
+  const defended = chooseOrders(board, 276, players, false);
   assert.ok(!defended.some((op) => op.to === 5));
 });
 
@@ -331,4 +334,77 @@ test('rebind with a pending queue, apply diff and retain independent multiline o
     handle.stop();
     assert.equal(socket.listenerCount('update'), 0);
   }
+});
+
+test('detect corridor boards and leave open maps alone', () => {
+  const open = createBoard(10, 10, 1);
+  open.grid_type.fill(200);
+  // A random map uses ~12% mountains, well below the corridor threshold.
+  for (let i = 0; i < 10; i++) open.grid_type[i * 10 + i] = 201;
+  assert.equal(isMazeBoard(open), false);
+  const corridor = createBoard(10, 10, 1);
+  corridor.grid_type.fill(201);
+  for (let i = 0; i < 10; i++) corridor.grid_type[i * 10 + (i % 2)] = 200;
+  assert.equal(isMazeBoard(corridor), true);
+});
+
+test('refuse to reverse or repeat a corridor lane, but keep progress and cuts', () => {
+  const b = createBoard(1, 4, 1);
+  b.grid_type.set([101, 1, 2, 102]);
+  recordLane(b, 0, 1);
+  // The reverse of the last lane is blocked when it gains no ground.
+  assert.equal(laneBlocked(b, 1, 0, 40, false, false), true);
+  // Walking back toward the objective is real progress on a corridor.
+  assert.equal(laneBlocked(b, 1, 0, 41, true, false), false);
+  // A crown strike or a rescue reinforcement is never blocked.
+  assert.equal(laneBlocked(b, 1, 0, 41, false, true), false);
+  // The third consecutive use of one edge is refused as well.
+  recordLane(b, 0, 1);
+  assert.equal(laneBlocked(b, 0, 1, 40, false, false), true);
+  recordLane(b, 1, 2);
+  assert.equal(laneState(b).edge, '1:2');
+  assert.equal(laneState(b).blocked, 2);
+});
+
+test('defer the concentrated front planner on a corridor board', () => {
+  // A 5x5 snake: walls everywhere except one winding corridor with a crown at
+  // each end. Mountains are 60% of the board, like a generated maze.
+  const path = [
+    [0, 0],
+    [0, 1],
+    [0, 2],
+    [1, 2],
+    [2, 2],
+    [2, 3],
+    [2, 4],
+    [3, 4],
+    [4, 4],
+    [4, 3],
+  ];
+  const build = () => {
+    const b = createBoard(5, 5, 1);
+    b.grid_type.fill(201);
+    for (const [x, y] of path) b.grid_type[x * 5 + y] = 200;
+    b.grid_type[0] = 101;
+    b.grid_type[24] = 102;
+    b.army_cnt[0] = 34;
+    b.army_cnt[1] = 9;
+    b.army_cnt[13] = 7;
+    b.army_cnt[23] = 6;
+    b.army_cnt[24] = 40;
+    return b;
+  };
+  const corridor = build();
+  assert.equal(isMazeBoard(corridor), true);
+  // The fog seat already plays the generic path; a corridor board must match it
+  // until the deferred turn instead of switching to the front planner at 28.
+  const fog = build();
+  fog.fogMode = true;
+  assert.deepEqual(chooseOrders(corridor, 40, players, false), chooseOrders(fog, 40, players, false));
+  // From the deferred turn the concentrated front planner owns the frame again,
+  // which is visible in the different (front) scoring.
+  const late = build();
+  const lateFog = build();
+  lateFog.fogMode = true;
+  assert.notDeepEqual(chooseOrders(late, 300, players, false), chooseOrders(lateFog, 300, players, false));
 });

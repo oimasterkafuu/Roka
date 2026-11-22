@@ -8,6 +8,7 @@ const {
   siegeValue,
 } = require('./single-front');
 const { openingOrder, END_TICK } = require('./opening');
+const { isMazeBoard, laneBlocked, recordLane, LANE, SINGLE_FROM } = require('./maze');
 
 const INF = 1e6;
 const ownerOf = (code) => (code < 200 ? code % 50 : 0);
@@ -318,7 +319,12 @@ function chooseOrders(b, turn, leaderboard, multi) {
     b.opening = null;
   }
   const scouting = distances(b, scouts).dist;
-  const single = clearSerial && turn >= 28;
+  const maze = isMazeBoard(b) && process.env.BOT3_MAZE !== '0';
+  // A corridor is won by painting neutral cells and by one concentrated
+  // column. The open-map front planner concentrates on a rival crown instead
+  // and stops expanding, which is exactly the wrong shape on a maze board, so
+  // it only takes the frame late (see maze.js for the measured thresholds).
+  const single = clearSerial && turn >= (maze ? SINGLE_FROM : 28);
   const self = leaderboard.find((p) => p.id === me);
   const borderDistance = single ? distances(b, borders).dist : null;
   const rival = single
@@ -609,8 +615,20 @@ function chooseOrders(b, turn, leaderboard, multi) {
   candidates.sort((a, c) => c.score - a.score);
   const used = new Set(),
     orders = [];
-  for (const op of candidates) {
-    if (used.has(op.from) || used.has(op.to)) continue;
+  // Maze lane discipline: do not spend consecutive ticks on the same corridor
+  // edge (or its reverse) unless the move is a real cut, capture or defence.
+  const take = (op) => {
+    if (used.has(op.from) || used.has(op.to)) return false;
+    if (maze && LANE && !op.build) {
+      const i = op.from,
+        j = op.to;
+      const hostile = teams[j] && teams[j] !== myTeam;
+      const forward = goal[j] < goal[i] || (front ? front.route[j] < front.route[i] : false);
+      const emergency =
+        (hostile && (crown(tile[j]) || (units[j] >= 16 && units[i] - 1 > units[j]))) ||
+        (teams[j] === myTeam && (immediate[j] >= units[j] || (danger.length > 0 && defense[j] <= 1)));
+      if (laneBlocked(b, i, j, turn, forward, emergency)) return false;
+    }
     used.add(op.from);
     used.add(op.to);
     orders.push(op);
@@ -621,9 +639,16 @@ function chooseOrders(b, turn, leaderboard, multi) {
       }
       b.lastFrom[op.to] = op.from;
       b.lastMove[op.to] = turn;
+      if (maze) recordLane(b, op.from, op.to);
     }
-    if (!multi || orders.length >= 16) break;
+    return true;
+  };
+  for (const op of candidates) {
+    if (take(op) && (!multi || orders.length >= 16)) break;
   }
+  // A fully blocked frame must not idle: keep the previous behaviour when no
+  // lane passed the guard (the cooldown expires within four ticks).
+  if (maze && !orders.length && candidates.length) take(candidates[0]);
   return orders;
 }
 
