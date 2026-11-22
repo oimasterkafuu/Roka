@@ -10,6 +10,15 @@ const { planFinish } = require('./kill');
 const { makeOpening } = require('./opening');
 const { isMazeBoard, laneBlocked, laneState, recordLane } = require('./maze');
 const { closingConfig, closingUpdate, freshClosing } = require('./closing');
+const {
+  fogConfig,
+  fogBoard,
+  fogUpdate,
+  fogRequired,
+  DEFAULT_START_TURN,
+  DEFAULT_GUESS,
+  DEFAULT_AIM_LEAD,
+} = require('./fog');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -549,10 +558,103 @@ test('hand the plan to the closing column only while the layer is on', () => {
   }
 });
 
+// Fog single-line layer. It prices the part of a route the fog hides and aims
+// the column at the visible front instead of at a crown that is never
+// remembered; see ./fog and BOT3_FOG.md for the measured matrix. Opt-in: the
+// default path keeps the round-2 plan byte for byte.
+test('keep the fog layer opt-in and price the hidden part of the route', () => {
+  assert.equal(fogConfig({}, {}).enabled, false);
+  assert.equal(fogConfig({}, { BOT3_FOG: '1' }).enabled, true);
+  assert.equal(fogConfig({}, { BOT3_FOG: 'off' }).enabled, false);
+  const tuned = fogConfig(
+    {},
+    { BOT3_FOG: '1', BOT3_FOG_TURN: '220', BOT3_FOG_GUESS: '12', BOT3_FOG_AIM_LEAD: '40', BOT3_FOG_FUNNEL: '1' },
+  );
+  assert.equal(tuned.startTurn, 220);
+  assert.equal(tuned.guess, 12);
+  assert.equal(tuned.aimLead, 40);
+  assert.equal(tuned.funnel, true);
+  assert.equal(tuned.column, true);
+  const defaults = fogConfig({}, {});
+  assert.equal(defaults.startTurn, DEFAULT_START_TURN);
+  assert.equal(defaults.guess, DEFAULT_GUESS);
+  assert.equal(defaults.aimLead, DEFAULT_AIM_LEAD);
+  // A fogged cell reports no defenders, so every remaining step carries the
+  // flat reserve and the reserve stops growing at the cap.
+  const required = Float64Array.from([10, 20, 30]);
+  const goal = Float64Array.from([0, 2, 99]);
+  assert.deepEqual(Array.from(fogRequired(required, goal, 5)), [10, 30, 70]);
+  assert.deepEqual(Array.from(fogRequired(Float64Array.from([4]), Float64Array.from([1]), 0)), [4]);
+});
+
+test('open the fog column only on a late serial fog room with a material edge', () => {
+  assert.equal(fogBoard({ fog: [0, 1, 0] }), true);
+  assert.equal(fogBoard({ fog: [0, 0, 0] }), false);
+  assert.equal(fogBoard({ fog: [0, 0, 0], fogMode: true }), true);
+  const board = {};
+  const room = { multi: false, size: 221, turn: 200, army: 400, enemyArmy: 300, danger: 0 };
+  const config = fogConfig({ enabled: true, floor: 1 }, {});
+  assert.equal(fogUpdate(board, room, config).active, true);
+  assert.equal(board.fogLayer.entries, 1);
+  assert.equal(fogUpdate({}, { ...room, multi: true }, config).active, false);
+  assert.equal(fogUpdate({}, { ...room, size: 900 }, config).active, false);
+  assert.equal(fogUpdate({}, { ...room, turn: 20 }, config).active, false);
+  // Behind on the measured army, or with a home already threatened, the layer
+  // stays out of the frame; it pauses rather than latching away the game.
+  assert.equal(fogUpdate({}, { ...room, army: 100 }, config).active, false);
+  assert.equal(fogUpdate(board, { ...room, danger: 1 }, config).active, false);
+  assert.equal(board.fogLayer.exit, 'threat');
+  assert.equal(fogUpdate(board, room, config).active, true);
+  assert.equal(board.fogLayer.entries, 2);
+  assert.equal(fogUpdate({}, room, fogConfig({ enabled: false }, {})).active, false);
+});
+
+test('never touch a visible board while the fog layer is on', () => {
+  const army = [
+    { id: 1, team: 1, army: 300, land: 9, dead: 0 },
+    { id: 2, team: 2, army: 90, land: 6, dead: 0 },
+  ];
+  const build = () => {
+    const b = createBoard(3, 6, 1);
+    b.grid_type.fill(200);
+    b.grid_type[0] = 101;
+    b.army_cnt[0] = 20;
+    b.grid_type[2] = 1;
+    b.army_cnt[2] = 130;
+    b.grid_type[4] = 1;
+    b.army_cnt[4] = 60;
+    for (let i = 12; i < 18; i++) {
+      b.grid_type[i] = 102;
+      b.army_cnt[i] = 3;
+    }
+    return b;
+  };
+  process.env.BOT3_FOG = '1';
+  try {
+    // A visible (non-fog) board never reaches the layer, so it cannot allocate
+    // state or change a single score.
+    const visible = build();
+    chooseOrders(visible, 140, army, false);
+    assert.equal(visible.fogLayer, undefined);
+    // A fog single-line board does reach it, and switching the layer off again
+    // leaves the board state untouched.
+    const hidden = build();
+    hidden.fogMode = true;
+    chooseOrders(hidden, 140, army, false);
+    assert.notEqual(hidden.fogLayer, undefined);
+    const off = build();
+    off.fogMode = true;
+    process.env.BOT3_FOG = '0';
+    chooseOrders(off, 140, army, false);
+    assert.equal(off.fogLayer, undefined);
+  } finally {
+    delete process.env.BOT3_FOG;
+  }
+});
+
 // Finish layer fixtures. Owners follow the engine encoding (`50 * owner + kind`),
 // so `101`/`102` are a crown of player 1 / player 2 and `1`/`2` plain land.
-function finishBoard(kinds, armies, rows = 1) {
-  const b = createBoard(rows, kinds.length / rows, 1);
+function finishBoard(kinds, armies, rows = 1) {  const b = createBoard(rows, kinds.length / rows, 1);
   b.grid_type.set(kinds);
   b.army_cnt.set(armies);
   return b;

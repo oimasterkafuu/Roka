@@ -25,27 +25,40 @@
 //
 // Behaviour while the layer is active (fog, single line, small board, from
 // `BOT3_FOG_TURN`): the heaviest stack becomes a column that advances down the
-// objective field and attacks the frontier, and rear garrisons funnel into it
-// (`BOT3_FOG_FUNNEL`). The column only commits when it can pay `required` plus
-// a reserve of `guess` units per remaining step, which is the conservative
+// objective field and attacks the frontier. With `BOT3_FOG_AIM` and no
+// remembered crown the whole planner aims at the visible enemy front instead of
+// an infinite goal. The column only commits when it can pay `required` plus a
+// reserve of `guess` units per remaining step, which is the conservative
 // stand-in for defenders the fog hides. Everything else - building, defence,
 // the pressure model - stays on the existing path, so a threat still takes the
 // tick and the layer simply pauses (it is a predicate, not a latch).
 //
-// `BOT3_FOG=0` restores the previous behaviour byte for byte.
+// Opt-in: `BOT3_FOG=1` turns the layer on. The default stays off because the
+// Relay fog cells only climb from 50% to 52-56% and never reach the 65% gate,
+// while two other cells lose one game each; `BOT3_FOG=0` therefore restores the
+// previous behaviour byte for byte (verified on the full 2048-game matrix).
+// The measured matrix lives in BOT3_FOG.md.
 
 const DEFAULT_MAX_BOARD = 800;
 // Late enough to keep the opening untouched; the early economy is the same on
 // both sides of a mirror, and the measured gains come from the attrition that
 // follows.
+// Late enough to keep the opening untouched; the early economy is the same on
+// both sides of a mirror, and the measured gains come from the attrition that
+// follows.
 const DEFAULT_START_TURN = 60;
 // Reserve per remaining step toward the objective. A fogged cell can hide any
-// number of units; four is the measured compromise between walking into an
+// number of units; eight is the measured compromise between walking into an
 // ambush and never moving at all (see BOT3_FOG.md).
 const DEFAULT_GUESS = 8;
 // Do not commit while behind on material: the reserve above is only a guess,
 // the leaderboard army is measured.
 const DEFAULT_FLOOR = 0;
+// The front aim needs a material edge, but only a measured one: requiring the
+// full leaderboard army (`army >= enemyArmy`) is what keeps the anti/archipelago
+// cell from regressing, while a looser ratio buys the relay/archipelago cell at
+// the anti cell's expense. Both ends are recorded in BOT3_FOG.md.
+const DEFAULT_AIM_LEAD = 100;
 
 function number(raw, fallback, min, max) {
   const value = Number(raw);
@@ -62,14 +75,15 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function fogConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.BOT3_FOG, true),
+    enabled: overrides.enabled ?? flag(env.BOT3_FOG, false),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_FOG_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     startTurn: overrides.startTurn ?? number(env.BOT3_FOG_TURN, DEFAULT_START_TURN, 0, 100000),
     guess: overrides.guess ?? number(env.BOT3_FOG_GUESS, DEFAULT_GUESS, 0, 200),
     floor: overrides.floor ?? number(env.BOT3_FOG_FLOOR, DEFAULT_FLOOR, 0, 4),
     column: overrides.column ?? flag(env.BOT3_FOG_COLUMN, true),
     funnel: overrides.funnel ?? flag(env.BOT3_FOG_FUNNEL, false),
-    aimFront: overrides.aimFront ?? flag(env.BOT3_FOG_AIM, false),
+    aimFront: overrides.aimFront ?? flag(env.BOT3_FOG_AIM, true),
+    aimLead: overrides.aimLead ?? number(env.BOT3_FOG_AIM_LEAD, DEFAULT_AIM_LEAD, 0, 200),
     expand: overrides.expand ?? flag(env.BOT3_FOG_EXPAND, false),
     invest: overrides.invest ?? flag(env.BOT3_FOG_INVEST, false),
     guard: overrides.guard ?? flag(env.BOT3_FOG_GUARD, false),
@@ -82,6 +96,8 @@ function fogBoard(b) {
   return Boolean(b?.fogMode ?? (b?.fog ? b.fog.includes(1) : false));
 }
 
+// Layer state lives under its own key: `board.fog` is the per-cell visibility
+// array the diff carries, so it must not be used as scratch space.
 function freshFog() {
   return { active: false, entries: 0, entry: null, exit: null };
 }
@@ -89,7 +105,7 @@ function freshFog() {
 // Gate for the whole layer: fog, serial, small board, late enough. `active`
 // additionally needs a measured material edge and no threatened home.
 function fogUpdate(board, input, config = fogConfig()) {
-  const state = (board.fog ??= freshFog());
+  const state = (board.fogLayer ??= freshFog());
   const off = { active: false, state, entries: state.entries, entry: state.entry };
   if (!config.enabled) return off;
   if (input?.multi) return off;
@@ -178,6 +194,7 @@ module.exports = {
   DEFAULT_START_TURN,
   DEFAULT_GUESS,
   DEFAULT_FLOOR,
+  DEFAULT_AIM_LEAD,
   COLUMN_SCORE,
   FUNNEL_SCORE,
   GUARD_SCORE,

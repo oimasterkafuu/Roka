@@ -350,12 +350,19 @@ function chooseOrders(b, turn, leaderboard, multi) {
     : null;
   // Without a remembered enemy crown there is no objective at all: fog vision
   // is radius 1, so the crowns only appear once our land touches their
-  // neighbour. Aim at the visible front until then (see ./fog).
-  const objectives = single
-    ? (rival?.crowns ?? [])
-    : fogOpen && fogCfg.aimFront && !targets.length
-      ? enemies
-      : targets;
+  // neighbour. Aim at the visible front until then (see ./fog), but only when
+  // the leaderboard army says we are close enough to afford the attrition:
+  // chasing a front from far behind is what costs the anti/archipelago cell.
+  let enemyArmy = 0;
+  for (const p of leaderboard)
+    if (!p.dead && p.team !== myTeam) enemyArmy = Math.max(enemyArmy, Number(p.army) || 0);
+  const fogAim =
+    fogOpen &&
+    fogCfg.aimFront &&
+    !maze &&
+    !targets.length &&
+    self.army * 100 >= enemyArmy * fogCfg.aimLead;
+  const objectives = single ? (rival?.crowns ?? []) : fogAim ? enemies : targets;
   const { dist: goal, queue } = distances(b, objectives);
   const heading = targets.length ? goal : enemies.length ? enemyDist : scouting;
   const required = assaultStrength(b, queue, goal, units, teams, myTeam);
@@ -364,9 +371,6 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const danger = homes.filter((i) => threat[i] > units[i]);
   const exposedHome = turn >= 38 && homes.length <= 2 ? homes.find((i) => pressure(i) > units[i]) : undefined;
   const defense = distances(b, danger, (j) => teams[j] === myTeam && !b.isolated[j]).dist;
-  let enemyArmy = 0;
-  for (const p of leaderboard)
-    if (!p.dead && p.team !== myTeam) enemyArmy = Math.max(enemyArmy, Number(p.army) || 0);
   const fog = fogOpen
     ? fogUpdate(b, { turn, multi, size, army: self.army, enemyArmy, danger: danger.length })
     : { active: false };
