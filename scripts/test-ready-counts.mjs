@@ -65,8 +65,16 @@ for (const lobby of [mixed, room(3,0,2,0), room(0,2,0,1)]) {
     }
     return chain;
   };
-  vm.runInNewContext(rendering, { data, $, roomRunning: false, ready_state: 0, refreshDeployBanner() {} });
+  vm.runInNewContext(rendering, {
+    data,
+    $,
+    roomRunning: false,
+    selfTeam: 1,
+    ready_state: 0,
+    refreshDeployBanner() {},
+  });
   assert.equal(nodes['#force-start'].html, '我准备好了');
+  assert.equal(nodes['#force-start']['prop:disabled'], false);
   const text = nodes['#ready-counts'].text;
   assert.equal(text.includes('真人'), data.ready_counts.human.total > 0);
   assert.equal(text.includes('AI'), data.ready_counts.ai.total > 0);

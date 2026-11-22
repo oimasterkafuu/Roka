@@ -11,6 +11,7 @@
 //   对局结束回到准备阶段后才重置。
 // 成功 exit 0，失败/超时 exit 1。全程硬上限 120 秒。
 
+import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -174,6 +175,7 @@ function createRoomClient(baseUrl, { cookie, token, room, autoReady = true, name
     chats: [],
     kicks: 0,
     roomUpdates: [],
+    homeRooms: 0,
   };
 
   socket.on('set_id', (id) => {
@@ -191,6 +193,9 @@ function createRoomClient(baseUrl, { cookie, token, room, autoReady = true, name
   });
   socket.on('room_kick', () => {
     client.kicks += 1;
+  });
+  socket.on('home_rooms', () => {
+    client.homeRooms += 1;
   });
   socket.on('room_update', (data) => {
     client.roomUpdates.push(data);
@@ -224,6 +229,71 @@ function waitFor(condition, timeoutMs, label) {
   });
 }
 
+function broadcastCounts(client) {
+  return [client.roomUpdates.length, client.homeRooms, client.chats.length];
+}
+
+async function expectQuietCommand(client, observers, event, payload) {
+  const before = observers.map(broadcastCounts);
+  client.socket.emit(event, payload);
+  await sleep(150);
+  assert.deepEqual(
+    observers.map(broadcastCounts),
+    before,
+    `${event} ${JSON.stringify(payload)} should be silent`,
+  );
+}
+
+async function scenarioQuietLobbyCommands(baseUrl, tokenA, tokenB) {
+  const room = 'guardquiet';
+  const host = createRoomClient(baseUrl, { cookie: tokenA, room, autoReady: false, name: 'host' });
+  const member = (client) => lastRoomUpdate(host)?.players.find(({ sid }) => sid === client.clientId);
+  await waitFor(() => member(host) && host.chats.length === 1, 5000, 'host joined');
+  await expectQuietCommand(host, [host], 'change_ready', { ready: true });
+  assert.equal(member(host).ready, false);
+
+  const guest = createRoomClient(baseUrl, { cookie: tokenB, room, autoReady: false, name: 'guest' });
+  const observers = [host, guest];
+  await waitFor(() => member(guest)?.team === 1 && host.chats.length === 2, 5000, 'guest joined');
+
+  let before = broadcastCounts(host);
+  guest.socket.emit('change_team', { team: 0 });
+  await waitFor(() => member(guest)?.team === 0 && host.homeRooms > before[1], 5000, 'guest spectating');
+  assert.deepEqual(
+    broadcastCounts(host),
+    before.map((count) => count + 1),
+  );
+  await expectQuietCommand(guest, observers, 'change_ready', { ready: true });
+  await expectQuietCommand(host, observers, 'change_ready', { ready: true });
+  await expectQuietCommand(guest, observers, 'change_team', { team: 0 });
+  assert.equal(member(guest).ready, false);
+  assert.equal(member(host).ready, false);
+
+  before = broadcastCounts(host);
+  guest.socket.emit('change_team', { team: 1 });
+  await waitFor(() => member(guest)?.team === 1 && host.homeRooms > before[1], 5000, 'guest playing');
+  assert.deepEqual(
+    broadcastCounts(host),
+    before.map((count) => count + 1),
+  );
+  await expectQuietCommand(host, observers, 'change_team', { team: 2 });
+
+  before = broadcastCounts(host);
+  host.socket.emit('change_ready', { ready: 1 });
+  await waitFor(() => member(host).ready && host.homeRooms > before[1], 5000, 'host ready');
+  assert.deepEqual(broadcastCounts(host), [before[0] + 1, before[1] + 1, before[2]]);
+  await expectQuietCommand(host, observers, 'change_ready', { ready: true });
+
+  before = broadcastCounts(host);
+  host.socket.emit('change_ready', { ready: false });
+  await waitFor(() => !member(host).ready && host.homeRooms > before[1], 5000, 'host unready');
+  assert.deepEqual(broadcastCounts(host), [before[0] + 1, before[1] + 1, before[2]]);
+
+  host.socket.disconnect();
+  guest.socket.disconnect();
+  log('quiet commands and real team/readiness changes passed');
+}
+
 async function scenarioSameTeam(baseUrl, tokenA, tokenB) {
   log('场景 1：组队模式全员同队应拒绝开局');
   const a = createRoomClient(baseUrl, { cookie: tokenA, room: ROOM_TEAM, autoReady: false, name: 'A' });
@@ -246,11 +316,9 @@ async function scenarioSameTeam(baseUrl, tokenA, tokenB) {
   }
   log('场景 1a 通过：全员同队未开局且收到提示');
 
+  await expectQuietCommand(a, [a, b], 'change_ready', { ready: true });
   // B 换到队伍 2 后应能正常开局。
   b.socket.emit('change_team', { team: 2 });
-  await sleep(300);
-  a.socket.emit('change_ready', { ready: true });
-  b.socket.emit('change_ready', { ready: true });
   await waitFor(() => a.inits.length > 0 && b.inits.length > 0, 8000, '换队后开局');
   log('场景 1b 通过：调整为不同队伍后正常开局');
   a.socket.disconnect();
@@ -280,6 +348,15 @@ async function scenarioDuplicateName(baseUrl, dupToken, tokenB) {
   if (!dupInit || !Array.isArray(dupInit.general) || dupInit.general[0] >= 0) {
     throw new Error('同名人类未以观战身份收到 init_map（疑似接管了 bot 席位）');
   }
+  const observers = [bot, humanB, humanDup];
+  await expectQuietCommand(bot, observers, 'change_team', { team: 0 });
+  await expectQuietCommand(bot, observers, 'change_ready', { ready: true });
+  humanDup.socket.emit('change_team', { team: 0 });
+  await waitFor(
+    () => lastRoomUpdate(bot)?.players.some(({ sid, team }) => sid === humanDup.clientId && team === 0),
+    5000,
+    'spectator can change next-game seat during play',
+  );
   const updatesAtJoin = bot.updates;
   await sleep(2500);
   if (bot.updates <= updatesAtJoin) {
@@ -540,6 +617,7 @@ async function main() {
   await waitTcpReady(port, SERVER_READY_TIMEOUT_MS);
   log('服务器已就绪');
 
+  await scenarioQuietLobbyCommands(baseUrl, tokenA, tokenB);
   await scenarioSameTeam(baseUrl, tokenA, tokenB);
   await scenarioDuplicateName(baseUrl, dupToken, tokenB);
   await scenarioMapSize(baseUrl, tokenA, tokenB);

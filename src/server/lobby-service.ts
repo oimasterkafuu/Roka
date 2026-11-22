@@ -1396,7 +1396,7 @@ class LobbyService {
     return bestTeam === 0 ? 1 : bestTeam;
   }
 
-  private getPlayingCount(players: LobbyPlayer[]): number {
+  getPlayingCount(players: LobbyPlayer[]): number {
     return players.filter((player) => player.team !== 0).length;
   }
 

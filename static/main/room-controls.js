@@ -216,8 +216,7 @@ const delayUpdateMapToken = _.debounce(function () {
   updateConfPatch({ map_token: value.trim() });
 }, 300);
 
-function updateTeam() {
-  var team = getTabVal('custom-team');
+function updateTeam(team) {
   if (team == '观战') team = 0;
   else if (team == '参赛') team = 1;
   else team = parseInt(team);
@@ -226,8 +225,8 @@ function updateTeam() {
 }
 
 // 观战中的「下局模式」选择：仅决定下一局的观战/参与身份（team 0/1），不影响当前对局。
-function updateSpectateMode() {
-  socket.emit('change_team', { team: getTabVal('spectate-mode') == '观战' ? 0 : 1 });
+function updateSpectateMode(mode) {
+  socket.emit('change_team', { team: mode == '观战' ? 0 : 1 });
 }
 
 // 观战视角选择（迷雾对局，看齐回放的视角切换）：默认「全图」；组队局 tab 显示
@@ -320,13 +319,13 @@ function setTabVal(x, y) {
   $(tabs[0]).val(y);
 }
 
-function initTab(x, y, callback) {
+function initTab(x, y, callback, optimistic = true) {
   $(y).on('click', function () {
     var groupKey = $(x).attr('id').substr(5);
     var nextVal = $(y).html();
     if (getTabVal(groupKey) == nextVal) return;
-    setTabVal(groupKey, nextVal);
-    callback();
+    if (optimistic) setTabVal(groupKey, nextVal);
+    callback(nextVal);
   });
 }
 

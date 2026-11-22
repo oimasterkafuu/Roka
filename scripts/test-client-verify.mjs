@@ -17,6 +17,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import vm from 'node:vm';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(rootDir, 'package.json'));
@@ -199,6 +200,137 @@ async function fetchStamp(baseUrl, cookie) {
 const USER_VERIFY = 'verify_alice'; // 首个注册 = 超管（走 client_verify 新路径）
 const USER_PLAIN = 'verify_bob'; // 对照连接（不发 sig）
 const USER_HEARTBEAT = 'verify_carol'; // 回归连接（走 room_heartbeat 老路径）
+
+async function testRoomHeartbeatLifecycle() {
+  const handlers = new Map();
+  const timers = new Map();
+  const sent = [];
+  const digests = [];
+  const noop = () => {};
+  const node = {
+    0: { children: [{}, {}] },
+    ready: noop,
+    attr: noop,
+    css: noop,
+    hide: noop,
+    html: noop,
+    prop: noop,
+    removeAttr: noop,
+    show: noop,
+    text: () => node,
+    toggleClass: noop,
+    val: noop,
+  };
+  let now = 0;
+  let timerId = 0;
+  const socket = {
+    id: 'old-connection',
+    connected: true,
+    on: (event, handler) => handlers.set(event, handler),
+    emit: (event, payload) => sent.push({ event, payload, at: now, socketId: socket.id }),
+  };
+  const crypto = {
+    subtle: {
+      digest: (_algorithm, data) =>
+        new Promise((resolve) => digests.push({ data: new TextDecoder().decode(data), resolve })),
+    },
+  };
+  const context = vm.createContext({
+    window: { addEventListener: noop, crypto },
+    document: { visibilityState: 'visible', hasFocus: () => true },
+    location: { origin: 'http://127.0.0.1', pathname: '/games/test' },
+    io: { connect: () => socket },
+    $: () => node,
+    crypto,
+    TextEncoder,
+    setInterval(callback, period) {
+      timers.set(++timerId, { callback, period, next: now + period });
+      return timerId;
+    },
+    clearInterval: (id) => timers.delete(id),
+    setTabVal: noop,
+    setAllowTeamModeByCode: noop,
+    setFogModeByCode: noop,
+    setMultiLineModeByCode: noop,
+    setMapModeByCode: noop,
+    getMapModeCode: () => 'random',
+    setMapRegionByCode: noop,
+    setMapSizeByCode: noop,
+    refreshMapInputHint: noop,
+    normalizeMapTokenInput: (value) => value,
+    setTabGroupReadonly: noop,
+    refreshCustomTeamTabs: noop,
+    usernameLinkHtml: () => '<a>fixture</a>',
+    usernameEnsureColors: noop,
+    notifyEvent: noop,
+    update: noop,
+    crown_html: '',
+  });
+  const advance = (ms) => {
+    now += ms;
+    for (const timer of timers.values()) {
+      if (timer.next > now) continue;
+      timer.next += timer.period;
+      timer.callback();
+    }
+  };
+  const source = fs.readFileSync(path.join(rootDir, 'static', 'main.js'), 'utf8');
+  vm.runInContext(source, context, { filename: 'static/main.js' });
+  context.client_id = 'old-member';
+  const roomUpdate = handlers.get('room_update');
+  const snapshot = (sid) => ({ players: [{ sid, uid: 'tester', team: 0, ready: false }] });
+
+  roomUpdate({});
+  roomUpdate(snapshot('other-member'));
+  assert.equal(sent.length, 0);
+  roomUpdate(snapshot(context.client_id));
+  roomUpdate(snapshot(context.client_id));
+  assert.deepEqual(
+    sent.map(({ at }) => at),
+    [0],
+  );
+  advance(29_999);
+  assert.equal(sent.length, 1);
+  advance(1);
+  assert.deepEqual(
+    sent.map(({ at }) => at),
+    [0, 30_000],
+  );
+
+  context.session_stamp = 'fixture-stamp';
+  advance(30_000);
+  assert.equal(digests.length, 1);
+  socket.connected = false;
+  handlers.get('disconnect')('transport close');
+  assert.equal(timers.size, 0);
+  roomUpdate(snapshot(context.client_id));
+  assert.equal(timers.size, 0);
+
+  socket.connected = true;
+  socket.id = 'new-connection';
+  context.client_id = 'new-member';
+  roomUpdate(snapshot(context.client_id));
+  assert.deepEqual(
+    digests.map(({ data }) => data),
+    ['fixture-stamp:old-member', 'fixture-stamp:new-member'],
+  );
+  digests[0].resolve(Uint8Array.of(1).buffer);
+  await new Promise(setImmediate);
+  assert.equal(sent.length, 2, 'old signature must not emit on the new connection');
+  digests[1].resolve(Uint8Array.of(2).buffer);
+  await new Promise(setImmediate);
+  assert.deepEqual(
+    sent.map(({ event, socketId, payload }) => [event, socketId, payload.sig]),
+    [
+      ['room_heartbeat', 'old-connection', undefined],
+      ['room_heartbeat', 'old-connection', undefined],
+      ['room_heartbeat', 'new-connection', '02'],
+    ],
+  );
+  handlers.get('room_kick')();
+  assert.equal(timers.size, 0);
+  log('browser heartbeat: first frame, 30-second cadence, disconnect, reconnect and kick passed');
+}
 
 // 只替换引擎创建边界，直接检查 LobbyService 传入的速度与排行榜回调，避免计时断言。
 async function testGameAIClassification(store) {
@@ -408,6 +540,7 @@ async function testMixedReadySockets(baseUrl, token) {
 
 async function main() {
   try {
+    await testRoomHeartbeatLifecycle();
     ensureBuild();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roka-client-verify-test-'));
 
