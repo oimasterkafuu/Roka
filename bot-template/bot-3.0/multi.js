@@ -63,7 +63,9 @@
 // games: the cell goes 31/1 -> 32/0, at the cost of 5 relay fog wins
 // (archipelago -1, maze -1, random -4) and no cell below the baseline.
 //
-// The layer is on by default; `BOT3_MULTI=0` restores the baseline path
+// The layer is on by default; `BOT3_MULTI=0` restores the baseline path.
+// Multi-line rooms no longer have the burst window, so the burst pricing is
+// off by default and only the focus phase remains active.
 // byte for byte. Every mechanism has its own switch; see MULTI.md for
 // the measured effect of each one.
 
@@ -112,7 +114,7 @@ function multiConfig(overrides = {}, env = process.env) {
   return {
     enabled: overrides.enabled ?? flag(env.BOT3_MULTI, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_MULTI_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
-    burst: overrides.burst ?? flag(env.BOT3_MULTI_BURST, true),
+    burst: overrides.burst ?? flag(env.BOT3_MULTI_BURST, false),
     // Fog rooms cannot price the burst: the rival half of the race is invisible,
     // so the capture/raid bonuses buy land that the endgame cannot convert. The
     // measured cost is one game in `anti/archipelago/fog+multi` (31/32 against

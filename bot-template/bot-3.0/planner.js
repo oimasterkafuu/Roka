@@ -270,7 +270,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
     anchors = [],
     scouts = [];
   const next = turn + 1,
-    burst = next >= 26 && next <= 50;
+    beforeBurstEnd = !multi && turn < 50,
+    burst = beforeBurstEnd && next >= 26;
   for (let i = 0; i < size; i++) {
     if (!b.fog[i]) {
       b.memory[i] = tile[i];
@@ -609,6 +610,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
     const rescue = rescueValues(b, teams, myTeam, units);
     front = {
       b,
+      beforeBurstEnd,
       units,
       teams,
       myTeam,
@@ -776,8 +778,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
       }
       let score = 0;
       if (!own) {
-        score = turn < 50 ? 62 : 32;
-        if (swamp(tile[j])) score -= turn < 49 ? 29 : 8;
+        score = beforeBurstEnd ? 62 : 32;
+        if (swamp(tile[j])) score -= beforeBurstEnd && turn < 49 ? 29 : 8;
         score += Math.min(3, opens) * 2 + Math.min(4, remaining - 1) * 1.3;
         if (hostile) score += 17 + Math.min(95, Math.sqrt(cut[j]) * 5);
         if (hostile && anchor(tile[j])) score += 80;

@@ -920,7 +920,7 @@ test('multi-line layer is on by default and clamps its own environment', () => {
 });
 
 test('only burst and focus turns of a multi-line room reach the layer', () => {
-  const on = multiConfig({ enabled: true }, {});
+  const on = multiConfig({ enabled: true, burst: true }, {});
   const { b, input } = multiContext();
   assert.equal(multiUpdate(b, { ...input, multi: false }, on), null);
   assert.equal(multiUpdate(b, input, multiConfig({}, { BOT3_MULTI: '0' })), null);
@@ -939,20 +939,20 @@ test('only burst and focus turns of a multi-line room reach the layer', () => {
 test('the fog burst gate only releases the burst while the army race is held', () => {
   const base = multiContext();
   const at = (army, enemyArmy, fog) => multiContext({ input: { ...base.input, army, enemyArmy, fog } });
-  const config = multiConfig({ enabled: true, burstFog: true, burstFogLead: 100 }, {});
+  const config = multiConfig({ enabled: true, burst: true, burstFog: true, burstFogLead: 100 }, {});
   const behind = at(58, 108, true);
   assert.equal(multiUpdate(behind.b, behind.input, config), null);
   const ahead = at(140, 108, true);
   assert.equal(multiUpdate(ahead.b, ahead.input, config).burst, true);
   const clear = at(58, 108, false);
   assert.equal(multiUpdate(clear.b, clear.input, config).burst, true);
-  const off = multiConfig({ enabled: true, burstFog: false }, {});
+  const off = multiConfig({ enabled: true, burst: true, burstFog: false }, {});
   const ungated = at(58, 108, true);
   assert.equal(multiUpdate(ungated.b, ungated.input, off).burst, true);
 });
 
 test('burst scoring paints cheap neutrals and stops banking army into a crown', () => {
-  const config = multiConfig({ enabled: true }, {});
+  const config = multiConfig({ enabled: true, burst: true }, {});
   const { b, input } = multiContext();
   const plan = multiUpdate(b, input, config);
   const candidates = [
@@ -1041,8 +1041,10 @@ test('serial rooms stay byte-identical while the multi layer is enabled', () => 
     assert.equal(enabled.multiLine, undefined);
     const multi = make();
     chooseOrders(multi, 44, players, true);
+    assert.equal(multi.multiLine, undefined);
+    chooseOrders(multi, 60, players, true);
     assert.ok(multi.multiLine instanceof Object);
-    assert.equal(multi.multiLine.burstTicks, 1);
+    assert.equal(multi.multiLine.burstTicks, 0);
   } finally {
     delete process.env.BOT3_MULTI;
   }
@@ -1073,8 +1075,9 @@ function fogMultiBoard() {
   return b;
 }
 
-test('fog multi layer is on by default, prices the land race, and clamps its knobs', () => {
-  assert.equal(fogMultiConfig({}, {}).enabled, true);
+test('fog multi layer is off after the burst removal and clamps its knobs', () => {
+  assert.equal(fogMultiConfig({}, {}).enabled, false);
+  assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: '1' }).enabled, true);
   assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: '0' }).enabled, false);
   assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: '1' }).enabled, true);
   assert.equal(fogMultiConfig({}, { BOT3_FOG_MULTI: 'off' }).enabled, false);
@@ -1156,7 +1159,7 @@ test('a fog focus objective falls back to the visible frontier, then the belief 
 });
 
 test('the planner fog burst verdict overrides the multi layer fog gate', () => {
-  const config = multiConfig({ enabled: true, burstFog: true, burstFogLead: 100 }, {});
+  const config = multiConfig({ enabled: true, burst: true, burstFog: true, burstFogLead: 100 }, {});
   const { b, input } = multiContext();
   const behind = { ...input, fog: true, army: 58, enemyArmy: 108 };
   assert.equal(multiUpdate(multiContext().b, behind, config), null);

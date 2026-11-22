@@ -124,7 +124,7 @@ function evaluateFrontMove(s, move) {
     if (hostile) score += 12 + Math.min(530, (valueOfCut / Math.max(1, send * 0.08)) * 85);
     if (recovery > 0) score += Math.min(300, recovery * 1.5);
     if (b.grid_type[j] >= 50 && b.grid_type[j] < 100 && hostile) score += 90;
-    if (turn < 50 && economical && !repulse) score += 530 + Math.min(5, remaining);
+    if (s.beforeBurstEnd && economical && !repulse) score += 530 + Math.min(5, remaining);
     if (repulse > 0) score -= Math.min(180, 25 + send * 1.4);
   } else if (!b.isolated[j]) {
     if (frontDist[j] < frontDist[i]) score = 25 + Math.min(52, Math.sqrt(send) * 3);
