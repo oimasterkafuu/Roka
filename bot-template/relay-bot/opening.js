@@ -7,15 +7,15 @@ const openingBudget = (speed) => Math.floor(160000 / Math.max(1, speed * speed))
 // and keep the number of unused exits at the crown. Sending a whole stack
 // dominates a partial transfer in this relaxation: any surplus away from
 // home can take a tile without using an exit. This bounds even split moves.
-const boundCache = new Map();
+const boundCache = new Uint8Array(26 ** 4 * 5);
 function freeCaptures(left, home, away, exits, transit = 1) {
   if (!left) return 0;
   home = Math.min(home, left);
   away = Math.min(away, left);
   if (away >= left) return left;
   const key = (((left * 26 + home) * 26 + away) * 5 + exits) * 26 + transit;
-  const cached = boundCache.get(key);
-  if (cached !== undefined) return cached;
+  const cached = boundCache[key];
+  if (cached) return cached - 1;
   const stock = home + 1;
   let best = freeCaptures(left - 1, stock, away, exits, transit);
   // Before the nearest vacancy, a batch must cross at least this many
@@ -25,7 +25,7 @@ function freeCaptures(left, home, away, exits, transit = 1) {
     best = Math.max(best, freeCaptures(left - transit, transit - 1, away + stock, exits, transit));
   if (away) best = Math.max(best, 1 + freeCaptures(left - 1, stock, away - 1, exits, transit));
   if (exits) best = Math.max(best, 1 + freeCaptures(left - 1, 0, away + stock - 1, exits - 1));
-  boundCache.set(key, best);
+  boundCache[key] = best + 1;
   return best;
 }
 
@@ -42,8 +42,13 @@ function radialSearch(spare, vacant) {
     let d0 = 1;
     while (d0 <= depth && !vacant[d0]) d0++;
     if (needed > freeCaptures(left, spare[0], away, vacant[1], Math.max(1, d0 - 1))) return false;
-    const key = String.fromCharCode(left, needed, ...spare, ...vacant);
-    if (memo.has(key)) return memo.get(key);
+    // At most 24 further captures can consume spare troops. Layer one,
+    // two and three have at most 4, 8 and 12 vacancies on a square grid.
+    let key = left * 26 + needed;
+    for (let i = 0; i <= depth; i++) key = key * 32 + Math.min(31, spare[i]);
+    key = ((key * 5 + vacant[1]) * 9 + vacant[2]) * 13 + vacant[3];
+    const cached = memo.get(key);
+    if (cached !== undefined) return cached;
     if (memo.size >= 15000) return true;
     spare[0]++;
     for (let d = 1; d <= depth + 1; d++) {
@@ -174,9 +179,7 @@ function makeOpening(
   const root = homes[0],
     left = horizon - turn;
   const own = [],
-    cells = [],
-    local = new Int32Array(b.size).fill(-1);
-  const distance = new Int16Array(b.size).fill(-1);
+    cells = [];
   const startOnly =
     turn === 0 &&
     b.army_cnt[root] === 1 &&
@@ -186,26 +189,40 @@ function makeOpening(
   const radius = startOnly
     ? Math.floor((left + 1) / 2)
     : left + b.grid_type.reduce((n, t) => n + Number(t < 200 && t % 50 === b.me), 0);
+  const row = Math.floor(root / b.cols),
+    col = root % b.cols;
+  const top = Math.max(0, row - radius),
+    west = Math.max(0, col - radius);
+  const width = Math.min(b.cols - 1, col + radius) - west + 1;
+  const height = Math.min(b.size / b.cols - 1, row + radius) - top + 1;
+  const local = new Int32Array(width * height).fill(-1);
+  const distance = [];
+  const slot = (i) => {
+    const x = Math.floor(i / b.cols) - top,
+      y = (i % b.cols) - west;
+    return x >= 0 && x < height && y >= 0 && y < width ? x * width + y : -1;
+  };
   function add(i, d) {
-    local[i] = cells.length;
-    distance[i] = d;
+    local[slot(i)] = cells.length;
+    distance.push(d);
     cells.push(i);
   }
   add(root, 0);
   for (let k = 0; k < cells.length; k++) {
     const i = cells[k];
-    if (distance[i] >= radius) continue;
+    if (distance[k] >= radius) continue;
     for (const j of b.neighbors[i]) {
       const mine = b.grid_type[j] < 200 && b.grid_type[j] % 50 === b.me && !b.isolated[j];
-      if (local[j] >= 0 || b.grid_type[j] === 201 || (!mine && (teams[j] || b.army_cnt[j]))) continue;
-      add(j, distance[i] + 1);
+      if (local[slot(j)] >= 0 || b.grid_type[j] === 201 || (!mine && (teams[j] || b.army_cnt[j]))) continue;
+      add(j, distance[k] + 1);
     }
   }
-  const adj = cells.map((i) => b.neighbors[i].map((j) => local[j]).filter((k) => k >= 0));
+  const adj = cells.map((i) => b.neighbors[i].map((j) => local[slot(j)]).filter((k) => k >= 0));
   const besideRivalCrown = cells.map((i) =>
     b.neighbors[i].some((j) => b.grid_type[j] >= 100 && b.grid_type[j] < 150 && teams[j] !== teams[root]),
   );
-  const army = new Uint16Array(cells.length);
+  const army = startOnly ? new Uint8Array(cells.length) : new Uint32Array(cells.length);
+  const bytes = Buffer.from(army.buffer);
   for (const [k, i] of cells.entries()) {
     if (teams[i] && b.grid_type[i] % 50 === b.me) {
       army[k] = b.army_cnt[i];
@@ -221,17 +238,17 @@ function makeOpening(
     // across that layer needs the troops one tick earlier and leaves one
     // behind. Also bound the number of cells available inside each layer.
     for (let d = 1; d <= radius; d++) {
-      const inside = cells.reduce((n, i) => n + Number(distance[i] < d), 0);
+      const inside = distance.reduce((n, v) => n + Number(v < d), 0);
       upper = Math.min(upper, inside + Math.max(0, left - 2 * d + 2));
     }
   }
   const depth = 3,
     vacant = Array(depth + 1).fill(0),
     spare = Array(depth + 1).fill(0);
-  const layer = cells.map((i) => Math.min(depth, distance[i]));
-  for (const [k, i] of cells.entries()) {
+  const layer = distance.map((d) => Math.min(depth, d));
+  for (const k of cells.keys()) {
     if (army[k]) spare[layer[k]] += army[k] - 1;
-    else if (distance[i] <= depth) vacant[layer[k]]++;
+    else if (distance[k] <= depth) vacant[layer[k]]++;
   }
   const possible = radialSearch(spare, vacant);
   while (upper > initialLand && !possible(left, upper - initialLand, initialAway)) upper--;
@@ -245,12 +262,12 @@ function makeOpening(
     Math.min(16, enemyDistance[cells[k]]) * 1.5 +
     (b.grid_type[cells[k]] === 204 ? 0 : 9) +
     adj[k].length -
-    Math.max(0, distance[cells[k]] + 2 - enemyDistance[cells[k]]) * 3;
+    Math.max(0, distance[k] + 2 - enemyDistance[cells[k]]) * 3;
   const weight = cells.map((_, k) => fallbackWeight(k));
   const value = cells.map(
-    (i) =>
+    (i, k) =>
       (b.grid_type[i] === 204 ? 0 : 18) +
-      Math.min(12, enemyDistance[i] - distance[i]) -
+      Math.min(12, enemyDistance[i] - distance[k]) -
       Math.max(0, 5 - enemyDistance[i]) * 5,
   );
   // Count work, not wall time. A route that meets upper is a certificate;
@@ -258,7 +275,7 @@ function makeOpening(
   let fullOnly = true,
     ceiling = budget,
     variation = 0;
-  function search(steps, away, target, seen) {
+  function search(steps, away, target, seen, lastIndex = Math.max(...own)) {
     if (own.length > land || (own.length === land && quality > bestQuality)) {
       best = path.slice();
       land = own.length;
@@ -269,7 +286,7 @@ function makeOpening(
     let nearest = 1;
     while (nearest < cells.length && army[nearest]) nearest++;
     if (nearest === cells.length) return false;
-    const transit = Math.max(1, distance[cells[nearest]] - 1);
+    const transit = Math.max(1, distance[nearest] - 1);
     const portsNow = exits();
     if (
       own.length + freeCaptures(steps, army[0] - 1, away, portsNow, transit) < target ||
@@ -277,7 +294,9 @@ function makeOpening(
     )
       return false;
     const waited = path.length > 0 && path.at(-1) === null;
-    const key = String.fromCharCode(steps, Number(waited)) + Buffer.from(army.buffer).toString('base64');
+    const key =
+      String.fromCharCode(steps, Number(waited)) +
+      bytes.toString('latin1', 0, (lastIndex + 1) * army.BYTES_PER_ELEMENT);
     if (seen.has(key)) return false;
     seen.add(key);
     nodes++;
@@ -316,7 +335,7 @@ function makeOpening(
         if (fullOnly) continue;
         let reserve = 0;
         for (const n of b.neighbors[cells[from]]) {
-          if (n === cells[to] || b.grid_type[n] === 201 || army[local[n]] || teams[n] === teams[root])
+          if (n === cells[to] || b.grid_type[n] === 201 || army[local[slot(n)]] || teams[n] === teams[root])
             continue;
           reserve +=
             b.army_cnt[n] -
@@ -343,7 +362,7 @@ function makeOpening(
         if (capture) {
           own.push(to);
           quality += value[to];
-          if (distance[cells[to]] <= depth) vacant[toLayer]--;
+          if (distance[to] <= depth) vacant[toLayer]--;
         }
       }
       path.push(
@@ -359,13 +378,13 @@ function makeOpening(
               capture,
             },
       );
-      const found = search(steps - 1, futureAway, target, seen);
+      const found = search(steps - 1, futureAway, target, seen, Math.max(to, lastIndex));
       path.pop();
       if (from >= 0) {
         if (capture) {
           own.pop();
           quality -= value[to];
-          if (distance[cells[to]] <= depth) vacant[toLayer]++;
+          if (distance[to] <= depth) vacant[toLayer]++;
         }
         army[from] += send;
         army[to] -= send;
@@ -424,12 +443,23 @@ function makeOpening(
 
 function openingOrder(b, teams, homes, turn, enemyDistance, multi) {
   if (turn >= END_TICK || homes.length !== 1) return null;
+  const planFromFrame = () =>
+    makeOpening(
+      b,
+      teams,
+      homes,
+      turn,
+      typeof enemyDistance === 'function' ? enemyDistance() : enemyDistance,
+      END_TICK,
+      b.openingBudget,
+      multi,
+    );
   if (
     !b.opening ||
     turn < b.opening.start ||
     (b.opening.lastTurn != null && turn !== b.opening.lastTurn + 1)
   ) {
-    b.opening = makeOpening(b, teams, homes, turn, enemyDistance, END_TICK, b.openingBudget, multi);
+    b.opening = planFromFrame();
   }
   let plan = b.opening;
   let orders = plan.moves[turn - plan.start] ?? [];
@@ -456,7 +486,7 @@ function openingOrder(b, teams, homes, turn, enemyDistance, multi) {
         effectiveSend(op) !== op.send,
     )
   ) {
-    b.opening = plan = makeOpening(b, teams, homes, turn, enemyDistance, END_TICK, b.openingBudget, multi);
+    b.opening = plan = planFromFrame();
     orders = plan.moves[0] ?? [];
   }
   plan.lastTurn = turn;

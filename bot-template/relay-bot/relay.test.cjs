@@ -6,7 +6,7 @@ const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents } = require('./single-front');
-const { makeOpening } = require('./opening');
+const { makeOpening, openingOrder } = require('./opening');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -69,6 +69,51 @@ test('wait for a column in a single-exit corridor and reach tile thirteen by tic
   const plan = makeOpening(b, teams, [0], 0, Array(25).fill(90));
   assert.deepEqual([plan.land, plan.upper], [13, 13]);
   assert.ok(plan.moves.some((batch) => !batch.length));
+});
+
+test('crop near a board edge without wrapping rows or changing legal opening orders', () => {
+  // Both crowns have the same nine-tick neighbourhood at their right edge.
+  const plan = (rows, cols) => {
+    const root = Math.floor(rows / 2) * cols + cols - 1;
+    const walls = [root - cols - 1, root + cols - 2];
+    const { b, teams } = openingFixture(rows, cols, root, walls);
+    const result = makeOpening(b, teams, [root], 0, Array(b.size).fill(90), 9);
+    const pos = (i) => [Math.floor(i / cols) - Math.floor(rows / 2), (i % cols) - cols + 1];
+    return {
+      land: result.land,
+      upper: result.upper,
+      moves: result.moves.map((batch) => batch.map((op) => [pos(op.from), pos(op.to), op.mode, op.send])),
+    };
+  };
+  assert.deepEqual(plan(81, 93), plan(13, 17));
+});
+
+test('reuse the cached opening without a rival distance search on its next frame', () => {
+  const { b, teams } = openingFixture(1, 17, 0);
+  let calls = 0;
+  const distances = () => {
+    calls++;
+    return Array(17).fill(90);
+  };
+  const ops = openingOrder(b, teams, [0], 0, distances, false);
+  b.army_cnt[0]++;
+  for (const op of ops) {
+    b.army_cnt[op.from] -= op.send;
+    b.army_cnt[op.to] += op.send;
+    b.grid_type[op.to] = 1;
+    teams[op.to] = 1;
+  }
+  openingOrder(b, teams, [0], 1, distances, false);
+  assert.equal(calls, 1);
+});
+
+test('recover a valuable isolated column by taking its connection', () => {
+  const b = createBoard(2, 6, 1);
+  b.grid_type.set([101, 1, 200, 1, 1, 201, 201, 201, 201, 201, 201, 102]);
+  b.army_cnt.set([15, 30, 0, 85, 2, 0, 0, 0, 0, 0, 0, 25]);
+  b.isolated[3] = b.isolated[4] = 1;
+  const [order] = chooseOrders(b, 73, players, false);
+  assert.deepEqual([order.from, order.to], [1, 2]);
 });
 
 test('prefer an uncontested branch when both directions offer the same land', () => {
