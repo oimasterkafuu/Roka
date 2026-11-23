@@ -2081,6 +2081,7 @@ const {
   neutralFrontier,
   freshMshape,
   DEFAULT_SLOTS,
+  DEFAULT_STEAL,
   DEFAULT_FAN_ARMY,
   DEFAULT_LEAD_CAP,
   DEFAULT_FRONTIER,
@@ -2101,8 +2102,8 @@ function mshapeBlob(army = 2) {
   return b;
 }
 
-test('default the expansion-shape layer off and clamp its knobs', () => {
-  assert.equal(mshapeConfig({}, {}).enabled, false);
+test('ship the expansion-shape layer on and clamp its knobs', () => {
+  assert.equal(mshapeConfig({}, {}).enabled, true);
   assert.equal(mshapeConfig({}, { BOT3_MSHAPE: '1' }).enabled, true);
   assert.equal(mshapeConfig({}, { BOT3_MSHAPE: 'off' }).enabled, false);
   const defaults = mshapeConfig({ enabled: true }, {});
@@ -2111,7 +2112,7 @@ test('default the expansion-shape layer off and clamp its knobs', () => {
   assert.equal(defaults.leadCap, DEFAULT_LEAD_CAP);
   assert.equal(defaults.frontier, DEFAULT_FRONTIER === 1);
   assert.equal(defaults.capture, 0);
-  assert.equal(defaults.steal, 0);
+  assert.equal(defaults.steal, DEFAULT_STEAL);
   assert.equal(defaults.fan, 0);
   assert.equal(defaults.ringCap, 6);
   // Every knob is clamped and read per call.
@@ -2125,7 +2126,7 @@ test('default the expansion-shape layer off and clamp its knobs', () => {
 test('reach the expansion-shape layer only from a multi-line room', () => {
   const b = mshapeBlob();
   const input = { turn: 60, multi: true, size: b.size, me: 1, land: 30, enemyLand: 30 };
-  assert.equal(mshapeUpdate(b, input, mshapeConfig({}, {})), null);
+  assert.equal(mshapeUpdate(b, input, mshapeConfig({}, { BOT3_MSHAPE: '0' })), null);
   const on = mshapeConfig({ enabled: true });
   assert.equal(mshapeUpdate(b, { ...input, multi: false }, on), null);
   assert.equal(mshapeUpdate(b, { ...input, size: 100000 }, { ...on, maxBoard: 800 }), null);
@@ -2141,20 +2142,18 @@ test('lift the inherited sixteen-order cap only in a multi-line room', () => {
     { id: 1, team: 1, army: 80, land: 3, dead: 0 },
     { id: 2, team: 2, army: 100, land: 4, dead: 0 },
   ];
-  const off = chooseOrders(mshapeBlob(), 60, players, true);
-  assert.equal(off.length, 16);
-  process.env.BOT3_MSHAPE = '1';
-  process.env.BOT3_MSHAPE_SLOTS = '64';
+  process.env.BOT3_MSHAPE = '0';
   try {
-    const on = chooseOrders(mshapeBlob(), 60, players, true);
-    assert.ok(on.length > 16, `expected more than sixteen orders, got ${on.length}`);
-    // Serial rooms keep the one-order rule and the untouched score path.
-    const serial = chooseOrders(mshapeBlob(), 60, players, false);
-    assert.equal(serial.length, 1);
+    const off = chooseOrders(mshapeBlob(), 60, players, true);
+    assert.equal(off.length, 16);
   } finally {
     delete process.env.BOT3_MSHAPE;
-    delete process.env.BOT3_MSHAPE_SLOTS;
   }
+  const on = chooseOrders(mshapeBlob(), 60, players, true);
+  assert.ok(on.length > 16, `expected more than sixteen orders, got ${on.length}`);
+  // Serial rooms keep the one-order rule and the untouched score path.
+  const serial = chooseOrders(mshapeBlob(), 60, players, false);
+  assert.equal(serial.length, 1);
 });
 
 test('stand the expansion shape down when the land race is over', () => {
@@ -2297,8 +2296,8 @@ const {
   DEFAULT_LEAD,
 } = require('./mhalf');
 
-test('default the sustained-pressure layer off and clamp its knobs', () => {
-  assert.equal(mhalfConfig({}, {}).enabled, false);
+test('ship the sustained-pressure layer on and clamp its knobs', () => {
+  assert.equal(mhalfConfig({}, {}).enabled, true);
   assert.equal(mhalfConfig({}, { BOT3_MHALF: '1' }).enabled, true);
   assert.equal(mhalfConfig({}, { BOT3_MHALF: 'off' }).enabled, false);
   const defaults = mhalfConfig({ enabled: true }, {});
@@ -2323,7 +2322,7 @@ test('default the sustained-pressure layer off and clamp its knobs', () => {
 test('reach the sustained-pressure layer only from a multi-line room', () => {
   const b = mshapeBlob();
   const input = { turn: 60, multi: true, size: b.size, me: 1, land: 30, enemyLand: 30 };
-  assert.equal(mhalfUpdate(b, input, mhalfConfig({}, {})), null);
+  assert.equal(mhalfUpdate(b, input, mhalfConfig({}, { BOT3_MHALF: '0' })), null);
   const on = mhalfConfig({ enabled: true });
   assert.equal(mhalfUpdate(b, { ...input, multi: false }, on), null);
   assert.equal(mhalfUpdate(b, { ...input, size: 100000 }, { ...on, maxBoard: 800 }), null);

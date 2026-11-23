@@ -98,7 +98,7 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function mhalfConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.BOT3_MHALF, false),
+    enabled: overrides.enabled ?? flag(env.BOT3_MHALF, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_MHALF_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     route: overrides.route ?? number(env.BOT3_MHALF_ROUTE, DEFAULT_ROUTE, 0, 1),
     retain: overrides.retain ?? number(env.BOT3_MHALF_RETAIN, DEFAULT_RETAIN, 0, 2),

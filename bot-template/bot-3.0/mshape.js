@@ -41,27 +41,28 @@
 // that would feed it sits two to six hops away. `ROUND15-MSHAPE.md` has the
 // tables.
 //
-// Every knob is read from the environment on each call, and with `BOT3_MSHAPE`
-// unset the planner is byte-identical to the round-13 baseline.
+// Every knob is read from the environment on each call. The layer ships on with
+// the values measured in round 15 (`slots` 64, `steal` 100, `leadCap` 110);
+// `BOT3_MSHAPE=0` restores the round-13 planner byte for byte.
 
 const DEFAULT_MAX_BOARD = 800;
 // The engine and the server have no queue cap, and the rules allow one order per
 // non-empty front per tick; 16 is the number both bots inherited from relay.
-const DEFAULT_SLOTS = 16;
+const DEFAULT_SLOTS = 64;
 const DEFAULT_CAPTURE = 0;
 const DEFAULT_RING = 0;
 const DEFAULT_RING_CAP = 6;
 const DEFAULT_HOLE = 0;
 const DEFAULT_FEED = 0;
 const DEFAULT_FEED_CAP = 80;
-const DEFAULT_STEAL = 0;
+const DEFAULT_STEAL = 100;
 // Merges at or above this score are defence/rescue/siege decisions, not land
 // economy, so `steal` never demotes them.
 const DEFAULT_STEAL_CAP = 300;
 const DEFAULT_MERGE = 0;
 const DEFAULT_RAID = 0;
 const DEFAULT_WATER = 0;
-const DEFAULT_LEAD_CAP = 0;
+const DEFAULT_LEAD_CAP = 110;
 // `1` = gate on the neutral frontier, `0` = off.
 const DEFAULT_FRONTIER = 0;
 const DEFAULT_FAN = 0;
@@ -85,7 +86,7 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function mshapeConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.BOT3_MSHAPE, false),
+    enabled: overrides.enabled ?? flag(env.BOT3_MSHAPE, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_MSHAPE_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     slots: overrides.slots ?? number(env.BOT3_MSHAPE_SLOTS, DEFAULT_SLOTS, 1, 4096),
     capture: overrides.capture ?? number(env.BOT3_MSHAPE_CAPTURE, DEFAULT_CAPTURE, 0, 5000),

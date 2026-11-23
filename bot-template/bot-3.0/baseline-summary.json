@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-23T00:21:20.060Z",
-  "evaluatedCommit": "015981fff551e9a2cdab459bdabaec7e0976ddea",
-  "sourceSha256": "a33fca4d77413a5badad7b87f685399b068c6167bb56cbba29f508cb1d289a48",
+  "generatedAt": "2026-11-23T04:06:16.431Z",
+  "evaluatedCommit": "f010c5844e24b322e2cc2a1ff8994e4cb8dbae8d",
+  "sourceSha256": "d3db050479225acdebe8b778eb117967eb27fb62f853ac10cbc2e30b143a8078",
   "settings": {
     "bot": "bot-template/bot-3.0",
     "mapSize": "official-small (0.34)",
@@ -32,18 +32,18 @@
   },
   "total": {
     "games": 2048,
-    "win": 1688,
-    "loss": 299,
-    "timeout": 61,
-    "winRate": 0.82421875
+    "win": 1702,
+    "loss": 290,
+    "timeout": 56,
+    "winRate": 0.8310546875
   },
   "byOpponent": {
     "anti": {
       "games": 512,
-      "win": 454,
+      "win": 455,
       "loss": 35,
-      "timeout": 23,
-      "winRate": 0.88671875
+      "timeout": 22,
+      "winRate": 0.888671875
     },
     "apex": {
       "games": 512,
@@ -54,10 +54,10 @@
     },
     "relay": {
       "games": 512,
-      "win": 300,
-      "loss": 199,
-      "timeout": 13,
-      "winRate": 0.5859375
+      "win": 313,
+      "loss": 190,
+      "timeout": 9,
+      "winRate": 0.611328125
     },
     "v2": {
       "games": 512,
@@ -70,10 +70,10 @@
   "byMap": {
     "archipelago": {
       "games": 512,
-      "win": 420,
-      "loss": 81,
-      "timeout": 11,
-      "winRate": 0.8203125
+      "win": 421,
+      "loss": 82,
+      "timeout": 9,
+      "winRate": 0.822265625
     },
     "maze": {
       "games": 512,
@@ -84,17 +84,17 @@
     },
     "mediterranean": {
       "games": 512,
-      "win": 420,
-      "loss": 67,
-      "timeout": 25,
-      "winRate": 0.8203125
+      "win": 427,
+      "loss": 63,
+      "timeout": 22,
+      "winRate": 0.833984375
     },
     "random": {
       "games": 512,
-      "win": 420,
-      "loss": 74,
+      "win": 426,
+      "loss": 68,
       "timeout": 18,
-      "winRate": 0.8203125
+      "winRate": 0.83203125
     }
   },
   "byMode": {
@@ -107,10 +107,10 @@
     },
     "fog=false,multi=true": {
       "games": 512,
-      "win": 433,
-      "loss": 73,
-      "timeout": 6,
-      "winRate": 0.845703125
+      "win": 443,
+      "loss": 65,
+      "timeout": 4,
+      "winRate": 0.865234375
     },
     "fog=true,multi=false": {
       "games": 512,
@@ -121,19 +121,19 @@
     },
     "fog=true,multi=true": {
       "games": 512,
-      "win": 441,
-      "loss": 64,
-      "timeout": 7,
-      "winRate": 0.861328125
+      "win": 445,
+      "loss": 63,
+      "timeout": 4,
+      "winRate": 0.869140625
     }
   },
   "byOpponentMap": {
     "anti/archipelago": {
       "games": 128,
-      "win": 108,
+      "win": 109,
       "loss": 14,
-      "timeout": 6,
-      "winRate": 0.84375
+      "timeout": 5,
+      "winRate": 0.8515625
     },
     "apex/archipelago": {
       "games": 128,
@@ -145,8 +145,8 @@
     "relay/archipelago": {
       "games": 128,
       "win": 76,
-      "loss": 47,
-      "timeout": 5,
+      "loss": 48,
+      "timeout": 4,
       "winRate": 0.59375
     },
     "v2/archipelago": {
@@ -200,10 +200,10 @@
     },
     "relay/mediterranean": {
       "games": 128,
-      "win": 72,
-      "loss": 50,
-      "timeout": 6,
-      "winRate": 0.5625
+      "win": 79,
+      "loss": 46,
+      "timeout": 3,
+      "winRate": 0.6171875
     },
     "v2/mediterranean": {
       "games": 128,
@@ -228,10 +228,10 @@
     },
     "relay/random": {
       "games": 128,
-      "win": 76,
-      "loss": 50,
+      "win": 82,
+      "loss": 44,
       "timeout": 2,
-      "winRate": 0.59375
+      "winRate": 0.640625
     },
     "v2/random": {
       "games": 128,
@@ -265,8 +265,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 150,
-      "meanTick": 150
+      "meanWinTick": 149.8,
+      "meanTick": 149.8
     },
     {
       "opponent": "apex",
@@ -291,8 +291,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 184.1,
-      "meanTick": 184.1
+      "meanWinTick": 183.7,
+      "meanTick": 183.7
     },
     {
       "opponent": "apex",
@@ -395,8 +395,8 @@
       "loss": 1,
       "timeout": 0,
       "winRate": 0.96875,
-      "meanWinTick": 257.1,
-      "meanTick": 251.4
+      "meanWinTick": 257.3,
+      "meanTick": 251.6
     },
     {
       "opponent": "apex",
@@ -421,8 +421,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 181.8,
-      "meanTick": 181.8
+      "meanWinTick": 180.8,
+      "meanTick": 180.8
     },
     {
       "opponent": "apex",
@@ -447,8 +447,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 256,
-      "meanTick": 256
+      "meanWinTick": 261.7,
+      "meanTick": 261.7
     },
     {
       "opponent": "anti",
@@ -473,8 +473,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 189.6,
-      "meanTick": 189.6
+      "meanWinTick": 191.2,
+      "meanTick": 191.2
     },
     {
       "opponent": "anti",
@@ -499,8 +499,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 202.1,
-      "meanTick": 202.1
+      "meanWinTick": 202.9,
+      "meanTick": 202.9
     },
     {
       "opponent": "anti",
@@ -577,8 +577,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 498.9,
-      "meanTick": 498.9
+      "meanWinTick": 502.7,
+      "meanTick": 502.7
     },
     {
       "opponent": "anti",
@@ -599,12 +599,12 @@
       "fog": true,
       "multi": true,
       "games": 32,
-      "win": 29,
+      "win": 30,
       "loss": 0,
-      "timeout": 3,
-      "winRate": 0.90625,
-      "meanWinTick": 498.8,
-      "meanTick": 498.8
+      "timeout": 2,
+      "winRate": 0.9375,
+      "meanWinTick": 485.5,
+      "meanTick": 485.5
     },
     {
       "opponent": "anti",
@@ -629,8 +629,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 307.8,
-      "meanTick": 307.8
+      "meanWinTick": 311.8,
+      "meanTick": 311.8
     },
     {
       "opponent": "anti",
@@ -655,8 +655,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 294.8,
-      "meanTick": 294.8
+      "meanWinTick": 287.6,
+      "meanTick": 287.6
     },
     {
       "opponent": "v2",
@@ -811,8 +811,8 @@
       "loss": 1,
       "timeout": 0,
       "winRate": 0.96875,
-      "meanWinTick": 271.1,
-      "meanTick": 265
+      "meanWinTick": 274.4,
+      "meanTick": 268.2
     },
     {
       "opponent": "v2",
@@ -837,8 +837,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 186.3,
-      "meanTick": 186.3
+      "meanWinTick": 183.3,
+      "meanTick": 183.3
     },
     {
       "opponent": "v2",
@@ -850,8 +850,8 @@
       "loss": 1,
       "timeout": 7,
       "winRate": 0.75,
-      "meanWinTick": 316.6,
-      "meanTick": 342.3
+      "meanWinTick": 321.9,
+      "meanTick": 347.4
     },
     {
       "opponent": "v2",
@@ -863,8 +863,8 @@
       "loss": 0,
       "timeout": 0,
       "winRate": 1,
-      "meanWinTick": 286.7,
-      "meanTick": 286.7
+      "meanWinTick": 281.8,
+      "meanTick": 281.8
     },
     {
       "opponent": "relay",
@@ -885,12 +885,12 @@
       "fog": false,
       "multi": true,
       "games": 32,
-      "win": 16,
-      "loss": 16,
+      "win": 21,
+      "loss": 11,
       "timeout": 0,
-      "winRate": 0.5,
-      "meanWinTick": 370.3,
-      "meanTick": 370.3
+      "winRate": 0.65625,
+      "meanWinTick": 398.2,
+      "meanTick": 393.4
     },
     {
       "opponent": "relay",
@@ -911,12 +911,12 @@
       "fog": true,
       "multi": true,
       "games": 32,
-      "win": 16,
-      "loss": 16,
+      "win": 17,
+      "loss": 15,
       "timeout": 0,
-      "winRate": 0.5,
-      "meanWinTick": 438,
-      "meanTick": 438
+      "winRate": 0.53125,
+      "meanWinTick": 415.1,
+      "meanTick": 416.8
     },
     {
       "opponent": "relay",
@@ -993,8 +993,8 @@
       "loss": 15,
       "timeout": 2,
       "winRate": 0.46875,
-      "meanWinTick": 598.9,
-      "meanTick": 598.9
+      "meanWinTick": 532.7,
+      "meanTick": 567.9
     },
     {
       "opponent": "relay",
@@ -1016,11 +1016,11 @@
       "multi": true,
       "games": 32,
       "win": 15,
-      "loss": 15,
-      "timeout": 2,
+      "loss": 16,
+      "timeout": 1,
       "winRate": 0.46875,
-      "meanWinTick": 606.1,
-      "meanTick": 606.1
+      "meanWinTick": 608.4,
+      "meanTick": 631.7
     },
     {
       "opponent": "relay",
@@ -1041,12 +1041,12 @@
       "fog": false,
       "multi": true,
       "games": 32,
-      "win": 14,
-      "loss": 14,
-      "timeout": 4,
-      "winRate": 0.4375,
-      "meanWinTick": 575.4,
-      "meanTick": 575.4
+      "win": 19,
+      "loss": 11,
+      "timeout": 2,
+      "winRate": 0.59375,
+      "meanWinTick": 638.9,
+      "meanTick": 608.1
     },
     {
       "opponent": "relay",
@@ -1067,12 +1067,12 @@
       "fog": true,
       "multi": true,
       "games": 32,
-      "win": 15,
-      "loss": 15,
-      "timeout": 2,
-      "winRate": 0.46875,
-      "meanWinTick": 595.9,
-      "meanTick": 595.9
+      "win": 17,
+      "loss": 14,
+      "timeout": 1,
+      "winRate": 0.53125,
+      "meanWinTick": 643.7,
+      "meanTick": 623.2
     }
   ]
 }

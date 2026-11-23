@@ -230,3 +230,35 @@ Breaking the mirror would require a strictly stronger multi policy (for example
 a 2-3 ply search with a self-play-tuned evaluation), not a differently weighted
 version of the current scoring. `msim.js`/`mqueue.js` are kept as the exact
 model and predictor for such an attempt.
+
+## 第 15–16 轮：默认层与新的引擎事实（rounds 15-16)
+
+Rounds 15-16 ran nine experiments against the mirror. Two rules measured positive
+with a clean 2048-game matrix and now ship **on**:
+
+- `mshape.js` (`BOT3_MSHAPE`, `SLOTS=64 STEAL=100 LEAD=110`): the inherited
+  sixteen-order cap only binds on growth-pulse ticks (t=49/99/..., where the
+  planner projects the +1 and 40+ candidates appear) — lifting it there is worth
+  +7 wins / 256; and a plain merge that ranks above a capture costs **two** ticks
+  (the engine does not run a move whose source is another order's target, and
+  `strategy.js` skips planning while its queue is non-empty), so it is demoted.
+- `mhalf.js` (`BOT3_MHALF`): a capture needs **three** army (an all-in push is
+  `army-1` and must strictly beat the garrison), so a merge that fills a ring
+  cell which cannot fire this tick and reaches three army from behind the ring
+  ranks first; a delivery that leaves the ring one army short is capped below the
+  cheapest capture.
+
+Result: relay multi cells `123 -> 136` of 256 (one cell, random clear, now passes
+65 %), full matrix `1688 -> 1702` with zero cell regressions. The remaining seven
+cells are still 46.9-59.4 %, because the mirror needs a *biased* policy (winning
+from both seats) and these layers only add ~+5 pp.
+
+New engine facts measured in those rounds: multi-feed (several orders into one
+target cell per tick) is legal but the planner forbids it; own merges are only
+proposed when they strictly reduce `frontDist`, so **lateral frontier→frontier
+merges are never candidates**; the frontier ring cannot be pre-armed (a fed ring
+cell captures next tick and drops back to one army), so pulse output is limited by
+**ring width**, not by the army pool; and `strategy.js`'s pending gate never skips
+a tick in practice. Measured negatives (vault crowns, mass columns, attrition
+pricing, pulse staging, fog doctrine, latched-head stacks, 1-ply search) are
+recorded in [ROUND16-ROUNDUP.md](ROUND16-ROUNDUP.md).
