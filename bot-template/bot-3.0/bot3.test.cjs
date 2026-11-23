@@ -3367,3 +3367,334 @@ test('measure crown distance over every non-water cell', () => {
   assert.deepEqual([...dist], [2, 1, 0, 1, -1]);
   assert.equal(crownField({ tile: b.grid_type, neighbors: b.neighbors }, []), null);
 });
+
+// --- Crown economy from the stranded rear army (./mcrown2) -------------------
+const {
+  mcrown2Config,
+  mcrown2Update,
+  applyMcrown2,
+  mcrown2Orders,
+  ownField,
+  deepBasin,
+  pickVault,
+  vaultOk,
+  freshMcrown2,
+  DEFAULT_HOP,
+  DEFAULT_FEED,
+  DEFAULT_GAIN,
+  DEFAULT_SAFE,
+  DEFAULT_CROWNS,
+  DEFAULT_CAP,
+  DEFAULT_MIN_BASIN,
+  DEFAULT_BEHIND,
+  DEFAULT_FOGBANK_SWAMP,
+  swampShare: bankSwampShare,
+  swampOk,
+} = require('./mcrown2');
+
+// A 1x8 strip of ours with an explicit hop field, so a test never depends on the
+// planner's own distance bookkeeping.
+function crownStrip(units = [1, 1, 1, 4, 4, 5, 4, 1], hop = [0, 1, 2, 3, 4, 5, 6, 7]) {
+  const b = createBoard(1, 8, 1);
+  b.grid_type.set(units.map((u) => (u > 0 ? 1 : 200)));
+  b.army_cnt.set(units);
+  return {
+    b,
+    ctx: {
+      size: b.size,
+      tile: b.grid_type,
+      teams: Uint8Array.from(units.map((u) => (u > 0 ? 1 : 0))),
+      units: Float64Array.from(units),
+      neighbors: b.neighbors,
+      myTeam: 1,
+      me: 1,
+      isolated: new Uint8Array(b.size),
+      frontDist: Int32Array.from(hop),
+      enemyDist: Int32Array.from(hop.map(() => 40)),
+      cut: new Float64Array(b.size),
+      army: units.reduce((s, u) => s + u, 0),
+      enemyArmy: 1000,
+    },
+  };
+}
+
+test('ship the crown-economy layer off and clamp its knobs', () => {
+  assert.equal(mcrown2Config({}, {}).enabled, false);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2: '1' }).enabled, true);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2: 'off' }).enabled, false);
+  const defaults = mcrown2Config({ enabled: true }, {});
+  assert.equal(defaults.hop, DEFAULT_HOP);
+  assert.equal(defaults.feed, DEFAULT_FEED);
+  assert.equal(defaults.gain, DEFAULT_GAIN);
+  assert.equal(defaults.safe, DEFAULT_SAFE);
+  assert.equal(defaults.crowns, DEFAULT_CROWNS);
+  assert.equal(defaults.cap, DEFAULT_CAP);
+  assert.equal(defaults.minBasin, DEFAULT_MIN_BASIN);
+  assert.equal(defaults.behind, DEFAULT_BEHIND);
+  assert.equal(defaults.build, true);
+  assert.equal(defaults.corridor, false);
+  // Every knob is clamped and read per call.
+  const clamped = mcrown2Config(
+    {},
+    {
+      BOT3_MCROWN2: '1',
+      BOT3_MCROWN2_HOP: '0',
+      BOT3_MCROWN2_FEED: '999',
+      BOT3_MCROWN2_CROWNS: '9',
+      BOT3_MCROWN2_SAFE: '0',
+      BOT3_MCROWN2_BEHIND: '-4',
+    },
+  );
+  assert.equal(clamped.hop, 1);
+  assert.equal(clamped.feed, 64);
+  assert.equal(clamped.crowns, 4);
+  assert.equal(clamped.safe, 1);
+  assert.equal(clamped.behind, 0);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2: '1', BOT3_MCROWN2_GAIN: 'abc' }).gain, DEFAULT_GAIN);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2: '1', BOT3_MCROWN2_BUILD: '0' }).build, false);
+});
+
+test('reach the crown layer only from a losing multi-line room', () => {
+  const { b, ctx } = crownStrip();
+  const off = mcrown2Config({});
+  assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true }, off), null);
+  const on = mcrown2Config({ enabled: true });
+  assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: false }, on), null);
+  assert.equal(mcrown2Update(b, { ...ctx, turn: 10, multi: true }, on), null);
+  assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true, size: 100000 }, on), null);
+  assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true, corridor: true }, on), null);
+  assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true, fog: true }, { ...on, fog: false }), null);
+  // The army-race gate: a vault is only started while we are behind.
+  assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true, army: 300, enemyArmy: 200 }, on), null);
+  assert.ok(mcrown2Update(b, { ...ctx, turn: 60, multi: true, army: 150, enemyArmy: 200 }, on));
+  // Once started the bank is finished even when the race flips (hysteresis).
+  assert.ok(
+    mcrown2Update(b, { ...ctx, turn: 61, multi: true, army: 400, enemyArmy: 200 }, on),
+    'a started bank survives the gate',
+  );
+  assert.equal(b.mcrown2.cells.length, 1);
+  assert.deepEqual(freshMcrown2().cells, []);
+});
+
+test('bank the rear basin, never the ring', () => {
+  const { b, ctx } = crownStrip();
+  const on = mcrown2Config({ enabled: true });
+  assert.equal(vaultOk(ctx, 0, on, true), false, 'the ring is off limits');
+  assert.equal(vaultOk(ctx, 2, on, true), false, 'hop 2 is too shallow');
+  assert.equal(vaultOk(ctx, 3, on, true), true);
+  // A rival next door disqualifies the site; a held vault survives a rival two
+  // hops out and is dropped only when the rival is adjacent.
+  const near = { ...ctx, enemyDist: Int32Array.from([40, 40, 40, 2, 40, 40, 40, 40]) };
+  assert.equal(vaultOk(near, 3, on, true), false);
+  assert.equal(vaultOk(near, 3, on, false), true);
+  const adjacent = { ...ctx, enemyDist: Int32Array.from([40, 40, 40, 1, 40, 40, 40, 40]) };
+  assert.equal(vaultOk(adjacent, 3, on, false), false);
+  // The basin behind cell 3 is cells 3..7.
+  const basin = deepBasin(ctx, 3, 3);
+  assert.equal(basin.cells, 5);
+  assert.equal(basin.army, 18);
+  assert.equal(basin.exits, 1);
+  assert.equal(basin.outlets, 1);
+  assert.equal(deepBasin(ctx, 5, 5).army, 10);
+  // A dead end is not an outlet (its only neighbour is deeper), and a basin with
+  // a second way out cannot be held by freezing one cell.
+  assert.equal(deepBasin(ctx, 7, 7).exits, 1);
+  assert.equal(pickVault({ ...ctx, frontDist: flatField(ctx) }, on, []), -1);
+  const twin = {
+    ...ctx,
+    size: 10,
+    tile: Int32Array.from([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+    teams: Uint8Array.from([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+    units: Float64Array.from([1, 1, 1, 4, 4, 5, 4, 1, 1, 1]),
+    neighbors: createBoard(1, 10, 1).neighbors,
+    isolated: new Uint8Array(10),
+    frontDist: Int32Array.from([0, 1, 2, 3, 4, 5, 6, 2, 3, 4]),
+    enemyDist: new Int32Array(10).fill(40),
+    cut: new Float64Array(10),
+  };
+  assert.equal(deepBasin(twin, 3, 3).outlets, 2);
+  // `OUTLETS=1` is the strict rule; the shipped default (`8`) tolerates the
+  // multi-outlet basins that measurably starve the frontier.
+  assert.equal(pickVault(twin, { ...on, outlets: 1 }, []), -1);
+  assert.equal(pickVault(twin, on, []), 3);
+  assert.equal(pickVault(twin, { ...on, outlets: 40 }, []), 3);
+  // An outlet whose basin holds enough army is picked; a higher `minBasin`
+  // refuses every site, and so does a rival in the basin's own territory.
+  assert.equal(pickVault(ctx, on, []), 3);
+  // With the first basin taken, the one behind it is the next best outlet.
+  assert.equal(pickVault(ctx, on, [3]), 4);
+  assert.equal(pickVault(ctx, on, [3, 4]), -1);
+  assert.equal(pickVault(ctx, { ...on, minBasin: 40 }, []), -1);
+  const blocked = { ...ctx, enemyDist: Int32Array.from([40, 40, 40, 40, 40, 40, 2, 40]) };
+  assert.equal(pickVault(blocked, on, []), -1);
+  assert.equal(b.mcrown2, undefined, 'picking never allocates state by itself');
+});
+
+// A flat field: every cell is at hop 3, so no cell is an outlet.
+function flatField(ctx) {
+  return Int32Array.from(ctx.frontDist, () => 3);
+}
+
+test('redirect rear merges into the bank and keep defence work', () => {
+  const { b, ctx } = crownStrip();
+  const on = mcrown2Config({ enabled: true });
+  const plan = mcrown2Update(b, { ...ctx, turn: 60, multi: true, army: 100, enemyArmy: 200 }, on);
+  assert.ok(plan);
+  assert.equal(plan.active[0].cell, 3);
+  const candidates = [
+    { score: 40, from: 4, to: 3, mode: 2 }, // already into the bank
+    { score: 30, from: 5, to: 4, mode: 2 }, // steps toward the bank
+    { score: 20, from: 3, to: 2, mode: 2 }, // drains the bank
+    { score: 600, from: 3, to: 2, mode: 0 }, // defence keeps its slot
+    { score: 32, from: 2, to: 1, mode: 2 }, // hop 2 is not the layer's business
+  ];
+  applyMcrown2(plan, { ...ctx, teams: ctx.teams }, candidates);
+  assert.equal(candidates.length, 4);
+  assert.equal(candidates[0].score, 40 + DEFAULT_GAIN + 40);
+  assert.equal(candidates[1].score, 30 + DEFAULT_GAIN);
+  assert.equal(candidates[1].to, 4);
+  assert.equal(candidates[2].score, 600, 'defence is exempt from the veto');
+  assert.equal(candidates[3].score, 32, 'shallow merges are untouched');
+});
+
+test('feed the bank from several sources and buy the crown in two steps', () => {
+  // 3x3 blob with the bank in the middle and four donors around it. The plan is
+  // built by hand here: the site choice has its own test, this one is about the
+  // batch the engine actually receives.
+  const { b, ctx } = crownStrip();
+  const blob = createBoard(3, 3, 1);
+  blob.grid_type.fill(1);
+  blob.army_cnt.fill(3);
+  blob.army_cnt[4] = 44;
+  const hop = Int32Array.from([4, 4, 4, 4, 4, 4, 4, 4, 4]);
+  const own = {
+    size: 9,
+    tile: blob.grid_type,
+    teams: new Uint8Array(9).fill(1),
+    units: Float64Array.from(blob.army_cnt),
+    neighbors: blob.neighbors,
+    myTeam: 1,
+    me: 1,
+    isolated: new Uint8Array(9),
+    frontDist: hop,
+    enemyDist: new Int32Array(9).fill(40),
+    cut: new Float64Array(9),
+    army: 68,
+    enemyArmy: 90,
+  };
+  const on = mcrown2Config({ enabled: true });
+  const plan = {
+    config: on,
+    state: freshMcrown2(),
+    active: [{ cell: 4, done: false, field: ownField(9, blob.neighbors, own.teams, 1, 4) }],
+    crowns: [],
+    keep: on.keep,
+  };
+  assert.deepEqual([...plan.active[0].field], [2, 1, 2, 1, 0, 1, 2, 1, 2]);
+  const extra = mcrown2Orders(plan, own, []);
+  const feeds = extra.filter((op) => !op.build);
+  // Four donors, four merges into the same cell: the engine runs them all.
+  assert.equal(feeds.length, 4);
+  assert.deepEqual(new Set(feeds.map((op) => op.to)), new Set([4]));
+  assert.deepEqual(new Set(feeds.map((op) => op.from)), new Set([1, 3, 5, 7]));
+  for (const op of feeds) assert.equal(op.mode, 2);
+  // 44 army plus the deliveries pays for the city at once.
+  assert.equal(extra.filter((op) => op.build).length, 1);
+  assert.equal(extra.at(-1).build, 'b');
+  assert.equal(extra.at(-1).from, 4);
+  // A city upgrades on the next tick.
+  const city = createBoard(3, 3, 1);
+  city.grid_type.fill(1);
+  city.grid_type[4] = 51;
+  city.army_cnt.fill(1);
+  city.army_cnt[4] = 50;
+  const cityCtx = { ...own, tile: city.grid_type, units: Float64Array.from(city.army_cnt) };
+  const cityOps = mcrown2Orders(plan, cityCtx, []);
+  assert.equal(cityOps.filter((op) => op.build).at(-1).build, 'c');
+  assert.equal(b.mcrown2, undefined);
+});
+
+test('never chain two appended merges in one tick', () => {
+  const { b, ctx } = crownStrip([1, 1, 1, 2, 5, 5, 5, 1]);
+  const on = mcrown2Config({ enabled: true });
+  const plan = mcrown2Update(b, { ...ctx, turn: 60, multi: true, army: 100, enemyArmy: 200 }, on);
+  assert.ok(plan);
+  const extra = mcrown2Orders(plan, ctx, []);
+  // The engine drops a queued move whose source is another queued move's target.
+  const sources = new Set(extra.map((op) => op.from));
+  for (const op of extra) assert.equal(sources.has(op.to) && op.to !== op.from, false);
+  assert.ok(extra.length >= 1);
+  assert.equal(extra[0].to, 3);
+  // An order the planner already emitted is never duplicated.
+  const taken = [{ score: 40, from: 4, to: 3, mode: 2 }];
+  const again = mcrown2Orders(plan, ctx, taken);
+  assert.equal(again.some((op) => op.from === 4), false);
+  // A full bank stops taking army.
+  const full = { ...ctx, units: Float64Array.from([1, 1, 1, 200, 5, 5, 5, 1]), army: 220 };
+  assert.equal(mcrown2Orders(plan, full, []).length, 0);
+});
+
+test('leave the planner byte-identical while the crown layer is off', () => {
+  const b = mshapeBlob(3);
+  b.openingBudget = 3;
+  const board = mshapeBlob(3);
+  board.openingBudget = 3;
+  const before = chooseOrders(b, 60, players, true);
+  const after = chooseOrders(board, 60, players, true);
+  assert.equal(b.mcrown2, undefined, 'no state is allocated while the switch is off');
+  assert.deepEqual(
+    after.map((op) => [op.from, op.to, op.build ?? null, op.mode]),
+    before.map((op) => [op.from, op.to, op.build ?? null, op.mode]),
+  );
+});
+
+test('gate the fog bank on the room, the swamp share and the pick window', () => {
+  // The fog switch is a separate switch that turns the fog defaults on with it,
+  // so a fog run and the round-18 clear experiment never share a default.
+  const fogOnly = mcrown2Config({}, { BOT3_FOGBANK: '1' });
+  assert.equal(fogOnly.enabled, true);
+  assert.equal(fogOnly.fogOnly, true);
+  assert.equal(fogOnly.swamp, DEFAULT_FOGBANK_SWAMP);
+  assert.equal(mcrown2Config({}, {}).enabled, false);
+  assert.equal(mcrown2Config({}, {}).swamp, 0, 'the round-18 default stays off');
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2: '1' }).fogOnly, false);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2_FOGONLY: '1' }).fogOnly, true);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2_SWAMP: '999' }).swamp, 100);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2_PICKEND: '-3' }).pickEnd, 0);
+  const { b, ctx } = crownStrip();
+  // A clear room is refused by the fog gate, a fog room is not.
+  const fogRoom = mcrown2Config({ enabled: true, fogOnly: true });
+  assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true, fog: false }, fogRoom), null);
+  assert.ok(mcrown2Update(b, { ...ctx, turn: 60, multi: true, fog: true }, fogRoom));
+  // Swamp share: `204` is the fog encoding of an unowned swamp, `150+owner` of an
+  // owned one, so both count and the share is exact through the fog.
+  const grass = Int32Array.from([1, 1, 1, 1, 1, 1, 1, 1]);
+  assert.equal(bankSwampShare({ size: 8, tile: grass }), 0);
+  const half = Int32Array.from([1, 204, 204, 204, 1, 151, 1, 1]);
+  assert.equal(bankSwampShare({ size: 8, tile: half }), 50);
+  assert.equal(swampOk({ swamp: 30 }, { size: 8, tile: half }), true);
+  assert.equal(swampOk({ swamp: 60 }, { size: 8, tile: half }), false);
+  assert.equal(swampOk({ swamp: 0 }, { size: 8, tile: grass }), true, '0 = gate off');
+  assert.equal(bankSwampShare({ size: 0, tile: null }), 0);
+  // A grass fog room never starts a bank under the shipped fog defaults, and the
+  // swamp-heavy room that pays does.
+  assert.equal(
+    mcrown2Update(b, { ...ctx, size: 8, tile: grass, turn: 60, multi: true, fog: true }, fogOnly),
+    null,
+  );
+  const { b: heavyBoard, ctx: heavyCtx } = crownStrip();
+  const heavy = { ...heavyCtx, tile: Int32Array.from([1, 1, 1, 1, 151, 151, 151, 151]) };
+  assert.ok(mcrown2Update(heavyBoard, { ...heavy, turn: 60, multi: true, fog: true }, fogOnly));
+  // The pick window is a *pick* gate: it refuses a new vault after the tick and
+  // keeps a running one (the measured reason it must not be a run gate).
+  const late = mcrown2Config({ enabled: true, pickEnd: 60 });
+  const { b: b2, ctx: ctx2 } = crownStrip();
+  assert.equal(mcrown2Update(b2, { ...ctx2, turn: 60, multi: true }, late), null);
+  const early = mcrown2Config({ enabled: true, pickEnd: 60 });
+  const { b: b3, ctx: ctx3 } = crownStrip();
+  assert.ok(mcrown2Update(b3, { ...ctx3, turn: 59, multi: true }, early));
+  assert.ok(
+    mcrown2Update(b3, { ...ctx3, turn: 200, multi: true }, early),
+    'a started bank is finished past the window',
+  );
+});
