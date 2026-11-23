@@ -48,6 +48,7 @@ const { predict: queuePredict, record: queueRecord } = require('./mqueue');
 const { configOf: twoPlyConfig, choose: twoPlyChoose } = require('./m2ply');
 const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
 const { mhalfConfig, mhalfUpdate, applyMhalf, applyMhalfModes } = require('./mhalf');
+const { bankgateConfig, bankgateUpdate, applyBankgate, bankgateOrders } = require('./bankgate');
 const { mtuneConfig, mtuneUpdate, applyMtune, mshapeOverrides, mhalfOverrides } = require('./mtune');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
@@ -511,6 +512,34 @@ function chooseOrders(b, turn, leaderboard, multi) {
     },
     mhalfConfig(mhalfOverrides(mtuneCfg)),
   );
+  // Geometry-gated crown bank (see ./bankgate, round 19). The round-18 layer
+  // banks the stranded rear army (hop >= 3) into a crown, but it also runs on
+  // open boards where that army is a pipe to the frontier, so the pick is
+  // gated on measured geometry (no income land left on the frontier, a rear
+  // basin that actually holds a reservoir, a holdable outlet, a land race not
+  // already won). Measured clean on the full matrix, so the switch ships on.
+  const bankgateLayer = bankgateUpdate(b, {
+    turn,
+    multi,
+    size,
+    me,
+    fog: Boolean(b.fogMode ?? b.fog.includes(1)),
+    corridor: isMazeBoard(b),
+    tile,
+    teams,
+    units,
+    neighbors,
+    myTeam,
+    isolated: b.isolated,
+    frontDist,
+    enemyDist,
+    cut,
+    fogMask: b.fog,
+    army: self.army,
+    enemyArmy,
+    land: self.land,
+    enemyLand,
+  });
   // Fog oracle (see ./fog-oracle). The leaderboard is rebuilt from the unfogged
   // grids, so `rival.army` / `rival.land` are exact even where the vision is
   // not: the difference against the visible half is the interior reserve, and
@@ -1394,6 +1423,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mshapeLayer) applyMshape(mshapeLayer, { tile, teams, units, neighbors, myTeam }, candidates);
   if (mhalfLayer) applyMhalf(mhalfLayer, { tile, teams, units, neighbors, myTeam }, candidates);
+  // Crown bank (see ./bankgate). Runs last so the redirect of a rear merge
+  // survives every other score layer: the army is already moving and the only
+  // decision left is whether it walks to the ring or to the bank.
+  if (bankgateLayer)
+    applyBankgate(bankgateLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   // Self-play-tuned multi-line evaluation (see ./mtune). Rounds 15/16 each moved
   // one rule; this layer moves the whole set of score bands from one blob, so a
   // search can tune capture/hostile/merge/defence prices together. Off by
@@ -1450,6 +1484,15 @@ function chooseOrders(b, turn, leaderboard, multi) {
       myTeam,
     });
     if (picked) {
+      // The crown bank is additive: the search decides the exchange, the layer
+      // still delivers its rear merges and its build on the same tick.
+      if (bankgateLayer)
+        for (const op of bankgateOrders(
+          bankgateLayer,
+          { tile, teams, units, neighbors, frontDist, myTeam },
+          picked,
+        ))
+          picked.push(op);
       for (const op of picked) {
         if (op.build) continue;
         b.lastFrom[op.to] = op.from;
@@ -1505,6 +1548,17 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // halved push still takes the cell and the source keeps enough army to fire
   // again next tick, so a fork stays actable instead of being drained to one.
   if (mhalfLayer && multi) applyMhalfModes(mhalfLayer, { tile, teams, units, neighbors, myTeam }, orders);
+  // Crown bank (see ./bankgate): the gather merges and the city/crown build are
+  // appended after the planner's matching loop, because the engine runs several
+  // moves into one cell per tick while `take()` allows one order per target.
+  if (bankgateLayer) {
+    for (const op of bankgateOrders(
+      bankgateLayer,
+      { tile, teams, units, neighbors, frontDist, myTeam },
+      orders,
+    ))
+      orders.push(op);
+  }
   // A fully blocked frame must not idle: keep the previous behaviour when no
   // lane passed the guard (the cooldown expires within four ticks).
   if (maze && !orders.length && candidates.length) take(candidates[0]);

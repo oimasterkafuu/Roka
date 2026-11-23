@@ -3367,3 +3367,439 @@ test('measure crown distance over every non-water cell', () => {
   assert.deepEqual([...dist], [2, 1, 0, 1, -1]);
   assert.equal(crownField({ tile: b.grid_type, neighbors: b.neighbors }, []), null);
 });
+
+// --- Geometry-gated crown bank (./bankgate) ---------------------------------
+const {
+  bankgateConfig,
+  bankgateUpdate,
+  applyBankgate,
+  bankgateOrders,
+  geometry,
+  gateOpen,
+  releaseNow,
+  rearRise,
+  ownField,
+  deepBasin,
+  pickVault,
+  vaultOk,
+  freshBankgate,
+  DEFAULT_HOP,
+  DEFAULT_FEED,
+  DEFAULT_GAIN,
+  DEFAULT_SAFE,
+  DEFAULT_CROWNS,
+  DEFAULT_CAP,
+  DEFAULT_MIN_BASIN,
+  DEFAULT_BEHIND,
+  DEFAULT_GATE,
+  DEFAULT_DEMAND,
+  DEFAULT_REAR,
+  DEFAULT_SWAMP,
+  DEFAULT_MOUNTAIN,
+  DEFAULT_RELEASE,
+  DEFAULT_RELEASE_FILL,
+  DEFAULT_RELEASE_GRACE,
+} = require('./bankgate');
+
+// A 1x8 strip of ours with an explicit hop field, so a test never depends on the
+// planner's own distance bookkeeping.
+function bankStrip(units = [1, 1, 1, 4, 4, 5, 4, 1], hop = [0, 1, 2, 3, 4, 5, 6, 7]) {
+  const b = createBoard(1, 8, 1);
+  b.grid_type.set(units.map((u) => (u > 0 ? 1 : 200)));
+  b.army_cnt.set(units);
+  return {
+    b,
+    ctx: {
+      size: b.size,
+      tile: b.grid_type,
+      teams: Uint8Array.from(units.map((u) => (u > 0 ? 1 : 0))),
+      units: Float64Array.from(units),
+      neighbors: b.neighbors,
+      myTeam: 1,
+      me: 1,
+      isolated: new Uint8Array(b.size),
+      frontDist: Int32Array.from(hop),
+      enemyDist: Int32Array.from(hop.map(() => 40)),
+      cut: new Float64Array(b.size),
+      army: units.reduce((s, u) => s + u, 0),
+      enemyArmy: 1000,
+      fogMask: null,
+    },
+  };
+}
+
+// The mechanism tests below are about the bank, not about the gate: they run
+// the round-18 layer (`gate: false`) so a fixture does not have to pretend to
+// be a swamp board. The gate itself has its own tests.
+const bankOn = () => bankgateConfig({ enabled: true, gate: false });
+
+test('ship the geometry-gated bank on and clamp its knobs', () => {
+  // Round 19 ships the layer on: zero regressed cells in the full matrix.
+  assert.equal(bankgateConfig({}, {}).enabled, true);
+  assert.equal(bankgateConfig({}, { BOT3_BANKGATE: '1' }).enabled, true);
+  assert.equal(bankgateConfig({}, { BOT3_BANKGATE: 'off' }).enabled, false);
+  assert.equal(bankgateConfig({ enabled: false }, {}).enabled, false);
+  const defaults = bankgateConfig({ enabled: true }, {});
+  assert.equal(defaults.hop, DEFAULT_HOP);
+  assert.equal(defaults.feed, DEFAULT_FEED);
+  assert.equal(defaults.gain, DEFAULT_GAIN);
+  assert.equal(defaults.safe, DEFAULT_SAFE);
+  assert.equal(defaults.crowns, DEFAULT_CROWNS);
+  assert.equal(defaults.cap, DEFAULT_CAP);
+  assert.equal(defaults.minBasin, DEFAULT_MIN_BASIN);
+  assert.equal(defaults.behind, DEFAULT_BEHIND);
+  assert.equal(defaults.build, true);
+  assert.equal(defaults.corridor, false);
+  // The round-19 discriminator defaults.
+  assert.equal(defaults.gate, DEFAULT_GATE === 1);
+  assert.equal(defaults.demand, DEFAULT_DEMAND);
+  assert.equal(defaults.rear, DEFAULT_REAR);
+  assert.equal(defaults.swamp, DEFAULT_SWAMP);
+  assert.equal(defaults.mountain, DEFAULT_MOUNTAIN);
+  assert.equal(defaults.release, DEFAULT_RELEASE === 1);
+  assert.equal(defaults.releaseFill, DEFAULT_RELEASE_FILL);
+  assert.equal(defaults.releaseGrace, DEFAULT_RELEASE_GRACE);
+  // Every knob is clamped and read per call.
+  const clamped = bankgateConfig(
+    {},
+    {
+      BOT3_BANKGATE: '1',
+      BOT3_BANKGATE_HOP: '0',
+      BOT3_BANKGATE_FEED: '999',
+      BOT3_BANKGATE_CROWNS: '9',
+      BOT3_BANKGATE_SAFE: '0',
+      BOT3_BANKGATE_BEHIND: '-4',
+      BOT3_BANKGATE_DEMAND: '-1',
+      BOT3_BANKGATE_SWAMP: '999',
+      BOT3_BANKGATE_RELEASE_GRACE: '-2',
+    },
+  );
+  assert.equal(clamped.hop, 1);
+  assert.equal(clamped.feed, 64);
+  assert.equal(clamped.crowns, 4);
+  assert.equal(clamped.safe, 1);
+  assert.equal(clamped.behind, 0);
+  assert.equal(clamped.demand, 0);
+  assert.equal(clamped.swamp, 100);
+  assert.equal(clamped.releaseGrace, 0);
+  assert.equal(
+    bankgateConfig({}, { BOT3_BANKGATE: '1', BOT3_BANKGATE_GAIN: 'abc' }).gain,
+    DEFAULT_GAIN,
+  );
+  assert.equal(bankgateConfig({}, { BOT3_BANKGATE: '1', BOT3_BANKGATE_BUILD: '0' }).build, false);
+  assert.equal(bankgateConfig({}, { BOT3_BANKGATE: '1', BOT3_BANKGATE_GATE: '0' }).gate, false);
+  assert.equal(bankgateConfig({}, { BOT3_BANKGATE: '1', BOT3_BANKGATE_MOUNTAIN: '40' }).mountain, 40);
+});
+
+test('reach the bank only from a losing multi-line room', () => {
+  const { b, ctx } = bankStrip();
+  const off = bankgateConfig({ enabled: false });
+  assert.equal(bankgateUpdate(b, { ...ctx, turn: 60, multi: true }, off), null);
+  const on = bankOn();
+  assert.equal(bankgateUpdate(b, { ...ctx, turn: 60, multi: false }, on), null);
+  assert.equal(bankgateUpdate(b, { ...ctx, turn: 10, multi: true }, on), null);
+  assert.equal(bankgateUpdate(b, { ...ctx, turn: 60, multi: true, size: 100000 }, on), null);
+  assert.equal(bankgateUpdate(b, { ...ctx, turn: 60, multi: true, corridor: true }, on), null);
+  assert.equal(
+    bankgateUpdate(b, { ...ctx, turn: 60, multi: true, fog: true }, { ...on, fog: false }),
+    null,
+  );
+  // The army-race gate: a vault is only started while we are behind.
+  assert.equal(
+    bankgateUpdate(b, { ...ctx, turn: 60, multi: true, army: 300, enemyArmy: 200 }, on),
+    null,
+  );
+  assert.ok(bankgateUpdate(b, { ...ctx, turn: 60, multi: true, army: 150, enemyArmy: 200 }, on));
+  // Once started the bank is finished even when the race flips (hysteresis).
+  assert.ok(
+    bankgateUpdate(b, { ...ctx, turn: 61, multi: true, army: 400, enemyArmy: 200 }, on),
+    'a started bank survives the gate',
+  );
+  assert.equal(b.bankgate.cells.length, 1);
+  assert.deepEqual(freshBankgate().cells, []);
+});
+
+test('measure the geometry the gate reads', () => {
+  // A 2x5 board: our strip in the top row, a neutral plain left of it and a
+  // neutral swamp right of it, a plain at the bottom left that no cell of ours
+  // touches, a mountain in the bottom right.
+  const b = createBoard(2, 5, 1);
+  b.grid_type.set([200, 1, 1, 1, 204, 200, 1, 1, 1, 201]);
+  const units = Float64Array.from([0, 2, 50, 3, 0, 0, 1, 1, 1, 0]);
+  const teams = Uint8Array.from([0, 1, 1, 1, 0, 0, 1, 1, 1, 0]);
+  const ctx = {
+    size: 10,
+    tile: b.grid_type,
+    teams,
+    units,
+    neighbors: b.neighbors,
+    myTeam: 1,
+    isolated: new Uint8Array(10),
+    frontDist: Int32Array.from([9, 0, 1, 4, 9, 9, 2, 2, 3, 9]),
+    enemyDist: new Int32Array(10).fill(40),
+    cut: Float64Array.from([0, 0, 9, 0, 0, 0, 0, 0, 0, 0]),
+    fogMask: new Uint8Array(10),
+    config: bankgateConfig({ enabled: true, gate: false }),
+  };
+  const g = geometry(ctx);
+  assert.equal(g.own, 6);
+  assert.equal(g.ring, 1);
+  assert.equal(g.hop0, 2);
+  assert.equal(g.hop1, 50);
+  assert.equal(g.hop2, 2);
+  assert.equal(g.hop3, 1);
+  assert.equal(g.hop4, 3);
+  // Hops 3 and beyond (cells 3 and 8) are the reservoir the layer banks.
+  assert.equal(g.rear, 4);
+  // Both neutral plains in reach (0 next to our ring, 5 under our cell 6) count
+  // as demand; the neutral swamp at 4 is tracked separately.
+  assert.equal(g.demand, 2);
+  assert.equal(g.demandSwamp, 1);
+  assert.equal(g.swampShare, 0.1);
+  assert.equal(g.mountainShare, 0.1);
+  assert.equal(g.articulations, 1, 'the cut weight marks cell 2 as an articulation');
+  assert.equal(g.plains, 2);
+  // A fogged neutral plain is not counted as demand (an unseen cell reports
+  // `200`, so counting it would invent land that is not there).
+  const fogged = { ...ctx, fogMask: Uint8Array.from([1, 0, 0, 0, 0, 1, 0, 0, 0, 0]) };
+  assert.equal(geometry(fogged).demand, 0);
+  // Fogging only the left plain still counts the visible one under our cell 6.
+  const half = { ...ctx, fogMask: Uint8Array.from([1, 0, 0, 0, 0, 0, 0, 0, 0, 0]) };
+  assert.equal(geometry(half).demand, 1);
+});
+
+test('gate the pick on measured geometry, not on the map name', () => {
+  const on = bankgateConfig({ enabled: true });
+  const state = freshBankgate();
+  const geom = (over = {}) => ({
+    demand: 3,
+    rear: 40,
+    swampShare: 0.5,
+    mountainShare: 0.05,
+    ...over,
+  });
+  assert.equal(gateOpen(state, geom(), on), true);
+  // An open frontier still has income land to take: the rear army is a pipe.
+  assert.equal(gateOpen(state, geom({ demand: 11, swampShare: 0.08 }), on), false);
+  // A dry, open board never passes the terrain clause, however late the tick.
+  const late = { ...on, demand: 100 };
+  assert.equal(gateOpen(state, geom({ demand: 1, swampShare: 0.08 }), late), false);
+  // A corridor board passes on its mountain share, not on its swamp share.
+  const corridor = { ...on, mountain: 40 };
+  assert.equal(
+    gateOpen(state, geom({ demand: 1, swampShare: 0.08, mountainShare: 0.54 }), corridor),
+    true,
+  );
+  assert.equal(
+    gateOpen(state, geom({ demand: 1, swampShare: 0.08, mountainShare: 0.13 }), corridor),
+    false,
+  );
+  // The reservoir clause is opt-in and reads the hop >= HOP army, absolute and
+  // rising over the window.
+  assert.equal(gateOpen(state, geom({ rear: 5 }), { ...on, rear: 30 }), false);
+  assert.equal(gateOpen(state, geom({ rear: 50 }), { ...on, rear: 30 }), true);
+  assert.equal(rearRise(state, geom({ rear: 50 }), on), 0, 'no history yet');
+  state.hist.push({ turn: 20, rear: 10 }, { turn: 60, rear: 40 });
+  assert.equal(rearRise(state, geom({ rear: 50 }), on), 40);
+  assert.equal(gateOpen(state, geom({ rear: 50 }), { ...on, rise: 20 }), true);
+  assert.equal(gateOpen(state, geom({ rear: 50 }), { ...on, rise: 60 }), false);
+  // Zero on a clause disables it.
+  const bare = bankgateConfig({ enabled: true, swamp: 0, mountain: 0, demand: 100 });
+  assert.equal(gateOpen(state, geom({ demand: 99, rear: 0, swampShare: 0 }), bare), true);
+  assert.equal(gateOpen(state, geom(), bankgateConfig({ enabled: true, gate: false })), true);
+});
+
+test('release a bank that cannot be held', () => {
+  const on = bankgateConfig({ enabled: true, gate: false, release: true });
+  const state = freshBankgate();
+  const geom = (over = {}) => ({ demand: 3, land: 60, enemyLand: 60, ...over });
+  state.cells.push({ cell: 3, done: false, pickTurn: 60, peak: 4 });
+  // Inside the grace window nothing is released.
+  assert.equal(releaseNow(state, geom(), on, 70), false);
+  // After it, a bank that never filled is given back ...
+  assert.equal(releaseNow(state, geom(), on, 100), true);
+  // ... while a bank that filled is kept.
+  state.cells[0].peak = 60;
+  assert.equal(releaseNow(state, geom(), on, 100), false);
+  // The starve rule is opt-in and needs both a starved frontier and a land
+  // deficit against the rival (measured negative, off by default).
+  const starve = { ...on, releaseDemand: 3, releaseTicks: 2, releaseGap: 5 };
+  assert.equal(releaseNow(state, geom({ demand: 9 }), starve, 101), false);
+  assert.equal(releaseNow(state, geom({ demand: 9, enemyLand: 80 }), starve, 102), true);
+  assert.equal(
+    releaseNow(state, geom({ demand: 9, enemyLand: 62 }), { ...starve, releaseGap: 20 }, 103),
+    false,
+  );
+  // The switch is off by default: no release without it.
+  assert.equal(releaseNow(state, geom(), bankgateConfig({}), 200), false);
+});
+
+test('bank the rear basin, never the ring', () => {
+  const { b, ctx } = bankStrip();
+  const on = bankOn();
+  assert.equal(vaultOk(ctx, 0, on, true), false, 'the ring is off limits');
+  assert.equal(vaultOk(ctx, 2, on, true), false, 'hop 2 is too shallow');
+  assert.equal(vaultOk(ctx, 3, on, true), true);
+  // A rival next door disqualifies the site; a held vault survives a rival two
+  // hops out and is dropped only when the rival is adjacent.
+  const near = { ...ctx, enemyDist: Int32Array.from([40, 40, 40, 2, 40, 40, 40, 40]) };
+  assert.equal(vaultOk(near, 3, on, true), false);
+  assert.equal(vaultOk(near, 3, on, false), true);
+  const adjacent = { ...ctx, enemyDist: Int32Array.from([40, 40, 40, 1, 40, 40, 40, 40]) };
+  assert.equal(vaultOk(adjacent, 3, on, false), false);
+  // The basin behind cell 3 is cells 3..7.
+  const basin = deepBasin(ctx, 3, 3);
+  assert.equal(basin.cells, 5);
+  assert.equal(basin.army, 18);
+  assert.equal(basin.exits, 1);
+  assert.equal(basin.outlets, 1);
+  assert.equal(deepBasin(ctx, 5, 5).army, 10);
+  // A dead end is not an outlet (its only neighbour is deeper), and a basin with
+  // a second way out cannot be held by freezing one cell.
+  assert.equal(deepBasin(ctx, 7, 7).exits, 1);
+  assert.equal(pickVault({ ...ctx, frontDist: Int32Array.from(ctx.frontDist, () => 3) }, on, []), null);
+  const twin = {
+    ...ctx,
+    size: 10,
+    tile: Int32Array.from([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+    teams: Uint8Array.from([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+    units: Float64Array.from([1, 1, 1, 4, 4, 5, 4, 1, 1, 1]),
+    neighbors: createBoard(1, 10, 1).neighbors,
+    isolated: new Uint8Array(10),
+    frontDist: Int32Array.from([0, 1, 2, 3, 4, 5, 6, 2, 3, 4]),
+    enemyDist: new Int32Array(10).fill(40),
+    cut: new Float64Array(10),
+  };
+  assert.equal(deepBasin(twin, 3, 3).outlets, 2);
+  // `OUTLETS=1` is the strict rule; the shipped default (`8`) tolerates the
+  // multi-outlet basins that measurably starve the frontier.
+  assert.equal(pickVault(twin, { ...on, outlets: 1 }, []), null);
+  assert.equal(pickVault(twin, on, []).cell, 3);
+  assert.equal(pickVault(twin, { ...on, outlets: 40 }, []).cell, 3);
+  assert.equal(pickVault(ctx, on, []).cell, 3);
+  // With the first basin taken, the one behind it is the next best outlet.
+  assert.equal(pickVault(ctx, on, [3]).cell, 4);
+  assert.equal(pickVault(ctx, on, [3, 4]), null);
+  assert.equal(pickVault(ctx, { ...on, minBasin: 40 }, []), null);
+  const blocked = { ...ctx, enemyDist: Int32Array.from([40, 40, 40, 40, 40, 40, 2, 40]) };
+  assert.equal(pickVault(blocked, on, []), null);
+  assert.equal(b.bankgate, undefined, 'picking never allocates state by itself');
+});
+
+test('redirect rear merges into the bank and keep defence work', () => {
+  const { b, ctx } = bankStrip();
+  const on = bankOn();
+  const plan = bankgateUpdate(b, { ...ctx, turn: 60, multi: true, army: 100, enemyArmy: 200 }, on);
+  assert.ok(plan);
+  assert.equal(plan.active[0].cell, 3);
+  const candidates = [
+    { score: 40, from: 4, to: 3, mode: 2 }, // already into the bank
+    { score: 30, from: 5, to: 4, mode: 2 }, // steps toward the bank
+    { score: 20, from: 3, to: 2, mode: 2 }, // drains the bank
+    { score: 600, from: 3, to: 2, mode: 0 }, // defence keeps its slot
+    { score: 32, from: 2, to: 1, mode: 2 }, // hop 2 is not the layer's business
+  ];
+  applyBankgate(plan, { ...ctx, teams: ctx.teams }, candidates);
+  assert.equal(candidates.length, 4);
+  assert.equal(candidates[0].score, 40 + DEFAULT_GAIN + 40);
+  assert.equal(candidates[1].score, 30 + DEFAULT_GAIN);
+  assert.equal(candidates[1].to, 4);
+  assert.equal(candidates[2].score, 600, 'defence is exempt from the veto');
+  assert.equal(candidates[3].score, 32, 'shallow merges are untouched');
+});
+
+test('feed the bank from several sources and buy the crown in two steps', () => {
+  // 3x3 blob with the bank in the middle and four donors around it. The plan is
+  // built by hand here: the site choice has its own test, this one is about the
+  // batch the engine actually receives.
+  const blob = createBoard(3, 3, 1);
+  blob.grid_type.fill(1);
+  blob.army_cnt.fill(3);
+  blob.army_cnt[4] = 44;
+  const hop = Int32Array.from([4, 4, 4, 4, 4, 4, 4, 4, 4]);
+  const own = {
+    size: 9,
+    tile: blob.grid_type,
+    teams: new Uint8Array(9).fill(1),
+    units: Float64Array.from(blob.army_cnt),
+    neighbors: blob.neighbors,
+    myTeam: 1,
+    me: 1,
+    isolated: new Uint8Array(9),
+    frontDist: hop,
+    enemyDist: new Int32Array(9).fill(40),
+    cut: new Float64Array(9),
+    army: 68,
+    enemyArmy: 90,
+  };
+  const on = bankOn();
+  const plan = {
+    config: on,
+    state: freshBankgate(),
+    active: [{ cell: 4, done: false, field: ownField(9, blob.neighbors, own.teams, 1, 4) }],
+    crowns: [],
+    keep: on.keep,
+  };
+  assert.deepEqual([...plan.active[0].field], [2, 1, 2, 1, 0, 1, 2, 1, 2]);
+  const extra = bankgateOrders(plan, own, []);
+  const feeds = extra.filter((op) => !op.build);
+  // Four donors, four merges into the same cell: the engine runs them all.
+  assert.equal(feeds.length, 4);
+  assert.deepEqual(new Set(feeds.map((op) => op.to)), new Set([4]));
+  assert.deepEqual(new Set(feeds.map((op) => op.from)), new Set([1, 3, 5, 7]));
+  for (const op of feeds) assert.equal(op.mode, 2);
+  // 44 army plus the deliveries pays for the city at once.
+  assert.equal(extra.filter((op) => op.build).length, 1);
+  assert.equal(extra.at(-1).build, 'b');
+  assert.equal(extra.at(-1).from, 4);
+  // A city upgrades on the next tick.
+  const city = createBoard(3, 3, 1);
+  city.grid_type.fill(1);
+  city.grid_type[4] = 51;
+  city.army_cnt.fill(1);
+  city.army_cnt[4] = 50;
+  const cityCtx = { ...own, tile: city.grid_type, units: Float64Array.from(city.army_cnt) };
+  const cityOps = bankgateOrders(plan, cityCtx, []);
+  assert.equal(cityOps.filter((op) => op.build).at(-1).build, 'c');
+});
+
+test('never chain two appended merges in one tick', () => {
+  const { b, ctx } = bankStrip([1, 1, 1, 2, 5, 5, 5, 1]);
+  const on = bankOn();
+  const plan = bankgateUpdate(b, { ...ctx, turn: 60, multi: true, army: 100, enemyArmy: 200 }, on);
+  assert.ok(plan);
+  const extra = bankgateOrders(plan, ctx, []);
+  // The engine drops a queued move whose source is another queued move's target.
+  const sources = new Set(extra.map((op) => op.from));
+  for (const op of extra) assert.equal(sources.has(op.to) && op.to !== op.from, false);
+  assert.ok(extra.length >= 1);
+  assert.equal(extra[0].to, 3);
+  // An order the planner already emitted is never duplicated.
+  const taken = [{ score: 40, from: 4, to: 3, mode: 2 }];
+  const again = bankgateOrders(plan, ctx, taken);
+  assert.equal(again.some((op) => op.from === 4), false);
+  // A full bank stops taking army.
+  const full = { ...ctx, units: Float64Array.from([1, 1, 1, 200, 5, 5, 5, 1]), army: 220 };
+  assert.equal(bankgateOrders(plan, full, []).length, 0);
+});
+
+test('leave the planner byte-identical while the bank is off', () => {
+  const previous = process.env.BOT3_BANKGATE;
+  process.env.BOT3_BANKGATE = '0';
+  try {
+    const b = mshapeBlob(3);
+    b.openingBudget = 3;
+    const board = mshapeBlob(3);
+    board.openingBudget = 3;
+    const before = chooseOrders(b, 60, players, true);
+    const after = chooseOrders(board, 60, players, true);
+    assert.equal(b.bankgate, undefined, 'no state is allocated while the switch is off');
+    assert.deepEqual(
+      after.map((op) => [op.from, op.to, op.build ?? null, op.mode]),
+      before.map((op) => [op.from, op.to, op.build ?? null, op.mode]),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.BOT3_BANKGATE;
+    else process.env.BOT3_BANKGATE = previous;
+  }
+});
