@@ -44,6 +44,7 @@ const {
 const { landConfig, landContext } = require('./land');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
+const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
 const {
@@ -452,6 +453,26 @@ function chooseOrders(b, turn, leaderboard, multi) {
       enemyArmy = Math.max(enemyArmy, Number(p.army) || 0);
       enemyLand = Math.max(enemyLand, Number(p.land) || 0);
     }
+  // Expansion-shape layer (see ./mshape). Multi-line rooms have no burst and
+  // land is the only recurring income, so the tick after each growth pulse is
+  // worth more than any serial objective: the layer prices the frontier (a
+  // capture that keeps neutral neighbours open) and lifts the inherited
+  // sixteen-order cap. Off by default.
+  const mshapeLayer = mshapeUpdate(
+    b,
+    {
+      turn,
+      multi,
+      size,
+      me,
+      corridor: isMazeBoard(b),
+      land: self.land,
+      enemyLand,
+      army: self.army,
+      enemyArmy,
+    },
+    mshapeConfig(),
+  );
   // Fog oracle (see ./fog-oracle). The leaderboard is rebuilt from the unfogged
   // grids, so `rival.army` / `rival.land` are exact even where the vision is
   // not: the difference against the visible half is the interior reserve, and
@@ -1333,6 +1354,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
   }
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
+  if (mshapeLayer) applyMshape(mshapeLayer, { tile, teams, units, neighbors, myTeam }, candidates);
   // Shadow pricing: the scores of the existing candidates move, and the
   // prediction also creates the candidates re-ranking cannot produce (see
   // ./shadow: an approach step toward its next objective, the counter-capture
@@ -1379,8 +1401,16 @@ function chooseOrders(b, turn, leaderboard, multi) {
     }
     return true;
   };
+  // The rules allow one order per non-empty front per tick and neither the
+  // engine nor the server caps the queue, so the cap is `./mshape`'s to lift.
+  const multiSlots = mshapeLayer ? mshapeLayer.slots : 16;
   for (const op of candidates) {
-    if (take(op) && (!multi || orders.length >= 16)) break;
+    if (take(op) && (!multi || orders.length >= multiSlots)) break;
+  }
+  // Unlimited fronts (see ./mshape): one cell may take two different neutral
+  // neighbours in the same tick when both pushes are halved.
+  if (mshapeLayer && multi) {
+    for (const op of applyFan(mshapeLayer, { tile, teams, units, neighbors }, orders)) orders.push(op);
   }
   // A fully blocked frame must not idle: keep the previous behaviour when no
   // lane passed the guard (the cooldown expires within four ticks).

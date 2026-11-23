@@ -2070,3 +2070,209 @@ test('price the land-first capture boost and merge cap only when enabled', () =>
     funnel,
   );
 });
+
+// --- Expansion-shape layer for multi-line rooms (./mshape) ------------------
+const {
+  mshapeConfig,
+  mshapeUpdate,
+  applyMshape,
+  applyFan,
+  ringCount,
+  neutralFrontier,
+  freshMshape,
+  DEFAULT_SLOTS,
+  DEFAULT_FAN_ARMY,
+  DEFAULT_LEAD_CAP,
+  DEFAULT_FRONTIER,
+} = require('./mshape');
+
+// A 6x6 blob of our plains with two army each inside a 9x9 neutral board: enough
+// frontier and enough interior stacks that the sixteen-order clamp binds.
+function mshapeBlob(army = 2) {
+  const b = createBoard(9, 9, 1);
+  b.grid_type.fill(200);
+  for (let r = 1; r <= 6; r++)
+    for (let c = 1; c <= 6; c++) {
+      b.grid_type[r * 9 + c] = 1;
+      b.army_cnt[r * 9 + c] = army;
+    }
+  b.grid_type[0] = 101;
+  b.army_cnt[0] = 2;
+  return b;
+}
+
+test('default the expansion-shape layer off and clamp its knobs', () => {
+  assert.equal(mshapeConfig({}, {}).enabled, false);
+  assert.equal(mshapeConfig({}, { BOT3_MSHAPE: '1' }).enabled, true);
+  assert.equal(mshapeConfig({}, { BOT3_MSHAPE: 'off' }).enabled, false);
+  const defaults = mshapeConfig({ enabled: true }, {});
+  assert.equal(defaults.slots, DEFAULT_SLOTS);
+  assert.equal(defaults.fanArmy, DEFAULT_FAN_ARMY);
+  assert.equal(defaults.leadCap, DEFAULT_LEAD_CAP);
+  assert.equal(defaults.frontier, DEFAULT_FRONTIER === 1);
+  assert.equal(defaults.capture, 0);
+  assert.equal(defaults.steal, 0);
+  assert.equal(defaults.fan, 0);
+  assert.equal(defaults.ringCap, 6);
+  // Every knob is clamped and read per call.
+  const clamped = mshapeConfig({}, { BOT3_MSHAPE: '1', BOT3_MSHAPE_RING_CAP: '99', BOT3_MSHAPE_SLOTS: '0' });
+  assert.equal(clamped.ringCap, 8);
+  assert.equal(clamped.slots, 1);
+  assert.equal(mshapeConfig({}, { BOT3_MSHAPE: '1', BOT3_MSHAPE_SLOTS: 'abc' }).slots, DEFAULT_SLOTS);
+  assert.equal(mshapeConfig({}, { BOT3_MSHAPE: '1', BOT3_MSHAPE_FAN: '9' }).fan, 3);
+});
+
+test('reach the expansion-shape layer only from a multi-line room', () => {
+  const b = mshapeBlob();
+  const input = { turn: 60, multi: true, size: b.size, me: 1, land: 30, enemyLand: 30 };
+  assert.equal(mshapeUpdate(b, input, mshapeConfig({}, {})), null);
+  const on = mshapeConfig({ enabled: true });
+  assert.equal(mshapeUpdate(b, { ...input, multi: false }, on), null);
+  assert.equal(mshapeUpdate(b, { ...input, size: 100000 }, { ...on, maxBoard: 800 }), null);
+  const plan = mshapeUpdate(b, input, on);
+  assert.ok(plan);
+  assert.equal(plan.slots, DEFAULT_SLOTS);
+  assert.equal(b.mshapeLine.ticks, 1);
+  assert.deepEqual(freshMshape(), { ticks: 0 });
+});
+
+test('lift the inherited sixteen-order cap only in a multi-line room', () => {
+  const players = [
+    { id: 1, team: 1, army: 80, land: 3, dead: 0 },
+    { id: 2, team: 2, army: 100, land: 4, dead: 0 },
+  ];
+  const off = chooseOrders(mshapeBlob(), 60, players, true);
+  assert.equal(off.length, 16);
+  process.env.BOT3_MSHAPE = '1';
+  process.env.BOT3_MSHAPE_SLOTS = '64';
+  try {
+    const on = chooseOrders(mshapeBlob(), 60, players, true);
+    assert.ok(on.length > 16, `expected more than sixteen orders, got ${on.length}`);
+    // Serial rooms keep the one-order rule and the untouched score path.
+    const serial = chooseOrders(mshapeBlob(), 60, players, false);
+    assert.equal(serial.length, 1);
+  } finally {
+    delete process.env.BOT3_MSHAPE;
+    delete process.env.BOT3_MSHAPE_SLOTS;
+  }
+});
+
+test('stand the expansion shape down when the land race is over', () => {
+  const b = mshapeBlob();
+  const input = { turn: 60, multi: true, size: b.size, me: 1, land: 30, enemyLand: 30 };
+  const on = mshapeConfig({ enabled: true });
+  assert.equal(neutralFrontier(b, 1), true);
+  const closed = mshapeBlob();
+  for (let i = 0; i < closed.size; i++) if (closed.grid_type[i] === 200) closed.grid_type[i] = 201;
+  assert.equal(neutralFrontier(closed, 1), false);
+  assert.equal(mshapeUpdate(closed, input, { ...on, frontier: true }), null);
+  assert.ok(mshapeUpdate(closed, input, { ...on, frontier: false }));
+  // A land lead above the cap also stands the layer down.
+  assert.equal(mshapeUpdate(b, { ...input, land: 90 }, { ...on, leadCap: 110 }), null);
+  assert.ok(mshapeUpdate(b, { ...input, land: 30 }, { ...on, leadCap: 110 }));
+});
+
+test('price a neutral capture by the frontier it keeps', () => {
+  // 2x3 board: our plains on 0 and 3, neutral plains on 1, 4, 5, swamp on 2.
+  const b = createBoard(2, 3, 1);
+  b.grid_type.set([1, 200, 150, 1, 200, 200]);
+  const ctx = {
+    tile: b.grid_type,
+    teams: Uint8Array.from([1, 0, 0, 1, 0, 0]),
+    neighbors: b.neighbors,
+    myTeam: 1,
+  };
+  assert.equal(ringCount(ctx, 1), 1); // 2 is swamp and does not pay a pulse
+  assert.equal(ringCount(ctx, 4), 2); // 1 and 5 are plains
+  const make = () => [
+    { score: 32, from: 0, to: 1, mode: 2 },
+    { score: 32, from: 0, to: 2, mode: 2 },
+    { score: 32, from: 3, to: 4, mode: 2 },
+    { score: 60, from: 0, to: 3, mode: 2 },
+  ];
+  const plan = { config: { slots: 64 } };
+  const plain = make();
+  applyMshape(plan, ctx, plain);
+  assert.deepEqual(
+    plain.map((op) => op.score),
+    [32, 32, 32, 60],
+  );
+  const priced = make();
+  applyMshape(
+    plan,
+    { ...ctx, tile: b.grid_type },
+    priced,
+  );
+  applyMshape(
+    { config: { slots: 64, capture: 10, ring: 5, ringCap: 6, hole: 25, water: 40, steal: 100, stealCap: 300 } },
+    ctx,
+    priced,
+  );
+  assert.equal(priced[0].score, 32 + 10 + 5); // one plain neighbour left
+  assert.equal(priced[1].score, 32 + 10 + 10 - 40); // swamp capture pays no pulse
+  assert.equal(priced[2].score, 32 + 10 + 10);
+  // The merge would invalidate the capture from the same cell, so it loses (the
+  // capture map is read before the boosts below move the capture scores).
+  assert.equal(priced[3].score, 32 - 100);
+  // A target that closes the frontier is charged for it.
+  const hole = [{ score: 32, from: 3, to: 5, mode: 2 }];
+  const closed = createBoard(2, 3, 1);
+  closed.grid_type.set([1, 201, 150, 1, 1, 200]);
+  applyMshape(
+    { config: { slots: 64, hole: 25 } },
+    { tile: closed.grid_type, teams: Uint8Array.from([1, 0, 0, 1, 1, 0]), neighbors: closed.neighbors, myTeam: 1 },
+    hole,
+  );
+  assert.equal(hole[0].score, 32 - 25);
+});
+
+test('take a rival cell as a two-cell land swing when priced', () => {
+  const b = createBoard(1, 3, 1);
+  b.grid_type.set([1, 2, 1]);
+  const ctx = { tile: b.grid_type, teams: Uint8Array.from([1, 2, 1]), neighbors: b.neighbors, myTeam: 1 };
+  const raid = [{ score: 49, from: 0, to: 1, mode: 2 }];
+  applyMshape({ config: { slots: 64 } }, ctx, raid);
+  assert.equal(raid[0].score, 49);
+  applyMshape({ config: { slots: 64, raid: 40 } }, ctx, raid);
+  assert.equal(raid[0].score, 89);
+});
+
+test('split one stack over two neutral fronts only when asked', () => {
+  // 2x2 board: our stack on 0 touches two neutral plains (1 and 2).
+  const b = createBoard(2, 2, 1);
+  b.grid_type.set([1, 200, 200, 201]);
+  b.army_cnt.set([3, 0, 0, 0]);
+  const ctx = {
+    tile: b.grid_type,
+    teams: Uint8Array.from([1, 0, 0, 0]),
+    units: Float64Array.from([3, 0, 0, 0]),
+    neighbors: b.neighbors,
+    myTeam: 1,
+  };
+  const orders = () => [{ score: 32, from: 0, to: 1, mode: 2 }];
+  const idle = orders();
+  assert.deepEqual(applyFan({ config: { fan: 0 } }, ctx, idle), []);
+  assert.equal(idle[0].mode, 2);
+  const split = orders();
+  const extra = applyFan({ config: { fan: 1, fanArmy: 3 } }, ctx, split);
+  assert.equal(extra.length, 1);
+  assert.equal(extra[0].to, 2);
+  assert.equal(extra[0].mode, 1);
+  assert.equal(split[0].mode, 1);
+  // A stack below the threshold, a defence mode and a hostile target are left
+  // alone: a halved push into defenders can be a mutual-loss trade.
+  assert.deepEqual(applyFan({ config: { fan: 1, fanArmy: 6 } }, ctx, orders()), []);
+  const defence = [{ score: 600, from: 0, to: 1, mode: 1 }];
+  assert.deepEqual(applyFan({ config: { fan: 1, fanArmy: 3 } }, ctx, defence), []);
+  const hostile = createBoard(2, 2, 1);
+  hostile.grid_type.set([1, 2, 200, 201]);
+  const raid = [{ score: 49, from: 0, to: 1, mode: 2 }];
+  assert.deepEqual(
+    applyFan(
+      { config: { fan: 1, fanArmy: 3 } },
+      { ...ctx, tile: hostile.grid_type, teams: Uint8Array.from([1, 2, 0, 0]), neighbors: hostile.neighbors },
+      raid,
+    ),
+    [],
+  );
+});

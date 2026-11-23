@@ -45,6 +45,7 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 - `land.js`：沼泽重图抢地层：按地形结构（沼泽占比）判定地图，在明牌单线、我方地盘落后于对手时停用收尾漏斗（默认开启，`BOT3_LANDFIRST=0` 关闭；`BOT3_LAND_CAPTURE`/`_PAINT`/`BOT3_LANDBURST`/`BOT3_ISLANDCROWN` 为实测为负、默认关闭的可开关项，见 [LAND.md](LAND.md)）。
 - `kill.js`：单线斩杀层（第 13 轮起默认开启，但只在影子层 `armed`——已证明对手是被重放的 relay 规划器——时生效；`BOT3_FINISH=0` 关闭，`BOT3_FINISH_ARM=0` 去掉门控，见 [SHADOW.md](SHADOW.md)）。
 - `multi.js`：多线 focus 层（burst 已随上游移除而默认关闭；默认关闭，`BOT3_MULTI=1` 开启，见 [MULTI.md](MULTI.md)）。
+- `mshape.js`：多线房间扩张形状层（第 15 轮，默认关闭，`BOT3_MSHAPE=1` 开启）：把继承的 16 单上限放开到全部候选、让「会废掉一次占领的合并」排在占领之后（引擎里合并目标当 Tick 不能出手，`strategy.js` 又会在队列非空时跳过规划）、并在已大幅领先或走廊按实测退场；Relay 多线 8 格 512 局 +10 胜、全量 2048 局 +6 胜且零退化，但仍未达 65%，因此默认关闭（见 [ROUND15-MSHAPE.md](ROUND15-MSHAPE.md)）。
 - `fog.js`：迷雾单线前线瞄准/柱状推进层（默认开启，`BOT3_FOG=0` 关闭）。柱状推进的「先涂地」封顶默认开启（`BOT3_FOG_PAINT3=0` 回到 round-4 基线，见 [BOT3_FOG.md](BOT3_FOG.md)）。
 - `fog-multi.js`：迷雾多线 burst 土地竞赛门控（多线 burst 移除后默认关闭，`BOT3_FOG_MULTI=1` 开启，见 [BOT3_FOG.md](BOT3_FOG.md)）。
 - `fog-maze.js`：迷雾迷宫层：走廊目标场、中立格涂色加分、柱状推进、换线纪律与王冠经济门控（第 11 轮起默认开启，`BOT3_MAZEFOG3=0` 关闭，见 [BOT3_MAZE.md](BOT3_MAZE.md)）。
