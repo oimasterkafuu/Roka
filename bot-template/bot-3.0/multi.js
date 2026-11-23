@@ -370,6 +370,7 @@ module.exports = {
   applyMulti,
   crownRoute,
   teamCuts,
+  rivalTeam,
   freshMulti,
   BURST_END,
   DEFAULT_MAX_BOARD,
