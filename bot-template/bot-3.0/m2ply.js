@@ -46,9 +46,28 @@
 // target), never through the planner's greedy matching loop, which cannot
 // express a duplicate target.
 //
-// Gate: multi-line, clear rooms, `BOT3_M2PLY=1`, the relay predictor armed, and
-// no maze lane discipline (its guard lives inside the planner's take loop, so an
-// adopted set would bypass it).
+// Round 18 adds a **third tick** and a **compounding value** (switch
+// `BOT3_M3PLY`, off by default; `BOT3_M2PLY` keeps the round-17 two-tick shape
+// byte for byte). The two-tick search stalled for two documented reasons:
+//
+//   * land was priced linearly (`min(5, 1 + pulsesLeft)`), while land is an
+//     income process -- every plain pays +1 on each 50-tick mark, forever, and
+//     the army that buys more land. A two-tick horizon can only see the tick
+//     that arms, not the capture it enables, so it cannot price a sacrifice
+//     that buys a compound lead;
+//   * the supply only fed the current tick's matching (one target per set).
+//
+// With `plies = 3` the terminal board is `turn + 3`: our candidate set at
+// tick + 1, relay's batch at tick + 2 predicted from *that candidate's own*
+// board, our rollout at tick + 2, relay's batch at tick + 3 predicted again,
+// our rollout at tick + 3, then the value. Land is priced as the remaining
+// income stream (`exchange * sum(decay^k)`) plus a `cheap`/`width` pair that
+// prices the ring we can arm next tick. The supply grows the split/stage
+// families that arm two ring cells at once.
+//
+// Gate: multi-line, clear rooms, `BOT3_M2PLY=1` or `BOT3_M3PLY=1`, the relay
+// predictor armed, and no maze lane discipline (its guard lives inside the
+// planner's take loop, so an adopted set would bypass it).
 
 const msim = require('./msim');
 const { predictAhead } = require('./mqueue');
@@ -72,6 +91,7 @@ function number(raw, fallback, min, max) {
 const DEFAULTS = {
   margin: 2,
   sims: 12,
+  plies: 2,
   feeds: 3,
   // The trim family (drop the planner's weakest orders, refill the slots) is a
   // measured negative: on 256 clear multi games it costs 6 wins against the rest
@@ -90,11 +110,30 @@ const DEFAULTS = {
   // shape off), so the mode-1 capture candidate ships disabled.
   retain: 0,
   fan: 1,
+  // Round-18 compounding evaluation (active when `plies >= 3`).
+  exchange: 1.5,
+  decay: 0.95,
+  width: 0.3,
+  cheap: 0.5,
+  reach: 2,
+  split: 2,
+  stage: 2,
+  minFeed: 2,
 };
 
 function configOf(overrides = {}, env = process.env) {
+  const three = overrides.three ?? flag(env.BOT3_M3PLY, true);
+  const plies = overrides.plies ?? number(env.BOT3_M3PLY_PLIES, three ? 3 : DEFAULTS.plies, 2, 3);
+  // The round-18 evaluation and supply follow the horizon, so an explicit
+  // `plies: 3` is the same layer as `BOT3_M3PLY=1`.
+  const compound = three || plies >= 3;
   return {
-    enabled: overrides.enabled ?? flag(env.BOT3_M2PLY, false),
+    enabled: overrides.enabled ?? (flag(env.BOT3_M2PLY, false) || three),
+    // `plies` is the whole horizon: 2 is the round-17 search, 3 adds the tick
+    // where the armed ring cell actually fires. The compounding value and the
+    // split/stage supply are tied to it so `BOT3_M2PLY=1` alone stays the
+    // round-17 layer.
+    plies,
     margin: overrides.margin ?? number(env.BOT3_M2PLY_MARGIN, DEFAULTS.margin, 0, 100000),
     sims: overrides.sims ?? number(env.BOT3_M2PLY_SIMS, DEFAULTS.sims, 1, 64),
     feeds: overrides.feeds ?? number(env.BOT3_M2PLY_FEEDS, DEFAULTS.feeds, 0, 16),
@@ -102,6 +141,27 @@ function configOf(overrides = {}, env = process.env) {
     land: overrides.land ?? number(env.BOT3_M2PLY_LAND, DEFAULTS.land, 0, 1000),
     landCap: overrides.landCap ?? number(env.BOT3_M2PLY_LAND_CAP, DEFAULTS.landCap, 1, 100),
     horizon: overrides.horizon ?? number(env.BOT3_M2PLY_HORIZON, DEFAULTS.horizon, 50, 5000),
+    // Land as a compounding income stream: `exchange` is how many army one
+    // cell's remaining pulses are worth (the measured capture arithmetic is one
+    // land per `garrison` army spent, so an exchange rate below one would never
+    // pay), `decay` discounts a pulse the later it arrives. `stream` off keeps
+    // the round-17 linear `landWeight`.
+    stream: overrides.stream ?? flag(env.BOT3_M3PLY_STREAM, compound),
+    exchange: overrides.exchange ?? number(env.BOT3_M3PLY_EXCHANGE, DEFAULTS.exchange, 0, 20),
+    decay: overrides.decay ?? number(env.BOT3_M3PLY_DECAY, DEFAULTS.decay, 0.01, 1),
+    width: overrides.width ?? number(env.BOT3_M3PLY_WIDTH, compound ? DEFAULTS.width : 0, 0, 1000),
+    cheap:
+      overrides.cheap ?? number(env.BOT3_M3PLY_CHEAP, compound ? DEFAULTS.cheap : 0, 0, 1000),
+    reach: overrides.reach ?? number(env.BOT3_M3PLY_REACH, DEFAULTS.reach, 1, 8),
+    split: overrides.split ?? number(env.BOT3_M3PLY_SPLIT, compound ? DEFAULTS.split : 0, 0, 8),
+    stage: overrides.stage ?? number(env.BOT3_M3PLY_STAGE, compound ? DEFAULTS.stage : 0, 0, 8),
+    // Donor mass: a cell with two army pushes one, which is enough to arm a
+    // one-army ring cell into an empty plain. The round-17 supply required three
+    // (a two-army push) and found only 1.14 donors per target in the census, so
+    // the third tick lowers the bar by default.
+    minFeed:
+      overrides.minFeed ??
+      number(env.BOT3_M3PLY_MINFEED, compound ? DEFAULTS.minFeed : 3, 2, 8),
     crown: overrides.crown ?? number(env.BOT3_M2PLY_CROWN, DEFAULTS.crown, 0, 100000),
     ring: overrides.ring ?? number(env.BOT3_M2PLY_RING, DEFAULTS.ring, 0, 1000),
     mass: overrides.mass ?? number(env.BOT3_M2PLY_MASS, DEFAULTS.mass, 0, 1000),
@@ -128,12 +188,16 @@ const totals = {
   adopted: 0,
   lateral: 0,
   feed: 0,
+  split: 0,
+  stage: 0,
   trim: 0,
   retain: 0,
   fan: 0,
   react: 0,
   gain: 0,
   aheadCalls: 0,
+  plans: 0,
+  sources: 0,
   ms: 0,
 };
 
@@ -259,6 +323,27 @@ function landWeight(turn, config) {
   return config.land * Math.min(config.landCap, 1 + left);
 }
 
+// The remaining income stream of one cell: every plain pays +1 army on each
+// 50-tick mark for the rest of the game, and that army buys more land, so a cell
+// is worth the discounted sum of its remaining pulses rather than one pulse.
+// `exchange` is the land/army exchange rate; the floor of one army keeps a cell
+// a cell after the horizon.
+function streamWeight(turn, config) {
+  const left = Math.max(0, Math.floor((config.horizon - turn) / msim.PLAIN_GROWTH_INTERVAL));
+  const pulses = Math.min(config.landCap, left);
+  let sum = 0,
+    factor = 1;
+  for (let k = 1; k <= pulses; k++) {
+    factor *= config.decay;
+    sum += factor;
+  }
+  return config.land * Math.max(1, config.exchange * sum);
+}
+
+function landValue(turn, config) {
+  return config.stream ? streamWeight(turn, config) : landWeight(turn, config);
+}
+
 // Value of a simulated board in army units.
 function value(st, ctx, me, foe, turn, config) {
   const { size, code, army, iso } = st;
@@ -268,6 +353,10 @@ function value(st, ctx, me, foe, turn, config) {
     foeLand = 0,
     myReady = 0,
     foeReady = 0,
+    myRing = 0,
+    foeRing = 0,
+    myCheap = 0,
+    foeCheap = 0,
     myMass = 0,
     foeMass = 0,
     myIso = 0,
@@ -276,6 +365,8 @@ function value(st, ctx, me, foe, turn, config) {
     foeCrowns = 0;
   const myCrownCells = [],
     foeCrownCells = [];
+  const reach = config.reach;
+  const cheapOn = config.cheap > 0;
   for (let i = 0; i < size; i++) {
     const owner = msim.ownerOf(code[i]);
     if (!owner) continue;
@@ -304,21 +395,32 @@ function value(st, ctx, me, foe, turn, config) {
       continue;
     }
     let ring = false;
+    // Cheapest gap to a capture next tick: `mass + feed - 1 > garrison`. A gap
+    // of one means a single army from a neighbour arms this cell on the tick
+    // after, which is the shape the planner never prices.
+    let gap = Infinity;
     for (const j of ctx.neighbors[i]) {
       const other = msim.ownerOf(code[j]);
       if (other !== owner) {
         ring = true;
-        break;
+        if (cheapOn && code[j] !== 201) {
+          const need = army[j] + 2 - mass;
+          if (need < gap) gap = need;
+        }
       }
     }
     if (!ring) continue;
+    if (mine) myRing += 1;
+    else foeRing += 1;
     // A ring cell can only fire with two army (`push = army - 1` must beat the
     // garrison), so armament counts cells that are actually able to act.
     if (mine) {
       if (mass >= 2) myReady += 1;
+      if (cheapOn && mass >= 2 && gap >= 1 && gap <= reach) myCheap += 1;
       myMass += Math.min(6, Math.max(0, mass - 1));
     } else {
       if (mass >= 2) foeReady += 1;
+      if (cheapOn && mass >= 2 && gap >= 1 && gap <= reach) foeCheap += 1;
       foeMass += Math.min(6, Math.max(0, mass - 1));
     }
   }
@@ -342,9 +444,11 @@ function value(st, ctx, me, foe, turn, config) {
   return (
     myArmy -
     foeArmy +
-    landWeight(turn, config) * (myLand - foeLand) +
+    landValue(turn, config) * (myLand - foeLand) +
     config.crown * (myCrowns - foeCrowns) +
     config.ring * (myReady - foeReady) +
+    (config.width ?? 0) * (myRing - foeRing) +
+    (config.cheap ?? 0) * (myCheap - foeCheap) +
     config.mass * (myMass - foeMass) +
     config.cut * (foeIso - myIso) +
     config.guard * safety
@@ -449,7 +553,7 @@ function rollout(st, ctx, me, config) {
 // target this tick, feed it from one to three own neighbours. The engine keeps
 // the fed cell's own order for the tick after (its source is a target), which is
 // exactly the two-tick pattern a one-tick search cannot price.
-function feedSets({ b, turn, candidates, base, pred, units, teams, myTeam, ring, config }) {
+function feedPlans({ b, units, teams, myTeam, ring, config }) {
   const size = b.size,
     tile = b.grid_type,
     neighbors = b.neighbors,
@@ -489,7 +593,7 @@ function feedSets({ b, turn, candidates, base, pred, units, teams, myTeam, ring,
     for (const s of neighbors[t]) {
       if (teams[s] !== myTeam || b.isolated[s] || s === t) continue;
       const mass = Math.max(0, units[s]);
-      if (mass < 3) continue;
+      if (mass < config.minFeed) continue;
       // Prefer cells that cannot capture anything this tick: spending them on a
       // feed costs no capture.
       let captures = 0;
@@ -501,9 +605,17 @@ function feedSets({ b, turn, candidates, base, pred, units, teams, myTeam, ring,
     plans.push({ target: t, need, promise, sources });
   }
   plans.sort((a, c) => a.need - c.need || c.promise - a.promise);
+  return plans;
+}
+
+function feedSets({ b, base, units, teams, myTeam, ring, config }) {
   const out = [];
-  for (const plan of plans.slice(0, config.feeds)) {
-    for (let count = 1; count <= 3 && count <= plan.sources.length; count++) {
+  // A three-tick horizon also wants the split/stage families inside the same
+  // simulation budget, so the feed family contributes two sets per plan there
+  // (one source, two sources) instead of three.
+  const perPlan = config.plies >= 3 ? 2 : 3;
+  for (const plan of feedPlans({ b, units, teams, myTeam, ring, config }).slice(0, config.feeds)) {
+    for (let count = 1; count <= perPlan && count <= plan.sources.length; count++) {
       const sources = plan.sources.slice(0, count).map((s) => s.cell);
       const drop = new Set([plan.target, ...sources]);
       // Keep every planner order that neither uses the fed cell as a source (it
@@ -522,6 +634,84 @@ function feedSets({ b, turn, candidates, base, pred, units, teams, myTeam, ring,
       if (out.length >= config.sims) break;
     }
     if (out.length >= config.sims) break;
+  }
+  return out;
+}
+
+// Two (or more) ring cells armed on the same tick. The round-17 supply feeds one
+// cell per set, so it can never express "spend this tick on two fronts"; with a
+// three-tick horizon both cells fire on tick + 2 and the income compounds from
+// there, which is the shape the two-tick search could not price.
+function splitSets({ plans, base, units, config }) {
+  const limit = config.split;
+  if (limit < 2) return [];
+  const out = [];
+  const targets = [],
+    sources = [],
+    used = new Set();
+  for (const plan of plans) {
+    if (targets.length >= limit) break;
+    if (used.has(plan.target)) continue;
+    const pick = plan.sources.filter(
+      (s) => s.captures === 0 && !used.has(s.cell) && s.cell !== plan.target,
+    );
+    if (!pick.length) continue;
+    used.add(plan.target);
+    used.add(pick[0].cell);
+    targets.push(plan.target);
+    sources.push(pick[0].cell);
+    if (targets.length < 2) continue;
+    const set = base.filter((op) => !used.has(op.from));
+    for (let k = 0; k < targets.length; k++)
+      set.push({
+        from: sources[k],
+        to: targets[k],
+        mode: 2,
+        build: null,
+        send: Math.max(1, units[sources[k]] - 1),
+        score: 0,
+      });
+    out.push({ kind: 'split', set: sanitize(set) });
+  }
+  return out;
+}
+
+// Staging: spend this tick to arm two ring cells *deeply* (two feeders each), so
+// both capture on tick + 2 and the pair of new cells pays for the rest of the
+// game. Only sources that cannot capture this tick are spent, so the family can
+// never trade a capture for an arming move (that is the `trim` mistake).
+function stageSets({ plans, base, units, config }) {
+  const limit = config.stage;
+  if (!limit) return [];
+  const out = [];
+  const targets = [],
+    feeders = [],
+    used = new Set();
+  for (const plan of plans) {
+    if (targets.length >= limit) break;
+    if (used.has(plan.target)) continue;
+    const pick = plan.sources
+      .filter((s) => s.captures === 0 && !used.has(s.cell) && s.cell !== plan.target)
+      .slice(0, 2)
+      .map((s) => s.cell);
+    if (!pick.length) continue;
+    used.add(plan.target);
+    for (const cell of pick) used.add(cell);
+    targets.push(plan.target);
+    feeders.push(pick);
+    if (targets.length < 2) continue;
+    const set = base.filter((op) => !used.has(op.from));
+    for (let k = 0; k < targets.length; k++)
+      for (const from of feeders[k])
+        set.push({
+          from,
+          to: targets[k],
+          mode: 2,
+          build: null,
+          send: Math.max(1, units[from] - 1),
+          score: 0,
+        });
+    out.push({ kind: 'stage', set: sanitize(set) });
   }
   return out;
 }
@@ -632,6 +822,35 @@ function twoTick(store, ctx, turn, players, me, relayMe, mine, theirs, ahead, co
   return value(store.sim, ctx, me, relayMe, turn + 2, config);
 }
 
+// `plies`-tick search. Every candidate replays tick + 1 from the frame board and,
+// for ticks +2..+plies, predicts relay's batch on *that candidate's own* board
+// (`predictAhead` replays relay's planner and restores its bookkeeping) and
+// answers with the fixed rollout. The terminal board is scored once. Returns
+// null when relay's response cannot be reproduced, which stands the whole layer
+// down for this frame.
+function threeTick(store, ctx, turn, players, me, relayMe, mine, theirs1, pred, config) {
+  msim.copyState(store.sim, store.start);
+  const first = new Map([
+    [me, mine.map((op) => ({ ...op }))],
+    [relayMe, theirs1.map((op) => ({ ...op }))],
+  ]);
+  msim.step(store.sim, ctx, { turn: turn + 1, multi: true, players, queues: first });
+  let last = turn + 1;
+  for (let k = 2; k <= config.plies; k++) {
+    const ahead = predictAhead(pred, store.sim, last, players, me);
+    totals.aheadCalls += 1;
+    if (!ahead) return null;
+    const next = new Map([
+      [me, rollout(store.sim, ctx, me, config)],
+      [relayMe, ahead.map((op) => ({ ...op }))],
+    ]);
+    msim.step(store.sim, ctx, { turn: last + 1, multi: true, players, queues: next });
+    last += 1;
+  }
+  store.sims += 1;
+  return value(store.sim, ctx, me, relayMe, last, config);
+}
+
 // Returns an order list to emit verbatim, or null to keep the planner's own set.
 function choose({ b, turn, candidates, pred, slots = 16, config = configOf(), units, teams, myTeam }) {
   if (!pred || !pred.armed || !pred.ops || !candidates.length) return null;
@@ -647,23 +866,38 @@ function choose({ b, turn, candidates, pred, slots = 16, config = configOf(), un
   const base = collect(candidates, slots);
   if (!base.length) return null;
   const theirs1 = pred.ops;
-  // Tick + 1 with the planner's own set: its board is where relay's next batch
-  // is predicted from, so every candidate is priced against the same response.
-  const midQueues = new Map([
-    [me, asOps(base, me)],
-    [relayMe, theirs1.map((op) => ({ ...op }))],
-  ]);
-  msim.copyState(store.sim, store.start);
-  msim.step(store.sim, ctx, { turn: turn + 1, multi: true, players, queues: midQueues });
-  msim.copyState(store.mid, store.sim);
-  const ahead = predictAhead(pred, store.mid, turn + 1, players, me);
-  totals.aheadCalls += 1;
-  if (!ahead) return null;
-  const baseScore = twoTick(store, ctx, turn, players, me, relayMe, asOps(base, me), theirs1, ahead, config);
+  let scorer;
+  if (config.plies >= 3) {
+    // Each candidate needs relay's response at tick + 2, which depends on its own
+    // tick + 1 board, so the prediction moves inside the scorer.
+    scorer = (set) => threeTick(store, ctx, turn, players, me, relayMe, asOps(set, me), theirs1, pred, config);
+  } else {
+    // Tick + 1 with the planner's own set: its board is where relay's next batch
+    // is predicted from, so every candidate is priced against the same response
+    // (the round-17 shape).
+    const midQueues = new Map([
+      [me, asOps(base, me)],
+      [relayMe, theirs1.map((op) => ({ ...op }))],
+    ]);
+    msim.copyState(store.sim, store.start);
+    msim.step(store.sim, ctx, { turn: turn + 1, multi: true, players, queues: midQueues });
+    msim.copyState(store.mid, store.sim);
+    const ahead = predictAhead(pred, store.mid, turn + 1, players, me);
+    totals.aheadCalls += 1;
+    if (!ahead) return null;
+    scorer = (set) => twoTick(store, ctx, turn, players, me, relayMe, asOps(set, me), theirs1, ahead, config);
+  }
+  const baseScore = scorer(base);
+  if (baseScore === null) return null;
   const ring = ringMask(b.grid_type, teams, b.neighbors, myTeam, store);
+  const plans = feedPlans({ b, units, teams, myTeam, ring, config });
+  totals.plans += plans.length;
+  for (const plan of plans) totals.sources += plan.sources.length;
   const supplied = [
     { kind: 'base', set: base },
-    ...feedSets({ b, turn, candidates, base, pred, units, teams, myTeam, ring, config }),
+    ...feedSets({ b, base, units, teams, myTeam, ring, config }),
+    ...splitSets({ plans, base, units, config }),
+    ...stageSets({ plans, base, units, config }),
     ...trimSets({ candidates, base, slots, config }),
     ...retainSets({ base, units, config }),
     ...fanSets({ b, candidates, base, units, teams, myTeam, config }),
@@ -685,7 +919,8 @@ function choose({ b, turn, candidates, pred, slots = 16, config = configOf(), un
     if (seen.has(key)) continue;
     seen.add(key);
     sims += 1;
-    const score = twoTick(store, ctx, turn, players, me, relayMe, asOps(set, me), theirs1, ahead, config);
+    const score = scorer(set);
+    if (score === null) continue;
     if (score > bestScore) {
       best = set;
       bestScore = score;
@@ -719,13 +954,19 @@ module.exports = {
   value,
   rollout,
   landWeight,
+  streamWeight,
+  landValue,
   ringMask,
+  feedPlans,
   feedSets,
+  splitSets,
+  stageSets,
   trimSets,
   retainSets,
   fanSets,
   reactSets,
   twoTick,
+  threeTick,
   freshStore,
   totals,
   DEFAULTS,
