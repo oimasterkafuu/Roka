@@ -3803,3 +3803,98 @@ test('leave the planner byte-identical while the bank is off', () => {
     else process.env.BOT3_BANKGATE = previous;
   }
 });
+
+// --- Fog crown bank: the shallow gather band (./mcrown2) --------------------
+const {
+  mcrown2Config,
+  mcrown2Update,
+  DEFAULT_SHALLOW,
+  DEFAULT_MINBANK,
+} = require('./mcrown2');
+
+// A 1x20 strip: eight of our plains at the front of the field and twelve cells
+// of swamp behind them, so the board's swamp share is 60 % - between the
+// archipelago share (64-67 %) and the mediterranean one (36-47 %). Cell 2 sits
+// at hop 2 and cell 3 at hop 3, which is exactly the band the shallow switch
+// decides between.
+function shallowStrip(swampBehind = true) {
+  const b = createBoard(1, 20, 1);
+  for (let i = 0; i < 20; i++) b.grid_type[i] = i < 8 ? 1 : swampBehind ? 204 : 200;
+  const units = [1, 1, 1, 4, 4, 5, 5, 1];
+  for (let i = 0; i < 8; i++) b.army_cnt[i] = units[i];
+  const hop = [0, 1, 2, 3, 3, 4, 4, 4];
+  for (let i = 8; i < 20; i++) hop.push(1e6);
+  return {
+    b,
+    input: {
+      turn: 50,
+      multi: true,
+      fog: true,
+      size: 20,
+      tile: b.grid_type,
+      teams: Uint8Array.from(Array.from({ length: 20 }, (_, i) => (i < 8 ? 1 : 0))),
+      units: Float64Array.from(Array.from({ length: 20 }, (_, i) => (i < 8 ? units[i] : 0))),
+      neighbors: b.neighbors,
+      myTeam: 1,
+      me: 1,
+      isolated: new Uint8Array(20),
+      frontDist: Int32Array.from(hop),
+      enemyDist: new Int32Array(20).fill(40),
+      cut: new Float64Array(20),
+      army: 60,
+      enemyArmy: 80,
+      land: 8,
+      enemyLand: 9,
+    },
+  };
+}
+
+test('gate the shallow gather band on the swamp share, on for island boards', () => {
+  // Round 20 ships the shallow band at 55% swamp: on island boards the rear
+  // basin is one hop shallower, so a hop-3 gather never pays for the second 50.
+  assert.equal(DEFAULT_SHALLOW, 55);
+  assert.equal(DEFAULT_MINBANK, 0);
+  const shipped = mcrown2Config({}, {});
+  assert.equal(shipped.shallow, 55);
+  assert.equal(shipped.hop, 3);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2_SHALLOW: '55' }).shallow, 55);
+  assert.equal(
+    mcrown2Config({}, { BOT3_MCROWN2_SHALLOW: '55' }).hop,
+    3,
+    'the switch moves the band at run time, not the configured hop',
+  );
+  // Clamped into 0..100; a non-numeric value falls back to the shipped default,
+  // and an explicit 0 turns the shallow band off.
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2_SHALLOW: '500' }).shallow, 100);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2_SHALLOW: '0' }).shallow, 0);
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2_SHALLOW: 'abc' }).shallow, DEFAULT_SHALLOW);
+});
+
+test('shorten the bank band to hop 2 only on a swamp board', () => {
+  const base = { enabled: true, fogOnly: false, fog: true, swamp: 0, behind: 0 };
+  const off = mcrown2Config({ ...base, shallow: 0 });
+  const on = mcrown2Config({ ...base, shallow: 55 });
+  // Every call gets a fresh board: the vault state lives on `b.mcrown2`, and a
+  // second call would keep the first call's pick.
+  // Off: the round-18 band, and the plan carries the very config object it was
+  // given (nothing is rebuilt, so the shipped path is byte-identical).
+  const idOff = shallowStrip(true);
+  const shipped = mcrown2Update(idOff.b, idOff.input, off);
+  assert.ok(shipped);
+  assert.equal(shipped.config, off);
+  assert.equal(shipped.config.hop, 3);
+  assert.equal(shipped.active[0].cell, 3);
+  // On, swamp 60 %: the band is hop 2, and the hop-2 cell is now the pick.
+  const idWet = shallowStrip(true);
+  const shallow = mcrown2Update(idWet.b, idWet.input, on);
+  assert.ok(shallow);
+  assert.equal(shallow.config.hop, 2);
+  assert.notEqual(shallow.config, on);
+  assert.equal(shallow.active[0].cell, 2);
+  // On, dry board (0 % swamp): the gate keeps the round-18 band.
+  const idDry = shallowStrip(false);
+  const dryPlan = mcrown2Update(idDry.b, idDry.input, on);
+  assert.ok(dryPlan);
+  assert.equal(dryPlan.config, on);
+  assert.equal(dryPlan.active[0].cell, 3);
+});
