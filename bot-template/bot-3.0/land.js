@@ -60,6 +60,21 @@ const DEFAULT_CLOSE_SKIP = 1;
 // stays down for the rest of the game).
 // Same board bound as ./closing: the layer is for the compact serial room.
 const DEFAULT_MAX_BOARD = 800;
+// Ignore the instantaneous land race when arming the stand-down: on a
+// swamp-heavy serial room the funnel crosses terrain that pays no income, so
+// the structural gate alone (heavy board + single line) is the reason to stay
+// down. Measured round 13 on `relay/mediterranean/clear/single`: neutral (the
+// stand-down was not the lever), see LAND.md.
+const DEFAULT_CLOSE_ALWAYS = 0;
+// Crown economy. On a structurally swamp-heavy clear serial room the only
+// income that compounds is a crown (+1 army per tick; swamp pays nothing), and
+// the measured losses lead on land and army at tick 100 while trailing the
+// rival on crowns, then bleed out between ticks 100 and 250. `site` raises the
+// build proposal for the chosen site and `develop` keeps the develop gate open
+// (the stock gate only builds on 5 of every 12 ticks once `invest` drops), so
+// the army converts into crowns instead of frontier land. Both are inert at 0.
+const DEFAULT_SITE = 0;
+const DEFAULT_DEVELOP = 0;
 
 function number(raw, fallback, min, max) {
   const value = Number(raw);
@@ -87,6 +102,10 @@ function landConfig(overrides = {}, env = process.env) {
     homes: overrides.homes ?? number(env.BOT3_LAND_HOMES, DEFAULT_HOMES, 0, 32),
     spread: overrides.spread ?? number(env.BOT3_LAND_SPREAD, DEFAULT_SPREAD, 0, 20),
     closeSkip: overrides.closeSkip ?? number(env.BOT3_LAND_CLOSE_SKIP, DEFAULT_CLOSE_SKIP, 0, 1),
+    closeAlways:
+      overrides.closeAlways ?? number(env.BOT3_LAND_CLOSE_ALWAYS, DEFAULT_CLOSE_ALWAYS, 0, 1),
+    site: overrides.site ?? number(env.BOT3_LAND_SITE, DEFAULT_SITE, 0, 4000),
+    develop: overrides.develop ?? number(env.BOT3_LAND_DEVELOP, DEFAULT_DEVELOP, 0, 1),
     closeUntil: overrides.closeUntil ?? number(env.BOT3_LAND_CLOSE_UNTIL, 0, 0, 100000),
   };
 }
@@ -106,6 +125,7 @@ function swampShare(b) {
 const OFF = {
   active: false,
   heavy: false,
+  single: false,
   trail: false,
   capture: 0,
   paint: Infinity,
@@ -113,6 +133,8 @@ const OFF = {
   homes: 0,
   spread: 0,
   closeSkip: false,
+  site: 0,
+  develop: false,
 };
 
 // One call per planning tick. `input` carries the numbers the planner already
@@ -143,6 +165,7 @@ function landContext(b, input, config = landConfig()) {
   return {
     active: capture > 0 || paint !== Infinity,
     heavy,
+    single,
     trail,
     capture,
     paint,
@@ -153,9 +176,11 @@ function landContext(b, input, config = landConfig()) {
       config.landfirst &&
       config.closeSkip &&
       single &&
-      trail &&
+      (trail || config.closeAlways) &&
       !(config.closeUntil > 0 && turn >= config.closeUntil),
     ),
+    site: config.landfirst && single ? config.site : 0,
+    develop: Boolean(config.landfirst && single && config.develop),
   };
 }
 
@@ -170,5 +195,8 @@ module.exports = {
   DEFAULT_HOMES,
   DEFAULT_SPREAD,
   DEFAULT_CLOSE_SKIP,
+  DEFAULT_CLOSE_ALWAYS,
+  DEFAULT_SITE,
+  DEFAULT_DEVELOP,
   DEFAULT_MAX_BOARD,
 };

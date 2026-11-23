@@ -6,10 +6,10 @@ const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents, evaluateFrontMove } = require('./single-front');
-const { planFinish } = require('./kill');
+const { planFinish, finishEnabled } = require('./kill');
 const { makeOpening } = require('./opening');
 const relayPlanner = require('../relay-bot/planner');
-const { predict: predictShadow, record: recordShadow } = require('./shadow');
+const { predict: predictShadow, record: recordShadow, plan: planShadow } = require('./shadow');
 const { isMazeBoard, laneBlocked, laneState, recordLane } = require('./maze');
 const { closingConfig, closingUpdate, freshClosing } = require('./closing');
 const { landConfig, landContext, swampShare } = require('./land');
@@ -1799,6 +1799,112 @@ test('arm the land-first layer only on a structurally swamp-heavy clear serial r
   const late = landConfig({}, { BOT3_LAND_CLOSE_UNTIL: '120' });
   assert.equal(landContext(b, room, late).closeSkip, false);
   assert.equal(landContext(b, { ...room, turn: 119 }, late).closeSkip, true);
+  // Round 13: the stand-down can ignore the instantaneous land race (measured
+  // neutral on mediterranean), and the crown-economy knobs stay inert at 0.
+  assert.equal(landConfig({}, {}).closeAlways, 0);
+  assert.equal(landConfig({}, { BOT3_LAND_CLOSE_ALWAYS: '1' }).closeAlways, 1);
+  const always = landConfig({}, { BOT3_LAND_CLOSE_ALWAYS: '1' });
+  assert.equal(landContext(b, { ...room, land: 30 }, always).closeSkip, true);
+  assert.equal(landContext(b, { ...room, single: false }, always).closeSkip, false);
+  assert.equal(landConfig({}, {}).site, 0);
+  assert.equal(landConfig({}, {}).develop, 0);
+  const crowns = landConfig({}, { BOT3_LAND_SITE: '520', BOT3_LAND_DEVELOP: '1' });
+  assert.equal(landContext(b, room, crowns).site, 520);
+  assert.equal(landContext(b, room, crowns).develop, true);
+  assert.equal(landContext(b, { ...room, single: false }, crowns).site, 0);
+  assert.equal(landContext(b, room, landConfig({}, { BOT3_LANDFIRST: '0' })).site, 0);
+});
+
+// Round 13: the punish recapture is gated on the structural swamp share, so a
+// plain-rich board keeps the shipped path, and the bid/keep knobs stay addressable.
+test('gate the shadow punish recapture on the structural swamp share', () => {
+  const keys = [
+    'BOT3_SHADOW_PUNISH',
+    'BOT3_SHADOW_PUNISH_BID',
+    'BOT3_SHADOW_PUNISH_KEEP',
+    'BOT3_SHADOW_PUNISH_SWAMP',
+  ];
+  const saved = {};
+  for (const key of keys) saved[key] = process.env[key];
+  try {
+    for (const key of keys) delete process.env[key];
+    const setup = (swampCells) => {
+      const b = createBoard(6, 10, 1);
+      b.grid_type.fill(200);
+      for (let i = 0; i < swampCells; i++) b.grid_type[i] = 204;
+      // Our 9-unit stack next to relay's source tile.
+      b.grid_type[15] = 2;
+      b.grid_type[14] = 1;
+      b.army_cnt[15] = 0;
+      b.army_cnt[14] = 10;
+      return b;
+    };
+    const run = (b) => {
+      const candidates = [];
+      const state = { stats: { branches: {} } };
+      const ctx = {
+        pred: { from: 15, to: 4, build: false, relayMe: 2 },
+        weFirst: false,
+        push: 100,
+        defense: 10,
+        me: 1,
+        relayGrowth: 0,
+        hard: true,
+        state,
+      };
+      const added = planShadow(ctx, b, 70, candidates);
+      return { candidates, added, branches: state.stats.branches };
+    };
+    // Plain-rich board (0% swamp): the gate leaves the shipped path alone.
+    const open = run(setup(0));
+    assert.equal(open.added, 0);
+    assert.equal(open.candidates.length, 0);
+    // Swamp-heavy board: relay's abandoned tile is recaptured.
+    const heavy = run(setup(24));
+    assert.equal(heavy.added, 1);
+    assert.equal(heavy.candidates[0].score, 250);
+    assert.deepEqual(
+      [heavy.candidates[0].from, heavy.candidates[0].to, heavy.candidates[0].send],
+      [14, 15, 9],
+    );
+    assert.equal(heavy.branches.punishAdd, 1);
+    // The bid is a knob, and the gate can be opened or closed by hand.
+    process.env.BOT3_SHADOW_PUNISH_BID = '350';
+    assert.equal(run(setup(24)).candidates[0].score, 350);
+    delete process.env.BOT3_SHADOW_PUNISH_BID;
+    process.env.BOT3_SHADOW_PUNISH_SWAMP = '0';
+    assert.equal(run(setup(0)).added, 1);
+    delete process.env.BOT3_SHADOW_PUNISH_SWAMP;
+    process.env.BOT3_SHADOW_PUNISH = '0';
+    assert.equal(run(setup(24)).added, 0);
+    delete process.env.BOT3_SHADOW_PUNISH;
+    // `keep` bounds what relay may leave behind on the source tile.
+    const stuck = setup(24);
+    stuck.army_cnt[15] = 103;
+    assert.equal(run(stuck).added, 0);
+    process.env.BOT3_SHADOW_PUNISH_KEEP = '3';
+    assert.equal(run(stuck).added, 1);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('ship the finish layer on by default behind the shadow-armed gate', () => {
+  const saved = process.env.BOT3_FINISH;
+  try {
+    delete process.env.BOT3_FINISH;
+    assert.equal(finishEnabled(), true);
+    process.env.BOT3_FINISH = '0';
+    assert.equal(finishEnabled(), false);
+    process.env.BOT3_FINISH = '1';
+    assert.equal(finishEnabled(), true);
+  } finally {
+    if (saved === undefined) delete process.env.BOT3_FINISH;
+    else process.env.BOT3_FINISH = saved;
+  }
 });
 
 test('stand the closing column down on a swamp-heavy clear room while land trails', () => {

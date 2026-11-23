@@ -153,7 +153,7 @@ function createState() {
 // `_PUNISH=1`, `_RACE=1`, `_GUARD=1`, `_HOLD=1`, `_FREE=1`) because none of
 // them moved archipelago or mediterranean to the acceptance line; SHADOW.md
 // records each measured delta.
-const SUB_DEFAULT = { INVALID: true };
+const SUB_DEFAULT = { INVALID: true, PUNISH: true };
 const subOn = (name) => {
   const value = process.env[`BOT3_SHADOW_${name}`];
   if (value === '1') return true;
@@ -596,6 +596,36 @@ const APPROACH_MIN_UNITS = 6;
 const APPROACH_STEPS = 4;
 const APPROACH_MAX = 2;
 const PUNISH_MAX = 2;
+// Punish bid. `250` is the shipped shape: relay's abandoned source is recaptured
+// for its own value, which converts the mediterranean mid-game (see LAND.md,
+// round 13) and is neutral on archipelago once the structural gate below is on.
+// `keep` is how much relay may leave behind on the source tile (mode 2 keeps
+// one army, plus the tick growth).
+const DEFAULT_PUNISH_BID = 250;
+const DEFAULT_PUNISH_KEEP = 2;
+// Structural gate for the punish candidate. The recapture pays only where the
+// abandoned tile is worth keeping: on a swamp-heavy clear room a plain is the
+// only land that pays income (`applyTickGrowth`), so leaving relay's source
+// alive hands it the race, while on a plain-rich room the same tick is better
+// spent on the frontier (measured: random/maze lose a win with it on). The
+// default matches ./land's structural threshold.
+const DEFAULT_PUNISH_SWAMP = 0.35;
+
+function shadowNumber(name, fallback, min, max) {
+  const value = Number(process.env[`BOT3_SHADOW_${name}`]);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, value));
+}
+
+// Structural swamp share (fog keeps the code, so this is valid on a hidden
+// board too). Cached on the board: the grid only changes by ownership.
+function boardSwamp(b) {
+  if (b.shadowSwampShare !== undefined) return b.shadowSwampShare;
+  let cells = 0;
+  for (let i = 0; i < b.size; i++) if (swamp(b.grid_type[i])) cells++;
+  b.shadowSwampShare = b.size ? cells / b.size : 0;
+  return b.shadowSwampShare;
+}
 // Land-race bid. Tuned on the archipelago cell: high enough to beat the
 // planner's gather scores (~150-390), low enough that every real defence
 // (560+) and crown strike (2000) still wins the sort.
@@ -690,18 +720,20 @@ function planPunish(ctx, b, turn, add) {
   const { pred, weFirst, push, defense, me } = ctx;
   if (weFirst || pred.build) return;
   if (!(push > defense)) return;
+  if (boardSwamp(b) < shadowNumber('PUNISH_SWAMP', DEFAULT_PUNISH_SWAMP, 0, 1)) return;
   const grid = b.grid_type;
   const army = b.army_cnt;
   const pf = pred.from;
   const keep = army[pf] + ctx.relayGrowth - push;
-  if (keep > 2) return;
+  if (keep > shadowNumber('PUNISH_KEEP', DEFAULT_PUNISH_KEEP, 0, 16)) return;
+  const bid = shadowNumber('PUNISH_BID', DEFAULT_PUNISH_BID, 0, 4000);
   const picks = [];
   for (const i of b.neighbors[pf]) {
     if (ownerOf(grid[i]) !== me || b.isolated[i]) continue;
     const send = army[i] - 1;
     if (send <= keep || send < 2) continue;
     const code = grid[pf];
-    let score = 250 + Math.min(140, army[pf] * 2) + (crown(code) ? 200 : city(code) ? 90 : 0);
+    let score = bid + Math.min(140, army[pf] * 2) + (crown(code) ? 200 : city(code) ? 90 : 0);
     picks.push({ score, from: i, to: pf, mode: 2, send });
   }
   if (!picks.length) return;

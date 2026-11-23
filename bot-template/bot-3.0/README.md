@@ -43,7 +43,7 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 - `maze.js`：迷宫（走廊）层：地图判定、集中式前线规划器的推迟启用与可选的走廊换线纪律。
 - `closing.js`：小图单线终局的收尾层（见下节），默认开启。
 - `land.js`：沼泽重图抢地层：按地形结构（沼泽占比）判定地图，在明牌单线、我方地盘落后于对手时停用收尾漏斗（默认开启，`BOT3_LANDFIRST=0` 关闭；`BOT3_LAND_CAPTURE`/`_PAINT`/`BOT3_LANDBURST`/`BOT3_ISLANDCROWN` 为实测为负、默认关闭的可开关项，见 [LAND.md](LAND.md)）。
-- `kill.js`：可选的单线斩杀层（默认关闭，`BOT3_FINISH=1` 开启）。
+- `kill.js`：单线斩杀层（第 13 轮起默认开启，但只在影子层 `armed`——已证明对手是被重放的 relay 规划器——时生效；`BOT3_FINISH=0` 关闭，`BOT3_FINISH_ARM=0` 去掉门控，见 [SHADOW.md](SHADOW.md)）。
 - `multi.js`：多线 focus 层（burst 已随上游移除而默认关闭；默认关闭，`BOT3_MULTI=1` 开启，见 [MULTI.md](MULTI.md)）。
 - `fog.js`：迷雾单线前线瞄准/柱状推进层（默认开启，`BOT3_FOG=0` 关闭）。柱状推进的「先涂地」封顶默认开启（`BOT3_FOG_PAINT3=0` 回到 round-4 基线，见 [BOT3_FOG.md](BOT3_FOG.md)）。
 - `fog-multi.js`：迷雾多线 burst 土地竞赛门控（多线 burst 移除后默认关闭，`BOT3_FOG_MULTI=1` 开启，见 [BOT3_FOG.md](BOT3_FOG.md)）。
@@ -51,7 +51,7 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 - `fog-oracle.js`：迷雾情报层：用未迷雾的排行榜反推对手内部驻军密度、剩余中立格与王冠数（默认关闭，`BOT3_FOGORACLE=1` 开启，见 [BOT3_FOG_ORACLE.md](BOT3_FOG_ORACLE.md)）。
 - `cut.js`：隔离/切断经济学实验层（默认仅反向救援 `BOT3_CUTSAVE` 开启：`_MIN=10 _BEHIND=1 _SHARE=10`；其余时间/定价/加固/多线开关默认关闭；`BOT3_CUTSAVE=0` 关闭，见 [CUT.md](CUT.md)）。
 - `bot3.test.cjs`：短局穷举、峡谷、迷宫判定、收尾层、斩杀层、多线/迷雾层与协议回归。
-- `shadow.js`：relay 规划器的影子副本，逐帧重放它的 `chooseOrders` 以提前一 Tick 知道它要走的指令，并按引擎结算顺序重新给候选评分（默认开启，`BOT3_SHADOW=0` 关闭，见 [SHADOW.md](SHADOW.md)）。
+- `shadow.js`：relay 规划器的影子副本，逐帧重放它的 `chooseOrders` 以提前一 Tick 知道它要走的指令，并按引擎结算顺序重新给候选评分（默认开启，`BOT3_SHADOW=0` 关闭）。第 13 轮起 `_PUNISH` 反抢也默认开，但用 `BOT3_SHADOW_PUNISH_SWAMP`（默认 0.35）限定在沼泽重图，见 [SHADOW.md](SHADOW.md)。
 - `shadow-probe.cjs`：单局预测精度探针（逐帧对照 relay 实际发出的指令），仅用于测量。
 - `archipelago.js`：群岛（沼泽占比 ≥55%）陆地竞速层（默认开启，`BOT3_ARCH=0` 关闭）：`BOT3_ARCH_LAND` 把 burst 期目标换成最近无人小岛（默认仅清晰房间，`BOT3_ARCH_LAND_FOG=1` 允许迷雾）、`BOT3_ARCH_FRONT` 用可见敌方前线替代远处主城、`BOT3_ARCH_WATER` 封顶远离陆地的沼泽推进、`BOT3_ARCH_CROWN` 在独占小岛放宽建城（见 [BOT3_ARCH.md](BOT3_ARCH.md)）。
 - `land-probe.cjs`：单局抢地探针（逐 tick 打印双方 land/army/王冠数与指令构成），仅用于测量。
@@ -83,12 +83,13 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 
 | 变量                        | 默认 | 含义                                                             |
 | --------------------------- | ---: | ---------------------------------------------------------------- |
-| `BOT3_FINISH`               | 关闭 | 设为 `1` 启用；也可在板上用 `board.finish = true/false` 单独开关 |
+| `BOT3_FINISH`               | 开启 | 仅在对局被影子层 `armed`（对手 = relay 规划器）时生效；`0` 关闭 |
 | `BOT3_FINISH_ETA`           |    2 | 路线 Tick 上限                                                   |
 | `BOT3_FINISH_SURPLUS`       |   60 | 非斩首路线需要留在目标冠上的富余兵力                             |
 | `BOT3_FINISH_DECAP_SURPLUS` |    1 | 斩首路线的最低富余兵力                                           |
 | `BOT3_FINISH_MARGIN`        |    1 | 斩首时要求的先手 Tick                                            |
 | `BOT3_FINISH_TURN`          |   45 | 最早生效 Tick                                                    |
+| `BOT3_FINISH_ARM`           |    1 | `0` 去掉「影子层已 armed」门控（实验用；会让 anti 退化）          |
 | `BOT3_LANDFIRST`            | 开启 | 沼泽重图抢地层；`0` 回到 round-11 行为                           |
 | `BOT3_LAND_CLOSE_SKIP`      |    1 | 落后时停用收尾漏斗（`_CLOSE_UNTIL` 可让它在某 tick 后回来）      |
 | `BOT3_LAND_CAPTURE`         |    0 | 落后时中立格夺取加分（实测 130 为负）                            |
@@ -96,6 +97,9 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 | `BOT3_LANDBURST`            | 关闭 | 26..49 burst 窗口抢地加分（`_BURST` 默认 220，实测净负）         |
 | `BOT3_ISLANDCROWN`          | 关闭 | 王冠上限/间距（`_HOMES`=6、`_SPREAD`=3，实测 −3.9pp）            |
 | `BOT3_LAND_SWAMP_SHARE`     | 0.35 | 判定「沼泽重」的沼泽占比阈值                                     |
+| `BOT3_LAND_CLOSE_ALWAYS`    |    0 | 忽略土地竞速、沼泽单线一律停用收尾漏斗（实测中性）               |
+| `BOT3_LAND_SITE`            |    0 | 建址候选保底分（实测无位移，默认惰性）                           |
+| `BOT3_LAND_DEVELOP`         |    0 | 强制打开 develop 闸门（实测无位移，默认惰性）                    |
 
 ### 实测结论（配对比较，均对 `baseline-results.jsonl`）
 

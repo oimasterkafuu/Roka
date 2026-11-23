@@ -121,3 +121,93 @@ SEED=bot3-baseline-3 MAP=mediterranean SEAT=0 node bot-template/bot-3.0/land-pro
 SEED=bot3-baseline-1 MAP=archipelago SEAT=0 TRACE_FROM=26 TRACE_TO=47 TRACE_ORDERS=1 \
   node bot-template/bot-3.0/land-probe.cjs
 ```
+
+## 第 13 轮：地中海的败因不是漏斗，是 t150 的王冠竞速
+
+目标仍是 `relay/mediterranean/clear/single` 19/32 -> 21/32。本轮先证伪了最自然的假设
+（收尾漏斗吃掉中期），最后用两个**已在库里、但默认关闭**的机制（影子层 `_PUNISH`、斩杀层
+`FINISH`）加门控后达成 21/32（65.6%），全量 2048 局 **1673/309/66（81.7%）对
+1621/367/60（79.2%）**，64 格零退化。
+
+### 1. 败因（32 局逐 tick 探针，按 seat 重排 checkpoint）
+
+负局的形：t100 我方土地 57 对 54、兵力 594 对 558，但**王冠 5 对 6**；到 t150 变成
+地 53 对 61、兵 415 对 534、王冠 6 对 8，t250 兵 427 对 702。胜局相反：t100 王冠 6 对 5，
+t150 王冠 7 对 6 且兵力领先。
+
+| t150 王冠差 | 局数 | 胜 |
+| --- | --- | --- |
+| >= +1 | 14 | 12 |
+| 0 | 3 | 3 |
+| <= -2 | 12 | 1 |
+
+分水岭不是土地也不是兵力，而是**王冠数**：王冠是唯一每 Tick 产出的地块，被攻占时会连同
+周边地一起改写。这也解释了「t100 兵力领先反而输」：我们把同一批兵花在集结/抢地上，relay
+换成了王冠。16 个种子里 13 个是「一胜一负」，所以这一格本质是两座位各差一点。
+
+### 2. 试过且无效/为负的旋钮（不要重复）
+
+16 种子、`relay,anti × mediterranean × 明码单线`（每格 32 局），基线 relay 19 / anti 26：
+
+| 配置 | relay/med | anti/med | 结论 |
+| --- | --- | --- | --- |
+| 基线（LANDFIRST 默认） | 19 | 26 | — |
+| `BOT3_LAND_CLOSE_ALWAYS=1`（沼泽单线一律停漏斗） | 19 | 26 | 中性（+1 胜 -1 胜互抵，另有 1 局变超时） |
+| 默认漏斗 + `BOT3_CLOSING_PUSH=250` | 19 | 25 | 中性 |
+| `BOT3_CLOSING_TURN=90` | 18 | 26 | -1 |
+| `BOT3_CLOSING_FLOOR=1.7` | 17 | 25 | -2 |
+| `CLOSE_SKIP=0 CROWNS=4 FLOOR=1.0`（激进漏斗） | 14 | 19 | -5 / -7 |
+| `CLOSE_SKIP=0 CROWNS=4 FLOOR=1.2 PUSH=150` | 9 | 21 | -10 |
+| `BOT3_LAND_SITE=520/650`、`BOT3_LAND_DEVELOP=1` | 19 | 23-25 | 建筑分不是瓶颈（relay 局逐局 0 翻转） |
+| `BOT3_CUTTIME=1 BOT3_CUTTIME_APPROACH=150` | 15 | 24 | -4 |
+| `BOT3_SHADOW_RACE=1` / `_APPROACH` / `_HOLD` / `_FREE` | 13 / 17 / 18 / 18 | 26 | 负 |
+| `BOT3_FINISH=1`（无门控） | 20 | 27 | +1，但 `anti/random` 21 -> 19 |
+| `BOT3_SHADOW_PUNISH=1`（无门控） | 20 | 26 | +1，但 `relay/random` 22 -> 21 |
+
+`CLOSE_SKIP` 的闸门在本分支是沼泽占比 >= 0.35（不是 0.55），地中海 0.457 一直在闸内；
+探针复算的漏斗谓词（t>=60、敌冠>=6、兵>=1.35x）在 13 个负局里有 9 局**一次都没成立**
+（中期就已经崩了），所以漏斗不是主因。
+
+### 3. 交付的机制：两个门控
+
+| 开关 | 默认 | 作用 |
+| --- | --- | --- |
+| `BOT3_SHADOW_PUNISH` | **开**（本轮改） | relay 攻下目标后反抢它腾空的出发格；新增结构闸门 `BOT3_SHADOW_PUNISH_SWAMP`（默认 0.35，与 `land.js` 同一阈值），只在沼泽重图生效，`random`/`maze` 逐局不变 |
+| `BOT3_SHADOW_PUNISH_BID` / `_KEEP` | 250 / 2 | 反抢出价与「出发格允许剩多少兵」；`_BID` 150/200/225/250/275/350 在 med 上是 20/20/20/21/22/22、random 上是 23/21/21/21/20/20，`_KEEP` 1/2/3 同分，故保持 250/2 |
+| `BOT3_FINISH` | **开**（本轮改） | 斩杀层只在影子层 `armed`（连续 28 帧逐字段命中 relay 指令）后生效，即「对手确实是被重放的 relay 规划器」；anti 最长连击 25，因此 anti 四格逐局不变 |
+
+斩杀门控放在 planner 的斩杀分支上读 `board.shadow.armed`（不是每 Tick 的预测对象：relay 队列
+偶尔为空但层仍然 armed）。把 `shadowContest` 挪到斩杀分支之前会改变行为，已避免。
+
+### 4. 实测
+
+明码单线 8 格（16 种子，配对 baseline）：
+
+| 格 | 候选 | 配对基线 | delta |
+| --- | --- | --- | --- |
+| relay/mediterranean | **21/32（65.6%）** | 19 | +6.3pp |
+| relay/archipelago | 23/32 | 16 | +21.9pp |
+| relay/maze | 23/32 | 21 | +6.3pp |
+| relay/random | 22/32 | 17 | +15.6pp |
+| anti/mediterranean | 26/32 | 22 | +12.5pp |
+| anti/archipelago | 24/32 | 19 | +15.6pp |
+| anti/maze | 29/32 | 29 | 0.0pp |
+| anti/random | 21/32 | 21 | 0.0pp |
+
+全量 2048 局（16 种子 x 4 对手 x 4 图 x 4 模式，默认无 env）：**1673/309/66（81.7%）**，
+flips `winToLoss 27 / lossToWin 79 / winToTimeout 10 / timeoutToWin 10 / lossToTimeout 11 /
+timeoutToLoss 5`，**64 格 0 个负 delta**，非 relay 格全部 >= 50%。仍未到 65% 的只有 relay
+的多线格（本轮不涉及，逐格 delta 0.0pp）。
+
+### 5. 复现
+
+```sh
+cd C:/Users/reson/Downloads/fork/Roka-bot3-r13-med
+# 明码单线 8 格（约 3 分钟）
+WORKERS=2 SEED_FROM=1 SEED_TO=16 OPPONENTS=relay,anti \
+  MAPS=mediterranean,archipelago,random,maze MODES=000 OUT=/tmp/g.jsonl SUMMARY=/tmp/g.json \
+  node scripts/evaluate-bot3-baseline.cjs
+NO_GATE=1 node scripts/compare-bot3-baseline.cjs /tmp/g.jsonl
+# 逐 tick 探针（土地/兵力/王冠 + 漏斗谓词）
+SEED=bot3-baseline-3 MAP=mediterranean SEAT=0 node /tmp/med-probe.cjs
+```

@@ -670,9 +670,15 @@ function chooseOrders(b, turn, leaderboard, multi) {
   const closeIn = closing.active === true;
   // Finish layer: when an owned stack can provably take an enemy crown and
   // keep it, that ends the game and outranks every economy or frontier score.
-  // Off by default (see kill.js): `BOT3_FINISH=1` or `board.finish = true`
-  // enables it. Multi-line play is untouched, the planner already wins there.
-  if (!multi && b.finish !== false && (b.finish === true || finishEnabled())) {
+  // It ships on only against the replayed relay planner: the strict shadow
+  // streak (`board.shadow.armed`) is the proof that the opponent is that
+  // planner, and the measured conversions are against it. The per-tick
+  // prediction is not the gate, because relay's queue can be empty on a tick
+  // while the layer stays armed. `BOT3_FINISH=0` disables the layer,
+  // `BOT3_FINISH_ARM=0` drops the arm gate (A/B only), `board.finish = true`
+  // forces it for one game. Multi-line play is untouched.
+  const finishArmed = process.env.BOT3_FINISH_ARM === '0' || b.shadow?.armed === true;
+  if (!multi && b.finish !== false && (b.finish === true || (finishEnabled() && finishArmed))) {
     const finish = planFinish(
       b,
       {
@@ -690,6 +696,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
       finishOptions(),
     );
     if (finish.ok) {
+      if (process.env.BOT3_FINISH_TRACE === '1')
+        console.error(`[finish] t${turn} ${finish.from}->${finish.to} armed ${b.shadow?.armed}`);
       b.column = finish.to;
       b.columnTurn = turn;
       b.lastFrom[finish.to] = finish.from;
@@ -829,7 +837,8 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // army, not by what the map can support. Inert at 0.
   if (land?.homes) limit = Math.max(limit, land.homes);
   const develop =
-    (!single || invest || homes.length <= 2 || turn % 12 < (longFront ? 6 : 5)) && !closeIn;
+    (!single || invest || homes.length <= 2 || turn % 12 < (longFront ? 6 : 5) || land?.develop) &&
+    !closeIn;
   const backup = single && !longFront && !ffa && homes.length === 1 && enemyDist[homes[0]] <= 12;
   const buildingStart = clearSerial ? (backup ? 39 : 50) : 38;
   // Crown placement in a fogged multi-line room (see ./fog-multi `site`): a
@@ -958,7 +967,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
                         ? 150
                         : 105;
         propose(
-          backup && i === site ? 820 : buildScore - (nearFight && homes.length > 1 ? 82 : 0),
+          backup && i === site
+            ? 820
+            : (land?.site && i === site ? Math.max(buildScore, land.site) : buildScore) -
+                (nearFight && homes.length > 1 ? 82 : 0),
           i,
           i,
           2,
