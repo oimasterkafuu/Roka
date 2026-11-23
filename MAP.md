@@ -419,7 +419,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 - **scripts/test-multiline.mjs** — `pnpm run test:multiline`：单线串行（`multi_line: false`）引擎级套件（直驱 dist/game-engine.js）——同 Tick 两个不同出发点各发一条指令时每 Tick 只执行一条、第二条原地等待下 Tick；单链逐 Tick 推进节奏；失效队首被丢弃且 seq 进 `lst_moves`（丢弃 + 执行同帧汇报）；执行首条有效指令后本 Tick 不再处理后续（后续失效指令也不当场丢弃）；建造 b/c 同样每 Tick 一条；E 撤回摘除大队列队尾、Q 清空整个大队列（issue #120）；单线 `init_map` 保持旧协议（无 `multi_line` 标记，`next_seq/queue_ops` 保留）。需先 `pnpm run build`。
 - **scripts/test-multiline-v2.mjs** — `pnpm run test:multiline-v2`：v3 全局队列（`multi_line: true`）并行套件（直驱 dist/game-engine.js）——单链逐 Tick 节奏与单线一致、两条独立链同 Tick 真并行且 seq 同帧汇报、同格 b+c 按序执行、失效移动被丢弃且 seq 进 `lst_moves`、`init_map` 下发 `next_seq/queue_ops`、Q 清空整个大队列且 E 撤回全局最后一条（统一语义，issue #120）；成环死锁回归（issue #121：二环/三环逐 Tick 拆解排空、失效成环节点丢弃后恢复）。需先 `pnpm run build`。
-- **scripts/test-rebind-init-sync.mjs** — `pnpm run test:rebind-sync`（纳入 `pnpm test`）：断线重连换绑 seq 同步回归（直驱 dist/game-engine.js）——入队推进 nextSeq 后触发 `rebindPlayer`，断言换绑补发的 `init_map` 携带 `next_seq`（与服务端当前值一致、不复位）与 `queue_ops`（换绑清队后的空拷贝）、换绑后新入队 seq 接续递增；观战席 `addSpectator` 的 `init_map` 不带这两个字段（观战渲染不依赖）。需先 `pnpm run build`。
+- **scripts/test-rebind-init-sync.mjs** — `pnpm run test:rebind-sync`（纳入 `pnpm test`）：断线重连换绑 seq 同步回归（直驱 dist/game-engine.js）——验证换绑前后的 `next_seq` 连续、`queue_ops` 清空，观战席带空队列同步字段；开局、换绑和观战的 `init_map` 均仅在多线对局发送 `multi_line: true`。需先 `pnpm run build`。
 - **scripts/test-strategy-logic.mjs** — `pnpm run test:strategy`：策略逻辑单元测试——合成 1×m 走廊棋盘直接驱动 `bot/` 纯函数模块（buildContext + planOffense），回归四类行为：优势即打（触发即攻）、集结期入口不出兵切断（防入口易位致纵队折返）、僵死对峙超时解散 + 重集结闸门 + 改善后开打、爆发期路径敌格自然增兵不误判增援弃打。
 - **scripts/test-leaderboard-activity.mjs** — `pnpm run test:leaderboard`：隔离 v8+Brotli fixture 验证启动与离线迁移、只改 lastGameAt、原始备份、幂等、原子替换失败与损坏输入不破坏原文件；覆盖旧账号登录/重启不续榜、7 天边界、无证据与非法时间、有效/过期/永久封禁、同分稳定排序、top10 与完整个人排名逐项一致、第 11 名、零分差结算回榜，以及执行真实 profile.js 排名渲染表达式验证 null/0 显示 ASCII `-`。需先 `pnpm run build`。
 - **scripts/test-replay-cache.mjs** — `pnpm run test:replay-cache`：Node vm 加载浏览器纯逻辑，断言 ID 键、版本/魔数/长度失效及条数/容量 LRU 淘汰，不依赖浏览器或服务端。
@@ -528,7 +528,8 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 
 - `static/main.js` 处理方向键光标、WASD 推兵、多线选区与数字编队。编队 0–19 使用本地 `roka.controlGroups` 存储，队列继续使用现有 `attack` 指令。
 - `static/main/render-update.js` 与 `static/styles/map.css` 渲染主光标、附加选格与右下角编号。文字教程由 `views/tutorial-text.pug` 生成 `static/tutorial-text.html`。
-- `scripts/test-cursor-control-groups.mjs` 用 VM 执行真实客户端键鼠、队列和渲染逻辑，并验证文字教程生成物。`pnpm run test:cursor-control-groups` 纳入 `pnpm test`。
+- `static/main/render-update.js` 使用 `init_map` 的 `multi_line` 标记判断实时对局是否显示第 26–50 Tick 的爆发期红框，单线保留，多线不显示；教程与不携带模式标记的观看回放不受影响。
+- `scripts/test-cursor-control-groups.mjs` 用 VM 执行真实客户端键鼠、队列和渲染逻辑，覆盖实时爆发期红框和回合计数的边界，并验证文字教程生成物。`pnpm run test:cursor-control-groups` 纳入 `pnpm test`。
 
 ### 多线争锋回放录制与重建
 

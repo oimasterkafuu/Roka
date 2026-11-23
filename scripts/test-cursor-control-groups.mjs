@@ -36,6 +36,10 @@ function createClient({ platform = 'Linux x86_64', storage = new Map(), multiLin
     emit: (name, payload) => sent.push([name, payload]),
   };
   elements.set('#tabs-multi-line-mode', { ...makeElement(), children: [makeElement()] });
+  elements.set('#status-alert', {
+    children: [{ children: Array.from({ length: 7 }, makeElement) }],
+    style: {},
+  });
   let cells = [];
   function $(selector) {
     if (typeof selector === 'string' && !elements.has(selector)) elements.set(selector, makeElement());
@@ -48,6 +52,17 @@ function createClient({ platform = 'Linux x86_64', storage = new Map(), multiLin
         element.events[name] = handler;
       },
       bind() {},
+      children: () => element.children || [],
+      addClass(name) {
+        if (!element.className.split(' ').includes(name))
+          element.className = `${element.className} ${name}`.trim();
+      },
+      removeClass(name) {
+        element.className = element.className
+          .split(' ')
+          .filter((item) => item !== name)
+          .join(' ');
+      },
       css(name, value) {
         if (value === undefined) return element.style[name];
         element.style[name] = value;
@@ -82,6 +97,7 @@ function createClient({ platform = 'Linux x86_64', storage = new Map(), multiLin
       setItem: (key, value) => storage.set(key, value),
     },
     hideSurrenderAlert() {},
+    usernameEnsureColors() {},
     backTurn: () => replay.push('back'),
     nextTurn: () => replay.push('next'),
     switchAutoplay: () => replay.push('autoplay'),
@@ -115,6 +131,16 @@ function createClient({ platform = 'Linux x86_64', storage = new Map(), multiLin
     storage,
     replay,
     start,
+    update: (turn) =>
+      handlers.get('update')({
+        turn,
+        is_diff: true,
+        grid_type: [],
+        army_cnt: [],
+        leaderboard: [],
+        kills: {},
+      }),
+    element: (selector) => elements.get(selector),
     key(key, options = {}) {
       let prevented = false;
       elements.get('body').events.keydown({
@@ -138,6 +164,35 @@ function createClient({ platform = 'Linux x86_64', storage = new Map(), multiLin
     queue: () => structuredClone(context.route),
   };
 }
+
+test('live burst border is single-line only and does not affect the turn counter', () => {
+  const client = createClient();
+  for (const [multiLine, clientId] of [
+    [false, 'player'],
+    [true, 'player'],
+    [true, 'spectator'],
+  ]) {
+    client.context.client_id = clientId;
+    client.context.setMultiLineModeByCode(!multiLine);
+    client.start({ multiLine });
+    for (const [turn, label, alpha] of [
+      [25, '回合 12.'],
+      [26, '回合 13', '0.700'],
+      [50, '回合 25', '0.028'],
+      [51, '回合 25.'],
+    ]) {
+      client.update(turn);
+      const map = client.element('#map');
+      assert.equal(
+        map.className.split(' ').includes('burst'),
+        !multiLine && Boolean(alpha),
+        `${clientId}, multi-line=${multiLine}, Tick ${turn}`,
+      );
+      if (!multiLine && alpha) assert.equal(map.style['--burst-alpha'], alpha);
+      assert.equal(client.element('#turn-counter').innerHTML, label);
+    }
+  }
+});
 
 test('arrow keys cross any terrain, while WASD respects mountains and preserves split modes', () => {
   const client = createClient();

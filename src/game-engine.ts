@@ -1080,6 +1080,7 @@ export class GameEngine {
       general: [-1, -1],
       next_seq: 1,
       queue_ops: [],
+      ...(this.multiLine ? { multi_line: true } : {}),
     });
     const snapshot = this.buildSnapshotFor(-1, new Map<number, number[]>());
     this.spectatorSnapshotLast.set(sid, this.cloneSpectatorSnapshot(snapshot));
@@ -1229,6 +1230,7 @@ export class GameEngine {
       // 换绑已清空队列，queue_ops 恒为空拷贝，与开局路径字段对齐。
       next_seq: this.nextSeq[id],
       queue_ops: this.pmove[id].map((op) => ({ ...op })),
+      ...(this.multiLine ? { multi_line: true } : {}),
     });
     // 换绑后补发全量帧：保留观战席/已战败玩家已选的观战视角；同时把 diff 基线
     // 对齐到本次补发的快照（客户端 init_map 已重置棋盘，后续 diff 以此为准）。

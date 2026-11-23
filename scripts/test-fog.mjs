@@ -137,7 +137,7 @@ async function signUser(store, jwtSecret, username, password) {
 const renderUpdateSource = fs.readFileSync(path.join(rootDir, 'static', 'main', 'render-update.js'), 'utf8');
 const roomControlsSource = fs.readFileSync(path.join(rootDir, 'static', 'main', 'room-controls.js'), 'utf8');
 
-function createBrowserRenderer(n, m) {
+function createBrowserRenderer(n, m, multiLine) {
   const cells = Array.from({ length: n }, () =>
     Array.from({ length: m }, () => ({ className: '', innerHTML: '' })),
   );
@@ -217,6 +217,7 @@ function createBrowserRenderer(n, m) {
     dire_class: ['arrow_u', 'arrow_d', 'arrow_l', 'arrow_r'],
     dire_char: ['↑', '↓', '←', '→'],
     is_replay: false,
+    match_multi_line: multiLine === true,
     replay_id: null,
     client_id: 'spectator',
     game_ended: false,
@@ -423,7 +424,7 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
       fogFieldSeen: false,
       fogFieldAbsent: false,
     };
-    client.browser = browser ? createBrowserRenderer(data.n, data.m) : null;
+    client.browser = browser ? createBrowserRenderer(data.n, data.m, data.multi_line) : null;
     client.browserError = null;
   });
   socket.on('update', (data) => {
@@ -547,7 +548,7 @@ async function testEliminatedSpectatorView() {
         if (sid === 'spectator') browser?.update(frame);
       },
       emitInitMap: (sid, data) => {
-        if (sid === 'spectator') browser = createBrowserRenderer(data.n, data.m);
+        if (sid === 'spectator') browser = createBrowserRenderer(data.n, data.m, data.multi_line);
       },
       chatMessage: () => undefined,
       endGame: () => undefined,

@@ -42,6 +42,7 @@ e.enableAfkSurrender = false;
 
 // 开局路径基线：init_map 已带 seq 同步字段。
 const startInit = inits.find((x) => x.sid === 'a')?.data;
+check('多线开局 init_map 标记 multi_line', startInit?.multi_line === true);
 check('开局 init_map 带 next_seq=1', startInit?.next_seq === 1);
 check(
   '开局 init_map 带空 queue_ops',
@@ -62,6 +63,7 @@ const ok = e.rebindPlayer('a', 'a2');
 check('rebindPlayer 换绑成功', ok === true);
 const rebindInit = inits.find((x) => x.sid === 'a2')?.data;
 check('换绑路径补发 init_map', Boolean(rebindInit));
+check('多线换绑 init_map 保留 multi_line', rebindInit?.multi_line === true);
 check(
   '换绑 init_map 带 next_seq 且与服务端当前值一致',
   rebindInit?.next_seq === expectedNext,
@@ -77,14 +79,23 @@ check(
 e.addMove('a2', 2, 2, 2, 3);
 check('换绑后入队 seq 接续递增', e['pmove'][0][0]?.seq === expectedNext, `seq=${e['pmove'][0][0]?.seq}`);
 
-// 观战席基线：观战者无自身队列，init_map 不携带 seq 同步字段（客户端观战渲染不依赖）。
 inits.length = 0;
 e.addSpectator('spec1');
 const specInit = inits.find((x) => x.sid === 'spec1')?.data;
+check('多线观战 init_map 保留 multi_line', specInit?.multi_line === true);
 check(
   '观战席 init_map 带空队列同步字段',
   specInit?.next_seq === 1 && Array.isArray(specInit?.queue_ops) && specInit.queue_ops.length === 0,
 );
+
+inits.length = 0;
+const single = await GameEngine.create({ ...base, multi_line: false }, ['a', 'b'], ['a', 'b'], 'single', cb);
+check('单线换绑成功', single.rebindPlayer('a', 'a2'));
+single.addSpectator('spec1');
+for (const sid of ['a', 'a2', 'spec1']) {
+  const init = inits.find((entry) => entry.sid === sid)?.data;
+  check(`单线 init_map 继续省略 multi_line (${sid})`, init && !Object.hasOwn(init, 'multi_line'));
+}
 
 if (failures) process.exit(1);
 console.log('test-rebind-init-sync: 换绑重连 init_map 同步场景全部通过');

@@ -420,7 +420,7 @@ function update(data, options) {
   refreshSpectateViewTabs(data.leaderboard);
   $('#turn-counter').html('回合 ' + Math.floor(data.turn / 2) + (data.turn % 2 == 1 ? '.' : ''));
   $('#turn-counter').css('display', '');
-  if (data.turn >= 26 && data.turn <= 50) {
+  if ((is_replay || !match_multi_line) && data.turn >= 26 && data.turn <= 50) {
     $('#map').addClass('burst');
     $('#map').css('--burst-alpha', ((0.7 * (51 - data.turn)) / 25).toFixed(3));
   } else {
