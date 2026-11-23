@@ -102,8 +102,7 @@ function landConfig(overrides = {}, env = process.env) {
     homes: overrides.homes ?? number(env.BOT3_LAND_HOMES, DEFAULT_HOMES, 0, 32),
     spread: overrides.spread ?? number(env.BOT3_LAND_SPREAD, DEFAULT_SPREAD, 0, 20),
     closeSkip: overrides.closeSkip ?? number(env.BOT3_LAND_CLOSE_SKIP, DEFAULT_CLOSE_SKIP, 0, 1),
-    closeAlways:
-      overrides.closeAlways ?? number(env.BOT3_LAND_CLOSE_ALWAYS, DEFAULT_CLOSE_ALWAYS, 0, 1),
+    closeAlways: overrides.closeAlways ?? number(env.BOT3_LAND_CLOSE_ALWAYS, DEFAULT_CLOSE_ALWAYS, 0, 1),
     site: overrides.site ?? number(env.BOT3_LAND_SITE, DEFAULT_SITE, 0, 4000),
     develop: overrides.develop ?? number(env.BOT3_LAND_DEVELOP, DEFAULT_DEVELOP, 0, 1),
     closeUntil: overrides.closeUntil ?? number(env.BOT3_LAND_CLOSE_UNTIL, 0, 0, 100000),
