@@ -48,6 +48,7 @@ const { predict: queuePredict, record: queueRecord } = require('./mqueue');
 const { configOf: twoPlyConfig, choose: twoPlyChoose } = require('./m2ply');
 const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
 const { mhalfConfig, mhalfUpdate, applyMhalf, applyMhalfModes } = require('./mhalf');
+const { mazerushConfig, mazerushUpdate, applyMazerush, mazerushOrders } = require('./mazerush');
 const { mcrown2Config, mcrown2Update, applyMcrown2, mcrown2Orders } = require('./mcrown2');
 const { bankgateConfig, bankgateUpdate, applyBankgate, bankgateOrders } = require('./bankgate');
 const { mtuneConfig, mtuneUpdate, applyMtune, mshapeOverrides, mhalfOverrides } = require('./mtune');
@@ -398,7 +399,18 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // Maze + fog layer (see ./fog-maze). A fogged corridor board is the one room
   // neither `./fog` (corridor maps excluded) nor `./maze` (the front planner is
   // clear-serial only) prices, so it gets its own objective. Off by default.
-  const fogMazeCfg = fogMazeConfig();
+  //
+  // Corridor multi-line layer (see ./mazerush, round 20). Read here so the fog
+  // branch objective can be handed the layer's measured branch count: a fogged
+  // corridor has no objective field at all without it, so the sixteen orders
+  // stack into one lane and stop growing vision. The layer itself is created
+  // below, where the leaderboard numbers are available.
+  const mazerushCfg = mazerushConfig();
+  const mazerushMap = mazerushCfg.enabled && fogMaze && multi === true;
+  const fogRoom = Boolean(b.fogMode ?? b.fog?.includes(1));
+  const fogMazeCfg = fogMazeConfig(
+    mazerushMap && fogRoom && mazerushCfg.branch > 0 ? { branches: mazerushCfg.branch } : undefined,
+  );
   const mazeFogRoom = fogMaze && fogMazeCfg.enabled;
   // A zero garrison or a disconnected pocket means fighting has already
   // changed the opening economy. Let the tactical planner handle that frame.
@@ -497,6 +509,26 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // merges by a hop field and chooses the move mode per capture, so the ring
   // keeps a rolling garrison instead of being drained all-in every tick. Off by
   // default and inert outside a multi-line room.
+  // Corridor multi-line layer (see ./mazerush, round 20). A maze multi room is
+  // a single lane: a cell holding one army cannot push, and the matching loop
+  // allows one order per target, so a corridor front can only be armed one army
+  // per tick. The layer re-ranks the lane merges and appends multi-feed orders
+  // into the ring cell. It also turns on the measured `./mhalf` corridor
+  // routing, so one switch is the whole corridor stack. Off by default and
+  // gated on `isMazeBoard && multi`, so every other cell stays byte-identical.
+  const mazerushLayer = mazerushUpdate(
+    b,
+    { turn, multi, size, me, corridor: isMazeBoard(b), land: self.land, enemyLand, fog: fogRoom },
+    mazerushCfg,
+  );
+  const halfOverrides = mhalfOverrides(mtuneCfg) ?? {};
+  const halfConfig = mazerushLayer?.config.lane
+    ? mhalfConfig({
+        ...halfOverrides,
+        corridor: true,
+        sideways: fogRoom ? 0 : mazerushLayer.config.sideways,
+      })
+    : mhalfConfig(halfOverrides);
   const mhalfLayer = mhalfUpdate(
     b,
     {
@@ -511,7 +543,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       army: self.army,
       enemyArmy,
     },
-    mhalfConfig(mhalfOverrides(mtuneCfg)),
+    halfConfig,
   );
   // Crown banks. Round 18 measured that the stranded rear army (hop >= 3; 61
   // army at t50-250 versus 21.5 at the ring) can buy a crown that pays +1 army
@@ -1427,6 +1459,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mshapeLayer) applyMshape(mshapeLayer, { tile, teams, units, neighbors, myTeam }, candidates);
   if (mhalfLayer) applyMhalf(mhalfLayer, { tile, teams, units, neighbors, myTeam }, candidates);
+  // Corridor multi-line layer (see ./mazerush): lane pump / junction hold /
+  // branch seal scores. Gated on `isMazeBoard && multi` inside `mazerushUpdate`.
+  if (mazerushLayer)
+    applyMazerush(mazerushLayer, { b, tile, teams, units, neighbors, myTeam }, candidates);
   // Geometry-gated crown bank (see ./bankgate, round 19) and the fog-only
   // variant (see ./mcrown2 `BOT3_FOGBANK`). Both run last so the redirect of a
   // rear merge survives every other score layer: the army is already moving and
@@ -1507,6 +1543,13 @@ function chooseOrders(b, turn, leaderboard, multi) {
           picked,
         ))
           picked.push(op);
+      if (mazerushLayer)
+        for (const op of mazerushOrders(
+          mazerushLayer,
+          { b, tile, teams, units, neighbors, myTeam },
+          picked,
+        ))
+          picked.push(op);
       for (const op of picked) {
         if (op.build) continue;
         b.lastFrom[op.to] = op.from;
@@ -1573,6 +1616,18 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // halved push still takes the cell and the source keeps enough army to fire
   // again next tick, so a fork stays actable instead of being drained to one.
   if (mhalfLayer && multi) applyMhalfModes(mhalfLayer, { tile, teams, units, neighbors, myTeam }, orders);
+  // Corridor multi-feed (see ./mazerush): append the remaining own merges into
+  // a ring cell after the matching loop. The engine runs several moves into one
+  // cell per tick, so this is the only way a corridor front is armed faster than
+  // one army per tick.
+  if (mazerushLayer && multi) {
+    for (const op of mazerushOrders(
+      mazerushLayer,
+      { b, tile, teams, units, neighbors, myTeam },
+      orders,
+    ))
+      orders.push(op);
+  }
   // Crown bank (see ./bankgate): the gather merges and the city/crown build are
   // appended after the planner's matching loop, because the engine runs several
   // moves into one cell per tick while `take()` allows one order per target.
