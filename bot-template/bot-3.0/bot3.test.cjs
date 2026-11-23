@@ -2460,7 +2460,6 @@ test('keep a rolling garrison only when the halved push still takes the cell', (
   );
   assert.equal(tiny[0].mode, 2);
 });
-<<<<<<< HEAD
 // ---------------------------------------------------------------------------
 // Multi-line exact simulator, relay batch predictor and two-tick search
 // (./msim, ./mqueue, ./m2ply).
@@ -2919,7 +2918,7 @@ test('m2ply: adopts a two-tick arming plan only when it wins the simulation', ()
     if (previousArm === undefined) delete process.env.BOT3_MSEARCH_ARM;
     else process.env.BOT3_MSEARCH_ARM = previousArm;
   }
-=======
+});
 
 // --- Self-play-tuned multi-line evaluation (./mtune) ------------------------
 const {
@@ -3093,5 +3092,4 @@ test('measure crown distance over every non-water cell', () => {
   const dist = crownField({ tile: b.grid_type, neighbors: b.neighbors }, [2]);
   assert.deepEqual([...dist], [2, 1, 0, 1, -1]);
   assert.equal(crownField({ tile: b.grid_type, neighbors: b.neighbors }, []), null);
->>>>>>> exp/bot3-r17-mtune
 });
