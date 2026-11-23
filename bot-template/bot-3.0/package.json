@@ -1,6 +1,6 @@
 {
   "name": "bot-3.0",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "description": "Bot(3.0) - Roka small-map 1v1 strategy bot, based on relay-bot",
   "scripts": {

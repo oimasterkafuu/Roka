@@ -6,10 +6,13 @@ const { test } = require('node:test');
 const { createBoard, chooseOrders } = require('./planner');
 const { attachStrategy, MAX_TEAMS } = require('./strategy');
 const { rescueValues, assessOpponents, evaluateFrontMove } = require('./single-front');
-const { planFinish } = require('./kill');
+const { planFinish, finishEnabled } = require('./kill');
 const { makeOpening } = require('./opening');
+const relayPlanner = require('../relay-bot/planner');
+const { predict: predictShadow, record: recordShadow, plan: planShadow } = require('./shadow');
 const { isMazeBoard, laneBlocked, laneState, recordLane } = require('./maze');
 const { closingConfig, closingUpdate, freshClosing } = require('./closing');
+const { landConfig, landContext, swampShare } = require('./land');
 const {
   fogConfig,
   fogBoard,
@@ -17,13 +20,19 @@ const {
   fogRequired,
   fogBeliefTargets,
   fogRaidUpdate,
+  fogPaintCap,
   freshRaid,
   DEFAULT_START_TURN,
   DEFAULT_GUESS,
   DEFAULT_AIM_LEAD,
   DEFAULT_SWAMP_LEAD,
+  DEFAULT_PAINT3,
+  DEFAULT_PAINT3_SWAMP,
+  DEFAULT_PAINT3_UNTIL,
   RAID_SCORE,
 } = require('./fog');
+const { fogMazeConfig, fogMazeProgress, fogMazeEconomy, fogMazeEconGate } = require('./fog-maze');
+const { archipelagoConfig, archipelagoUpdate, archipelagoWaterBlocked } = require('./archipelago');
 
 const players = [
   { id: 1, team: 1, army: 80, land: 3, dead: 0 },
@@ -587,7 +596,13 @@ test('price the hidden part of a fog route and keep the layer switchable', () =>
   assert.equal(fogConfig({}, { BOT3_FOG: 'off' }).enabled, false);
   const tuned = fogConfig(
     {},
-    { BOT3_FOG: '1', BOT3_FOG_TURN: '220', BOT3_FOG_GUESS: '12', BOT3_FOG_AIM_LEAD: '40', BOT3_FOG_FUNNEL: '1' },
+    {
+      BOT3_FOG: '1',
+      BOT3_FOG_TURN: '220',
+      BOT3_FOG_GUESS: '12',
+      BOT3_FOG_AIM_LEAD: '40',
+      BOT3_FOG_FUNNEL: '1',
+    },
   );
   assert.equal(tuned.startTurn, 220);
   assert.equal(tuned.guess, 12);
@@ -771,7 +786,8 @@ test('never touch a visible board while the fog layer is on', () => {
 
 // Finish layer fixtures. Owners follow the engine encoding (`50 * owner + kind`),
 // so `101`/`102` are a crown of player 1 / player 2 and `1`/`2` plain land.
-function finishBoard(kinds, armies, rows = 1) {  const b = createBoard(rows, kinds.length / rows, 1);
+function finishBoard(kinds, armies, rows = 1) {
+  const b = createBoard(rows, kinds.length / rows, 1);
   b.grid_type.set(kinds);
   b.army_cnt.set(armies);
   return b;
@@ -861,7 +877,10 @@ test('refuse a corridor that an enemy stack can cut before the column arrives', 
   cut[2] = 40;
   const threat = new Float64Array(b.size);
   threat[2] = 90;
-  const plan = planFinish(b, finishContext(b, [4, 6], { cut, threat, homes: [0, 7] }), { maxEta: 7, surplus: 25 });
+  const plan = planFinish(b, finishContext(b, [4, 6], { cut, threat, homes: [0, 7] }), {
+    maxEta: 7,
+    surplus: 25,
+  });
   assert.equal(plan.ok, false);
   assert.equal(plan.reason, 'cut');
 });
@@ -1106,7 +1125,10 @@ test('fog multi layer is off after the burst removal and clamps its knobs', () =
     { BOT3_FOG_MULTI_LAND: '0.5', BOT3_FOG_MULTI_LEAD: '80', BOT3_FOG_MULTI_ROUTE: '1' },
   );
   assert.deepEqual([tuned.landSlack, tuned.armyLead, tuned.route], [0.5, 80, true]);
-  const clamped = fogMultiConfig({ enabled: true }, { BOT3_FOG_MULTI_LAND: '-3', BOT3_FOG_MULTI_COUNT: '99' });
+  const clamped = fogMultiConfig(
+    { enabled: true },
+    { BOT3_FOG_MULTI_LAND: '-3', BOT3_FOG_MULTI_COUNT: '99' },
+  );
   assert.equal(clamped.landSlack, 0);
   assert.equal(clamped.count, 8);
 });
@@ -1119,7 +1141,10 @@ test('release the fog burst while the land race is open, not while army trails',
   assert.equal(fogMultiBurst({ turn: 30, land: 20, enemyLand: 20, army: 50, enemyArmy: 200 }, config), true);
   assert.equal(fogMultiBurst({ turn: 30, land: 19, enemyLand: 25, army: 50, enemyArmy: 200 }, config), true);
   // Twice the rival's land: the race is won, so the paint is garrison spent.
-  assert.equal(fogMultiBurst({ turn: 30, land: 100, enemyLand: 50, army: 400, enemyArmy: 200 }, config), false);
+  assert.equal(
+    fogMultiBurst({ turn: 30, land: 100, enemyLand: 50, army: 400, enemyArmy: 200 }, config),
+    false,
+  );
   // Outside the burst window the multi layer keeps its own gate.
   assert.equal(fogMultiBurst({ turn: 24, land: 5, enemyLand: 5 }, config), undefined);
   assert.equal(fogMultiBurst({ turn: 51, land: 5, enemyLand: 5 }, config), undefined);
@@ -1196,4 +1221,852 @@ test('fresh fog multi ledger starts empty', () => {
     released: 0,
     gated: 0,
   });
+});
+
+test('cap a fog column merge only while the frontier still has neutral land', () => {
+  assert.equal(fogPaintCap({ paint: 0, paintFrom: 8 }, 40), Infinity);
+  assert.equal(fogPaintCap({ paint: 120, paintFrom: 8 }, 7), Infinity);
+  assert.equal(fogPaintCap({ paint: 120, paintFrom: 8 }, 8), 120);
+});
+
+test('default the paint-before-advance cap on and allow the pre-round-8 opt-out', () => {
+  // The measured bundle is the default: it is the only setting that reaches the
+  // 65% Relay target with no regressing cell (see BOT3_FOG.md).
+  const on = fogConfig({}, {});
+  assert.deepEqual(
+    [on.paint, on.paintFrom, on.paintSwamp, on.paintUntil, on.paintArmy],
+    [DEFAULT_PAINT3, 8, DEFAULT_PAINT3_SWAMP, DEFAULT_PAINT3_UNTIL, 0],
+  );
+  const off = fogConfig({}, { BOT3_FOG_PAINT3: '0' });
+  assert.deepEqual(
+    [off.paint, off.paintFrom, off.paintSwamp, off.paintUntil, off.paintArmy],
+    [0, 8, 0, 0, 0],
+  );
+  const bundle = fogConfig({}, { BOT3_FOG_PAINT3: '1' });
+  assert.deepEqual(
+    [bundle.paint, bundle.paintSwamp, bundle.paintUntil],
+    [DEFAULT_PAINT3, DEFAULT_PAINT3_SWAMP, DEFAULT_PAINT3_UNTIL],
+  );
+  const over = fogConfig({}, { BOT3_FOG_PAINT3: '1', BOT3_FOG_PAINT: '90', BOT3_FOG_PAINT_SWAMP: '0' });
+  assert.deepEqual([over.paint, over.paintSwamp, over.paintUntil], [90, 0, DEFAULT_PAINT3_UNTIL]);
+});
+
+test('stand the corridor layer down only inside the land-behind window', () => {
+  const config = fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_BEHIND: '90' });
+  const input = { land: 33, enemyLand: 40, army: 300, enemyArmy: 300, neutralFront: 5 };
+  const b = {};
+  assert.equal(fogMazeProgress(b, { ...input, turn: 60 }, config).stalled, true);
+  assert.equal(fogMazeProgress({}, { ...input, turn: 40 }, config).stalled, false);
+  assert.equal(fogMazeProgress({}, { ...input, turn: 90 }, config).stalled, false);
+  // The verdict latches: a recovered land count does not reopen the layer.
+  assert.equal(fogMazeProgress(b, { ...input, turn: 120, land: 60, enemyLand: 40 }, config).stalled, true);
+});
+
+test('stand the corridor layer down once the rival material takes off', () => {
+  const config = fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_ARMY_BEHIND: '200' });
+  const input = { land: 50, enemyLand: 48, neutralFront: 5 };
+  const b = {};
+  assert.equal(fogMazeProgress(b, { ...input, turn: 240, army: 900, enemyArmy: 400 }, config).stalled, false);
+  assert.equal(fogMazeProgress(b, { ...input, turn: 260, army: 400, enemyArmy: 900 }, config).stalled, true);
+});
+// --- shadow layer (./shadow) -------------------------------------------------
+
+// Two-player leaderboard the shadow needs to identify relay's seat.
+const shadowPlayers = [
+  { id: 1, team: 1, army: 10, land: 1, dead: 0 },
+  { id: 2, team: 2, army: 10, land: 1, dead: 0 },
+];
+
+const ownerOf = (code) => (code < 200 ? code % 50 : 0);
+
+// A 3x3 duel: our crown in one corner, relay's in the other, open ground in
+// between. Relay's planner expands toward us, which the shadow replays.
+function shadowBoard() {
+  const b = createBoard(3, 3, 1);
+  b.grid_type.fill(200);
+  b.grid_type[0] = 101;
+  b.grid_type[8] = 102;
+  b.army_cnt[0] = 10;
+  b.army_cnt[8] = 10;
+  b.openingBudget = 160000;
+  return b;
+}
+
+// Apply the predicted order the way the engine would; growth is zero for plain
+// land on the early turns used here and the target of a capture is neutral.
+function applyPrediction(b, pred) {
+  if (pred.build) {
+    b.army_cnt[pred.from] -= 50;
+    b.grid_type[pred.from] = 51;
+    return;
+  }
+  const push = Math.max(0, b.army_cnt[pred.from] - 1);
+  b.army_cnt[pred.from] -= push;
+  const to = pred.to;
+  if (ownerOf(b.grid_type[to]) === 2) {
+    b.army_cnt[to] += push;
+    return;
+  }
+  const defense = b.army_cnt[to];
+  if (push > defense) {
+    b.army_cnt[to] = push - defense;
+    b.grid_type[to] = 2;
+  } else b.army_cnt[to] = defense - push;
+}
+
+function withShadow(run) {
+  const saved = {};
+  for (const key of ['BOT3_SHADOW', 'BOT3_SHADOW_ARM', 'BOT3_SHADOW_MIRROR']) saved[key] = process.env[key];
+  try {
+    return run();
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test('shadow layer is inert when disabled with BOT3_SHADOW=0', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '0';
+    const b = shadowBoard();
+    assert.equal(predictShadow(b, 0, shadowPlayers, false), null);
+    assert.equal(b.shadow, undefined);
+  }));
+
+test('shadow layer is on by default', () =>
+  withShadow(() => {
+    delete process.env.BOT3_SHADOW;
+    const b = shadowBoard();
+    const pred = predictShadow(b, 0, shadowPlayers, false);
+    assert.ok(pred, 'default configuration predicts an order');
+    assert.equal(pred.armed, false, 'the strict arming streak still starts at zero');
+  }));
+
+test('shadow replays the relay planner order for the same frame', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    const b = shadowBoard();
+    const pred = predictShadow(b, 0, shadowPlayers, false);
+    // Independent relay board fed the same frame.
+    const reference = relayPlanner.createBoard(3, 3, 2);
+    reference.openingBudget = 160000;
+    reference.fogMode = false;
+    reference.grid_type.set(b.grid_type);
+    reference.army_cnt.set(b.army_cnt);
+    const [order] = relayPlanner.chooseOrders(reference, 0, shadowPlayers, false);
+    assert.ok(order, 'relay plans an order on the opening frame');
+    assert.deepEqual([pred.from, pred.to, pred.mode], [order.from, order.to, order.mode]);
+    assert.equal(pred.armed, false);
+  }));
+
+test('shadow refuses fog, multi-line and non-duel rooms', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    const foggy = shadowBoard();
+    foggy.fog[3] = 1;
+    assert.equal(predictShadow(foggy, 0, shadowPlayers, false), null);
+    assert.equal(predictShadow(shadowBoard(), 0, shadowPlayers, true), null);
+    const ffa = [...shadowPlayers, { id: 3, team: 3, army: 10, land: 1, dead: 0 }];
+    assert.equal(predictShadow(shadowBoard(), 0, ffa, false), null);
+  }));
+
+test('shadow stays inert when the opponent does not follow its plan', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    const b = shadowBoard();
+    for (let turn = 0; turn < 30; turn++) {
+      const pred = predictShadow(b, turn, shadowPlayers, false);
+      recordShadow(b, turn, []);
+      // A different bot does something else entirely: the predicted source cell
+      // is untouched, which the guard classifies as a dropped order, never as
+      // evidence that this is relay.
+      if (pred) assert.equal(pred.armed, false);
+    }
+    assert.equal(b.shadow.armed, false);
+    assert.equal(b.shadow.stats.drift, 0);
+    assert.equal(b.shadow.verified, 0);
+  }));
+
+test('shadow arms only after a strict streak of exact executions', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    process.env.BOT3_SHADOW_ARM = '6';
+    const b = shadowBoard();
+    let armed = -1;
+    for (let turn = 0; turn < 40 && armed < 0; turn++) {
+      const pred = predictShadow(b, turn, shadowPlayers, false);
+      recordShadow(b, turn, []);
+      if (!pred) continue;
+      // Strict gate: nothing is priced before the sixth consecutive exact frame.
+      if (b.shadow.streak < 6) assert.equal(pred.armed, false);
+      if (pred.armed) armed = turn;
+      else applyPrediction(b, pred);
+    }
+    assert.ok(armed > 0, 'the layer armed after the strict streak');
+    assert.equal(b.shadow.armed, true);
+    assert.ok(b.shadow.streak >= 6);
+    assert.ok(typeof b.shadow.stats.armedTurn === 'number');
+  }));
+
+test('shadow stays unarmed when the two economies are not mirrors', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    process.env.BOT3_SHADOW_ARM = '6';
+    process.env.BOT3_SHADOW_MIRROR = '1';
+    // Our board plays relay's plan, but the leaderboard says the two sides are
+    // nowhere near mirrored (a relay-derived bot with its own policy).
+    const skewed = [
+      { id: 1, team: 1, army: 40, land: 9, dead: 0 },
+      { id: 2, team: 2, army: 120, land: 4, dead: 0 },
+    ];
+    const b = shadowBoard();
+    for (let turn = 0; turn < 40; turn++) {
+      const pred = predictShadow(b, turn, skewed, false);
+      recordShadow(b, turn, []);
+      if (!pred) continue;
+      if (pred.armed) assert.fail('a skewed economy must not arm the layer');
+      applyPrediction(b, pred);
+    }
+    assert.equal(b.shadow.armed, false);
+    assert.ok(b.shadow.streak >= 6, 'the streak itself still completes');
+  }));
+
+test('shadow disables itself on the first unexplained frame', () =>
+  withShadow(() => {
+    process.env.BOT3_SHADOW = '1';
+    process.env.BOT3_SHADOW_ARM = '6';
+    const b = shadowBoard();
+    let armed = -1;
+    for (let turn = 0; turn < 40 && armed < 0; turn++) {
+      const pred = predictShadow(b, turn, shadowPlayers, false);
+      recordShadow(b, turn, []);
+      if (!pred) continue;
+      if (pred.armed) armed = turn;
+      else applyPrediction(b, pred);
+    }
+    assert.ok(armed > 0);
+    // One frame whose army change matches neither "executed" nor "dropped"
+    // proves the shadow is out of sync: the layer is gone for good.
+    let turn = armed + 1;
+    let inject = -1;
+    let disabled = false;
+    while (turn < armed + 10 && !disabled) {
+      const pred = predictShadow(b, turn, shadowPlayers, false);
+      recordShadow(b, turn, []);
+      if (inject >= 0) {
+        b.army_cnt[inject] += 7;
+        inject = -1;
+      }
+      disabled = b.shadow.ok === false;
+      if (pred && !disabled) inject = pred.from;
+      turn++;
+    }
+    assert.equal(disabled, true);
+    assert.equal(b.shadow.stats.drift, 1);
+    assert.equal(b.shadow.armed, false);
+  }));
+
+// Two visible own crowns, so `ours` reads 2 without any fog trickery.
+function economyFixture() {
+  return { size: 4, me: 1, grid_type: Int32Array.from([101, 201, 200, 101]) };
+}
+
+// Feed a rival army sequence from `start` and return the ledger's last read.
+function feedEconomy(b, start, deltas) {
+  let army = 400;
+  let last = null;
+  for (const [index, delta] of deltas.entries()) {
+    last = fogMazeEconomy(b, { turn: start + index, enemyArmy: army });
+    army += delta;
+  }
+  return last;
+}
+
+test('read the rival crown income from the unfogged army deltas', () => {
+  const b = economyFixture();
+  // A steady three-crown rival: every non-growth tick pays exactly +3.
+  const steady = feedEconomy(
+    b,
+    60,
+    Array.from({ length: 20 }, () => 3),
+  );
+  assert.equal(steady.ours, 2);
+  assert.equal(steady.bound, 3);
+  // One isolated-cell reconnection more than doubles a stack in a single tick
+  // (`game-engine.ts`), which is not income: the median ignores it.
+  const doubled = feedEconomy(economyFixture(), 60, [
+    ...Array.from({ length: 10 }, () => 3),
+    41,
+    3,
+    3,
+    3,
+    3,
+    3,
+  ]);
+  assert.equal(doubled.bound, 3);
+  // A rival that keeps building crowns lifts the median with it.
+  const growing = feedEconomy(economyFixture(), 60, [
+    ...Array.from({ length: 8 }, () => 3),
+    ...Array.from({ length: 24 }, () => 9),
+  ]);
+  assert.equal(growing.bound, 9);
+});
+
+test('ignore growth ticks and gaps in the crown ledger', () => {
+  const growth = feedEconomy(economyFixture(), 46, [40, 40, 40, 40]);
+  // Turns 46-49 are the burst window: no delta is read at all.
+  assert.equal(growth.window.length, 0);
+  assert.equal(growth.bound, 1);
+  const b = economyFixture();
+  fogMazeEconomy(b, { turn: 60, enemyArmy: 400 });
+  fogMazeEconomy(b, { turn: 100, enemyArmy: 900 });
+  assert.equal(b.fogMazeEconomy.window.length, 0);
+  assert.equal(fogMazeEconGate(b.fogMazeEconomy, 100, fogMazeConfig({ econ: 4 }, {})), false);
+});
+
+test('stand the corridor layer down when the rival economy outgrows ours', () => {
+  const config = fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_ECON: '4' });
+  const rival = feedEconomy(
+    economyFixture(),
+    60,
+    Array.from({ length: 20 }, () => 5),
+  );
+  // The exact anti shape: four crowns against our two.
+  assert.equal(fogMazeEconGate(rival, 80, config), true);
+  // Our own economy matching the rival keeps the layer.
+  assert.equal(fogMazeEconGate({ bound: 5, ours: 5 }, 80, config), false);
+  // A three-crown corridor rival is the relay shape and is not a stand-down.
+  assert.equal(fogMazeEconGate({ bound: 3, ours: 2 }, 300, config), false);
+  // The gate is switched off with the knob at 0.
+  assert.equal(fogMazeEconGate(rival, 80, fogMazeConfig({}, { BOT3_FOG_MAZE_ECON: '0' })), false);
+});
+
+test('default the maze fog bundle on with the crown-economy gate armed', () => {
+  // Round 11 makes the bundle the shipped default: the layer plus the paint cap
+  // plus the gate, which removes its one measured regression (see BOT3_MAZE.md).
+  const on = fogMazeConfig({}, {});
+  assert.equal(on.enabled, true);
+  assert.equal(on.econ, 4);
+  assert.equal(on.paint, 120);
+  const off = fogMazeConfig({}, { BOT3_MAZEFOG3: '0' });
+  assert.equal(off.enabled, false);
+  assert.equal(off.econ, 0);
+  assert.equal(off.paint, 0);
+  // The bare round-7 layer (`BOT3_MAZEFOG3=0` + `BOT3_FOG_MAZE_LAYER=1`) keeps
+  // its measured path: no gate, no paint cap.
+  const layer = fogMazeConfig({}, { BOT3_MAZEFOG3: '0', BOT3_FOG_MAZE_LAYER: '1' });
+  assert.equal(layer.enabled, true);
+  assert.equal(layer.econ, 0);
+  assert.equal(layer.paint, 0);
+  assert.equal(fogMazeConfig({}, { BOT3_FOG_MAZE_LAYER: '1', BOT3_FOG_MAZE_ECON: '6' }).econ, 6);
+});
+
+test('arm the cut rescue only inside the positional gates', () => {
+  const { cutConfig, saveGate } = require('./cut');
+  // Two cells each: we hold index 0, the rival holds index 1.
+  const ctx = { size: 2, myTeam: 1, teams: [1, 2], units: [40, 100], fog: true, closing: false };
+  const plan = (turn, overrides) => ({ turn, config: cutConfig(overrides, {}) });
+  const base = { enabled: true, min: 0, behindArmy: 0, behindLand: 0, share: 0, turn: 0, until: 0 };
+  // Ungated: the bonus is armed wherever a pocket clears `min`.
+  assert.ok(saveGate(plan(60, { save: base }), ctx));
+  // Fog-only gate blocks clear rooms and keeps fog rooms.
+  assert.ok(saveGate(plan(60, { save: { ...base, fog: true } }), ctx));
+  assert.equal(saveGate(plan(60, { save: { ...base, fog: true } }), { ...ctx, fog: false }), null);
+  // Closing gate blocks only while the endgame phase owns the plan.
+  assert.equal(saveGate(plan(60, { save: { ...base, closing: true } }), { ...ctx, closing: true }), null);
+  assert.ok(saveGate(plan(60, { save: { ...base, closing: true } }), ctx));
+  // Turn window.
+  assert.equal(saveGate(plan(40, { save: { ...base, turn: 60 } }), ctx), null);
+  assert.equal(saveGate(plan(90, { save: { ...base, until: 80 } }), ctx), null);
+  assert.ok(saveGate(plan(60, { save: { ...base, turn: 60, until: 80 } }), ctx));
+  // Behind gates: 40 army against 100 is behind, 140 against 100 is not.
+  assert.ok(saveGate(plan(60, { save: { ...base, behindArmy: 1 } }), ctx));
+  const ahead = { ...ctx, units: [140, 100] };
+  assert.equal(saveGate(plan(60, { save: { ...base, behindArmy: 1 } }), ahead), null);
+  // Land gate reads the ownership counts (one cell each here).
+  assert.ok(saveGate(plan(60, { save: { ...base, behindLand: 1 } }), ctx));
+  assert.equal(saveGate(plan(60, { save: { ...base, behindLand: 0.5 } }), ctx), null);
+  // Exact leaderboard reads win over the cell sums, and feed the share gate.
+  const exact = { ...ctx, army: 400, rivalArmy: 300, land: 10, rivalLand: 20 };
+  assert.equal(saveGate(plan(60, { save: { ...base, behindArmy: 1 } }), exact), null);
+  const sums = saveGate(plan(60, { save: { ...base, share: 25 } }), exact);
+  assert.deepEqual([sums.army, sums.rivalArmy, sums.land, sums.rivalLand], [400, 300, 10, 20]);
+});
+
+// Archipelago layer (see ./archipelago). Three 4x4 plain islands in a swamp sea:
+// ours (top left), one unclaimed (bottom left) and one rival (bottom right).
+function archipelagoFixture() {
+  const b = createBoard(15, 15, 1);
+  b.grid_type.fill(204);
+  const put = (x, y, code) => (b.grid_type[x * 15 + y] = code);
+  for (let x = 1; x < 5; x++) for (let y = 1; y < 5; y++) put(x, y, 1);
+  put(1, 1, 101);
+  for (let x = 1; x < 5; x++) for (let y = 9; y < 13; y++) put(x, y, 200);
+  for (let x = 9; x < 13; x++) for (let y = 9; y < 13; y++) put(x, y, 2);
+  put(9, 9, 102);
+  const homeDist = new Int32Array(b.size);
+  const enemyDist = new Int32Array(b.size);
+  const teams = new Uint8Array(b.size);
+  for (let i = 0; i < b.size; i++) {
+    const x = Math.floor(i / 15),
+      y = i % 15;
+    homeDist[i] = Math.abs(x - 1) + Math.abs(y - 1);
+    enemyDist[i] = Math.abs(x - 11) + Math.abs(y - 11);
+    if (x >= 9 && x < 13 && y >= 9 && y < 13) teams[i] = 2;
+    else if (x >= 1 && x < 5 && y >= 1 && y < 5) teams[i] = 1;
+  }
+  return {
+    b,
+    context: {
+      turn: 40,
+      tile: b.grid_type,
+      teams,
+      myTeam: 1,
+      homes: [16],
+      homeDist,
+      enemyDist,
+      enemies: [9 * 15 + 10],
+      fog: false,
+      multi: false,
+    },
+  };
+}
+
+test('default the measured archipelago bundle on and allow opting out', () => {
+  const { b, context } = archipelagoFixture();
+  const idle = archipelagoUpdate(b, context, archipelagoConfig({}, { BOT3_ARCH: '0' }));
+  assert.equal(idle.active, false);
+  assert.equal(idle.targets, null);
+  assert.equal(idle.waterCap, 0);
+  // The measured bundle is the default and only the two measured mechanisms.
+  const bundle = archipelagoConfig({}, {});
+  assert.equal(bundle.land, true);
+  assert.equal(bundle.front, true);
+  assert.equal(bundle.water, false);
+  assert.equal(bundle.crown, false);
+  // The land phase is armed in fog too, but only behind the fog-safe gate
+  // (`fogQuiet`); `BOT3_ARCH_FOG_QUIET=0` restores the measured losing variant.
+  assert.equal(bundle.landFog, true);
+  assert.equal(bundle.fogQuiet, true);
+  assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_LAND_FOG: '0' }).landFog, false);
+  assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_FOG_QUIET: '0' }).fogQuiet, false);
+  // A single flag overrides the bundle.
+  assert.equal(archipelagoConfig({}, { BOT3_ARCH: '1', BOT3_ARCH_LAND: '0' }).land, false);
+});
+
+test('gate the archipelago layer on the swamp share, not on the map name', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  assert.equal(archipelagoUpdate(b, context, { ...config, swampShare: 1.1 }).active, false);
+  const swamp = archipelagoUpdate(b, context, config);
+  assert.equal(swamp.active, true);
+  assert.ok(swamp.swampShare > 0.55);
+  // A plain board with the same shape is left alone by the default gate.
+  const dry = createBoard(15, 15, 1);
+  dry.grid_type.fill(200);
+  assert.equal(archipelagoUpdate(dry, { ...context, tile: dry.grid_type }, config).active, false);
+});
+
+test('aim the land phase at the nearest unclaimed island only during the burst', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  const early = archipelagoUpdate(b, context, config);
+  assert.equal(early.aimLand, true);
+  assert.ok(early.focus >= 0);
+  assert.ok(early.targets.length > 0);
+  // Every target is unclaimed plain land on the unclaimed island.
+  assert.deepEqual([...new Set(early.targets.map((i) => i % 15))].sort((a, c) => a - c), [9, 10, 11, 12]);
+  assert.ok(early.targets.every((i) => b.grid_type[i] === 200));
+  // After the burst the rival crown is the objective again.
+  assert.equal(archipelagoUpdate(b, { ...context, turn: 60 }, config).aimLand, false);
+  // A rival next to our home outranks any land grab.
+  const near = new Int32Array(b.size).fill(1);
+  assert.equal(archipelagoUpdate(b, { ...context, enemyDist: near }, config).aimLand, false);
+  // A contested island is never a land target.
+  const contested = Uint8Array.from(context.teams);
+  for (let x = 1; x < 5; x++) for (let y = 9; y < 13; y++) contested[x * 15 + y] = 2;
+  assert.equal(archipelagoUpdate(b, { ...context, teams: contested }, config).aimLand, false);
+});
+
+test('stand the fog land phase down as soon as the rival is in vision', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  // Clear rooms keep the burst deadline: the quiet gate is fog-only.
+  const clear = archipelagoUpdate(b, { ...context, enemies: [] }, config);
+  assert.equal(clear.aimLand, true);
+  // In fog nothing is visible yet, so the grab is free and the phase is armed.
+  const fogged = { ...context, fog: true, enemies: [] };
+  const quiet = archipelagoUpdate(b, fogged, config);
+  assert.equal(quiet.aimLand, true);
+  assert.ok(quiet.targets.length > 0);
+  // One visible rival cell hands the frame back to the remembered crowns.
+  const seen = archipelagoUpdate(b, { ...fogged, enemies: [9 * 15 + 10] }, config);
+  assert.equal(seen.aimLand, false);
+  // `fogKnown` extends the gate to a remembered crown.
+  assert.equal(archipelagoUpdate(b, { ...fogged, known: 1 }, config).aimLand, true);
+  const wrong = archipelagoUpdate(b, { ...fogged, known: 1 }, { ...config, fogKnown: true });
+  assert.equal(wrong.aimLand, false);
+  // The fog deadline ends the phase without touching the clear deadline.
+  assert.equal(archipelagoUpdate(b, fogged, { ...config, fogUntil: 30 }).aimLand, false);
+  assert.equal(archipelagoUpdate(b, { ...fogged, turn: 20 }, { ...config, fogUntil: 30 }).aimLand, true);
+});
+
+test('latch the focus island while it still has plain land', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  const first = archipelagoUpdate(b, context, config);
+  const focus = first.focus;
+  const claimed = Uint8Array.from(b.grid_type);
+  claimed[first.targets[0]] = 1;
+  const again = archipelagoUpdate(b, { ...context, tile: claimed }, config);
+  assert.equal(again.focus, focus);
+  assert.ok(!again.targets.includes(first.targets[0]));
+});
+
+test('cap a swamp capture that walks away from plain land and allow a crossing', () => {
+  const { b, context } = archipelagoFixture();
+  const arch = archipelagoUpdate(b, context, archipelagoConfig({ water: true }));
+  assert.equal(arch.waterCap, 18);
+  // A crossing step that shortens the run to the unclaimed island is allowed.
+  assert.equal(b.grid_type[0 * 15 + 8], 204);
+  assert.equal(arch.plainDist[0 * 15 + 8] < arch.plainDist[0 * 15 + 7], true);
+  assert.equal(archipelagoWaterBlocked(arch, b.grid_type, 0 * 15 + 7, 0 * 15 + 8), false);
+  // The landing itself is a plain capture, never capped.
+  const landing = 1 * 15 + 9;
+  assert.equal(b.grid_type[landing], 200);
+  assert.equal(archipelagoWaterBlocked(arch, b.grid_type, 0 * 15 + 9, landing), false);
+  // A swamp cell that is no closer to any plain cell buys nothing.
+  assert.equal(archipelagoWaterBlocked(arch, b.grid_type, 7 * 15 + 1, 7 * 15 + 0), true);
+  // Plain captures and the switched-off layer are never blocked.
+  assert.equal(archipelagoWaterBlocked(arch, b.grid_type, 7 * 15 + 0, 1 * 15 + 9), false);
+  const off = archipelagoUpdate(b, context, archipelagoConfig({}));
+  assert.equal(archipelagoWaterBlocked(off, b.grid_type, 7 * 15 + 1, 7 * 15 + 0), false);
+});
+
+test('arm the island crown only on a fully owned island clear of the rival', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ crown: true });
+  const arch = archipelagoUpdate(b, context, config);
+  assert.equal(arch.crownIslands[arch.island[2 * 15 + 2]], 1);
+  // The contested island and the unclaimed island are never crown sites.
+  assert.equal(arch.crownIslands[arch.island[9 * 15 + 9]], 0);
+  assert.equal(arch.crownIslands[arch.island[1 * 15 + 9]], 0);
+  // A rival within reach removes the safe-income claim.
+  const near = archipelagoUpdate(b, context, { ...config, crownEnemy: 40 });
+  assert.equal(near.crownIslands[near.island[2 * 15 + 2]], 0);
+  assert.equal(archipelagoConfig({ crown: false }).crown, false);
+});
+
+test('leave multi-line archipelago rooms alone unless asked', () => {
+  const { b, context } = archipelagoFixture();
+  const config = archipelagoConfig({ land: true });
+  assert.equal(archipelagoUpdate(b, { ...context, multi: true }, config).active, false);
+  assert.equal(archipelagoUpdate(b, { ...context, multi: true }, { ...config, multi: true }).active, true);
+});
+// Land-first layer (see ./land and LAND.md). The only knob that survived the
+// sixteen-seed swamp screen is the closing stand-down; the capture boost, the
+// clear-room paint cap and the island crowns stay opt-in with their measured
+// verdicts. These tests pin the room gate and the stand-down hand-off.
+test('arm the land-first layer only on a structurally swamp-heavy clear serial room', () => {
+  assert.equal(landConfig({}, {}).landfirst, true);
+  assert.equal(landConfig({}, { BOT3_LANDFIRST: '0' }).landfirst, false);
+  // The measured-negative knobs default to off and stay addressable.
+  assert.equal(landConfig({}, {}).capture, 0);
+  assert.equal(landConfig({}, {}).paint, 0);
+  assert.equal(landConfig({}, { BOT3_LAND_CAPTURE: '130' }).capture, 130);
+  assert.equal(landConfig({}, { BOT3_LAND_PAINT: '155' }).paint, 155);
+  assert.equal(landConfig({}, { BOT3_LAND_BURST: '0' }).burst, 0);
+  assert.equal(landConfig({}, { BOT3_LAND_CLOSE_SKIP: '0' }).closeSkip, 0);
+  assert.equal(landConfig({}, { BOT3_LAND_CLOSE_UNTIL: '200' }).closeUntil, 200);
+
+  const b = createBoard(6, 10, 1);
+  b.grid_type.fill(200);
+  for (let i = 0; i < 24; i++) b.grid_type[i] = 204;
+  assert.equal(swampShare(b), 0.4);
+  const room = {
+    turn: 140,
+    multi: false,
+    clearSerial: true,
+    single: true,
+    size: b.size,
+    land: 12,
+    enemyLand: 15,
+    neutral: 4,
+  };
+  const config = landConfig({}, {});
+  assert.equal(landContext(b, room, config).heavy, true);
+  assert.equal(landContext(b, room, config).trail, true);
+  assert.equal(landContext(b, room, config).closeSkip, true);
+  // Ahead on land, or before the front planner opens, the layer stands down.
+  assert.equal(landContext(b, { ...room, land: 16 }, config).closeSkip, false);
+  assert.equal(landContext(b, { ...room, single: false }, config).closeSkip, false);
+  assert.equal(landContext(b, { ...room, land: 0, enemyLand: 0 }, config).closeSkip, false);
+  // Fog, multi-line, an oversized board and an open map are out of scope.
+  assert.equal(landContext(b, { ...room, clearSerial: false }, config).closeSkip, false);
+  assert.equal(landContext(b, { ...room, multi: true }, config).closeSkip, false);
+  assert.equal(landContext(b, { ...room, size: 900 }, config).closeSkip, false);
+  const open = createBoard(6, 10, 1);
+  open.grid_type.fill(200);
+  assert.equal(swampShare(open), 0);
+  assert.equal(landContext(open, room, config).heavy, false);
+  assert.equal(landContext(open, room, config).closeSkip, false);
+  // `BOT3_LANDFIRST=0` makes every field inert.
+  assert.equal(landContext(b, room, landConfig({}, { BOT3_LANDFIRST: '0' })).closeSkip, false);
+  // The capture boost and the burst window are wired but off by default.
+  const capture = landConfig({}, { BOT3_LAND_CAPTURE: '130' });
+  assert.equal(landContext(b, room, capture).capture, 130);
+  assert.equal(landContext(b, { ...room, enemyLand: 12 }, capture).capture, 0);
+  const burst = landConfig({}, { BOT3_LANDBURST: '1' });
+  assert.equal(landContext(b, { ...room, turn: 26, single: false }, burst).burst, 220);
+  assert.equal(landContext(b, { ...room, turn: 50 }, burst).burst, 0);
+  // The stand-down can end: closing returns from `closeUntil` on.
+  const late = landConfig({}, { BOT3_LAND_CLOSE_UNTIL: '120' });
+  assert.equal(landContext(b, room, late).closeSkip, false);
+  assert.equal(landContext(b, { ...room, turn: 119 }, late).closeSkip, true);
+  // Round 13: the stand-down can ignore the instantaneous land race (measured
+  // neutral on mediterranean), and the crown-economy knobs stay inert at 0.
+  assert.equal(landConfig({}, {}).closeAlways, 0);
+  assert.equal(landConfig({}, { BOT3_LAND_CLOSE_ALWAYS: '1' }).closeAlways, 1);
+  const always = landConfig({}, { BOT3_LAND_CLOSE_ALWAYS: '1' });
+  assert.equal(landContext(b, { ...room, land: 30 }, always).closeSkip, true);
+  assert.equal(landContext(b, { ...room, single: false }, always).closeSkip, false);
+  assert.equal(landConfig({}, {}).site, 0);
+  assert.equal(landConfig({}, {}).develop, 0);
+  const crowns = landConfig({}, { BOT3_LAND_SITE: '520', BOT3_LAND_DEVELOP: '1' });
+  assert.equal(landContext(b, room, crowns).site, 520);
+  assert.equal(landContext(b, room, crowns).develop, true);
+  assert.equal(landContext(b, { ...room, single: false }, crowns).site, 0);
+  assert.equal(landContext(b, room, landConfig({}, { BOT3_LANDFIRST: '0' })).site, 0);
+});
+
+// Round 13: the punish recapture is gated on the structural swamp share, so a
+// plain-rich board keeps the shipped path, and the bid/keep knobs stay addressable.
+test('gate the shadow punish recapture on the structural swamp share', () => {
+  const keys = [
+    'BOT3_SHADOW_PUNISH',
+    'BOT3_SHADOW_PUNISH_BID',
+    'BOT3_SHADOW_PUNISH_KEEP',
+    'BOT3_SHADOW_PUNISH_SWAMP',
+  ];
+  const saved = {};
+  for (const key of keys) saved[key] = process.env[key];
+  try {
+    for (const key of keys) delete process.env[key];
+    const setup = (swampCells) => {
+      const b = createBoard(6, 10, 1);
+      b.grid_type.fill(200);
+      for (let i = 0; i < swampCells; i++) b.grid_type[i] = 204;
+      // Our 9-unit stack next to relay's source tile.
+      b.grid_type[15] = 2;
+      b.grid_type[14] = 1;
+      b.army_cnt[15] = 0;
+      b.army_cnt[14] = 10;
+      return b;
+    };
+    const run = (b) => {
+      const candidates = [];
+      const state = { stats: { branches: {} } };
+      const ctx = {
+        pred: { from: 15, to: 4, build: false, relayMe: 2 },
+        weFirst: false,
+        push: 100,
+        defense: 10,
+        me: 1,
+        relayGrowth: 0,
+        hard: true,
+        state,
+      };
+      const added = planShadow(ctx, b, 70, candidates);
+      return { candidates, added, branches: state.stats.branches };
+    };
+    // Plain-rich board (0% swamp): the gate leaves the shipped path alone.
+    const open = run(setup(0));
+    assert.equal(open.added, 0);
+    assert.equal(open.candidates.length, 0);
+    // Swamp-heavy board: relay's abandoned tile is recaptured.
+    const heavy = run(setup(24));
+    assert.equal(heavy.added, 1);
+    assert.equal(heavy.candidates[0].score, 250);
+    assert.deepEqual(
+      [heavy.candidates[0].from, heavy.candidates[0].to, heavy.candidates[0].send],
+      [14, 15, 9],
+    );
+    assert.equal(heavy.branches.punishAdd, 1);
+    // The bid is a knob, and the gate can be opened or closed by hand.
+    process.env.BOT3_SHADOW_PUNISH_BID = '350';
+    assert.equal(run(setup(24)).candidates[0].score, 350);
+    delete process.env.BOT3_SHADOW_PUNISH_BID;
+    process.env.BOT3_SHADOW_PUNISH_SWAMP = '0';
+    assert.equal(run(setup(0)).added, 1);
+    delete process.env.BOT3_SHADOW_PUNISH_SWAMP;
+    process.env.BOT3_SHADOW_PUNISH = '0';
+    assert.equal(run(setup(24)).added, 0);
+    delete process.env.BOT3_SHADOW_PUNISH;
+    // `keep` bounds what relay may leave behind on the source tile.
+    const stuck = setup(24);
+    stuck.army_cnt[15] = 103;
+    assert.equal(run(stuck).added, 0);
+    process.env.BOT3_SHADOW_PUNISH_KEEP = '3';
+    assert.equal(run(stuck).added, 1);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test('ship the finish layer on by default behind the shadow-armed gate', () => {
+  const saved = process.env.BOT3_FINISH;
+  try {
+    delete process.env.BOT3_FINISH;
+    assert.equal(finishEnabled(), true);
+    process.env.BOT3_FINISH = '0';
+    assert.equal(finishEnabled(), false);
+    process.env.BOT3_FINISH = '1';
+    assert.equal(finishEnabled(), true);
+  } finally {
+    if (saved === undefined) delete process.env.BOT3_FINISH;
+    else process.env.BOT3_FINISH = saved;
+  }
+});
+
+test('stand the closing column down on a swamp-heavy clear room while land trails', () => {
+  const army = (ours, theirs) => [
+    { id: 1, team: 1, army: 300, land: ours, dead: 0 },
+    { id: 2, team: 2, army: 90, land: theirs, dead: 0 },
+  ];
+  const swamp = 204;
+  const build = (terrain) => {
+    const b = createBoard(4, 6, 1);
+    b.grid_type.fill(terrain);
+    b.grid_type[0] = 101;
+    b.army_cnt[0] = 20;
+    b.grid_type[1] = 1;
+    b.army_cnt[1] = 130;
+    b.grid_type[2] = 1;
+    b.army_cnt[2] = 4;
+    b.grid_type[6] = 1;
+    b.army_cnt[6] = 60;
+    for (let i = 12; i < 18; i++) {
+      b.grid_type[i] = 102;
+      b.army_cnt[i] = 3;
+    }
+    return b;
+  };
+  // Trailing on the exact leaderboard land race: the funnel stands down.
+  const trailing = build(swamp);
+  chooseOrders(trailing, 140, army(4, 8), false);
+  assert.equal(trailing.closing.active, false);
+  // Leading on land, an open board, or the layer switched off keep the funnel.
+  const leading = build(swamp);
+  chooseOrders(leading, 140, army(12, 8), false);
+  assert.equal(leading.closing.active, true);
+  const open = build(200);
+  chooseOrders(open, 140, army(4, 8), false);
+  assert.equal(open.closing.active, true);
+  const off = build(swamp);
+  process.env.BOT3_LANDFIRST = '0';
+  try {
+    chooseOrders(off, 140, army(4, 8), false);
+    assert.equal(off.closing.active, true);
+  } finally {
+    delete process.env.BOT3_LANDFIRST;
+  }
+});
+
+test('price the land-first capture boost and merge cap only when enabled', () => {
+  const b = createBoard(1, 6, 1);
+  b.grid_type.set([101, 1, 1, 200, 102, 102]);
+  b.army_cnt.set([2, 40, 200, 0, 5, 3]);
+  const fill = (value) => Int32Array.from({ length: b.size }, () => value);
+  const state = {
+    b,
+    units: Float64Array.from(b.army_cnt),
+    teams: Uint8Array.from([1, 1, 1, 0, 2, 2]),
+    myTeam: 1,
+    turn: 200,
+    goal: Int32Array.from([3, 2, 2, 1, 0, 0]),
+    required: fill(6),
+    homeDist: fill(1),
+    immediate: fill(0),
+    cut: fill(0),
+    rescue: fill(0),
+    frontDist: fill(0),
+    route: Int32Array.from([3, 2, 1, 1, 0, 0]),
+    homes: [0],
+    danger: [],
+    site: -1,
+    self: { army: 250, land: 5 },
+    rival: { player: { army: 50 }, crowns: [4, 5], otherFront: 0, contact: 0 },
+    ffa: false,
+    wide: false,
+    anchorDist: fill(1),
+    enemyDist: Int32Array.from([3, 3, 3, 1, 1, 1]),
+    defense: fill(1),
+    closing: false,
+    push: 1,
+    lead: -1,
+    leadDist: null,
+  };
+  const capture = {
+    i: 2,
+    j: 3,
+    own: false,
+    hostile: false,
+    strike: false,
+    send: 199,
+    remaining: 199,
+    support: 2,
+    exposure: 0,
+    intercept: false,
+    base: false,
+  };
+  // A capture that is not also a crown approach (that case has its own rule):
+  // only the plain gap-filling term moves.
+  const flat = { ...state, goal: fill(3), route: fill(0) };
+  const plain = evaluateFrontMove(flat, capture);
+  assert.equal(
+    evaluateFrontMove({ ...flat, land: { capture: 0, burst: 0, paint: Infinity } }, capture),
+    plain,
+  );
+  assert.equal(
+    evaluateFrontMove({ ...flat, land: { capture: 130, burst: 0, paint: Infinity } }, capture),
+    plain + 130,
+  );
+  assert.equal(
+    evaluateFrontMove({ ...flat, land: { capture: 0, burst: 220, paint: Infinity } }, capture),
+    plain + 220,
+  );
+  // The paint cap clamps a plain own-cell merge and leaves site funding alone.
+  const merge = {
+    i: 1,
+    j: 2,
+    own: true,
+    hostile: false,
+    strike: false,
+    send: 39,
+    remaining: 79,
+    support: 2,
+    exposure: 0,
+    intercept: false,
+    base: false,
+  };
+  const march = evaluateFrontMove(state, merge);
+  assert.ok(march > 150);
+  assert.equal(evaluateFrontMove({ ...state, land: { capture: 0, burst: 0, paint: 150 } }, merge), 150);
+  // Funding the build site and the closing funnel are exempt from the cap.
+  const funded = evaluateFrontMove({ ...state, site: 2 }, merge);
+  assert.ok(funded > 150);
+  assert.equal(
+    evaluateFrontMove({ ...state, site: 2, land: { capture: 0, burst: 0, paint: 150 } }, merge),
+    funded,
+  );
+  const funnel = evaluateFrontMove({ ...state, closing: true }, merge);
+  assert.equal(
+    evaluateFrontMove({ ...state, closing: true, land: { capture: 0, burst: 0, paint: 150 } }, merge),
+    funnel,
+  );
 });

@@ -194,3 +194,39 @@ the layer does not model yet.
   serial-only (`input.multi` returns early). A multi-aware column (chains in the
   engine queue advance one cell per tick while merging the garrisons they pass)
   is untested and is where the remaining margin probably is.
+
+## 第 12–14 轮：镜像上限证据（rounds 12-14)
+
+The upstream engine later removed the multi-line burst, and the rounds 12-14
+experiments established that the remaining multi cells are a structural mirror
+rather than a policy gap. Measured facts:
+
+- **Perfect reflector.** Of 128 `(map, fog, seed)` pairs, every pair splits
+  exactly one win per seat with an identical deciding tick; a deterministic,
+  colour-symmetric policy therefore caps every multi cell at 50%.
+- **Action supply is fixed.** A multi tick executes about six orders (`sent ==
+  done`), roughly 1.4 army per land cell at t100 while an action needs two; the
+  sixteen slots are never binding, and widening candidate lists or filling
+  idle slots changed 0 games.
+- **No economy lever.** Multi rooms have no burst, crowns are the only
+  compounding income, and no cell ever reaches 50 army, so neither side builds
+  a crown; `army@50` is fully determined by the land bound, which is already at
+  18-23 of the maximum 24.
+- **The crown is unreachable.** A 3+ stack adjacent to the rival crown appeared
+  in 0 of 597 sampled ticks. A same-tick double push is legal and exactly
+  priced (verified on the real engine), but only 1 tick in 128 games could form
+  a pair.
+- **Exact search does not help.** `msim.js` reproduces the real engine with 0
+  mismatched ticks over ~380k cell-ticks, and `mqueue.js` predicts relay's
+  order batch on 2917/2917 frames, yet a one-ply search deviates on only 3.5%
+  of ticks and measures -1.2pp; weight sweeps (`MARCH`, `CROWN`, `MARGIN`,
+  `SIMS`) are identical.
+- **Measured negatives.** focus/paint, second-crown banking, synchronised
+  waves, isolation/cut, parity contest (+2.7pp, inside noise), slot filling,
+  double push/staging, timed crown rush (-6 to -10 wins), turtle/counter
+  (49.6%, best cell 53.1%).
+
+Breaking the mirror would require a strictly stronger multi policy (for example
+a 2-3 ply search with a self-play-tuned evaluation), not a differently weighted
+version of the current scoring. `msim.js`/`mqueue.js` are kept as the exact
+model and predictor for such an attempt.
