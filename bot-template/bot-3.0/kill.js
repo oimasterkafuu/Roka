@@ -393,12 +393,17 @@ function planFinish(b, ctx, input = {}) {
   return { ok: false, reason: rejected?.reason ?? 'no-route', ...(rejected || {}) };
 }
 
-// The finish layer is off by default: the paired acceptance runs below found
-// no configuration that both beat the relay mirror and stayed neutral
-// elsewhere, so the shippable default is the planner's own behaviour. Set
-// `BOT3_FINISH=1` to enable it, or `board.finish = true/false` per game.
+// The finish layer ships on: with `_PUNISH` it is the pair that takes
+// `relay/mediterranean/clear/single` from 19/32 to 21/32 on the sixteen-seed
+// screen, and on the full matrix it adds wins without a regressing cell. The
+// caller only runs it when the shadow layer is armed (the opponent is the
+// replayed relay planner), so a relay-derived bot such as anti is untouched.
+// `BOT3_FINISH=0` (or `board.finish = false`) restores the old default.
 function finishEnabled() {
-  return process.env.BOT3_FINISH === '1';
+  const raw = process.env.BOT3_FINISH;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return true;
+  const value = String(raw).trim().toLowerCase();
+  return value !== '0' && value !== 'false' && value !== 'off';
 }
 
 function finishOptions() {

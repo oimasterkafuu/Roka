@@ -200,3 +200,27 @@ WORKERS=2 SEED_FROM=1 SEED_TO=4 OPPONENTS=relay MODES=000 \
 - 依赖 `../relay-bot/planner`（只读）。路径缺失（例如只发布 `bot-3.0` 包）时自动
   降级为 no-op。
 - 多线与迷雾格子没有收益，也没有副作用（直接拒绝）。
+
+## 第 13 轮：`_PUNISH` 改成默认开，但加结构闸门
+
+`_PUNISH` 在明码单线四格上的实测是 archipelago 14（基线 17）、maze 25（+2）、
+mediterranean 20（+1）、random 21（-1），所以上一轮保持关闭。第 13 轮把它和斩杀层一起用于
+`relay/mediterranean/clear/single`（19 -> 21，见 [LAND.md](LAND.md)）时发现两件事：
+
+- 反抢只在**沼泽重**的图上值钱：`random`（沼泽约 7%）上那一 Tick 该去前线，`archipelago`
+  （66.7%）上是土地吞吐赛、反抢一格没用。新增 `BOT3_SHADOW_PUNISH_SWAMP`（默认 0.35，
+  与 `land.js` 同一「结构上沼泽重」阈值）后，`random` 回到 22/32、`maze` 回到 23/32、
+  `archipelago` 保持 23/32，只有 mediterranean 保留 +2。
+- 出价形状不是瓶颈：`_BID` 150/200/225/250/275/350 在 med 上是 20/20/20/21/22/22，在 random
+  上是 23/21/21/21/20/20，`_KEEP` 1/2/3 完全同分，因此保持 250/2。
+
+| 变量 | 默认 | 含义 |
+| --- | --- | --- |
+| `BOT3_SHADOW_PUNISH` | **开**（本轮改） | 反抢候选；`0` 关闭 |
+| `BOT3_SHADOW_PUNISH_SWAMP` | 0.35 | 只在该沼泽占比以上的明码单线房间生效 |
+| `BOT3_SHADOW_PUNISH_BID` | 250 | 反抢基础出价 |
+| `BOT3_SHADOW_PUNISH_KEEP` | 2 | relay 出发格允许剩下的兵力上限 |
+
+斩杀层（`kill.js`）的门控也挂在这一层：`BOT3_FINISH` 默认开，但只在 `board.shadow.armed`
+（连续 28 帧逐字段命中）为真、即对手确实是被重放的 relay 规划器时生效；anti 的最长连击是 25，
+所以 anti 四格逐局不变，而 `relay/mediterranean/clear/single` 得到 +1（19 -> 20，叠加反抢到 21）。
