@@ -44,8 +44,11 @@ const {
 const { landConfig, landContext } = require('./land');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
+const { predict: queuePredict, record: queueRecord } = require('./mqueue');
+const { configOf: twoPlyConfig, choose: twoPlyChoose } = require('./m2ply');
 const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
 const { mhalfConfig, mhalfUpdate, applyMhalf, applyMhalfModes } = require('./mhalf');
+const { mtuneConfig, mtuneUpdate, applyMtune, mshapeOverrides, mhalfOverrides } = require('./mtune');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
 const {
@@ -373,6 +376,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // relay's private opening bookkeeping is built up frame by frame. Only scores
   // move here; the candidate set and the untouched planner stay as is.
   const shadow = shadowPredict(b, turn, leaderboard, multi);
+  // Multi-line queue predictor (see ./mqueue). Relay is deterministic and a
+  // clear room shows the whole grid, so its in-flight batch is known one tick
+  // early -- but only once the model has replayed consecutive frames exactly.
+  // It feeds ./m2ply; off by default, multi-line clear rooms only.
+  const mqPred = queuePredict(b, turn, leaderboard, multi);
   // Fog single-line layer (see ./fog). `fogOpen` is the room gate that also
   // supplies the objective fallback; the column needs a measured material edge
   // on top of it (`fogUpdate`) and pauses whenever a home is threatened.
@@ -424,6 +432,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
     );
     if (!approach && !contested && !exposedStem && !tacticalCapture) {
       if (shadow) shadowRecord(b, turn, orders);
+      if (mqPred) queueRecord(b, turn, orders);
       return orders;
     }
     b.opening = null;
@@ -459,6 +468,12 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // worth more than any serial objective: the layer prices the frontier (a
   // capture that keeps neutral neighbours open) and lifts the inherited
   // sixteen-order cap. Off by default.
+  //
+  // Round-17 tuning layer (see ./mtune): one JSON blob owns the score bands of
+  // the multi-line evaluation, including five mshape/mhalf knobs, so a search
+  // can price them together. With `BOT3_MTUNE` off both overrides are
+  // `undefined` and every call below is the inherited one.
+  const mtuneCfg = mtuneConfig();
   const mshapeLayer = mshapeUpdate(
     b,
     {
@@ -472,7 +487,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       army: self.army,
       enemyArmy,
     },
-    mshapeConfig(),
+    mshapeConfig(mshapeOverrides(mtuneCfg)),
   );
   // Sustained-pressure layer (see ./mhalf). A multi-line empire spends each
   // growth pulse on rear merges because the army sits two to six hops behind a
@@ -494,7 +509,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       army: self.army,
       enemyArmy,
     },
-    mhalfConfig(),
+    mhalfConfig(mhalfOverrides(mtuneCfg)),
   );
   // Fog oracle (see ./fog-oracle). The leaderboard is rebuilt from the unfogged
   // grids, so `rival.army` / `rival.land` are exact even where the vision is
@@ -1379,6 +1394,15 @@ function chooseOrders(b, turn, leaderboard, multi) {
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mshapeLayer) applyMshape(mshapeLayer, { tile, teams, units, neighbors, myTeam }, candidates);
   if (mhalfLayer) applyMhalf(mhalfLayer, { tile, teams, units, neighbors, myTeam }, candidates);
+  // Self-play-tuned multi-line evaluation (see ./mtune). Rounds 15/16 each moved
+  // one rule; this layer moves the whole set of score bands from one blob, so a
+  // search can tune capture/hostile/merge/defence prices together. Off by
+  // default; scores only, no candidate is created or dropped.
+  const mtuneLayer = mtuneCfg.enabled
+    ? mtuneUpdate(b, { b, turn, multi, size, tile, teams, units, neighbors, myTeam, targets })
+    : null;
+  if (mtuneLayer)
+    applyMtune(mtuneLayer, { tile, teams, units, neighbors, myTeam, hop: mhalfLayer?.hop }, candidates);
   // Shadow pricing: the scores of the existing candidates move, and the
   // prediction also creates the candidates re-ranking cannot produce (see
   // ./shadow: an approach step toward its next objective, the counter-capture
@@ -1395,6 +1419,47 @@ function chooseOrders(b, turn, leaderboard, multi) {
       candidates.splice(0, candidates.length, ...kept);
   }
   candidates.sort((a, c) => c.score - a.score);
+  // Two-tick exact search (see ./m2ply). `msim` replays tick + 1 for a bounded
+  // set of order shapes the planner cannot supply itself (lateral frontier
+  // merges, multi-feed into one cell, a halved second front) and tick + 2 for a
+  // fixed rollout, against relay's batch predicted by replaying its own planner
+  // on the simulated board. The winner replaces the planner's set only by a
+  // measured margin, and is emitted verbatim: it is a legal, leftover-free batch
+  // that the greedy matching loop below cannot express (a duplicate target). The
+  // maze lane guard lives inside that loop, so the search stands down while it
+  // is active.
+  const twoPly = twoPlyConfig();
+  const laneGuard = maze && (LANE || (mazeFogOpen && fogMazeCfg.lane));
+  if (
+    twoPly.enabled &&
+    multi &&
+    mqPred?.armed &&
+    !laneGuard &&
+    !mshapeLayer?.config.fan &&
+    !mhalfLayer?.config.retain
+  ) {
+    const picked = twoPlyChoose({
+      b,
+      turn,
+      candidates,
+      pred: mqPred,
+      slots: mshapeLayer ? mshapeLayer.slots : 16,
+      config: twoPly,
+      units,
+      teams,
+      myTeam,
+    });
+    if (picked) {
+      for (const op of picked) {
+        if (op.build) continue;
+        b.lastFrom[op.to] = op.from;
+        b.lastMove[op.to] = turn;
+        if (maze) recordLane(b, op.from, op.to);
+      }
+      if (mqPred) queueRecord(b, turn, picked);
+      return picked;
+    }
+  }
   const used = new Set(),
     orders = [];
   // Maze lane discipline: do not spend consecutive ticks on the same corridor
@@ -1444,6 +1509,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // lane passed the guard (the cooldown expires within four ticks).
   if (maze && !orders.length && candidates.length) take(candidates[0]);
   if (shadow) shadowRecord(b, turn, orders);
+  if (mqPred) queueRecord(b, turn, orders);
   return orders;
 }
 
