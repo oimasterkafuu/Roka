@@ -130,6 +130,14 @@ pnpm run test:build-pages
 
 运行 `pnpm run test:relay` 检查协议与策略。当前结果见 [2.16.1 耗时与换边评测](bot-template/relay-bot/TEMPO.md)。历史结果见 [2.16.0 开局与峡谷评测](bot-template/relay-bot/OPENING.md)、[2.15.0 明牌单线与 FFA 评测](bot-template/relay-bot/SINGLE-LINE.md)及 [2.14.0 初版评测](bot-template/relay-bot/EVALUATION.md)。
 
+### Bot(3.0) 策略 Bot
+
+Bot(3.0) 以 Relay 为基础框架，参考 Bot(2.0) 的 1v1 结构，目标是在官方小图上继续提升实战胜率。目录名 `bot-3.0` 会被后台托管模板自动发现。
+
+当前主线已合入迷宫走廊相位、单线收尾纵队、迷雾单线层与第 7–20 轮的全部默认层，并同步上游 relay 的 opening/reinforcement pricing 与多线 burst 移除。最终基线使用真实引擎跑满 2048 局：Apex / Anti-Human / Bot(2.0) / Relay 四个对手，随机、迷宫、群岛、地中海四种地图，迷雾与多线各开关，每格 32 局、上限 1000 Tick，合计 **1759 胜 / 237 负 / 52 超时，胜率 85.9%**。非 Relay 对手全部 >=50% 且无退化；Relay 16 格中 14 格达标（剩余 random 迷雾与 maze 迷雾各 18/32）。逐项数据、旧引擎数字的不可比说明与复现命令见 [Bot(3.0) 基线](bot-template/bot-3.0/BASELINE.md)，暂停时保留的后续方向见 [NEXT.md](bot-template/bot-3.0/NEXT.md)。
+
+独立运行：`BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:bot3`；回归：`pnpm run test:bot3`；验收矩阵：`pnpm run eval:bot3`。
+
 ## 许可
 
 本项目以 [AGPL-3.0-only](LICENSE) 许可开源。
