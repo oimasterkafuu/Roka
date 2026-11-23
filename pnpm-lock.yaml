@@ -12,8 +12,8 @@ importers:
         specifier: ^11.2.2
         version: 11.2.2
       '@fastify/static':
-        specifier: ^10.1.11
-        version: 10.1.11
+        specifier: ^10.1.12
+        version: 10.1.12
       '@napi-rs/canvas':
         specifier: ^1.1.1
         version: 1.1.1
@@ -335,8 +335,8 @@ packages:
   '@fastify/send@4.2.1':
     resolution: {integrity: sha512-zOB8L9z444PnGbd1Nd7gNXPz/7bnDR8Z4KNTNSwLVQuE3cTGsU9qUj1N4SjXKK0Tq4cauZYTwB+tqvlqosuKsw==}
 
-  '@fastify/static@10.1.11':
-    resolution: {integrity: sha512-WjEpDqkzOziIipghh4ki3ZNfLCmI1kRWlYKar3+9FiuY2LzoeogKiDqxIH68r6vYUSxvUzyEiV1BOP0yfW+glQ==}
+  '@fastify/static@10.1.12':
+    resolution: {integrity: sha512-D0pmf8OgurIsKiIjxC8ZJP/bCYnUSAiU6PS/se/6Me63UoliAu8FqrzDRX8FdgJMqFMXy45ISlfUZ1Gi6AJnqA==}
 
   '@gltf-transform/core@4.5.1':
     resolution: {integrity: sha512-OWgBYssKHKoXMIrMb2N20jXqWRnMP9HdtcTFQBEAJtz4P+OOxx5fozl5eAeK7nktIs5uDE/lu4NbkE5VCZaR9g==}
@@ -834,8 +834,8 @@ packages:
   constantinople@4.0.1:
     resolution: {integrity: sha512-vCrqcSIq4//Gx74TXXCGnHpulY1dskqLTFGDmhrGxzeXL8lF8kvXv6mpNWlJj1uD4DW23D4ljAqbY4RRaaUZIw==}
 
-  content-disposition@3.0.0:
-    resolution: {integrity: sha512-ZH/0Xs9rMIFWCOmGdmS9eHBTF62qqQYNz4nVjQhkdIO/a0fCP4UIM3mRz/wiqL0L14YgAz/1xio4OaSY4+ON/A==}
+  content-disposition@3.1.0:
+    resolution: {integrity: sha512-6lwVDK9bsenmMu7hxcLuUiu+FzFBDAdfQR1LKbE+SCo7/Qfpm2NG8X9f8AJgumfoVID/4r1stSxcmCeiT7pfkQ==}
     engines: {node: '>=22'}
 
   cookie@0.7.2:
@@ -1835,12 +1835,12 @@ snapshots:
       http-errors: 2.0.1
       mime: 3.0.0
 
-  '@fastify/static@10.1.11':
+  '@fastify/static@10.1.12':
     dependencies:
       '@fastify/accept-negotiator': 2.1.2
       '@fastify/error': 4.2.1
       '@fastify/send': 4.2.1
-      content-disposition: 3.0.0
+      content-disposition: 3.1.0
       fastify-plugin: 6.0.1
       fastq: 1.20.3
       glob: 14.0.6
@@ -2298,7 +2298,7 @@ snapshots:
       '@babel/parser': 7.29.14
       '@babel/types': 7.29.14
 
-  content-disposition@3.0.0: {}
+  content-disposition@3.1.0: {}
 
   cookie@0.7.2: {}
 
@@ -2605,7 +2605,7 @@ snapshots:
 
   glob@14.0.6:
     dependencies:
-      minimatch: 11.0.8
+      minimatch: 11.0.9
       minipass: 7.1.3
       path-scurry: 3.0.0
 
