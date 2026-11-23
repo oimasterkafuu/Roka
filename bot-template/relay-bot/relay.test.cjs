@@ -186,7 +186,12 @@ test('expand in parallel from a single crown with executable independent orders'
   assert.equal(b.army_cnt.filter((n) => n > 0).length, parallel.land);
 });
 
-test('hold construction funds when an enemy column can round a bend, and build with enough reserve', () => {
+test('hold construction funds in a maze, and build with enough reserve when the front planner is active', (context) => {
+  const previous = process.env.BOT3_MAZE;
+  context.after(() => {
+    if (previous === undefined) delete process.env.BOT3_MAZE;
+    else process.env.BOT3_MAZE = previous;
+  });
   for (const terrain of [1, 51]) {
     const b = createBoard(3, 5, 1);
     b.grid_type.fill(201);
@@ -202,6 +207,12 @@ test('hold construction funds when an enemy column can round a bend, and build w
       b.grid_type[i] = t;
       b.army_cnt[i] = n;
     }
+    process.env.BOT3_MAZE = '1';
+    assert.ok(!chooseOrders(b, 62, players, false).some((op) => op.build));
+    b.army_cnt[1] = 170;
+    assert.ok(!chooseOrders(b, 62, players, false).some((op) => op.build));
+    process.env.BOT3_MAZE = '0';
+    b.army_cnt[1] = 108;
     assert.ok(!chooseOrders(b, 62, players, false).some((op) => op.build));
     b.army_cnt[1] = 170;
     assert.equal(chooseOrders(b, 62, players, false)[0].build, terrain === 1 ? 'b' : 'c');
@@ -277,11 +288,19 @@ test('take a crown when next-tick growth makes strict capture possible', () => {
   assert.deepEqual(chooseOrders(board, 7, players, false), []);
 });
 
-test('commit the first of two attacks only when a second force can finish', () => {
+test('defer an early maze siege, but require a safe second force when the front planner is active', (context) => {
   const board = createBoard(2, 7, 1);
   board.grid_type.fill(201);
   board.grid_type.set([101, 1, 1, 1, 51, 102, 51]);
   board.army_cnt.set([5, 1, 1, 1, 65, 80, 65]);
+  const previous = process.env.BOT3_MAZE;
+  context.after(() => {
+    if (previous === undefined) delete process.env.BOT3_MAZE;
+    else process.env.BOT3_MAZE = previous;
+  });
+  process.env.BOT3_MAZE = '1';
+  assert.ok(!chooseOrders(board, 75, players, false).some((op) => op.to === 5));
+  process.env.BOT3_MAZE = '0';
   const [attack] = chooseOrders(board, 75, players, false);
   assert.equal(attack.to, 5);
   assert.ok([4, 6].includes(attack.from));

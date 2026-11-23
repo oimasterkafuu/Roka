@@ -297,7 +297,12 @@ class ServerBotManager {
           throw new Error(`房间号无效（长度 1~15）。`);
         }
         // 旧记录缺少 template/allowTeam/allowFog/allowMultiLine：按旧默认值恢复。
-        const template = saved.template ?? DEFAULT_TEMPLATE;
+        const template =
+          saved.template === 'bot-2.0'
+            ? 'apex-bot'
+            : saved.template === 'bot-3.0'
+              ? 'relay-bot'
+              : (saved.template ?? DEFAULT_TEMPLATE);
         const allowTeam = saved.allowTeam === true;
         const allowFog = saved.allowFog === true;
         const allowMultiLine = saved.allowMultiLine === true;

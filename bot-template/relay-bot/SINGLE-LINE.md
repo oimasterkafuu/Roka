@@ -36,8 +36,8 @@ baseline_dir=$(mktemp -d)
 git archive b8558fa bot-template/relay-bot/strategy.js bot-template/relay-bot/planner.js | tar -x -C "$baseline_dir"
 export SEEDS=relay-front-holdout,relay-front-blind-2,relay-front-blind-3,relay-front-sealed-4,relay-front-audit-5,relay-published-check-6
 export MODES=000,100 TICKS=1000 OPPONENTS=anti,apex,v2
-RELAY_ENTRY="$baseline_dir/bot-template/relay-bot/strategy.js" node scripts/evaluate-relay.cjs > /tmp/relay-old.jsonl
-node scripts/evaluate-relay.cjs > /tmp/relay-current.jsonl
+RELAY_ENTRY="$baseline_dir/bot-template/relay-bot/strategy.js" node bot-template/relay-bot/training/evaluate.cjs > /tmp/relay-old.jsonl
+node bot-template/relay-bot/training/evaluate.cjs > /tmp/relay-current.jsonl
 ```
 
 四人 FFA 使用 `SEEDS=relay-front-holdout MAPS=random,maze MODES=000,100 OPPONENTS=anti+apex+v2`，轮换全部四个出生位。出局计负，超时时仍存活计未决。尚有多名选手存活时 `rank` 留空。输出中的 `seat` 从 0 开始，`executed` 和 `checkpoints` 均按座位顺序排列。各版本的配对结果见 [single-line-results.jsonl](single-line-results.jsonl)。

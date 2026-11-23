@@ -29,7 +29,10 @@ function config(options = {}) {
   const env = process.env;
   const profile = String(options.profile ?? env.APEX_EVAL_PROFILE ?? 'standard');
   if (!['standard', 'large'].includes(profile)) throw new Error('profile must be standard or large');
-  const defaultSizes = profile === 'large' ? '0.5,0.68,1' : '0.5';
+  // Official rooms use 0.34 at 1v1 normal size and 0.68 for large; larger
+  // synthetic boards are not reachable from the live lobby and only inflate
+  // the draw count.
+  const defaultSizes = profile === 'large' ? '0.34,0.68' : '0.34';
   const sizes = list(
     options.sizes ?? options.mapSize ?? env.APEX_EVAL_SIZES ?? env.APEX_EVAL_SIZE,
     defaultSizes,
@@ -42,8 +45,8 @@ function config(options = {}) {
     options.opponents ?? options.opponent ?? env.APEX_EVAL_OPPONENTS ?? env.APEX_EVAL_OPPONENT,
     'anti',
   );
-  if (!opponents.length || opponents.some((opponent) => !['anti', 'simple'].includes(opponent)))
-    throw new Error('opponents must be anti and/or simple');
+  if (!opponents.length || opponents.some((opponent) => !['anti', 'simple', 'apex'].includes(opponent)))
+    throw new Error('opponents must be anti, simple and/or apex');
   const fogOption = options.fog ?? env.APEX_EVAL_FOG ?? 'false';
   const fogs =
     fogOption === 'both'
@@ -449,7 +452,7 @@ function parseCli(args) {
 
 function cliHelp(defaults = {}) {
   const seedDefault = defaults.seeds ?? 8;
-  return `Usage: node bot-template/apex-bot/training/long-eval.cjs [options]
+  return `Usage: pnpm run eval:apex [options]
 
 Run deterministic map seeds against the real server engine in worker threads.
 All turn limits and results count server ticks (2 ticks = 1 displayed game turn).
@@ -462,9 +465,9 @@ CLI values override APEX_EVAL_* environment variables.
   --turns N          Maximum server ticks per match (default 600; APEX_EVAL_TURNS)
   --workers N        Worker count, 1..32 (default up to 8; APEX_EVAL_WORKERS)
   --modes CSV        random,maze,archipelago,mediterranean (APEX_EVAL_MODES)
-  --sizes CSV        Map size ratios, 0.2..3 (default 0.5; APEX_EVAL_SIZES)
-  --profile NAME     standard (0.5) or large (0.5,0.68,1) size suite
-  --opponents CSV    anti,simple (default anti; APEX_EVAL_OPPONENTS)
+  --sizes CSV        Map size ratios, 0.2..3 (default 0.34; APEX_EVAL_SIZES)
+  --profile NAME     standard (0.34) or large (0.34,0.68) size suite
+  --opponents CSV    anti,simple,apex (default anti; APEX_EVAL_OPPONENTS)
   --fog VALUE        false, true, or both (default false; APEX_EVAL_FOG)
   --seat VALUE       Apex seat: 0, 1, or both (default both; APEX_EVAL_SEAT=0|1)
   --trace N          Recent tick records per retained failure; 0 disables replay
@@ -477,7 +480,7 @@ CLI values override APEX_EVAL_* environment variables.
   -h, --help         Print this help and exit without starting workers
 
 Example:
-  node bot-template/apex-bot/training/long-eval.cjs --seeds 32 --workers 8 --opponents anti,simple --output /tmp/apex-eval.json
+  pnpm run eval:apex --seeds 32 --workers 8 --opponents anti,simple --output /tmp/apex-eval.json
 `;
 }
 

@@ -2,6 +2,7 @@
 const { parentPort } = require('node:worker_threads');
 const { runMatch, makeSimpleAdapter } = require('./engine.cjs');
 const { chooseAction: antiAction } = require('../../anti-human-bot/bot/policy.cjs');
+const { loadHistorical } = require('./historical.cjs');
 const { createController } = require('../bot/controller.cjs');
 
 function run(job) {
@@ -11,18 +12,19 @@ function run(job) {
   const policies = [null, null];
   const adapters = [];
   function apexPolicy(seat) {
-    const controller = createController(seat + 1);
+    const controller = createController(seat + 1, { mapMode: job.mode || 'random' });
     controllers[seat] = controller;
-    return (state) =>
-      controller.chooseBatch
-        ? controller.chooseBatch({ ...state, multiLine: job.multiLine === true })
-        : controller.choose(state);
+    return (state) => job.multiLine ? controller.chooseBatch({ ...state, multiLine: true }) : controller.choose(state);
   }
   policies[ownSeat] = apexPolicy(ownSeat);
   if (opponent === 'simple') {
     adapters.push(makeSimpleAdapter({ seat: 1 - ownSeat, decisionTimeoutMs: job.decisionTimeoutMs || 40 }));
   } else if (opponent === 'anti') {
     policies[1 - ownSeat] = (state) => antiAction(state);
+  } else if (opponent === 'apex') {
+    const { createController: createApexBaseline } = loadHistorical('apex', 'bot/controller.cjs');
+    const baseline = createApexBaseline(2 - ownSeat);
+    policies[1 - ownSeat] = (state) => job.multiLine ? baseline.chooseBatch({ ...state, multiLine: true }) : baseline.choose(state);
   } else {
     throw new Error(`unsupported opponent: ${opponent}`);
   }
@@ -55,6 +57,7 @@ function run(job) {
   result.seed = job.seed;
   result.mapSize = job.mapSize;
   result.fog = Boolean(job.fog);
+  result.multiLine = Boolean(job.multiLine);
   result.metrics = { own: apex, opponent: opponentMetric };
   if (result.telemetry) {
     result.telemetry = {

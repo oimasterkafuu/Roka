@@ -267,7 +267,7 @@ async function main() {
   await setSwitches(bot2Room, true);
 
   const yuelan = await startBot('yuelan', yuelanRoom, 'simple-strategy-bot');
-  const bot2 = await startBot('bot2_0', bot2Room, 'bot-2.0');
+  await startBot('bot2_0', bot2Room, 'apex-bot');
   await assertSwitchesRejected(yuelanRoom);
   await assertSwitchesRejected(bot2Room);
 
@@ -355,6 +355,8 @@ async function main() {
   assert.equal(saved.find((item) => item.username === 'bot2_0').allowMultiLine, false);
 
   await stopServer();
+  saved.find((item) => item.username === 'bot2_0').template = 'bot-2.0';
+  fs.writeFileSync(stateFile, JSON.stringify(saved));
   for (const socket of sockets) socket.disconnect();
   sockets.clear();
   latestRooms.clear();
@@ -372,6 +374,7 @@ async function main() {
   }
   assert.equal(restoredYuelan?.connected, true, 'yuelan must reconnect after restore');
   assert.equal(restoredBot2?.connected, true, 'bot2_0 must reconnect after restore');
+  assert.equal(restoredBot2.template, 'apex-bot', 'legacy bot state must restore into Apex');
   assert.equal(restoredYuelan.allowTeam, true);
   assert.equal(restoredYuelan.allowFog, true);
   assert.equal(restoredYuelan.allowMultiLine, true, 'edited multi_line permission must survive restart');

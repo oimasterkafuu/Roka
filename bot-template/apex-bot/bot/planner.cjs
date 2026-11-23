@@ -2,9 +2,35 @@
 
 const { makeBoard, connectedSet, distanceField, anchorCells, cutAnalysis } = require('./board.cjs');
 const { computePush, actionCoordinates, preview } = require('./rules.cjs');
+const { lastMileConfig, lastMileState, reseatRoot } = require('./lastmile.cjs');
+const { medPlanConfig, economyYields, crownRaceHold } = require('./medplan.cjs');
+const { mazeBlitzPlan } = require('./mazeblitz.cjs');
+const {
+  smallRaceConfig, smallRaceUpdate, smallRaceEconomyRelief, freshSmallRace,
+} = require('./crownrace.cjs');
+const {
+  snowballConfig, snowballEntry, snowballExit, snowballTurn, snowballTakesTick,
+  anchorScore, paintScore, captureScore, freshSnowball,
+} = require('./snowball.cjs');
 
-const ECON_GOAL = Number(process.env.APEX_ECON_GOAL || 6);
-const ECON_DEADLINE = Number(process.env.APEX_ECON_DEADLINE || 90);
+// Bot(2.0) 1v1 profile: the Apex defaults (6 / 90) over-invest in economy
+// before the decisive fight. 48 large-map seeds measured 16 -> 18 wins with
+// 10 / 45, so the template now defaults to the 1v1 profile; env still wins.
+const ECON_GOAL = Number(process.env.APEX_ECON_GOAL || 10);
+const ECON_DEADLINE = Number(process.env.APEX_ECON_DEADLINE || 45);
+const ECON_STOCK_GOAL = 6;
+const ECON_STOCK_DEADLINE = 90;
+// Random/maze 1v1 games measured better with the earlier, larger economy
+// window; archipelago/mediterranean regressed, so those keep the Apex stock
+// profile.  The map mode arrives with the room snapshot.  Set
+// APEX_ECON_MODE_GATE=0 to apply the tuned profile everywhere (A/B runs).
+function econProfile(m) {
+  const mode = String(m?.mapMode || 'random');
+  if (process.env.APEX_ECON_MODE_GATE === '0' || mode === 'random' || mode === 'maze') {
+    return { goal: ECON_GOAL, deadline: ECON_DEADLINE };
+  }
+  return { goal: ECON_STOCK_GOAL, deadline: ECON_STOCK_DEADLINE };
+}
 const FORCE_MARGIN = Number.isFinite(Number(process.env.APEX_FORCE_MARGIN))
   ? Math.max(0, Math.min(1, Number(process.env.APEX_FORCE_MARGIN))) : 0.12;
 const MULTI_CROWN_CAP = Number.isFinite(Number(process.env.APEX_MULTI_CROWN_CAP))
@@ -21,6 +47,43 @@ const CAMPAIGN_READINESS = Number.isFinite(Number(process.env.APEX_CAMPAIGN_READ
   ? Math.max(0, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_READINESS))) : 0;
 const CAMPAIGN_STRENGTH_DEFAULT = Number.isFinite(Number(process.env.APEX_CAMPAIGN_STRENGTH))
   ? Math.max(0.05, Math.min(0.8, Number(process.env.APEX_CAMPAIGN_STRENGTH))) : 0.25;
+// Flag and knob readers stay functions so unit tests can flip them in-process
+// (the evaluation harness only ever sets them before launching a worker).
+// Crown budget anchored to the ground actually held.  On the official 0.68 anti
+// pair the opponent's crown count is copied back at +2 forever
+// (`enemyCrowns + 2`, capped at 24-36), so the bot spends one hundred army per
+// crown, over and over, while owning barely a hundred cells.  Each of those
+// crowns is a hundred army that the crown campaign needed.  While land is
+// behind, production may therefore only grow with the land base (one crown per
+// `crownLandTiles()` cells); the phase ends the moment land reaches parity.
+// On by default: the flag exists so an A/B run can restore the old crown chase.
+function crownLandAnchorEnabled() {
+  return String(process.env.APEX_CROWN_LAND_ANCHOR ?? '1').trim() !== '0';
+}
+function crownLandTiles() {
+  const value = Number(process.env.APEX_CROWN_LAND_TILES);
+  return Number.isFinite(value) ? Math.max(4, Math.min(40, Math.floor(value))) : 12;
+}
+// The anchor releases once the land gap stops being structural, so the original
+// crown chase returns for boards where the empire is already comparable.
+function crownLandRatio() {
+  const value = Number(process.env.APEX_CROWN_LAND_RATIO);
+  return Number.isFinite(value) ? Math.max(0.3, Math.min(1.5, value)) : 1;
+}
+
+// The anchor is about an opponent that wins by painting ground, so it is scoped
+// to the open-paint modes.  On a maze the corridors already bound how much the
+// opponent can take, and on the mirrored crown race (Apex baseline) copying its
+// crown count is the correct response: applying the anchor there measured -2
+// wins for apex (maze 12 -> 11, mediterranean 9 -> 8) with no offsetting gain.
+// The mode arrives with the room snapshot; direct controller calls default to
+// random, matching econProfile.
+function crownLandAnchor(m, own, enemies) {
+  if (!crownLandAnchorEnabled()) return false;
+  const mode = String(m?.mapMode || 'random');
+  if (mode !== 'random' && mode !== 'archipelago') return false;
+  return own.length < enemies.length * crownLandRatio();
+}
 const BUILD_CLUSTER_SIZE = Number.isFinite(Number(process.env.APEX_BUILD_CLUSTER_SIZE))
   ? Math.max(2, Math.min(8, Number(process.env.APEX_BUILD_CLUSTER_SIZE))) : 4;
 const BUILD_COST = 50;
@@ -115,6 +178,75 @@ function pressure(b, at, omit = -1) {
   let value = 0;
   for (const j of b.neighbors(at)) if (j !== omit && b.enemy(j) && !b.isolated[j]) value = Math.max(value, b.army[j] - 1);
   return value;
+}
+
+// `pressure` only sees stacks that are already adjacent, so a column two ticks
+// out is invisible to every one-tick guard. Roka punishes exactly that gap: a
+// one-cell bridge left with a single soldier can be tapped by a stack it never
+// saw, and the whole delivered column becomes isolated and immobile. Build a
+// bounded multi-source arrival field instead. Sources are enemy stacks that can
+// still push, the walk is over passable cells, one step per tick, and `strength`
+// is the force that lands on the cell: every hop leaves one soldier behind and
+// has to beat the garrison of the cell it crosses, so a stack does not "walk
+// through" a friendly cell it could never capture. The field is cached per
+// board because the guards below run once per candidate action.
+const ETA_HORIZON = 2;
+const etaCache = new WeakMap();
+
+function enemyEta(b) {
+  const cached = etaCache.get(b);
+  if (cached) return cached;
+  const distance = new Int8Array(b.size).fill(-1);
+  const strength = new Float64Array(b.size);
+  let frontier = [];
+  for (let at = 0; at < b.size; at += 1) {
+    if (!b.enemy(at) || b.isolated[at] || !b.passable(at)) continue;
+    const army = Math.max(0, Number(b.army[at]) || 0);
+    if (army <= 1) continue;
+    distance[at] = 0;
+    strength[at] = army;
+    frontier.push(at);
+  }
+  // Level by level, so the strongest stack arriving at a cell wins every tie
+  // and the field stays deterministic (sources and frontier are index-ordered).
+  // A cell is recorded even when the arriving force is too small to take it:
+  // the guards compare that force against the garrison the move leaves behind,
+  // not against the garrison standing there now. Only a cell the stack can
+  // actually capture becomes a stepping stone, so it never walks through a
+  // strong friendly cell and invents a threat.
+  for (let step = 0; step < ETA_HORIZON && frontier.length; step += 1) {
+    const next = [];
+    const queued = new Set();
+    for (const at of frontier) {
+      const garrison = b.own(at) ? Math.max(0, Number(b.army[at]) || 0) : 0;
+      const send = strength[at] - garrison - 1;
+      if (send < 1) continue;
+      for (const j of b.neighbors(at)) {
+        if (!b.passable(j)) continue;
+        const held = b.own(j) ? Math.max(0, Number(b.army[j]) || 0) : 0;
+        if (distance[j] < 0) {
+          distance[j] = step + 1;
+          strength[j] = send;
+        } else if (distance[j] === step + 1 && strength[j] < send) {
+          strength[j] = send;
+        } else if (distance[j] !== step + 1) {
+          continue;
+        }
+        if (send > held && !queued.has(j)) { queued.add(j); next.push(j); }
+      }
+    }
+    frontier = next;
+  }
+  const result = { distance, strength };
+  etaCache.set(b, result);
+  return result;
+}
+
+// Beware: distance 1 of the arrival field is the pre-move neighbourhood, which
+// the pushed column may just have captured. Only the two-tick ring carries
+// information that `pressure` cannot already see on the resulting board.
+function etaArrival(eta, at) {
+  return at >= 0 && eta.distance[at] === 2 ? eta.strength[at] : 0;
 }
 
 function routeArrival(b, f, at) {
@@ -341,6 +473,27 @@ function latentReserveMove(b, profile) {
   }
   sources.sort((a, z) => z.score - a.score);
   return sources[0] ? { ...sources[0], branch: 'delayed-rush-rally' } : null;
+}
+
+// A saved home reserve is not a rush by itself: the opponent also has to be
+// able to land it.  Project the strongest force that can actually arrive at a
+// crown (`routeArrival` pays for every garrison the column has to cross on the
+// way) so the opening can tell a real rush from an army that is merely parked.
+const CROWN_WINDOW = 8;
+const CROWN_RESERVE_MARGIN = 12;
+
+function projectedArrival(b, crown, enemies, horizon) {
+  if (!Number.isInteger(crown) || crown < 0) return null;
+  const f = field(b, [crown]);
+  let worst = null;
+  for (const at of enemies) {
+    const distance = f.distance[at];
+    if (!Number.isFinite(distance) || distance > horizon) continue;
+    const { arrival } = routeArrival(b, f, at);
+    const force = Math.max(0, arrival);
+    if (!worst || force > worst.force) worst = { at, distance, force };
+  }
+  return worst;
 }
 
 function asPlayer(b, playerId) {
@@ -754,6 +907,35 @@ function supplyReservations(m) {
   return reserved;
 }
 
+// A cell that is the only path between an anchor and the army behind it must
+// keep a real garrison, otherwise the column it just supplied is cut for free.
+// One soldier above the strongest stack that can reach the cell is enough to
+// survive the tap that would otherwise strand the whole delivered column. Cells
+// that no enemy can reach inside the horizon keep the original single-soldier
+// tail: reserving a garrison on every interior cell of a long corridor would
+// halve each hop (only the coarse 0/1/2 push modes exist) and starve the very
+// campaigns this tree exists to serve.
+function bridgeGarrison(b, at) {
+  if (at < 0 || !b.own(at) || b.isolated[at]) return 1;
+  const cuts = cutAnalysis(b, b.playerId);
+  if (!cuts.points.has(at) || !(cuts.land[at] > 0)) return 1;
+  const threat = Math.max(pressure(b, at), etaArrival(enemyEta(b), at));
+  return threat > 0 ? threat + 2 : 1;
+}
+
+// Only the coarse push modes are available, so pick the first one that keeps
+// the required garrison home instead of the largest send that fits.
+function guardedTreeMove(b, from, to) {
+  const required = bridgeGarrison(b, from);
+  if (required <= 1) return safeMove(b, from, to, 'gather');
+  for (const mode of [1, 0, 2]) {
+    const action = safeMove(b, from, to, 'gather', [mode]);
+    if (!action) continue;
+    if (b.army[from] - computePush(b, from, to, mode) >= required) return action;
+  }
+  return null;
+}
+
 function advanceSupplyTree(b, m, reason, canEnter) {
   const state = m.delivery;
   // Invalidate the whole route when ownership or a safety constraint changes.
@@ -773,8 +955,12 @@ function advanceSupplyTree(b, m, reason, canEnter) {
     }
     const [from, to] = state.edges[0];
     if (!movable(b, from)) { state.edges.shift(); continue; }
-    const action = safeMove(b, from, to, 'gather');
-    if (!action || routeGuard(b, action).blocked) { m.delivery = null; return null; }
+    // A guarded bridge that cannot afford to donate must not be skipped:
+    // dropping the edge would make the remaining edge list non-contiguous and
+    // deliver around the bridge. Wait for the tributaries to top it up.
+    const action = guardedTreeMove(b, from, to);
+    if (!action) return null;
+    if (routeGuard(b, action).blocked) { m.delivery = null; return null; }
     state.pending = { army: b.army[from] };
     state.at = to;
     state.movedTurn = b.turn;
@@ -791,7 +977,10 @@ function advanceSupplyTree(b, m, reason, canEnter) {
 function treeGather(b, m, root, need, reason, canEnter, f, sources) {
   const trunk = sources[0].p;
   const nodes = new Set(trunk);
-  const spare = (at) => at === root ? 0 : Math.max(0, b.army[at] - Math.max(1, pressure(b, at)));
+  // Count only what a cell can actually give away. A cut cell that is inside an
+  // enemy's arrival horizon keeps its garrison, so promising that army to the
+  // delivery would over-fund the tree and drain the bridge it needs.
+  const spare = (at) => at === root ? 0 : Math.max(0, b.army[at] - Math.max(1, bridgeGarrison(b, at)));
   let funds = trunk.reduce((sum, at) => sum + spare(at), 0);
   const deficit = need - b.army[root];
   let branches = 0;
@@ -1381,7 +1570,8 @@ function mazeEconomyGoal(b, own, enemies) {
 // Long travel is an investment window. Use only nearby rear troops, with a
 // separate delivery cursor, so construction cannot reverse a military convoy.
 function sustainEconomy(b, m, own, ed, enemies) {
-  if (b.turn < ECON_DEADLINE) return null;
+  const econ = econProfile(m);
+  if (b.turn < econ.deadline) return null;
   const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown');
   if (!enemyCrowns.length) return null;
   if (constructionThreat(b, own, enemies)) return null;
@@ -1392,7 +1582,25 @@ function sustainEconomy(b, m, own, ed, enemies) {
       : own.reduce((best, at) => (b.army[at] > b.army[best] ? at : best), own[0]);
   const distance = cf.distance[head];
   // Do not stop a breach already within striking distance of the enemy core.
-  if (!Number.isFinite(distance) || distance < 24) {
+  // `APEX_MED_PLAN=1` rescales that reach on mediterranean rooms: the 24-cell
+  // large-map radius is longer than the ring those rooms are built from, so it
+  // held permanently and froze the crown economy from tick ~500 (7 crowns
+  // against 21 - see bot/medplan.cjs).  With the layer on, the yield boundary is
+  // the last-mile approach distance, i.e. economy stops exactly when a column
+  // starts trading blows on its crown.  Flag off: unchanged 24 for every map.
+  const economy = economyYields(
+    { mode: String(m?.mapMode || ''), size: b.size, distance },
+    medPlanConfig(),
+  );
+  // Small-map crown race (bot/crownrace.cjs).  A 0.34 room (221-255 cells) is
+  // smaller end to end than the 24-cell large-map radius, so this project
+  // yielded on every tick there and the rear crown economy never ran: land and
+  // crowns froze while the opponent painted.  While the race phase owns the
+  // budget the yield boundary is the last-mile reach, i.e. economy stops only
+  // when a column really is about to trade blows on its crown.  Flag off
+  // leaves `smallRaceEconomyRelief` false and this behaviour untouched.
+  const raceRelief = smallRaceEconomyRelief(m?.smallRace, distance, smallRaceConfig());
+  if (economy.yields && !raceRelief) {
     // A rear project selected before the spearhead arrived must not continue
     // consuming turns after the campaign enters its finishing corridor.
     // Abandon only the remote project; a safe frontline project remains valid
@@ -1407,7 +1615,10 @@ function sustainEconomy(b, m, own, ed, enemies) {
   }
   const crowns = own.filter((at) => b.kind(at) === 'crown').length;
   const infrastructureCap = b.size >= 1600 ? 36 : b.size >= 800 ? 28 : 24;
-  const goal = Math.min(infrastructureCap, Math.max(ECON_GOAL, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
+  let goal = Math.min(infrastructureCap, Math.max(econ.goal, enemyCrowns.length + 2, Math.ceil(own.length / 8)));
+  if (crownLandAnchor(m, own, enemies)) {
+    goal = Math.min(goal, Math.max(econ.goal, Math.floor(own.length / crownLandTiles())));
+  }
   const state = m.rearEconomy || (m.rearEconomy = { site: -1, delivery: null, spent: 0, nextWindow: 0 });
   const mazeBoard = m.maze ?? isMazeBoard(b);
   if (b.turn < state.nextWindow) return null;
@@ -1642,6 +1853,187 @@ function rearExpansion(b, m, own, ed, enemies) {
   return action ? { ...action, branch: 'rear-expansion' } : null;
 }
 
+// City/economy snowball phase for large non-maze rooms (see bot/snowball.cjs).
+// It owns a bounded share of the ticks that would otherwise be spent marching a
+// 40+ cell convoy: first forward city anchors (cheap crown sites that also keep
+// the surrounding land connected), then land around those anchors.  It never
+// outranks defence, the kill layer or the last mile, and it is latched off for
+// the rest of the game once land parity, its budgets or the army that pays for
+// it are gone.
+function snowballAnchorSite(b, m, own, enemies, state, config, reserved) {
+  const canEnter = (at) => b.own(at) && !b.isolated[at] && !reserved.has(at);
+  const usable = (at) => Number.isInteger(at) && at >= 0 && at < b.size &&
+    b.own(at) && !b.isolated[at] && (b.kind(at) === 'plain' || b.kind(at) === 'city');
+  if (state.site >= 0 && (!usable(state.site) || reserved.has(state.site))) state.site = -1;
+  if (state.site >= 0) return state.site;
+  const ed = field(b, enemies);
+  const homeField = Number.isInteger(m.home)
+    ? field(b, [m.home], (at) => b.own(at) && !b.isolated[at]) : null;
+  const frontField = m.campaign && Number.isInteger(m.campaign.at) && b.own(m.campaign.at)
+    ? field(b, [m.campaign.at], (at) => b.own(at) && !b.isolated[at]) : null;
+  let best = -1;
+  let bestScore = -Infinity;
+  for (const at of own) {
+    if (reserved.has(at) || !usable(at)) continue;
+    if (!(ed.distance[at] >= config.minEnemyDistance)) continue;
+    const kind = b.kind(at);
+    const need = BUILD_COST + 1;
+    // Bounded surplus: only funds that already sit within four steps of the
+    // site are offered, so an anchor can never drain the marching column, and
+    // the pool has to be genuinely spare (`anchorSurplus`) rather than exactly
+    // the build price - in a losing game the land step is the better buyer.
+    let funds = b.army[at];
+    if (funds < need) {
+      const local = field(b, [at], canEnter);
+      for (const cell of own) {
+        if (cell === at) continue;
+        if (!Number.isFinite(local.distance[cell]) || local.distance[cell] > 4) continue;
+        funds += Math.max(0, b.army[cell] - Math.max(1, pressure(b, cell)));
+      }
+    }
+    if (funds < Math.max(need, config.anchorSurplus)) continue;
+    const score = anchorScore({
+      kind,
+      army: b.army[at],
+      enemyDistance: ed.distance[at],
+      frontDistance: frontField ? frontField.distance[at] : Infinity,
+      homeDistance: homeField ? homeField.distance[at] : Infinity,
+      pressure: pressure(b, at),
+      funds,
+      need,
+    }, config);
+    if (score === null) continue;
+    if (score > bestScore) {
+      bestScore = score;
+      best = at;
+    }
+  }
+  state.site = best;
+  return best;
+}
+
+function snowballPaint(b, m, own, enemies, state, config, reserved) {
+  if (state.paints >= config.paintBudget) return null;
+  const anchors = own.filter((at) => b.kind(at) === 'city' || b.kind(at) === 'crown');
+  if (!anchors.length) return null;
+  // Distance measured through our own land and empty land, so the neutral
+  // frontier ring next to the anchors is reachable instead of infinite.
+  const anchorField = field(b, anchors, (at) =>
+    b.passable(at) && (b.own(at) || b.owner(at) === 0));
+  const ed = field(b, enemies);
+  const options = [];
+  for (const from of own) {
+    if (reserved.has(from) || !movable(b, from)) continue;
+    for (const to of b.neighbors(from)) {
+      if (!b.passable(to) || b.kind(to) === 'swamp') continue;
+      const owner = b.owner(to);
+      if (owner !== 0 && !b.enemy(to)) continue;
+      if (owner === 0) {
+        const score = paintScore({
+          owner,
+          kind: b.kind(to),
+          isolated: Boolean(b.isolated[to]),
+          enemyDistance: ed.distance[to],
+          anchorDistance: anchorField.distance[to],
+          room: b.neighbors(to).filter((next) => b.passable(next) && b.owner(next) === 0).length,
+          enemyNeighbours: b.neighbors(to).filter((next) => b.enemy(next) && !b.isolated[next]).length,
+          army: b.army[from],
+        }, config);
+        if (score === null) continue;
+        options.push({ from, to, score });
+        continue;
+      }
+      // Thin enemy cells are the other half of the land race: taking them
+      // removes the opponent's compounding income instead of only adding ours.
+      const score = captureScore({
+        kind: b.kind(to),
+        garrison: b.army[to],
+        army: b.army[from],
+      }, config);
+      if (score === null) continue;
+      options.push({ from, to, score: score + 40 });
+    }
+  }
+  if (!options.length) return null;
+  options.sort((a, z) => z.score - a.score);
+  // Connectivity and cut checks are the expensive part; only the strongest few
+  // candidates are verified, which keeps the decision inside its budget.
+  for (const option of options.slice(0, 8)) {
+    const action = safeMove(b, option.from, option.to, 'gather');
+    if (!action || routeGuard(b, action).blocked) continue;
+    state.paints += 1;
+    return { action, branch: 'snowball-paint' };
+  }
+  return null;
+}
+
+function citySnowball(b, m, own, enemies, totals, config = snowballConfig()) {
+  if (!config.enabled) return null;
+  const state0 = m.snowball;
+  if (state0 && state0.phase === 'done') return null;
+  const ownArmy = Number(totals?.own) || 0;
+  const enemyArmy = Number(totals?.enemy) || 0;
+  const maze = m.maze ?? isMazeBoard(b);
+  const base = {
+    turn: b.turn, size: b.size, maze, mode: String(m.mapMode || ''),
+    ownArmy, enemyArmy, ownLand: own.length, enemyLand: enemies.length,
+  };
+  let state = state0;
+  if (!state) {
+    if (!snowballEntry(base, config)) return null;
+    state = m.snowball = { ...freshSnowball(), startedTurn: b.turn };
+  } else {
+    const stop = snowballExit({
+      ...base, startedTurn: state.startedTurn, anchors: state.anchors, paints: state.paints,
+    }, config);
+    if (stop) {
+      state.phase = 'done';
+      state.reason = stop;
+      return null;
+    }
+  }
+  // A column inside the last mile must never be paused for economy work.
+  if (!snowballTakesTick(totals?.campaign ?? null, config)) return null;
+  if (!snowballTurn(b.turn, config)) return null;
+  const reserved = supplyReservations(m);
+  if (state.phase === 'anchor') {
+    const site = snowballAnchorSite(b, m, own, enemies, state, config, reserved);
+    if (site >= 0) {
+      const kind = b.kind(site);
+      const need = BUILD_COST + 1;
+      if (b.army[site] >= need) {
+        if (kind === 'city') {
+          state.anchors += 1;
+          state.site = -1;
+          // The anchor step is deliberately short: two forward crowns pay back
+          // in a hundred ticks, but every further crown costs army that the
+          // land step is a better buyer for.
+          if (state.anchors >= config.anchors) state.phase = 'paint';
+          return { action: build(b, site, 'c'), branch: 'snowball-upgrade' };
+        }
+        return { action: build(b, site, 'b'), branch: 'snowball-foundation' };
+      }
+      const canEnter = (at) => b.own(at) && !b.isolated[at] && !reserved.has(at);
+      const funding = gather(b, state, site, need, 'snowball-fund', canEnter, 4);
+      if (funding) return funding;
+      state.site = -1;
+      state.misses += 1;
+      return null;
+    }
+    // No forward site can be paid from local surplus: use the surplus on land
+    // instead of falling back to another rear crown.
+    state.misses += 1;
+    state.phase = 'paint';
+  }
+  if (state.phase === 'paint') {
+    const decision = snowballPaint(b, m, own, enemies, state, config, reserved);
+    if (decision) return decision;
+    state.phase = 'done';
+    state.reason = state.reason || 'exhausted';
+  }
+  return null;
+}
+
 function continuingIsolatedAssault(b, m) {
   const campaign = m.campaign;
   const at = campaign?.at;
@@ -1735,6 +2127,38 @@ function chooseCampaign(b,m,own) {
         campaign.recoveryRebases = (campaign.recoveryRebases || 0) + 1;
         m.delivery = null;
         return chooseCampaign(b, m, own);
+      }
+    }
+    // Last-mile reseat (APEX_LAST_MILE=1): a column that died or was cut
+    // inside the last mile must not send the campaign back to distance 40+ and
+    // pay for the whole approach again. Keep the same crown and resume from the
+    // best self-supporting forward supply cell instead.
+    const reseatCfg = lastMileConfig();
+    if (reseatCfg.enabled) {
+      const lostCampaign = m.campaign;
+      const ledger = lostCampaign?.lastMile;
+      const crown = Number.isInteger(lostCampaign?.crown) ? lostCampaign.crown : -1;
+      if (crown >= 0 && b.enemy(crown) && b.kind(crown) === 'crown' &&
+          Number.isFinite(ledger?.bestDist) && ledger.bestDist <= reseatCfg.range + 2) {
+        const reseatField = field(b, [crown]);
+        const at = reseatRoot(b, own, reseatField.distance, ledger.bestDist, reseatCfg);
+        if (at >= 0 && at !== lostAt) {
+          ledger.reseats = (ledger.reseats || 0) + 1;
+          m.campaign = {
+            ...lostCampaign,
+            at,
+            phase: 'gather',
+            started: b.turn,
+            lastAt: at,
+            lastProgress: b.turn,
+            deliveryBestDistance: Infinity,
+            bestCrownDistance: Math.min(ledger.bestDist, reseatField.distance[at]),
+            recoveryRebases: (lostCampaign.recoveryRebases || 0) + 1,
+            lastMile: { ...ledger, committed: false, prevArmy: b.army[at], lastProgress: b.turn },
+          };
+          m.delivery = null;
+          return chooseCampaign(b, m, own);
+        }
       }
     }
     // Keep a successful breach together.  When a crown is captured the old
@@ -1919,7 +2343,57 @@ function chooseCampaign(b,m,own) {
     );
   const forcedMazeBreak = mazeBoard && musterTurns >= 36 &&
     b.army[c.at] >= Math.max(24, firstContactNeed);
-  const breakthroughReady = b.army[c.at] >= breakthroughThreshold && musterTurns >= 2 || forcedMazeBreak;
+  let breakthroughReady = b.army[c.at] >= breakthroughThreshold && musterTurns >= 2 || forcedMazeBreak;
+  // Last-mile ledger (APEX_LAST_MILE=1, on by default; =0 disables).  In its default `reseat`
+  // mode it only records distance/army progress for the forward-recovery branch
+  // below and leaves this decision to the existing planner.  The optional
+  // `full` mode also owns the attack-phase decision here: stage until the next
+  // hostile cell is payable, commit the push, and reroute a stalled corridor.
+  // Both staging profiles measured negative on the official profile, so they
+  // stay behind the flag and out of the default behaviour.
+  const lastMileCfg = lastMileConfig();
+  const lastMile = lastMileState({
+    board: b,
+    campaign: c,
+    dist: f.distance[c.at],
+    army: b.army[c.at],
+    firstNeed: firstContactNeed,
+    pathNeed: resistance,
+    cap: urgencyCap,
+    config: lastMileCfg,
+  });
+  if (lastMile.state === 'reroute') {
+    // Staging stopped paying: the corridor cannot be walked at this strength.
+    // Release the crown to the selector for a cooldown instead of holding the
+    // same stack in the last mile until the campaign timeout fires.
+    c.lastMile.reroutes = (c.lastMile.reroutes || 0) + 1;
+    const blockCooldown = mazeBoard ? Math.max(48, CAMPAIGN_BLOCK_COOLDOWN * 3) : CAMPAIGN_BLOCK_COOLDOWN;
+    m.blocked = { crown: c.crown, until: b.turn + blockCooldown };
+    m.campaign = null;
+    m.delivery = null;
+    return chooseCampaign(b, m, own);
+  }
+  if (lastMile.state === 'commit') {
+    // The first hostile cell is payable: start (or keep) the push. The ledger
+    // keeps the commitment across hops so a thinner column does not fall back
+    // into a fresh full muster in the middle of the last mile.
+    breakthroughReady = true;
+    c.phase = 'attack';
+  } else if (lastMile.state === 'stage') {
+    // The next hostile cell is not payable yet: gather only up to the bounded
+    // first-contact requirement, and never march a partial push even if an
+    // earlier tick already flipped the campaign into `attack`.
+    breakthroughReady = false;
+    c.phase = 'gather';
+  }
+  // Inside the last mile the gather target is the bounded first-contact
+  // requirement, not the generic (120 floor, 65%-of-desired) threshold that
+  // made the column commit a half stack and lose it on the second hostile cell.
+  // Outside the last mile the ledger must not touch the muster strength: a
+  // first-contact target applied to a 40-cell approach starves every convoy.
+  const desiredEff = lastMile.enabled && lastMile.state !== 'approach'
+    ? Math.min(desired, lastMile.target)
+    : desired;
   if (c.phase === 'gather') {
     c.musterTurns = musterTurns + 1;
     if (breakthroughReady) {
@@ -1929,7 +2403,7 @@ function chooseCampaign(b,m,own) {
       c.musterTurns = 0;
     }
   }
-  if(c.phase==='gather'&&b.army[c.at]<desired) {
+  if(c.phase==='gather'&&b.army[c.at]<desiredEff) {
     // A narrow campaign that has already reached the final approach should
     // change the enemy graph before paying for another long convoy.  When the
     // next head move is unavailable, a strategic cut of the opponent's
@@ -1940,7 +2414,7 @@ function chooseCampaign(b,m,own) {
       const escapeCut = strategicCut(b, own) || frontierStrike(b, own);
       if (escapeCut) return { ...escapeCut, branch: 'campaign-cut' };
     }
-    const delivery = gather(b, m, c.at, desired, 'muster');
+    const delivery = gather(b, m, c.at, desiredEff, 'muster');
     if(delivery)return delivery;
     // A severed spearhead can remain technically connected while no source
     // can safely reach it.  Waiting for the normal campaign timeout here
@@ -1974,10 +2448,21 @@ function chooseCampaign(b,m,own) {
   // the opponent cuts it immediately and the controller keeps reselecting the
   // same corridor.  Keep gathering (or let the recovery path rebase it) until
   // the root has a meaningful column.
-  if (c.phase === 'gather' && b.army[c.at] < Math.min(desired, 18)) return null;
+  if (c.phase === 'gather' && b.army[c.at] < Math.min(desiredEff, 18)) return null;
+  // Inside the last mile, never march a column that cannot even take the
+  // first hostile cell: hold it at the forward supply cell (the gather above
+  // already tried to reinforce it) instead of feeding a partial push.
+  if (lastMile.state === 'stage' && firstHostile >= 0 && b.army[c.at] < firstContactNeed) {
+    return { action: null, branch: 'lastmile-stage' };
+  }
   c.phase='attack';
   const to=p[1];
-  const a=safeMove(b,c.at,to,'campaign');
+  // A committed last mile may land a column below the generic 18-unit
+  // arrival floor: the ledger already proved the next hostile cell is
+  // payable, and requiring a full column per hop is what stalled (or
+  // re-mustered) a push that was one cell from the crown. `safeMove` still
+  // applies its own pressure/stranding guards for every mode.
+  const a=safeMove(b,c.at,to, lastMile.state === 'commit' ? 'lastmile' : 'campaign');
   if(a){
     const guard = routeGuard(b, a);
     if (guard.anchor >= 0) {
@@ -2005,7 +2490,7 @@ function chooseCampaign(b,m,own) {
     const escapeCut = strategicCut(b, own) || frontierStrike(b, own);
     if (escapeCut) return { ...escapeCut, branch: 'campaign-cut' };
   }
-  const target = Math.max(desired, b.army[to] * 1.3 + 30);
+  const target = Math.max(desiredEff, b.army[to] * 1.3 + 30);
   const delivery = gather(b, m, c.at, target, 'muster');
   if(delivery)return delivery;
   if (mazeBoard && Number.isFinite(c.bestCrownDistance) && c.bestCrownDistance > 10 && c.bestCrownDistance <= 18) {
@@ -2067,9 +2552,65 @@ function recover(b, m, own) {
   return reposition(b, own) || emergencyProbe(b, own);
 }
 
-function plan(b,m) {
+// Small-map crown-race phase (APEX_SMALL_CROWN_RACE, on by default; set =0 to disable; see
+// bot/crownrace.cjs).  One assessment per planning tick, before any campaign
+// can claim the action budget, so the phase can outrank the push instead of
+// racing it.  The board work here is bounded: the size gate rejects every board
+// >= 800 before any army/land accounting, and the campaign-distance probe stays
+// lazy.
+function smallRaceStep(b, m, own, enemies) {
+  const config = smallRaceConfig();
+  if (!config.enabled) return { active: false, config, state: null };
+  if (!(b.size < config.maxBoard)) return { active: false, config, state: null };
+  const crowns = (list) => {
+    let count = 0;
+    for (const at of list) if (b.kind(at) === 'crown') count += 1;
+    return count;
+  };
+  const enemyCrowns = crowns(enemies);
+  if (!enemyCrowns) return { active: false, config, state: null };
+  const state = m.smallRace || (m.smallRace = freshSmallRace());
+  const campaignDistance = () => {
+    if (!m.campaign || !Number.isInteger(m.campaign.crown) || !Number.isInteger(m.campaign.at) ||
+      !b.own(m.campaign.at)) return Infinity;
+    return field(b, [m.campaign.crown]).distance[m.campaign.at];
+  };
+  const decision = smallRaceUpdate(state, {
+    turn: b.turn,
+    size: b.size,
+    maze: m.maze ?? isMazeBoard(b),
+    ownCrowns: crowns(own),
+    enemyCrowns,
+    ownLand: own.length,
+    enemyLand: enemies.length,
+    ownArmy: own.reduce((sum, at) => sum + b.army[at], 0),
+    enemyArmy: enemies.reduce((sum, at) => sum + b.army[at], 0),
+    campaignDistance,
+  }, config);
+  return { ...decision, config, state };
+}
+
+// Land is the second income term on a compact board (+1 army per 50 ticks per
+// cell) but every generic expansion layer (forward/broad/rear) is size-gated to
+// >= 800, so mid-game land on a 0.34 room never grew: the 0.34 traces show our
+// land frozen at 25-40 cells from tick 40 while the opponent painted 60-160.
+// During the race phase spend the budget on safe neutral cells (>= reach from
+// any enemy cell) until land parity, instead of on the withheld attacks.
+function smallRaceExpansion(b, m, own, ed, reach, enemyLand) {
+  if (own.length >= enemyLand) return null;
+  const reserved = supplyReservations(m);
+  const safe = own.filter((at) => !reserved.has(at) && ed.distance[at] >= reach);
+  if (safe.length < 2) return null;
+  const action = opening(b, m, safe, ed);
+  if (!action) return null;
+  const branch = action.branch === 'opening-route' ? 'small-race-route' : 'small-race-paint';
+  return { ...action, branch };
+}
+
+function plan(b,m,deadline) {
   const own=[]; const enemies=[];
   let campaignPaused = false;
+  let snowballDecision = null;
   for(let i=0;i<b.size;i++){if(b.own(i)&&!b.isolated[i])own.push(i);if(b.enemy(i)&&!b.isolated[i])enemies.push(i);}
   if(!Number.isInteger(m.home)||!b.own(m.home))m.home=own.find(i=>b.kind(i)==='crown');
   if(!own.length)return {action:null,branch:'idle'};
@@ -2081,18 +2622,43 @@ function plan(b,m) {
   const explore = !fogged || b.turn < 120 || own.length < 40 || (fogged && b.turn % 5 === 0);
   const ed=field(b,enemies);
   const rushProfile = earlyRushProfile(b, own, enemies);
+  // A saved home reserve is not a rush by itself: the opponent also has to be
+  // able to land it.  The composition test kept firing on slow opponents that
+  // hoard an army at home and paint the map, and the resulting hold stole the
+  // action budget on alternate ticks, so `cluster-fund` never reached fifty
+  // units: those games end with zero cities, land frozen at ~25 cells while the
+  // opponent paints ninety.  Require a projected arrival that beats the local
+  // guard before paying for the hold.  Scoped below the existing large-map
+  // threshold so 0.68+ behaviour is untouched, and env-gated for ablation.
+  const openingSmall = process.env.APEX_OPENING_SMALL !== '0';
+  const rushArrival = openingSmall && b.size < 800 && rushProfile
+    ? projectedArrival(b, rushProfile.crown, enemies, rushProfile.distance || CROWN_WINDOW)
+    : null;
+  // The tower cell alone understates the defence: a pooled army one step away
+  // still holds the crown, so compare against the connected local guard too.
+  const rushGuard = rushArrival
+    ? Math.max(Number(b.army[rushProfile.crown]) || 0, localGuard(b, rushProfile.crown))
+    : 0;
+  const rushLethal = !rushArrival || rushArrival.force >= rushGuard + CROWN_RESERVE_MARGIN;
   const mazeBoard = m.maze ?? isMazeBoard(b);
-  const mazeGoal = mazeBoard ? mazeEconomyGoal(b, own, enemies) : ECON_GOAL;
+  const econ = econProfile(m);
+  const mazeGoal = mazeBoard ? mazeEconomyGoal(b, own, enemies) : econ.goal;
   // Do not let a harmlessly distant reserve freeze the whole economy once
   // the sole crown already has enough local guard.  The hold specifically
   // covers the post-build exposure window: fifty units spent on a nearby
   // site plus the travel margin of the saved home column.
   const immediateRushHold = rushProfile && !rushProfile.maritime && b.turn < 42 && rushProfile.homeReserve >= 150 &&
     b.army[rushProfile.crown] < rushCrownFloor(rushProfile);
-  const rushBuildHold = rushProfile && (immediateRushHold ||
+  const rushBuildHold = rushProfile && rushLethal && (immediateRushHold ||
     (!rushProfile.maritime && (rushProfile.maze || rushProfile.distance <= 24) &&
       b.turn >= 42 && rushProfile.homeReserve >= 80 &&
       b.army[rushProfile.crown] < rushCrownFloor(rushProfile)));
+  // Small-map crown-race phase (on by default; =0 disables).  On a
+  // compact room the race is crowns plus painted land; when the opponent
+  // out-builds us and our attacks stop converting, a bounded economy window
+  // outranks the campaign instead of feeding it (see bot/crownrace.cjs).
+  const smallRace = smallRaceStep(b, m, own, enemies);
+  if (smallRace.active) campaignPaused = true;
   // On large maps a first campaign can monopolize the action budget while
   // the opponent paints several hundred cells. Pause only a gathering
   // campaign when the territory gap is structural; an already marching
@@ -2117,6 +2683,10 @@ function plan(b,m) {
       m.musterWaitTurns = 0;
     }
   }
+  // Optional per-decision budget.  Bail out at a phase boundary with no
+  // action so the controller can emit a cheap legal fallback instead of
+  // overrunning the next tick.  Without a deadline this is a no-op.
+  if (deadline && deadline.check()) return { action: null, branch: 'deadline' };
   if (b.multiLine) {
     const immediate = tactical(b, own);
     if (immediate?.branch === 'crown') return immediate;
@@ -2131,6 +2701,12 @@ function plan(b,m) {
   if (anchorGuard) return anchorGuard;
   const tactic=tactical(b,own);
   if(tactic?.branch==='crown')return tactic;
+  // Maze blitz (APEX_MAZE_BLITZ=1, maze rooms only, default off): a dedicated
+  // no-build burst opening plus one concentrated super-wave.  It returns null
+  // immediately unless the flag is on, so every other room keeps the default
+  // planner byte-for-byte.
+  const blitz = mazeBlitzPlan(b, m, own, enemies, BLITZ_HELPERS);
+  if (blitz) return blitz;
   // Before an opponent is visible, reserve a small deterministic share of
   // the action budget for scouting. This keeps fog games from becoming two
   // isolated local economies that never discover a crown to attack.
@@ -2143,6 +2719,33 @@ function plan(b,m) {
   // every tick; a harmless nearby pressure signal could therefore steal the
   // action budget, reset the delivery cursor, and make the bot collect the
   // same route forever without ever reaching the first hostile cell.
+  //
+  // Mediterranean crown-race hold (APEX_MED_PLAN, on by default): on a ring
+  // room, income is 1 army/tick per crown and a column that trades one-for-one
+  // wins nothing, so the crown budget the economy is chasing (`enemyCrowns + 2`)
+  // owns the action budget until it is actually met.  Defence, the kill strike
+  // and the last mile all run above this gate.
+  const medPlan = medPlanConfig();
+  if (medPlan.enabled && !campaignPaused) {
+    const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+    if (enemyCrowns) {
+      const campaignAt = m.campaign && Number.isInteger(m.campaign.crown) &&
+        Number.isInteger(m.campaign.at) && b.own(m.campaign.at) ? m.campaign : null;
+      // Live campaign distance: the stored one only refreshes inside
+      // chooseCampaign, which this gate is about to skip.  Built lazily so the
+      // board-wide field is only paid for when the hold can actually fire.
+      const campaignDistance = () => (campaignAt
+        ? field(b, [campaignAt.crown]).distance[campaignAt.at] : Infinity);
+      const held = crownRaceHold({
+        mode: String(m.mapMode || ''), size: b.size, maze: mazeBoard, turn: b.turn,
+        ownCrowns: own.filter((at) => b.kind(at) === 'crown').length,
+        enemyCrowns, campaignDistance,
+        ownArmy: own.reduce((sum, at) => sum + b.army[at], 0),
+        enemyArmy: enemies.reduce((sum, at) => sum + b.army[at], 0),
+      }, medPlan);
+      if (held) campaignPaused = true;
+    }
+  }
   if (m.campaign && Number.isInteger(m.campaign.at) && b.own(m.campaign.at) && !b.isolated[m.campaign.at]) {
     const campaign = chooseCampaign(b, m, own);
     if (campaign?.action) {
@@ -2165,15 +2768,45 @@ function plan(b,m) {
         b.turn % economyCadence === 0;
       const allowEconomyWindow = economyWindow;
       const latentCrownMove = rushBuildHold && rushOutwardMove(b, campaign.action, rushProfile);
-      if (!campaignPaused && !allowEconomyWindow && !latentCrownMove) return campaign;
+      if (!campaignPaused && !allowEconomyWindow && !latentCrownMove) {
+        // A long march is the snowball phase's only budget source. When it owns
+        // this tick the campaign is held here; the phase action is returned
+        // below, after the defence pass, so nothing defensive is displaced.
+        snowballDecision = citySnowball(b, m, own, enemies,
+          { own: ownTotal, enemy: enemyTotal, campaign: m.campaign });
+        if (!snowballDecision) return campaign;
+      }
       campaignPaused = true;
     }
   }
   const ownTotal = own.reduce((sum, at) => sum + b.army[at], 0);
   const enemyTotal = enemies.reduce((sum, at) => sum + b.army[at], 0);
   const enemyCrowns = enemies.filter((at) => b.kind(at) === 'crown').length;
+  if (deadline && deadline.check()) return { action: null, branch: 'deadline' };
   const defend=defense(b,m,own);
   if(defend)return defend;
+  // Small-map crown race: crown construction first, then safe land, then the
+  // normal branches below with the low-value attacks withheld.  Defence, the
+  // kill strike and the tactical crown finish all run above this point.
+  if (smallRace.active) {
+    const raceGoal = Math.min(24,
+      Math.max(mazeGoal, enemyCrowns + smallRace.config.crownLead, Math.ceil(own.length / 8)));
+    const raceEconomy = sustainEconomy(b, m, own, ed, enemies) || economy(b, m, own, ed, raceGoal);
+    if (raceEconomy) return raceEconomy;
+    const paint = smallRaceExpansion(b, m, own, ed, smallRace.config.reach, enemies.length);
+    if (paint) return paint;
+  }
+  if (!snowballDecision) {
+    // No campaign owns the budget this tick (muster wait, maze hold or a reset),
+    // so the phase may use the window directly instead of idling.
+    const campaignFree = !(m.campaign && Number.isInteger(m.campaign.at) &&
+      b.own(m.campaign.at) && !b.isolated[m.campaign.at]);
+    if (campaignFree) {
+      snowballDecision = citySnowball(b, m, own, enemies,
+        { own: ownTotal, enemy: enemyTotal, campaign: m.campaign });
+    }
+  }
+  if (snowballDecision) return snowballDecision;
   if (rushBuildHold) {
     const guard = delayedRushGuard(b, m, own, enemies, rushProfile);
     if (guard) return guard;
@@ -2220,9 +2853,12 @@ function plan(b,m) {
   }
   const cutGuard = cutDefense(b, m, own);
   if (cutGuard) return cutGuard;
-  const cut = strategicCut(b, own);
+  // While the race phase owns the budget, attacks that trade one-for-one are
+  // withheld: they feed the opponent's attrition instead of the crown economy.
+  const attackBudget = !smallRace.active;
+  const cut = attackBudget ? strategicCut(b, own) : null;
   if (cut && (!m.campaign || cut.score > 250)) return cut;
-  const strike=frontierStrike(b,own);
+  const strike = attackBudget ? frontierStrike(b, own) : null;
   // Once a campaign exists, its rally corridor owns the action budget.  A
   // tempting side capture can otherwise move the very stack being assembled
   // and leave the controller oscillating between two fronts.  Local strikes
@@ -2253,7 +2889,7 @@ function plan(b,m) {
   // has turned into infrastructure.  Start the prepared strike immediately;
   // postponing it behind another economy cycle gives the opponent a free
   // window to multiply its core.
-  if (!rushBuildHold && b.turn < ECON_DEADLINE &&
+  if (!rushBuildHold && b.turn < econ.deadline &&
       (!earlyStrike || mazeBoard || process.env.APEX_EARLY_MAZE === '0')) {
     const invest=economy(b,m,own,ed,mazeGoal);
     if(invest)return invest;
@@ -2279,6 +2915,7 @@ function plan(b,m) {
     return { action: null, branch: 'muster-wait' };
   }
   m.musterWaitTurns = 0;
+  if (deadline && deadline.check()) return { action: null, branch: 'deadline' };
   const investment=rushBuildHold ? null : economy(b,m,own,ed,mazeGoal);
   // On a maze, an active campaign and the construction plan share the same
   // narrow corridor.  Allow the compact plan to take a bounded turn after the
@@ -2293,7 +2930,10 @@ function plan(b,m) {
   if (rushBuildHold) return latentReserveMove(b, rushProfile) || { action: null, branch: 'delayed-rush-wait' };
   return (explore ? (mazeBoard ? mazeOpening(b, m, own, ed) : opening(b,m,own,ed)) : null)||{action:null,branch:'wait'};
 }
-module.exports={plan,recover,secureDecision,stranded,safeMove,gather,treeGather,growth,routeGuard,constructionThreat,earlyRushThreat,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,defense,defensiveCut,emergencyDefensiveCut};
+// Shared helper surface for the blitz module (no require cycle: the blitz
+// module keeps its own board/rules imports).
+const BLITZ_HELPERS={field,route,gather,safeMove,mazeOpening,opening,defense,localGuard,enemyEta,etaArrival};
+module.exports={plan,recover,secureDecision,BLITZ_HELPERS,stranded,safeMove,gather,treeGather,advanceSupplyTree,growth,routeGuard,constructionThreat,earlyRushThreat,earlyRushProfile,projectedArrival,mazeInfrastructureHold,isMazeBoard,mazeEmergency,mazeActionGuard,localGuard,sustainEconomy,forwardExpansion,broadExpansion,crownLandAnchor,defense,defensiveCut,emergencyDefensiveCut,econProfile,citySnowball};
 
 // Independent military lanes keep their own defence delivery cursor. They
 // must never overwrite the main campaign's frozen logistics state.

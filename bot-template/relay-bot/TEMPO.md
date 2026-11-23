@@ -66,13 +66,13 @@ pnpm run test:relay
 baseline_dir=$(mktemp -d)
 git archive 4fb119a bot-template/relay-bot | tar -x -C "$baseline_dir"
 export MAPS=random,maze,archipelago,mediterranean
-PLANNER="$baseline_dir/bot-template/relay-bot/planner.js" node scripts/evaluate-relay-opening.cjs
-node scripts/evaluate-relay-opening.cjs
+PLANNER="$baseline_dir/bot-template/relay-bot/planner.js" node bot-template/relay-bot/training/evaluate-opening.cjs
+node bot-template/relay-bot/training/evaluate-opening.cjs
 export TICKS=1000
-MODES=000,100 SEEDS=campaign-probe,campaign-blind-1,campaign-blind-2 OPPONENTS=anti,apex node scripts/evaluate-relay.cjs
-MODES=000 SEEDS=campaign-sealed-3,campaign-sealed-4 OPPONENTS=anti,apex,v2 node scripts/evaluate-relay.cjs
-MODES=001,010,011,101,110,111 SEEDS=campaign-variants OPPONENTS=anti,apex node scripts/evaluate-relay.cjs
-MODES=000,100 SEEDS=campaign-table OPPONENTS=anti+apex+v2 node scripts/evaluate-relay.cjs
+MODES=000,100 SEEDS=campaign-probe,campaign-blind-1,campaign-blind-2 OPPONENTS=anti,apex node bot-template/relay-bot/training/evaluate.cjs
+MODES=000 SEEDS=campaign-sealed-3,campaign-sealed-4 OPPONENTS=anti,apex,v2 node bot-template/relay-bot/training/evaluate.cjs
+MODES=001,010,011,101,110,111 SEEDS=campaign-variants OPPONENTS=anti,apex node bot-template/relay-bot/training/evaluate.cjs
+MODES=000,100 SEEDS=campaign-table OPPONENTS=anti+apex+v2 node bot-template/relay-bot/training/evaluate.cjs
 ```
 
 实战命令可添加 `RELAY_ENTRY="$baseline_dir/bot-template/relay-bot/strategy.js"` 重跑旧版。对手的运行时随机性及耗时可能带来单局波动。

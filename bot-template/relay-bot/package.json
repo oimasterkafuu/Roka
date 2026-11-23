@@ -1,0 +1,13 @@
+{
+  "name": "relay-bot",
+  "version": "0.16.0",
+  "private": true,
+  "description": "Roka small-map strategy bot with parallel orders and fog planning",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test *.test.cjs"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}

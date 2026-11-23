@@ -1,5 +1,7 @@
 'use strict';
 
+const { archipelagoWaterBlocked } = require('./archipelago');
+
 // A bridge cell can reconnect several pockets. Count each component once,
 // including its surviving garrisons, without feeding units into isolation.
 function rescueValues(b, teams, myTeam, units) {
@@ -92,6 +94,8 @@ function evaluateFrontMove(s, move) {
     ffa,
     wide,
     anchorDist,
+    enemyDist,
+    land,
   } = s;
   const { i, j, own, hostile, strike, send, remaining, support, exposure, intercept, base } = move;
   if (strike) return 2500 + Math.min(100, remaining);
@@ -124,6 +128,15 @@ function evaluateFrontMove(s, move) {
     if (recovery > 0) score += Math.min(300, recovery * 1.5);
     if (b.grid_type[j] >= 50 && b.grid_type[j] < 100 && hostile) score += 90;
     if (s.beforeBurstEnd && economical && !repulse) score += 530 + Math.min(5, remaining);
+    // Land-first (see ./land). On a structurally swamp-heavy clear serial room
+    // the serial tick used to go into army concentration while relay took the
+    // neutral land: the exact leaderboard land race says when that is the
+    // losing trade, so a neutral capture outranks the own-merge march, and the
+    // 26..49 burst pays every captured plain until turn 50.
+    if (land) {
+      if (land.capture && !hostile && !repulse) score += land.capture;
+      if (land.burst) score += land.burst;
+    }
     if (repulse > 0) score -= Math.min(180, 25 + send * 1.4);
   } else if (!b.isolated[j]) {
     if (frontDist[j] < frontDist[i]) score = 25 + Math.min(52, Math.sqrt(send) * 3);
@@ -184,6 +197,28 @@ function evaluateFrontMove(s, move) {
   }
   if (hostile && units[j] > 3 && !repulse && homeDist[j] < 6)
     score = Math.max(score, 130 + Math.min(360, (230 * units[j]) / Math.max(12, self.army * 0.12)));
+  if (s.closing && s.lead >= 0 && s.leadDist && !b.isolated[j] && send >= 12) {
+    // Closing phase on a compact serial room: the whole empire funnels into its
+    // heaviest stack, and that stack pushes only once it can pay for the rest
+    // of the path. sqrt(mass) keeps the funnel ordered (a 2000-army pool 1547
+    // outranks a 55-unit detachment 1003) and both sit above the economy build
+    // (675) and land (630) scores, so a tick is never spent on a 50-unit
+    // deposit while 2000 army waits at the back of the map.
+    //
+    // `required` already prices every defender on the route and one unit lost
+    // per step, so a 119-army lead facing a fifteen-cell approach through
+    // defended cells stages at the frontier instead of walking into the enemy
+    // line to die, and the rear garrisons keep arriving until it can commit.
+    // A plain mass march (no staging gate) captured three crowns and then lost
+    // the column mid-way; the staged version converts the whole hoard first.
+    if (i === s.lead) {
+      if (goal[j] < goal[i] && remaining >= required[i] * (s.push ?? 1))
+        score = Math.max(score, 1000 + Math.min(620, Math.sqrt(Math.max(send, remaining)) * 14));
+    } else if (s.leadDist[j] < s.leadDist[i] && enemyDist[i] >= 3) {
+      const mass = own ? send + units[j] : send;
+      score = Math.max(score, 940 + Math.min(500, Math.sqrt(mass) * 14));
+    }
+  }
   if (!rival && route[j] < route[i] && !b.isolated[j] && send >= 6 && !repulse) {
     score = Math.max(
       score,
@@ -211,6 +246,27 @@ function evaluateFrontMove(s, move) {
   )
     score -= 260;
   if (b.lastFrom[i] === j && turn - b.lastMove[i] < 7 && s.defense[j] >= s.defense[i]) score -= 150;
+  // Water discipline (see ./archipelago): a swamp capture that does not move
+  // closer to unclaimed plain land buys no income on a swamp-heavy board, so it
+  // is capped under the land capture next door. Crossings still pass: every hop
+  // of a shortest strait lowers the plain field.
+  if (!own && !hostile && !strike && archipelagoWaterBlocked(s.arch, b.grid_type, i, j))
+    score = Math.min(score, s.arch.waterCap);
+  // Clear-room paint cap (see ./land): while the exact land race is being lost
+  // and the border still has a neutral cell to paint, a plain merge onto our
+  // own cell buys neither land nor income. Defence, site funding and the
+  // closing funnel keep their score (they are priced above the cap anyway).
+  if (
+    land &&
+    own &&
+    !b.isolated[j] &&
+    !strike &&
+    !s.closing &&
+    j !== site &&
+    s.defense[j] >= s.defense[i] &&
+    score > land.paint
+  )
+    score = Math.max(0, Math.min(score, land.paint));
   return score;
 }
 

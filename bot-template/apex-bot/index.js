@@ -19,6 +19,16 @@ const bot = attachStrategy(socket, {
   team: Number(process.env.BOT_TEAM || 1),
   autoReady: process.env.BOT_AUTO_READY !== '0',
   actionDelayMs: Number(process.env.BOT_ACTION_DELAY_MS || 0),
+  decisionBudgetMs:
+    process.env.BOT_DECISION_BUDGET_MS === undefined ||
+    String(process.env.BOT_DECISION_BUDGET_MS).trim() === ''
+      ? undefined
+      : Number(process.env.BOT_DECISION_BUDGET_MS),
+  // Finish layer is on unless BOT_DUEL_STRIKE is set to 0.
+  duelStrike:
+    process.env.BOT_DUEL_STRIKE === undefined || String(process.env.BOT_DUEL_STRIKE).trim() === ''
+      ? undefined
+      : String(process.env.BOT_DUEL_STRIKE).trim() !== '0',
   log: (message) => console.log(`[apex] ${message}`),
 });
 

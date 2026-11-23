@@ -306,7 +306,10 @@ async function main() {
   if (
     templates.status !== 200 ||
     !templateIds.includes('simple-strategy-bot') ||
-    !templateIds.includes('anti-human-bot')
+    !templateIds.includes('anti-human-bot') ||
+    !templateIds.includes('apex-bot') ||
+    !templateIds.includes('relay-bot') ||
+    templateIds.length !== 4
   ) {
     return finish(1, `模板枚举校验失败：HTTP ${templates.status} items=${JSON.stringify(templateIds)}`);
   }

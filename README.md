@@ -114,29 +114,16 @@ pnpm run test:build-pages
 
 各 Bot 的安装和运行方式见对应目录下的 `README.md` 或 `USAGE.md`。
 
-### Relay 策略 Bot
+### Apex 与 Relay 策略 Bot
 
-管理员可在「策略 Bot」选择 `relay-bot`，按房间需要允许迷雾和多线。单线模式下，第 26–50 Tick 正常普通领土每 Tick 额外 +1 兵，第 50 Tick 连同基础增兵合计 +2；Relay 会优先扩张以利用爆发期。多线模式没有爆发期，第 50 Tick 仅有基础增兵 +1；Relay 按此推算兵力，逐 Tick 组合独立指令。接敌后两种模式都兼顾攻城路线、主城来兵和补给线上的关键格，迷雾下记录曾经发现的主城。
+管理员可在「策略 Bot」选择 `apex-bot` 或 `relay-bot`，按房间需要允许迷雾和多线。升级后，旧的托管配置会自动恢复到对应的现行模板，已保存的房间和权限保持不变。
+
+- [Apex](bot-template/apex-bot/README.md)：基于原 Bot 2.0 的战役策略，结合战术斩杀、经济竞赛和大图突击，保留 Apex 的多线队列支持。运行 `BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:apex`；回归 `pnpm run test:apex`；真实引擎评测 `pnpm run eval:apex --help`。
+- [Relay](bot-template/relay-bot/README.md)：基于原 Bot 3.0 的小图策略，加入迷宫走廊、迷雾侦察和多线搜索，保留裁剪棋盘的开局搜索与增援定价。运行 `BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:relay`；回归 `pnpm run test:relay`；构建后通过 `pnpm run eval:relay` 跑真实引擎换边矩阵。`BOT_ONCE=1` 让 Relay 等整局结算后退出，即使中途被淘汰也会等到结算。
+
+两者均默认连接 `http://127.0.0.1:23333`，可用 `BOT_SERVER` 覆盖。Relay 的[原始 2048 局数据和复现条件](bot-template/relay-bot/BASELINE.md)是历史基线，并非整合后重新测得的成绩。
 
 原始操作回放（`ops-v1`、`ops-v2`）一律按当前地图和对局规则重建，不模拟历史版本。旧多线回放同样没有爆发期；若已记录的操作按当前规则无法执行（例如兵力不足，或使用已移除的显式主城转让），该回放判为不兼容。已编码的观看帧无需重新模拟。
-
-默认的全视野单线房间在收到首帧时，规划到第 12 回合（Tick 24）的等待、出兵和汇兵顺序。目标是扩大领地，面积相同时优先普通地和敌军较难抵达的方向。逐 Tick 校验路线，敌军威胁主城或补给线时可中断计划。单线搜索同时计算占地上界，四倍速房间使用较小的计算预算。多线开局会比较同一 Tick 能并行执行的扩张路线。
-
-建指挥所、升主城和调兵筹款会估算可见敌军穿过弯道、沿途汇兵后抵达的兵力。守路的驻军付完 50 兵仍能挡住这波进攻，才在该格动工。接敌后按各方产量、侧翼、补给和断线兵团规模决定进攻或救援，FFA 也会计入其他边界的压力。
-
-在仓库根目录安装依赖后，可通过 `BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:relay` 独立运行。设置 `BOT_ONCE=1` 后，Bot 完成一整局便断开连接并退出，不会重新准备；被淘汰后仍等待整局结束。`BOT_SERVER` 默认为 `http://127.0.0.1:23333`，组队时可用 `BOT_TEAM` 选择 1 至 16 队。托管权限与第三方令牌的房间限制见游戏内机器人开发协议。
-
-开局搜索按剩余 Tick 裁剪棋盘。执行已缓存的路线时，只有出现接敌风险才检查补给截断。标准图明牌单线会按实际调兵量评估增援：一小队兵只对大兵堆贡献很少时，优先考虑其他行动；来兵能保住主城或凑齐建造费用时，保留增援的优先级。
-
-运行 `pnpm run test:relay` 检查协议与策略。当前结果见 [2.16.1 耗时与换边评测](bot-template/relay-bot/TEMPO.md)。历史结果见 [2.16.0 开局与峡谷评测](bot-template/relay-bot/OPENING.md)、[2.15.0 明牌单线与 FFA 评测](bot-template/relay-bot/SINGLE-LINE.md)及 [2.14.0 初版评测](bot-template/relay-bot/EVALUATION.md)。
-
-### Bot(3.0) 策略 Bot
-
-Bot(3.0) 以 Relay 为基础框架，参考 Bot(2.0) 的 1v1 结构，目标是在官方小图上继续提升实战胜率。目录名 `bot-3.0` 会被后台托管模板自动发现。
-
-当前主线已合入迷宫走廊相位、单线收尾纵队、迷雾单线层与第 7–20 轮的全部默认层，并同步上游 relay 的 opening/reinforcement pricing 与多线 burst 移除。最终基线使用真实引擎跑满 2048 局：Apex / Anti-Human / Bot(2.0) / Relay 四个对手，随机、迷宫、群岛、地中海四种地图，迷雾与多线各开关，每格 32 局、上限 1000 Tick，合计 **1759 胜 / 237 负 / 52 超时，胜率 85.9%**。非 Relay 对手全部 >=50% 且无退化；Relay 16 格中 14 格达标（剩余 random 迷雾与 maze 迷雾各 18/32）。逐项数据、旧引擎数字的不可比说明与复现命令见 [Bot(3.0) 基线](bot-template/bot-3.0/BASELINE.md)，暂停时保留的后续方向见 [NEXT.md](bot-template/bot-3.0/NEXT.md)。
-
-独立运行：`BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:bot3`；回归：`pnpm run test:bot3`；验收矩阵：`pnpm run eval:bot3`。
 
 ## 许可
 

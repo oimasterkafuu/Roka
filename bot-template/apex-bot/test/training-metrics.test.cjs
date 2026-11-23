@@ -20,7 +20,7 @@ test('long evaluation --help parses without constructing a match', () => {
   assert.equal(parseCli(['--profile', 'large']).options.profile, 'large');
 });
 
-test('large evaluation profile schedules all supported map scales', () => {
+test('large evaluation profile schedules official normal and large sizes', () => {
   const settings = config({
     profile: 'large',
     seeds: 1,
@@ -28,10 +28,10 @@ test('large evaluation profile schedules all supported map scales', () => {
     opponents: ['anti'],
     seats: [false],
   });
-  assert.deepEqual(settings.sizes, [0.5, 0.68, 1]);
+  assert.deepEqual(settings.sizes, [0.34, 0.68]);
   assert.deepEqual(
     makeJobs(settings).map((job) => job.mapSize),
-    [0.5, 0.68, 1],
+    [0.34, 0.68],
   );
 });
 

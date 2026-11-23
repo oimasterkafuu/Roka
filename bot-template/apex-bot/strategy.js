@@ -46,6 +46,12 @@ function createOpponentStats() {
   };
 }
 
+function envDuelStrike() {
+  const raw = process.env.BOT_DUEL_STRIKE;
+  if (raw === undefined || String(raw).trim() === '') return undefined;
+  return String(raw).trim() !== '0';
+}
+
 function validFrameArray(value, size) {
   return Array.isArray(value) && value.length === size && value.every(Number.isFinite);
 }
@@ -76,11 +82,23 @@ function attachStrategy(socket, options = {}) {
   // especially likely to lose its supply line. Decide on the newest frame;
   // callers can still opt into a delay when debugging.
   const actionDelayMs = Math.max(0, Number(options.actionDelayMs ?? 0) || 0);
+  // Hard per-decision wall-clock budget.  Undefined keeps the controller
+  // default (BOT_DECISION_BUDGET_MS or 80 ms, safe under a 125 ms 4x tick).
+  const decisionBudgetMs = Number(options.decisionBudgetMs);
+  // Finish layer (race-gated kill-path strike).  Default on; BOT_DUEL_STRIKE=0
+  // disables it, which reproduces the planner-only behaviour exactly.
+  const duelStrike = options.duelStrike === undefined ? envDuelStrike() : options.duelStrike !== false;
+  const controllerOptions = {
+    decisionBudgetMs: Number.isFinite(decisionBudgetMs) ? decisionBudgetMs : undefined,
+    duelStrike,
+    now,
+  };
   const state = {
     n: 0,
     m: 0,
     size: 0,
     playerId: 0,
+    mapMode: 'random',
     clientId: '',
     turn: -1,
     grid: [],
@@ -95,6 +113,8 @@ function attachStrategy(socket, options = {}) {
     queued: 0,
     actionPending: false,
     pendingAction: null,
+    pendingTurn: -1,
+    queueGraceWaits: 0,
     lastActionTurn: -1,
     queueResets: 0,
     queueOps: [],
@@ -126,13 +146,15 @@ function attachStrategy(socket, options = {}) {
     state.queued = 0;
     state.actionPending = false;
     state.pendingAction = null;
+    state.pendingTurn = -1;
+    state.queueGraceWaits = 0;
     state.lastActionTurn = -1;
     state.queueResets = 0;
     state.playerId = ids.indexOf(state.clientId) + 1;
     state.dead = false;
     state.ended = false;
     state.inGame = true;
-    controller = createController(state.playerId);
+    controller = createController(state.playerId, { ...controllerOptions, mapMode: state.mapMode });
     lastRoomCommand = '';
   }
 
@@ -172,6 +194,16 @@ function attachStrategy(socket, options = {}) {
     const actions = controller.chooseBatch(board);
     if (!actions.length) return;
     if (state.actionPending) {
+      // A public-server round trip can miss the next update even when the
+      // operation is already executing.  Clearing immediately then cancels
+      // the queued move and resends it, which looks like back-and-forth
+      // movement or an idle tick.  Give the acknowledgement one tick of
+      // grace; only a second missed frame means the queue is genuinely stale.
+      const age = state.pendingTurn >= 0 ? state.turn - state.pendingTurn : Infinity;
+      if (age <= 1) {
+        state.queueGraceWaits += 1;
+        return;
+      }
       socket.emit('clear_queue');
       state.queueResets += 1;
       state.queueOps = [];
@@ -181,11 +213,14 @@ function attachStrategy(socket, options = {}) {
       const queued = { ...payload, seq: state.nextSeq++ };
       state.queueOps.push(queued);
       state.queued += 1;
-      socket.emit(action.kind === 'build' ? 'build' : 'attack', payload);
     }
     state.lastActionTurn = state.turn;
+    state.pendingTurn = state.turn;
     state.actionPending = state.queueOps.length > 0;
     state.pendingAction = state.queueOps[0] || null;
+    for (const { seq, ...payload } of state.queueOps) {
+      socket.emit(payload.kind === 'build' ? 'build' : 'attack', payload);
+    }
   }
 
   function onSetId(id) {
@@ -252,6 +287,7 @@ function attachStrategy(socket, options = {}) {
     state.queueOps = state.queueOps.filter((op) => !removed.has(op.seq));
     state.actionPending = state.queueOps.length > 0;
     state.pendingAction = state.queueOps[0] || null;
+    if (!state.actionPending) state.pendingTurn = -1;
     state.turn = payload.turn;
     state.ended = Boolean(payload.game_end);
     if (payload.kills && payload.kills[state.clientId]) state.dead = true;
@@ -266,7 +302,21 @@ function attachStrategy(socket, options = {}) {
       state.inGame = false;
       state.actionPending = false;
       state.pendingAction = null;
+      state.pendingTurn = -1;
       if (decisionTimer) clearTimeout(decisionTimer);
+      // Live-server telemetry: network queue churn and budget fallbacks are
+      // invisible in the offline engine, so log them once per game.
+      const summary = controller?.stats?.() || {};
+      log(`game stats ${JSON.stringify({
+        queueResets: state.queueResets,
+        queueGraceWaits: state.queueGraceWaits,
+        budgetExceeded: summary.budgetExceeded || 0,
+        fallbacks: summary.fallbacks || 0,
+        noActionTurns: summary.noActionTurns || 0,
+        maxNoActionStreak: summary.maxNoActionStreak || 0,
+        strikes: summary.strikes || 0,
+        byBranch: summary.byBranch || {},
+      })}`);
       controller?.reset();
       return;
     }
@@ -275,6 +325,7 @@ function attachStrategy(socket, options = {}) {
   }
 
   function onRoomUpdate(payload = {}) {
+    if (typeof payload.map_mode === 'string' && payload.map_mode) state.mapMode = payload.map_mode;
     if (state.inGame) return;
     if (payload.in_game === true) return;
     const players = Array.isArray(payload.players) ? payload.players : [];
@@ -323,6 +374,8 @@ function attachStrategy(socket, options = {}) {
     state.inGame = false;
     state.actionPending = false;
     state.pendingAction = null;
+    state.pendingTurn = -1;
+    state.queueGraceWaits = 0;
     state.lastActionTurn = -1;
     lastRoomCommand = '';
     if (decisionTimer) clearTimeout(decisionTimer);

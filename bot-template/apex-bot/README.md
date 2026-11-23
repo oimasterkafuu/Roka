@@ -1,88 +1,52 @@
-# apex-bot
+# Apex
 
-这是一个独立重写的 Roka 策略 Bot。它把每回合的动作分成四层：
+现行 Apex 采用原 Bot 2.0 的战役策略，保留棋盘图搜索、连通性、建设、战役与规则预演管线，以及原版 Apex 的多线队列。官服普通房（0.34）和大图房（0.68）增加了斩杀、开局、最后一段和经济相位。
 
-- 先处理能在当前窗口内救下主城的防守或直接攻冠；明确的后方绕行威胁会沿可见、可通行的中立/沼泽/他人地盘主动截断，但仍受规则预演、兵力安全和路线护栏约束；
-- 再执行会切断敌方锚点连接的局部打击；
-- 目标锁定后沿一条可解释的推进走廊滚动集结，达到当前格的兵力预算就推进，不重复等待互相矛盾的全局集结；
-- 没有军事收益时才扩张或建设，并给桥接格和敌方反击留出安全余量。
-- 长距离战役超过经济窗口后，单独从后方选择安全工地，限制集资半径并交替完成建城/升冠，让运输前线与后方产能同时推进。
-- 大地图集结缺口较大时，会冻结当前目标并先合并多条近邻支路，再按叶子到根逐段汇聚；共享干线只走一次，避免单个后方起点长距离往返运输。
-- 远征前锋兵力不足时不会继续把一到十个兵送入走廊：战役会优先换用更强的后方兵堆，连续八个 Tick 无法集结则解除当前目标并恢复局部推进；大地图同时提高后方建设目标和扩张频率。
-- 迷宫中一旦发现对手已经完成建造，若本方还没有足够的连续锚点，旧的远征计划会立即挂起，优先完成本地皇冠/指挥所集群；只有具备补充纵队的基础后才恢复长距离推进。
-- 迷宫普通移动带有跨 Tick 滞回：记录最近边、反向边和短期冷却，普通集结不能在同一条边上重复送兵或立即掉头；出现真实斩首、截断或紧急防守时仍可越过护栏，找不到安全替代路线时会暂缓并转入局部锚点建设。
+## 历史基线（原 Bot 2.0）
 
-建设采用短而连续的邻接集群计划：先在同一片区域连续完成指挥所和皇冠，再转向相邻格，避免东建一个、西建一个造成兵力分散。推进前会预演移动后的割点；若后方走廊会被敌方一击截断，优先保留突破点、补强断点或改用安全后方兵堆，避免把整堆兵力送入腹地后被截断。
+官方尺寸、2400 Tick、seeds 8、双座位、10 worker、平局按负计：
 
-当前控制器保持一个连续的突击单元和一个独立的紧凑建设项目。突击单元被截断或路线停滞时会清空旧运输游标，改走局部截断、前线锚定或跨区域扩张，避免在同一条长征路线上反复集兵。大地图在兵力落后时会周期性寻找最近的可达中立地块；前锋深入长走廊时会定期建设指挥所，减少一次截断损失整条前线的概率。
+| 对手 | 对局 | W / D / L | 胜率 |
+| --- | ---: | ---: | ---: |
+| anti | 128 | 65 / 32 / 31 | **50.8%** |
+| apex | 128 | 90 / 5 / 33 | **70.3%** |
+| 合计 | 256 | 155 / 37 / 64 | **60.5%** |
 
-策略只读取协议提供的状态，规则预演使用与服务器相同的智能分兵公式。迷雾下保留服务器公开的地形编码，探索时不猜测隐藏的所有者和兵力。
+原始汇总数据见 [`training/final-baseline.json`](training/final-baseline.json)。
+
+## 主要特性
+
+- **斩杀层**：`bot/duel/killpath.cjs` + `race.cjs` + `strike.cjs`，只在证明本 Tick 可斩杀且不会先被斩杀时执行，默认 `maxEta=1`。
+- **紧凑图开局到达门控**：`APEX_OPENING_SMALL`，用真实可落地兵力判断是否值得进入 rush hold，只作用于 `<800` 格。
+- **最后一段重落座**：`bot/lastmile.cjs`，只在大图 `>=800` 格把死亡/被切的纵队从前方补给格重新落座。
+- **经济与皇冠**：经济档按 `map_mode` 门控；`APEX_CROWN_LAND_ANCHOR` 在 random/archipelago 把皇冠预算锚定实控土地。
+- **大地图相位**：`bot/snowball.cjs`（mediterranean 城市/经济雪球）与 `bot/medplan.cjs`（mediterranean 皇冠竞赛）。
+- **紧凑图皇冠竞赛**：`bot/crownrace.cjs`，在 `<800` 格、经济和皇冠落后时进行有界竞赛。
+- **决策预算**：`bot/deadline.cjs` 默认 80ms，超时回退到经 `preview` 校验的合法动作；动作确认允许一帧网络宽限。
+- **可选迷宫爆发**：`bot/mazeblitz.cjs`，`APEX_MAZE_BLITZ=1` 开启，默认关闭。
+
+## 运行
 
 ```sh
 pnpm install
 BOT_SERVER=http://127.0.0.1:23333 BOT_ROOM=room BOT_TOKEN=token pnpm start
 node --test test/*.test.cjs
-node training/benchmark.cjs
 ```
 
-`test/replay-regression.test.cjs` 还会重放用户提供的 13×17 回放：`player_ops[0]` 是 `oimaster` 的人类操作流，`Anti_Human` 使用 Apex 控制器，确保新版 Apex 能在 600 Tick 内守住并击败该进攻。
+服务端托管入口为 `require('./strategy').attachStrategy(socket, options)`；`options.decisionBudgetMs` 或 `BOT_DECISION_BUDGET_MS` 可覆盖决策预算。
 
-长期评测直接运行真实 `src/game-engine.ts`，支持多线程、四种地图、换边、迷雾和失败回放。默认目标是在 600 Tick 内击杀 Anti-Human；未结束的对局保留 `draws` 诊断字段，但在 `losses`/`effectiveLosses` 中按失败计入。
+## 评测
 
 ```sh
-APEX_EVAL_SEEDS=8 APEX_EVAL_WORKERS=8 APEX_EVAL_TURNS=600 \
-  node training/long-eval.cjs
+node training/long-eval.cjs --profile large --seeds 8 --workers 10 \
+  --turns 2400 --opponents anti,apex --seat both -q \
+  --output /tmp/bot2-final.json
 ```
 
-命令行也接受等价参数：
+`--profile large` 覆盖 `0.34` 与 `0.68`，`--multi-line true` 启用真实引擎的并行队列。`--opponents apex` 从 Git 提交 `33fdac9` 加载冻结的原版 Apex，需要本地历史和 `tar`。`training/compare.cjs` 按 `(mode, mapSize, seed, swap, opponent, fog, multiLine)` 配对并执行 bootstrap，旧报告缺失的多线字段按单线处理。
 
-```sh
-node training/long-eval.cjs --seeds 24 --workers 8 --turns 600 --opponents anti --seat both
-node training/long-eval.cjs --help
-```
+## 默认开关
 
-评测结果默认打印为 JSON；传入 `--output FILE` 或设置 `APEX_EVAL_OUTPUT` 可保存报告。`--profile large` 会固定覆盖 0.5、0.68、1 三档地图尺寸，建议配合 1200 Tick 观察完整长距离战役。报告包括每局地图、种子、胜负、Tick、决策延迟直方图、失败回放，以及按尺寸和尺寸组汇总的 120/300/600/900/1200 Tick 皇冠、城市、兵力、领土、建设/升级/攻击动作、存活率和相对对手的兵力/领土/皇冠比；`losses`/`effectiveLosses` 会把未结束对局也计为失败。
+默认开启：`APEX_OPENING_SMALL`、`APEX_LAST_MILE`、`APEX_CROWN_LAND_ANCHOR`、`APEX_CITY_SNOWBALL`、`APEX_MED_PLAN`、`APEX_SMALL_CROWN_RACE`。需要消融时设为 `0`。
 
-服务端托管入口使用 `require('./strategy').attachStrategy(socket, options)`，与独立进程共用同一套控制器和状态机。
-Bot 加入房间后默认自动切换到配置队伍并发送准备；只有设置 `BOT_AUTO_READY=0` 或传入 `autoReady: false` 才会关闭自动准备。
-服务端运行时会按对手用户名累计胜负、平局和连续失败次数（仅作日志记录，不影响自动准备——无论连败多少局都会照常准备开局）。
-
-## v3 全局队列多线
-
-`init_map.multi_line=true` 时，控制器通过 `chooseBatch` 每 Tick 最多提交六个独立动作头：主攻、截断、回防、局部扩张和已筹足资金的建设可同时执行。移动的两个端点与建造格互斥，避免产生入边依赖、重复花费驻军或阻塞另一条链。每个动作都在前序动作预演后的局面上重新检查。
-
-主攻保留当前集结点，主攻、独立回防和经济建设的冻结送兵树都不会被普通副线抽空；唯一且接近敌军的皇冠也不用于普通扩张。普通副线最多动用当前总兵力的 20%（无战役时 35%），只做中立地块的局部扩张，不在友军格之间来回搬兵。近敌扩张至少要有 8 兵到达并覆盖目标格反压，拒绝低力度送兵；大地图距离敌军超过 16 格时只用半量分兵，过弱的远距兵堆不会发起跨图战役。
-
-建设与升级在主计划和副线中都分别要求至少 51、101 兵，并继承皇冠建设威胁门控。可直接夺冠的动作没有额外经济准备或保守收尾门槛，截断先于普通战役和建设。
-
-协议层维护完整全局队列镜像，按 `lst_moves` 移除所有确认序号；重连从 `next_seq`/`queue_ops` 恢复，已有队列未排空时等待确认，不重复提交。服务端换绑补发的 `init_map` 缺少 `multi_line` 时，未结束对局保留原模式；下一局仍按新 payload 重置。`multi_line=false` 继续使用原来的单动作控制器和过期队列清理行为，单动作入口与 `chooseBatch` 的 120 Tick 真实引擎终局哈希一致。
-
-长评测显式开启相同引擎语义：
-
-```sh
-node training/long-eval.cjs --seeds 1 --workers 6 --turns 1200 --sizes 0.5,1 --opponents anti,simple --multi-line true --output /tmp/apex-v3.json
-```
-
-动作统计逐条计入真实执行成功的操作，避免只看服务器 `lstMove` 而遗漏并行操作。`test/multiline.test.cjs` 覆盖真实引擎同 Tick 执行、端点互斥、建设阈值、单线兼容与重连序号同步。
-
-### Focused large-board and batch optimization
-
-On multi-line boards of at least 800 cells, an active campaign retains priority
-before optional strategic cuts; auxiliary cuts cannot withdraw reserved campaign,
-defence or economy convoys. Direct crown captures retain their immediate priority.
-Campaign selection can consider distant modest stacks instead of discarding them
-with a fixed distance/army gate. Construction still requires 51 troops for a
-foundation and 101 for an upgrade. Small-board lane ordering and single-line
-planning remain unchanged.
-
-Multi-line batches reuse frame-local previews, route guards and pure tactical /
-construction analyses. Candidate expansion scores use the exact send calculation
-without constructing a full preview for every candidate; admitted actions still
-pass the sequential board safety checks. Caches are scoped to board objects and
-are never reused across server frames. Parallel execution alone is not evidence
-of higher win rate.
-
-Multi-line campaigns also retain a newly selected post-capture breach instead
-of overwriting it with an empty generic selection. The regression checks that
-the same spearhead marches toward the next crown; this fix does not change the
-legacy single-line campaign selector.
+默认关闭：`APEX_MAZE_BLITZ`。当开关关闭时，对应模块不会接管行动预算。

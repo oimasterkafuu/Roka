@@ -48,12 +48,12 @@ pnpm run build
 pnpm run test:relay
 baseline_dir=$(mktemp -d)
 git archive 7793ef1 bot-template/relay-bot | tar -x -C "$baseline_dir"
-PLANNER="$baseline_dir/bot-template/relay-bot/planner.js" node scripts/evaluate-relay-opening.cjs
-node scripts/evaluate-relay-opening.cjs
-SPEED=4 node scripts/evaluate-relay-opening.cjs
-MULTI=1 SEEDS=opening-sealed-3 node scripts/evaluate-relay-opening.cjs
+PLANNER="$baseline_dir/bot-template/relay-bot/planner.js" node bot-template/relay-bot/training/evaluate-opening.cjs
+node bot-template/relay-bot/training/evaluate-opening.cjs
+SPEED=4 node bot-template/relay-bot/training/evaluate-opening.cjs
+MULTI=1 SEEDS=opening-sealed-3 node bot-template/relay-bot/training/evaluate-opening.cjs
 export MAPS=maze,random MODES=000,100 SEEDS=gate-holdout,gate-sealed-2 OPPONENTS=anti,apex,v2,anti+apex+v2 TICKS=1000
-RELAY_ENTRY="$baseline_dir/bot-template/relay-bot/strategy.js" node scripts/evaluate-relay.cjs
-node scripts/evaluate-relay.cjs
-MAPS=maze MODES=001,010,011,111 SEEDS=opening-sealed-3 OPPONENTS=apex TICKS=500 node scripts/evaluate-relay.cjs
+RELAY_ENTRY="$baseline_dir/bot-template/relay-bot/strategy.js" node bot-template/relay-bot/training/evaluate.cjs
+node bot-template/relay-bot/training/evaluate.cjs
+MAPS=maze MODES=001,010,011,111 SEEDS=opening-sealed-3 OPPONENTS=apex TICKS=500 node bot-template/relay-bot/training/evaluate.cjs
 ```

@@ -25,7 +25,7 @@
 ```sh
 pnpm install --frozen-lockfile
 pnpm run build
-SEEDS=relay-validation-1,relay-validation-2 TICKS=1000 node scripts/evaluate-relay.cjs > /tmp/relay-validation.jsonl
+SEEDS=relay-validation-1,relay-validation-2 TICKS=1000 node bot-template/relay-bot/training/evaluate.cjs > /tmp/relay-validation.jsonl
 ```
 
 `OPPONENTS` 可选 `simple,anti,apex,v2`，`MAPS` 指定地形，`MODES` 以三位数字依次表示大图、迷雾、多线。例如 `MODES=110 MAPS=random` 表示随机大图、迷雾、单线。评测通过标准输出返回 JSONL，`seat` 为 Relay 的零基座位号，`executed` 按座位列出引擎成功执行的指令数，`checkpoints` 按座位记录各时点的 `[领土, 兵力]`。本轮完整原始数据见 [results.jsonl](results.jsonl)。
