@@ -1,6 +1,6 @@
 # Bot(3.0) 后续方向与负结果
 
-本文件记录第 16 轮结束时的状态、剩余缺口与已证伪方向。当前基线见 [BASELINE.md](BASELINE.md)，
+本文件记录第 20 轮结束（暂停迭代）时的状态、剩余缺口与已证伪方向。当前基线见 [BASELINE.md](BASELINE.md)，
 第 15–16 轮的 9 条多线实验汇总见 [ROUND16-ROUNDUP.md](ROUND16-ROUNDUP.md)。
 
 ## 当前状态
