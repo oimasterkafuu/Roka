@@ -11,6 +11,13 @@ const { attachStrategy } = require(process.env.RELAY_ENTRY || '../bot-template/r
 // SELF_ID names the strategy under test; the default keeps the original relay
 // reports readable, while newer bots can reuse the same harness.
 const SELF = process.env.SELF_ID || 'relay';
+// Leaderboard checkpoints the report records. The default list is the frozen
+// acceptance format; the round-17 tuning harness adds t150 so it can tie-break
+// equal win counts by midgame material (`CHECKPOINTS=100,150,250`).
+const CHECKPOINTS = String(process.env.CHECKPOINTS || '24,25,50,100,250')
+  .split(',')
+  .map((part) => Number(part.trim()))
+  .filter((tick) => Number.isInteger(tick) && tick > 0);
 
 const entries = {
   simple: '../bot-template/simple-strategy-bot/strategy',
@@ -107,7 +114,7 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
       engine.executedTurnMoves.forEach((ops, i) => {
         executed[i] += ops.length;
       });
-      if ([24, 25, 50, 100, 250].includes(tick)) {
+      if (CHECKPOINTS.includes(tick)) {
         checkpoints[tick] = names.map((uid) => {
           const p = lastFrame.leaderboard.find((item) => item.uid === uid);
           return [p.land, p.army];

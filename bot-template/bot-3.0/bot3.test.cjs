@@ -2460,6 +2460,7 @@ test('keep a rolling garrison only when the halved push still takes the cell', (
   );
   assert.equal(tiny[0].mode, 2);
 });
+<<<<<<< HEAD
 // ---------------------------------------------------------------------------
 // Multi-line exact simulator, relay batch predictor and two-tick search
 // (./msim, ./mqueue, ./m2ply).
@@ -2918,4 +2919,179 @@ test('m2ply: adopts a two-tick arming plan only when it wins the simulation', ()
     if (previousArm === undefined) delete process.env.BOT3_MSEARCH_ARM;
     else process.env.BOT3_MSEARCH_ARM = previousArm;
   }
+=======
+
+// --- Self-play-tuned multi-line evaluation (./mtune) ------------------------
+const {
+  mtuneConfig,
+  mtuneUpdate,
+  applyMtune,
+  mshapeOverrides,
+  mhalfOverrides,
+  parseWeights,
+  plainFrontier,
+  crownField,
+  BASE_WEIGHTS,
+  WEIGHT_KEYS,
+  DEFENCE_FLOOR,
+  PULSE_WINDOW,
+  RING_CAP,
+} = require('./mtune');
+
+// 9x9 walled board: our block on rows 2..5 x cols 2..5 (hop 0..3), a neutral
+// shelf on row 1 and one rival plain at row 1 col 4.
+function mtuneBlob() {
+  const b = createBoard(9, 9, 1);
+  b.grid_type.fill(201);
+  for (let r = 2; r <= 5; r++)
+    for (let c = 2; c <= 5; c++) {
+      const i = r * 9 + c;
+      b.grid_type[i] = 1;
+      b.army_cnt[i] = 2;
+    }
+  b.grid_type[11] = 200; // row 1 col 2, neutral plain
+  b.grid_type[12] = 200; // row 1 col 3, neutral plain
+  b.grid_type[13] = 52; // row 1 col 4, rival plain
+  b.grid_type[10] = 200; // row 1 col 1, neutral plain
+  b.grid_type[2] = 200; // row 0 col 2, neutral plain (above the neutral shelf)
+  return b;
+}
+
+function mtuneCtx(b) {
+  return {
+    tile: b.grid_type,
+    teams: Uint8Array.from({ length: b.size }, (_, i) => (b.grid_type[i] < 150 ? b.grid_type[i] % 50 : 0)),
+    units: b.army_cnt,
+    neighbors: b.neighbors,
+    myTeam: 1,
+    hop: null,
+  };
+}
+
+function mtunePlan(weights, turn = 60) {
+  return { weights: parseWeights(weights), turn, crownDist: null, enemyCut: null, state: {} };
+}
+
+test('default the tuned multi-line evaluation off and validate its weight blob', () => {
+  assert.equal(mtuneConfig({}, {}).enabled, false);
+  assert.equal(mtuneConfig({}, { BOT3_MTUNE: '1' }).enabled, true);
+  assert.equal(mtuneConfig({}, { BOT3_MTUNE: 'off' }).enabled, false);
+  // An empty blob is the inherited round-16 evaluation, key for key.
+  assert.deepEqual(parseWeights(undefined), BASE_WEIGHTS);
+  assert.deepEqual(parseWeights({}), BASE_WEIGHTS);
+  assert.deepEqual(Object.keys(parseWeights({})).sort(), [...WEIGHT_KEYS].sort());
+  // The layer knobs the blob owns repeat the base environment, so the base blob
+  // is a no-op and the screen reproduces the round-16 jsonl byte for byte.
+  const base = mtuneConfig({ enabled: true, weights: BASE_WEIGHTS }, {});
+  assert.deepEqual(mshapeOverrides(base), { slots: 64, leadCap: 110, steal: 100, water: 0, corridor: false });
+  assert.deepEqual(mhalfOverrides(base), {
+    reload: 60,
+    hop: 6,
+    leadCap: 110,
+    retain: 0,
+    floor: 2,
+    minFire: 3,
+    cheap: 0,
+    startTurn: 0,
+    endTurn: 0,
+    corridor: false,
+  });
+  // Off means no overrides at all, so every other mshape/mhalf switch keeps
+  // reading its own environment variable.
+  assert.equal(mshapeOverrides({ enabled: false }), undefined);
+  assert.equal(mhalfOverrides({ enabled: false }), undefined);
+  // Every weight is clamped to its band, and a typo is refused instead of
+  // silently tuning nothing.
+  const clamped = parseWeights({ capture: 999, reload: -5, corridor: 5, slots: 0, ring: -99 });
+  assert.equal(clamped.capture, 80);
+  assert.equal(clamped.reload, 0);
+  assert.equal(clamped.corridor, 1);
+  assert.equal(clamped.slots, 1);
+  assert.equal(clamped.ring, -8);
+  assert.throws(() => parseWeights({ captur: 10 }), /unknown BOT3_MTUNE weight "captur"/);
+  // A broken blob never takes the bot down mid-game: the config falls back to
+  // the inherited numbers and reports why.
+  const broken = mtuneConfig({}, { BOT3_MTUNE: '1', BOT3_MTUNE_JSON: '{oops' });
+  assert.equal(broken.enabled, true);
+  assert.deepEqual(broken.weights, BASE_WEIGHTS);
+  assert.match(broken.error, /not valid JSON/);
+});
+
+test('reach the tuned evaluation only from a multi-line room', () => {
+  const b = mtuneBlob();
+  const config = mtuneConfig({ enabled: true, weights: parseWeights({ capture: 10 }) }, {});
+  const input = { b, turn: 60, multi: true, size: b.size, targets: [13] };
+  assert.equal(mtuneUpdate(b, input, mtuneConfig({}, {})), null);
+  assert.equal(mtuneUpdate(b, { ...input, multi: false }, config), null);
+  assert.equal(mtuneUpdate(b, { ...input, size: 100000 }, { ...config, maxBoard: 800 }), null);
+  const plan = mtuneUpdate(b, input, config);
+  assert.ok(plan);
+  assert.equal(plan.turn, 60);
+  assert.equal(plan.weights.capture, 10);
+  assert.equal(b.mtuneLine.ticks, 1);
+});
+
+test('re-price the multi-line score bands from one blob', () => {
+  const b = mtuneBlob();
+  const ctx = mtuneCtx(b);
+  const candidates = () => [
+    { score: 32, from: 20, to: 11, mode: 2 }, // neutral capture
+    { score: 62, from: 22, to: 13, mode: 2 }, // rival capture
+    { score: 40, from: 20, to: 21, mode: 2 }, // own merge on the ring (lateral)
+    { score: 40, from: 40, to: 31, mode: 2 }, // own merge behind the ring
+    { score: 520, from: 30, to: 31, mode: 0 }, // defence merge
+    { score: 100, from: 50, to: 51, mode: 2, build: true }, // build site
+  ];
+  const on = candidates();
+  applyMtune(
+    mtunePlan({ capture: 10, hostile: -15, merge: -30, lateral: 12, defence: 100 }),
+    ctx,
+    on,
+  );
+  assert.equal(on[0].score, 42);
+  assert.equal(on[1].score, 47);
+  assert.equal(on[2].score, 52);
+  // hop[31] is 1, so the interior merge price applies instead of the lateral.
+  assert.equal(on[3].score, 10);
+  assert.equal(on[4].score, 620);
+  assert.equal(on[5].score, 100);
+  // Without the blob every score is the inherited one.
+  const off = candidates();
+  applyMtune(mtunePlan({}), ctx, off);
+  assert.deepEqual(
+    off.map((op) => op.score),
+    [32, 62, 40, 40, 520, 100],
+  );
+});
+
+test('price captures by the pulse they still pay out and by the ring they keep', () => {
+  const b = mtuneBlob();
+  const ctx = mtuneCtx(b);
+  // The neutral shelf cell 11 keeps three plain neutral neighbours open.
+  const open = plainFrontier(ctx, 11);
+  assert.equal(open, 3);
+  const at = (turn, weights, to = 11) => {
+    const candidates = [{ score: 32, from: 20, to, mode: 2 }];
+    applyMtune(mtunePlan(weights, turn), ctx, candidates);
+    return candidates[0].score;
+  };
+  // t=50 is the pulse: the full weight; it decays linearly over the window.
+  assert.equal(at(50, { pulse: 30 }), 32 + 30);
+  assert.equal(at(50 + PULSE_WINDOW / 2, { pulse: 30 }), 32 + 15);
+  assert.equal(at(50 + PULSE_WINDOW, { pulse: 30 }), 32);
+  // A ring capture is worth more than a rival capture of the same price.
+  assert.equal(at(60, { ring: 8 }) - at(60, {}), 8 * Math.min(RING_CAP, open));
+  // Defence work is exempt from the merge prices.
+  const defence = [{ score: DEFENCE_FLOOR, from: 30, to: 31, mode: 0 }];
+  applyMtune(mtunePlan({ merge: -60, march: -60, lateral: -60 }), ctx, defence);
+  assert.equal(defence[0].score, DEFENCE_FLOOR);
+});
+
+test('measure crown distance over every non-water cell', () => {
+  const b = createBoard(1, 5, 1);
+  b.grid_type.set([1, 1, 2, 1, 201]);
+  const dist = crownField({ tile: b.grid_type, neighbors: b.neighbors }, [2]);
+  assert.deepEqual([...dist], [2, 1, 0, 1, -1]);
+  assert.equal(crownField({ tile: b.grid_type, neighbors: b.neighbors }, []), null);
+>>>>>>> exp/bot3-r17-mtune
 });

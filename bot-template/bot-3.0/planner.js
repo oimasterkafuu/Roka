@@ -48,6 +48,7 @@ const { predict: queuePredict, record: queueRecord } = require('./mqueue');
 const { configOf: twoPlyConfig, choose: twoPlyChoose } = require('./m2ply');
 const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
 const { mhalfConfig, mhalfUpdate, applyMhalf, applyMhalfModes } = require('./mhalf');
+const { mtuneConfig, mtuneUpdate, applyMtune, mshapeOverrides, mhalfOverrides } = require('./mtune');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
 const {
@@ -467,6 +468,12 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // worth more than any serial objective: the layer prices the frontier (a
   // capture that keeps neutral neighbours open) and lifts the inherited
   // sixteen-order cap. Off by default.
+  //
+  // Round-17 tuning layer (see ./mtune): one JSON blob owns the score bands of
+  // the multi-line evaluation, including five mshape/mhalf knobs, so a search
+  // can price them together. With `BOT3_MTUNE` off both overrides are
+  // `undefined` and every call below is the inherited one.
+  const mtuneCfg = mtuneConfig();
   const mshapeLayer = mshapeUpdate(
     b,
     {
@@ -480,7 +487,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       army: self.army,
       enemyArmy,
     },
-    mshapeConfig(),
+    mshapeConfig(mshapeOverrides(mtuneCfg)),
   );
   // Sustained-pressure layer (see ./mhalf). A multi-line empire spends each
   // growth pulse on rear merges because the army sits two to six hops behind a
@@ -502,7 +509,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       army: self.army,
       enemyArmy,
     },
-    mhalfConfig(),
+    mhalfConfig(mhalfOverrides(mtuneCfg)),
   );
   // Fog oracle (see ./fog-oracle). The leaderboard is rebuilt from the unfogged
   // grids, so `rival.army` / `rival.land` are exact even where the vision is
@@ -1387,6 +1394,15 @@ function chooseOrders(b, turn, leaderboard, multi) {
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mshapeLayer) applyMshape(mshapeLayer, { tile, teams, units, neighbors, myTeam }, candidates);
   if (mhalfLayer) applyMhalf(mhalfLayer, { tile, teams, units, neighbors, myTeam }, candidates);
+  // Self-play-tuned multi-line evaluation (see ./mtune). Rounds 15/16 each moved
+  // one rule; this layer moves the whole set of score bands from one blob, so a
+  // search can tune capture/hostile/merge/defence prices together. Off by
+  // default; scores only, no candidate is created or dropped.
+  const mtuneLayer = mtuneCfg.enabled
+    ? mtuneUpdate(b, { b, turn, multi, size, tile, teams, units, neighbors, myTeam, targets })
+    : null;
+  if (mtuneLayer)
+    applyMtune(mtuneLayer, { tile, teams, units, neighbors, myTeam, hop: mhalfLayer?.hop }, candidates);
   // Shadow pricing: the scores of the existing candidates move, and the
   // prediction also creates the candidates re-ranking cannot produce (see
   // ./shadow: an approach step toward its next objective, the counter-capture
