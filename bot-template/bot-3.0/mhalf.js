@@ -79,7 +79,9 @@ const DEFAULT_MIN_FIRE = 3;
 const DEFAULT_SIDEWAYS = 0;
 // Bonus per plain (non-swamp) neutral neighbour of the ring cell being armed:
 // an armed cell that only faces swamp buys land with no pulse income.
-const DEFAULT_ARM_RING = 0;
+// Round 20: arming a threatened ring cell measured +1 on each swamp-heavy fog
+// cell and cost nothing elsewhere, so it ships at 10.
+const DEFAULT_ARM_RING = 10;
 // Charge for arming a ring cell whose whole open frontier is swamp.
 const DEFAULT_ARM_WATER = 0;
 

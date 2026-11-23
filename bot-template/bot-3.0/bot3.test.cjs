@@ -3431,7 +3431,9 @@ function bankStrip(units = [1, 1, 1, 4, 4, 5, 4, 1], hop = [0, 1, 2, 3, 4, 5, 6,
 // The mechanism tests below are about the bank, not about the gate: they run
 // the round-18 layer (`gate: false`) so a fixture does not have to pretend to
 // be a swamp board. The gate itself has its own tests.
-const bankOn = () => bankgateConfig({ enabled: true, gate: false });
+// The band tests below pin the round-19 hop-3 band; the shipped band is hop 1
+// (round 20), so they pass it explicitly.
+const bankOn = () => bankgateConfig({ enabled: true, gate: false, hop: 3 });
 
 test('ship the geometry-gated bank on and clamp its knobs', () => {
   // Round 19 ships the layer on: zero regressed cells in the full matrix.
@@ -3539,7 +3541,7 @@ test('measure the geometry the gate reads', () => {
     enemyDist: new Int32Array(10).fill(40),
     cut: Float64Array.from([0, 0, 9, 0, 0, 0, 0, 0, 0, 0]),
     fogMask: new Uint8Array(10),
-    config: bankgateConfig({ enabled: true, gate: false }),
+    config: bankgateConfig({ enabled: true, gate: false, hop: 3 }),
   };
   const g = geometry(ctx);
   assert.equal(g.own, 6);
@@ -3549,7 +3551,8 @@ test('measure the geometry the gate reads', () => {
   assert.equal(g.hop2, 2);
   assert.equal(g.hop3, 1);
   assert.equal(g.hop4, 3);
-  // Hops 3 and beyond (cells 3 and 8) are the reservoir the layer banks.
+  // Hops 3 and beyond (cells 3 and 8) are the reservoir the layer banks at
+  // the round-19 band; the shipped band starts at hop 1 (round 20).
   assert.equal(g.rear, 4);
   // Both neutral plains in reach (0 next to our ring, 5 under our cell 6) count
   // as demand; the neutral swamp at 4 is tracked separately.
@@ -4079,4 +4082,230 @@ test('leave the planner byte-identical while the grass-fog layer is off', () => 
     if (previous === undefined) delete process.env.BOT3_FOGRASS;
     else process.env.BOT3_FOGRASS = previous;
   }
+});
+// ---------------------------------------------------------------------------
+// Corridor multi-line layer (round 20, ./mazerush)
+// ---------------------------------------------------------------------------
+const {
+  mazerushConfig,
+  mazerushUpdate,
+  mazerushField,
+  applyMazerush,
+  mazerushOrders,
+  sealValues,
+  DEFAULT_MIN_FIRE: MAZERUSH_MIN_FIRE,
+  DEFAULT_FEED: MAZERUSH_FEED,
+  DEFAULT_HOLD,
+  DEFAULT_PUMP,
+  DEFAULT_SEAL,
+  DEFAULT_LANE,
+  DEFAULT_SIDEWAYS,
+  DEFAULT_BRANCH,
+} = require('./mazerush');
+
+// A 3x3 plus: our junction in the middle, arms left/top, a rival stack on the
+// right and a neutral cell below. Enough shape to test ring, hop, degree and
+// threat, which is all the layer reads.
+function rushBlob(units = [0, 2, 0, 2, 3, 5, 0, 0, 0]) {
+  const b = createBoard(3, 3, 1);
+  b.grid_type.fill(200);
+  b.army_cnt.set(units);
+  const teams = Uint8Array.from([0, 1, 0, 1, 1, 2, 0, 0, 0]);
+  // Only the plus is passable: the arms are interior cells of the corridor.
+  for (let i = 0; i < b.size; i++) b.grid_type[i] = teams[i] === 1 ? 1 : teams[i] === 2 ? 2 : 201;
+  return { b, teams, units: Float64Array.from(units) };
+}
+
+test('ship the corridor layer on and clamp its knobs', () => {
+  assert.equal(mazerushConfig({}, {}).enabled, true, 'the switch ships on');
+  assert.equal(mazerushConfig({}, { BOT3_MAZERUSH: '0' }).enabled, false);
+  assert.equal(mazerushConfig({}, { BOT3_MAZERUSH: '1' }).enabled, true);
+  assert.equal(mazerushConfig({}, { BOT3_MAZERUSH: 'off' }).enabled, false);
+  const defaults = mazerushConfig({ enabled: true }, {});
+  assert.equal(defaults.minFire, MAZERUSH_MIN_FIRE);
+  assert.equal(defaults.feed, MAZERUSH_FEED);
+  assert.equal(defaults.hold, DEFAULT_HOLD);
+  assert.equal(defaults.pump, DEFAULT_PUMP);
+  assert.equal(defaults.seal, DEFAULT_SEAL);
+  assert.equal(defaults.lane, DEFAULT_LANE === 1);
+  assert.equal(defaults.sideways, DEFAULT_SIDEWAYS);
+  assert.equal(defaults.branch, DEFAULT_BRANCH);
+  const clamped = mazerushConfig(
+    {},
+    { BOT3_MAZERUSH: '1', BOT3_MAZERUSH_FEED: '99', BOT3_MAZERUSH_HOLD: '-5' },
+  );
+  assert.equal(clamped.feed, 4);
+  assert.equal(clamped.hold, 0);
+});
+
+test('gate the corridor layer on maze + multi only', () => {
+  const on = mazerushConfig({ enabled: true });
+  const { b } = rushBlob();
+  const input = { turn: 60, multi: true, corridor: true, size: b.size, me: 1, land: 10, enemyLand: 10 };
+  assert.ok(mazerushUpdate(b, input, on), 'opens on a corridor multi room');
+  assert.equal(mazerushUpdate(createBoard(3, 3, 1), { ...input, multi: false }, on), null);
+  assert.equal(mazerushUpdate(createBoard(3, 3, 1), { ...input, corridor: false }, on), null);
+  assert.equal(mazerushUpdate(createBoard(3, 3, 1), input, mazerushConfig({}, { BOT3_MAZERUSH: '0' })), null);
+  // No state is allocated while the switch is off.
+  const off = createBoard(3, 3, 1);
+  mazerushUpdate(off, input, mazerushConfig({}, { BOT3_MAZERUSH: '0' }));
+  assert.equal(off.mazerush, undefined);
+  // The lead cap stands the layer down once the land race is won.
+  const gated = mazerushConfig({ enabled: true, leadCap: 110 });
+  assert.equal(mazerushUpdate(b, { ...input, land: 30, enemyLand: 10 }, gated), null);
+  assert.ok(mazerushUpdate(b, { ...input, land: 30, enemyLand: 30 }, gated));
+});
+
+test('measure the corridor field: ring, hop, degree and threat', () => {
+  const { b, teams, units } = rushBlob();
+  const field = mazerushField(b, teams, units, b.neighbors, 1);
+  assert.equal(field.ring[4], 1, 'the junction faces a rival stack');
+  assert.equal(field.ring[1], 0, 'an interior arm is not the ring');
+  assert.equal(field.hop[4], 0);
+  assert.equal(field.hop[1], 1);
+  assert.equal(field.hop[3], 1);
+  assert.equal(field.deg[4], 3, 'the centre of the plus is a degree-3 junction');
+  assert.equal(field.deg[1], 1);
+  assert.equal(field.threat[4], 5, 'the adjacent rival stack is the threat');
+  assert.equal(field.threat[1], 0, 'no hostile neighbour on the arm');
+});
+
+test('hold prices a threatened ring cell by its stack, junction first', () => {
+  const { b, teams, units } = rushBlob();
+  const ctx = { b, tile: b.grid_type, teams, units, neighbors: b.neighbors, myTeam: 1 };
+  const plan = mazerushUpdate(
+    b,
+    { turn: 60, multi: true, corridor: true, size: b.size, me: 1 },
+    mazerushConfig({ enabled: true, hold: 20 }),
+  );
+  const candidates = [
+    { score: 20, from: 3, to: 4, mode: 2, send: 1 },
+    { score: 20, from: 1, to: 4, mode: 2, send: 1 },
+  ];
+  applyMazerush(plan, ctx, candidates);
+  // The centre is a junction with a 5-army neighbour: hold * (1 + junction) * min(4, threat).
+  const bonus = 20 * 2 * 4;
+  assert.equal(Math.round(candidates[0].score), 20 + bonus);
+  assert.equal(Math.round(candidates[1].score), 20 + bonus);
+  // A ring cell that only faces neutral ground carries no threat and is untouched.
+  const neutral = rushBlob([0, 2, 0, 2, 3, 0, 0, 0, 0]);
+  const quiet = mazerushUpdate(
+    neutral.b,
+    { turn: 60, multi: true, corridor: true, size: 9, me: 1 },
+    mazerushConfig({ enabled: true, hold: 20 }),
+  );
+  const ops = [{ score: 20, from: 3, to: 4, mode: 2, send: 1 }];
+  applyMazerush(
+    quiet,
+    { ...ctx, b: neutral.b, teams: neutral.teams, units: neutral.units, tile: neutral.b.grid_type },
+    ops,
+  );
+  assert.equal(ops[0].score, 20);
+  // A defence score is never re-priced.
+  const strong = [{ score: 560, from: 3, to: 4, mode: 2, send: 1 }];
+  applyMazerush(plan, ctx, strong);
+  assert.equal(strong[0].score, 560);
+});
+
+test('feed appends an extra merge into a starved ring cell', () => {
+  const { b, teams, units } = rushBlob([0, 3, 0, 3, 1, 5, 0, 0, 0]);
+  const ctx = { b, tile: b.grid_type, teams, units, neighbors: b.neighbors, myTeam: 1 };
+  const on = mazerushConfig({ enabled: true, feed: 1, feedOrders: 2 });
+  const plan = mazerushUpdate(b, { turn: 60, multi: true, corridor: true, size: b.size, me: 1 }, on);
+  const extra = mazerushOrders(plan, ctx, []);
+  // Ring cell 4 holds one army and faces a five-army stack: it is starved, and
+  // both arms may feed it in the same tick because the engine runs queued moves
+  // into one cell in sequence.
+  assert.equal(extra.length, 2);
+  assert.deepEqual(extra.map((op) => op.to), [4, 4]);
+  for (const op of extra) {
+    assert.equal(teams[op.from], 1);
+    assert.equal(op.mode, 2);
+  }
+  // A ring cell the base batch already fires from is never made a target (that
+  // would cancel its order).
+  const firing = [{ score: 90, from: 4, to: 5, mode: 2, send: 2 }];
+  assert.equal(mazerushOrders(plan, ctx, firing).some((op) => op.to === 4), false);
+  // The layer is inert without a feed setting.
+  const quiet = mazerushUpdate(
+    b,
+    { turn: 60, multi: true, corridor: true, size: b.size, me: 1 },
+    mazerushConfig({ enabled: true }),
+  );
+  assert.deepEqual(mazerushOrders(quiet, ctx, []), []);
+});
+
+test('seal prices a rival junction by the branch it cuts', () => {
+  // A 4x4 room split by one rival junction: our crown on the left, the rival
+  // junction in the middle and a two-cell rival branch behind it.
+  const b = createBoard(4, 4, 1);
+  b.grid_type.fill(201);
+  for (const i of [0, 1, 5, 6, 9, 10, 4, 8]) b.grid_type[i] = 200;
+  b.grid_type[0] = 101;
+  const teams = new Uint8Array(b.size);
+  const units = new Float64Array(b.size);
+  teams[1] = 1;
+  units[1] = 3;
+  teams[5] = 2;
+  units[5] = 4; // rival junction, ours is to its left
+  teams[6] = 2;
+  units[6] = 2;
+  teams[9] = 2;
+  units[9] = 2; // the branch behind it
+  teams[10] = 2;
+  units[10] = 2;
+  const ctx = { b, tile: b.grid_type, teams, units, neighbors: b.neighbors, myTeam: 1 };
+  const seal = sealValues(ctx);
+  assert.ok(seal[5] > 0, 'the rival junction has a cut value');
+  assert.equal(seal[6], 0, 'a degree-2 cell is not a junction');
+  const plan = mazerushUpdate(
+    b,
+    { turn: 60, multi: true, corridor: true, size: b.size, me: 1 },
+    mazerushConfig({ enabled: true, seal: 20, sealCap: 400 }),
+  );
+  const ops = [
+    { score: 40, from: 1, to: 5, mode: 2, send: 2 },
+    { score: 40, from: 1, to: 6, mode: 2, send: 2 },
+  ];
+  applyMazerush(plan, ctx, ops);
+  assert.ok(ops[0].score > 40, 'the junction attack is re-priced');
+  assert.equal(ops[1].score, 40, 'the plain attack is untouched');
+  assert.equal(Math.round(ops[0].score), 40 + Math.min(400, Math.round(Math.sqrt(seal[5]) * 20)));
+});
+
+test('never allocate corridor state while the switch is off', () => {
+  const previous = process.env.BOT3_MAZERUSH;
+  process.env.BOT3_MAZERUSH = '0';
+  try {
+    // A 5x5 corridor: one open row, the rest mountains, so isMazeBoard holds.
+    const build = () => {
+      const b = createBoard(5, 5, 1);
+      b.grid_type.fill(201);
+      for (let c = 0; c < 5; c++) b.grid_type[c] = 200;
+      b.grid_type[0] = 101;
+      b.grid_type[4] = 102;
+      b.army_cnt[0] = 3;
+      b.army_cnt[4] = 1;
+      b.openingBudget = 3;
+      return b;
+    };
+    const before = build();
+    const after = build();
+    const one = chooseOrders(before, 60, players, true);
+    const two = chooseOrders(after, 60, players, true);
+    assert.equal(before.mazerush, undefined, 'no state is allocated while the switch is off');
+    assert.deepEqual(
+      two.map((op) => [op.from, op.to, op.build ?? null, op.mode]),
+      one.map((op) => [op.from, op.to, op.build ?? null, op.mode]),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.BOT3_MAZERUSH;
+    else process.env.BOT3_MAZERUSH = previous;
+  }
+});
+
+test('hand the measured branch count to the fog corridor objective', () => {
+  // The layer only passes the override, so the config itself is the contract.
+  assert.equal(fogMazeConfig({ branches: DEFAULT_BRANCH }).branches, DEFAULT_BRANCH);
+  assert.equal(fogMazeConfig({}).branches, 0, 'the shipped fog config keeps branches at 0');
 });

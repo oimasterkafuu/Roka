@@ -42,7 +42,10 @@
 const INF = 1e6;
 const DEFAULT_MAX_BOARD = 800;
 // Hops from the frontier a vault and its donors must sit at.
-const DEFAULT_HOP = 3;
+// Round 20's joint search: tapping from hop 1 (the ring's own rear edge) on a
+// gated board measured +5 archipelago clear and +1 mediterranean clear with no
+// negative flips, so it ships at 1 (the round-19 band was 3).
+const DEFAULT_HOP = 1;
 // First planning tick the gather may run.
 const DEFAULT_START = 44;
 const DEFAULT_END = 0;

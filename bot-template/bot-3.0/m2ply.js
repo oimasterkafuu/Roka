@@ -103,7 +103,8 @@ const DEFAULTS = {
   crown: 120,
   ring: 1.5,
   mass: 0.5,
-  cut: 0.5,
+  // Round 20's joint search: valuing isolation at 1.5 measured +1 maze clear.
+  cut: 1.5,
   guard: 0.5,
   feedNeed: 4,
   // Measured neutral on 128 clear multi games (77/128 against 78/128 with the
