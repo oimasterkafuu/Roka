@@ -3898,3 +3898,185 @@ test('shorten the bank band to hop 2 only on a swamp board', () => {
   assert.equal(dryPlan.config, on);
   assert.equal(dryPlan.active[0].cell, 3);
 });
+
+// --- Grass-fog multi doctrine (./foggrass) ----------------------------------
+const {
+  foggrassConfig,
+  foggrassUpdate,
+  foggrassField,
+  applyFoggrass,
+  foggrassOrders,
+  freshFoggrass,
+  swampShare: foggrassSwampShare,
+  DEFAULT_SWAMP: FOGGRASS_SWAMP,
+  DEFAULT_RELOAD: FOGGRASS_RELOAD,
+} = require('./foggrass');
+
+// 3x3 grass board. Cell 1 is the visible relay stack (3 army); cell 4 is our
+// ring cell in front of it; cell 5 is a rear neighbour that can feed it.
+function foggrassBoard() {
+  const b = createBoard(3, 3, 1);
+  b.grid_type.fill(1);
+  b.army_cnt.fill(1);
+  b.grid_type[1] = 2;
+  b.army_cnt[1] = 3;
+  b.army_cnt[4] = 1;
+  b.army_cnt[5] = 2;
+  b.fog.fill(0);
+  b.fogMode = [false];
+  return b;
+}
+function foggrassCtx(b, overrides = {}) {
+  const teams = Uint8Array.from([1, 2, 1, 1, 1, 1, 1, 1, 1]);
+  const units = Float64Array.from(b.army_cnt);
+  return {
+    size: 9,
+    tile: b.grid_type,
+    teams,
+    units,
+    neighbors: b.neighbors,
+    myTeam: 1,
+    me: 1,
+    ...overrides,
+  };
+}
+
+test('ship the grass-fog switch off and clamp its knobs', () => {
+  assert.equal(foggrassConfig({}, {}).enabled, false);
+  assert.equal(foggrassConfig({}, { BOT3_FOGRASS: '1' }).enabled, true);
+  assert.equal(foggrassConfig({}, { BOT3_FOGRASS: 'off' }).enabled, false);
+  const defaults = foggrassConfig({ enabled: true }, {});
+  assert.equal(defaults.swamp, FOGGRASS_SWAMP);
+  assert.equal(defaults.ring, false, 'the ring doctrine is opt-in');
+  assert.equal(defaults.feed, 0, 'the feed is part of the ring doctrine');
+  assert.equal(defaults.counter, false, 'the counter doctrine is opt-in');
+  assert.equal(defaults.reload, FOGGRASS_RELOAD, 'only the pulse refill ships on');
+  assert.equal(defaults.seat, 0);
+  const clamped = foggrassConfig(
+    { enabled: true },
+    {
+      BOT3_FOGRASS_SWAMP: '200',
+      BOT3_FOGRASS_MIN: '-4',
+      BOT3_FOGRASS_HOLD: '999',
+      BOT3_FOGRASS_SEAT: '9',
+      BOT3_FOGRASS_RELOAD: '-7',
+    },
+  );
+  assert.equal(clamped.swamp, 100);
+  assert.equal(clamped.minThreat, 1);
+  assert.equal(clamped.hold, 50);
+  assert.equal(clamped.seat, 2);
+  assert.equal(clamped.reload, -1);
+  assert.equal(foggrassConfig({}, { BOT3_FOGRASS: '1', BOT3_FOGRASS_RING: '1' }).ring, true);
+  assert.equal(foggrassConfig({}, { BOT3_FOGRASS: '1', BOT3_FOGRASS_COUNTER: '1' }).counter, true);
+});
+
+test('gate the layer on a grass fog multi room only', () => {
+  const b = foggrassBoard();
+  const input = { multi: true, fog: true, size: 9, me: 1, turn: 60, corridor: false, tile: b.grid_type };
+  const on = foggrassConfig({ enabled: true });
+  assert.equal(foggrassUpdate(b, input, on).share, 0);
+  assert.equal(foggrassUpdate(b, { ...input, multi: false }, on), null);
+  assert.equal(foggrassUpdate(b, { ...input, fog: false }, on), null);
+  assert.equal(foggrassUpdate(b, { ...input, corridor: true }, on), null);
+  assert.equal(foggrassUpdate(b, input, foggrassConfig({ enabled: false })), null);
+  // Three swamp cells out of nine is 33 %, i.e. no longer a grass room.
+  const wet = { ...b, grid_type: Array.from(b.grid_type, (code, i) => (i < 3 ? 204 : code)) };
+  assert.ok(foggrassSwampShare({ ...input, tile: wet.grid_type }) > 25);
+  assert.equal(foggrassUpdate(b, { ...input, tile: wet.grid_type }, on), null);
+  // The seat gate can hold the layer off one side of the mirror.
+  assert.equal(foggrassUpdate(b, input, foggrassConfig({ enabled: true, seat: 2 })), null);
+  assert.ok(foggrassUpdate(b, input, foggrassConfig({ enabled: true, seat: 1 })));
+});
+
+test('read the ring threat and the garrison a push cannot beat', () => {
+  const b = foggrassBoard();
+  const ctx = foggrassCtx(b);
+  const field = foggrassField(
+    ctx.tile,
+    ctx.teams,
+    ctx.units,
+    ctx.neighbors,
+    1,
+    foggrassConfig({ enabled: true }),
+  );
+  assert.equal(field.ring[4], 1, 'the ring cell in front of the relay stack');
+  assert.equal(field.threat[4], 3);
+  assert.equal(field.holdAt[4], 2, 'a 3-stack needs 4 to take a 2-garrison cell');
+  assert.equal(field.ring[1], 0, 'the rival cell is not our ring');
+  assert.equal(field.ring[5], 0, 'an interior cell has no foreign neighbour');
+  assert.equal(field.holdAt[4] <= 2, true, 'two army stops a 3-stack for a cost of two');
+  assert.equal(field.holdAt[5], 0);
+});
+
+test('feed an endangered ring cell and hold its garrison', () => {
+  const b = foggrassBoard();
+  const ctx = foggrassCtx(b);
+  const cfg = foggrassConfig({ enabled: true, ring: true, feed: 190 });
+  const plan = { config: cfg, turn: 60, me: 1, state: freshFoggrass() };
+  const feed = { score: 25, from: 5, to: 4, mode: 2, send: 1 };
+  applyFoggrass(plan, ctx, [feed]);
+  assert.ok(feed.score >= 190, 'the feed reaches the hold garrison');
+  assert.equal(plan.state.feeds, 1);
+  // The cell now holds its garrison, so the same frame holds it instead of
+  // spending it on a neutral capture.
+  const held = foggrassCtx(b, { units: Float64Array.from([1, 3, 1, 1, 2, 2, 1, 1, 1]) });
+  const hold = { score: 40, from: 4, to: 3, mode: 2 };
+  const defence = { score: 320, from: 4, to: 3, mode: 2 };
+  const attack = { score: 40, from: 4, to: 1, mode: 2 };
+  const candidates = [hold, defence, attack];
+  applyFoggrass({ ...plan, state: freshFoggrass() }, held, candidates);
+  assert.equal(candidates.includes(hold), false, 'the paint move is held');
+  assert.ok(candidates.includes(defence), 'defence keeps its slot');
+  assert.ok(candidates.includes(attack), 'a rival capture is a land swing');
+  // Keep-attack off also holds the rival capture; the feed is untouched.
+  const strict = foggrassConfig({ enabled: true, ring: true, feed: 190, keepAttack: false });
+  const strictPlan = { config: strict, turn: 60, me: 1, state: freshFoggrass() };
+  const strictAttack = { score: 40, from: 4, to: 1, mode: 2 };
+  applyFoggrass(strictPlan, held, [strictAttack]);
+  assert.equal(strictAttack.vetoHold, true);
+});
+
+test('counter-capture the rival cell that is about to empty', () => {
+  const b = foggrassBoard();
+  const ctx = foggrassCtx(b, { units: Float64Array.from([1, 3, 1, 1, 4, 2, 1, 1, 1]) });
+  const cfg = foggrassConfig({ enabled: true, counter: true });
+  const plan = { config: cfg, turn: 10, me: 1, state: freshFoggrass() };
+  // Tick 11 is odd, so seat 2 resolves first and seat 1 moves second.
+  const picks = foggrassOrders(plan, ctx, []);
+  assert.equal(picks.length, 1);
+  assert.equal(picks[0].from, 4);
+  assert.equal(picks[0].to, 1);
+  assert.equal(picks[0].mode, 2);
+  // Resolving first cannot take an emptied cell.
+  assert.deepEqual(foggrassOrders({ ...plan, turn: 11 }, ctx, []), []);
+  // A source already spent by the planner is never duplicated.
+  assert.deepEqual(foggrassOrders(plan, ctx, [{ from: 4, to: 0, mode: 2 }]), []);
+  // The doctrine ships off.
+  assert.deepEqual(foggrassOrders({ ...plan, config: foggrassConfig({ enabled: true }) }, ctx, []), []);
+});
+
+test('leave the planner byte-identical while the grass-fog layer is off', () => {
+  const previous = process.env.BOT3_FOGRASS;
+  process.env.BOT3_FOGRASS = '0';
+  try {
+    const make = () => {
+      const board = mshapeBlob(3);
+      board.openingBudget = 3;
+      board.fog.fill(1);
+      board.fogMode = [true];
+      return board;
+    };
+    const b = make();
+    const before = chooseOrders(b, 60, players, true);
+    const after = chooseOrders(make(), 60, players, true);
+    assert.equal(b.foggrass, undefined, 'no state is allocated while the switch is off');
+    assert.deepEqual(
+      after.map((op) => [op.from, op.to, op.build ?? null, op.mode]),
+      before.map((op) => [op.from, op.to, op.build ?? null, op.mode]),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.BOT3_FOGRASS;
+    else process.env.BOT3_FOGRASS = previous;
+  }
+});

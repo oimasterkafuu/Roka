@@ -53,6 +53,7 @@ const { bankgateConfig, bankgateUpdate, applyBankgate, bankgateOrders } = requir
 const { mtuneConfig, mtuneUpdate, applyMtune, mshapeOverrides, mhalfOverrides } = require('./mtune');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
+const { foggrassConfig, foggrassUpdate, applyFoggrass, foggrassOrders } = require('./foggrass');
 const {
   predict: shadowPredict,
   contest: shadowContest,
@@ -476,6 +477,37 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // can price them together. With `BOT3_MTUNE` off both overrides are
   // `undefined` and every call below is the inherited one.
   const mtuneCfg = mtuneConfig();
+  // Grass-fog multi doctrine (see ./foggrass, round 20). The one relay cell with
+  // no purchase for the crown economy runs on the plain reactive policy, so it
+  // gets a cheap reaction layer gated by the fog-visible swamp share instead.
+  // Off by default; `null` keeps the shipped path byte-identical.
+  const foggrassLayer =
+    multi && (b.fogMode ?? b.fog.includes(1))
+      ? foggrassUpdate(
+          b,
+          {
+            turn,
+            multi,
+            fog: true,
+            size,
+            me,
+            corridor: isMazeBoard(b),
+            tile,
+          },
+          foggrassConfig(),
+        )
+      : null;
+  const mhalfBaseOverrides = { ...mhalfOverrides(mtuneCfg) };
+  // Grass-fog rooms run the inherited ring refill, but a refill that reaches the
+  // reload threshold on the growth tick wins the sort and cancels the capture it
+  // was arming (see ./foggrass `reload`). The layer lowers the reload bonus in
+  // the room instead of re-scoring the merge afterwards.
+  if (
+    foggrassLayer &&
+    foggrassLayer.config.reload >= 0 &&
+    (!foggrassLayer.config.pulseOnly || (turn + 1) % 50 === 0)
+  )
+    mhalfBaseOverrides.reload = foggrassLayer.config.reload;
   const mshapeLayer = mshapeUpdate(
     b,
     {
@@ -511,7 +543,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
       army: self.army,
       enemyArmy,
     },
-    mhalfConfig(mhalfOverrides(mtuneCfg)),
+    mhalfConfig(mhalfBaseOverrides),
   );
   // Crown banks. Round 18 measured that the stranded rear army (hop >= 3; 61
   // army at t50-250 versus 21.5 at the ring) can buy a crown that pays +1 army
@@ -1435,6 +1467,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
     applyBankgate(bankgateLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mcrown2Layer)
     applyMcrown2(mcrown2Layer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
+  // Grass-fog reaction layer (see ./foggrass): the ring hold and the counter
+  // capture are candidate-level, so they run with the other score layers.
+  if (foggrassLayer)
+    applyFoggrass(foggrassLayer, { tile, teams, units, neighbors, myTeam, me }, candidates);
   // Self-play-tuned multi-line evaluation (see ./mtune). Rounds 15/16 each moved
   // one rule; this layer moves the whole set of score bands from one blob, so a
   // search can tune capture/hostile/merge/defence prices together. Off by
@@ -1504,6 +1540,13 @@ function chooseOrders(b, turn, leaderboard, multi) {
         for (const op of mcrown2Orders(
           mcrown2Layer,
           { tile, teams, units, neighbors, frontDist, myTeam },
+          picked,
+        ))
+          picked.push(op);
+      if (foggrassLayer)
+        for (const op of foggrassOrders(
+          foggrassLayer,
+          { tile, teams, units, neighbors, myTeam, me },
           picked,
         ))
           picked.push(op);
@@ -1580,6 +1623,16 @@ function chooseOrders(b, turn, leaderboard, multi) {
     for (const op of bankgateOrders(
       bankgateLayer,
       { tile, teams, units, neighbors, frontDist, myTeam },
+      orders,
+    ))
+      orders.push(op);
+  }
+  // Grass-fog counter-captures (see ./foggrass): appended after the matching
+  // loop so the reaction to a rival all-in push cannot lose the slot.
+  if (foggrassLayer) {
+    for (const op of foggrassOrders(
+      foggrassLayer,
+      { tile, teams, units, neighbors, myTeam, me },
       orders,
     ))
       orders.push(op);
