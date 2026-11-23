@@ -48,6 +48,7 @@ const { predict: queuePredict, record: queueRecord } = require('./mqueue');
 const { configOf: twoPlyConfig, choose: twoPlyChoose } = require('./m2ply');
 const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
 const { mhalfConfig, mhalfUpdate, applyMhalf, applyMhalfModes } = require('./mhalf');
+const { mcrown2Config, mcrown2Update, applyMcrown2, mcrown2Orders } = require('./mcrown2');
 const { mtuneConfig, mtuneUpdate, applyMtune, mshapeOverrides, mhalfOverrides } = require('./mtune');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
@@ -511,6 +512,34 @@ function chooseOrders(b, turn, leaderboard, multi) {
     },
     mhalfConfig(mhalfOverrides(mtuneCfg)),
   );
+  // Crown economy from the stranded rear army (see ./mcrown2, round 18). The
+  // hop4+ pool is idle (61 army at t50-250, 90-190 by t300 on long games) while
+  // a crown pays +1 every tick forever, so the layer banks that rear army into
+  // one cell three or more hops from the ring and buys a crown with it. It never
+  // touches hop 0/1, so the frontier exchange keeps its army. Off by default;
+  // round 19 restricts it to fog rooms (`BOT3_FOGBANK`), where the vault is
+  // hidden from the rival by construction and the measured gains reproduce.
+  const mcrown2Layer = mcrown2Update(b, {
+    turn,
+    multi,
+    size,
+    me,
+    fog: Boolean(b.fogMode ?? b.fog.includes(1)),
+    corridor: isMazeBoard(b),
+    tile,
+    teams,
+    units,
+    neighbors,
+    myTeam,
+    isolated: b.isolated,
+    frontDist,
+    enemyDist,
+    cut,
+    army: self.army,
+    enemyArmy,
+    land: self.land,
+    enemyLand,
+  });
   // Fog oracle (see ./fog-oracle). The leaderboard is rebuilt from the unfogged
   // grids, so `rival.army` / `rival.land` are exact even where the vision is
   // not: the difference against the visible half is the interior reserve, and
@@ -1394,6 +1423,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mshapeLayer) applyMshape(mshapeLayer, { tile, teams, units, neighbors, myTeam }, candidates);
   if (mhalfLayer) applyMhalf(mhalfLayer, { tile, teams, units, neighbors, myTeam }, candidates);
+  // Crown bank (see ./mcrown2). Runs last so the redirect of a rear merge
+  // survives every other score layer: the army is already moving and the only
+  // decision left is whether it walks to the ring or to the bank.
+  if (mcrown2Layer)
+    applyMcrown2(mcrown2Layer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   // Self-play-tuned multi-line evaluation (see ./mtune). Rounds 15/16 each moved
   // one rule; this layer moves the whole set of score bands from one blob, so a
   // search can tune capture/hostile/merge/defence prices together. Off by
@@ -1450,6 +1484,15 @@ function chooseOrders(b, turn, leaderboard, multi) {
       myTeam,
     });
     if (picked) {
+      // The crown bank is additive: the search decides the exchange, the layer
+      // still delivers its rear merges and its build on the same tick.
+      if (mcrown2Layer)
+        for (const op of mcrown2Orders(
+          mcrown2Layer,
+          { tile, teams, units, neighbors, frontDist, myTeam },
+          picked,
+        ))
+          picked.push(op);
       for (const op of picked) {
         if (op.build) continue;
         b.lastFrom[op.to] = op.from;
@@ -1500,6 +1543,17 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // neighbours in the same tick when both pushes are halved.
   if (mshapeLayer && multi) {
     for (const op of applyFan(mshapeLayer, { tile, teams, units, neighbors }, orders)) orders.push(op);
+  }
+  // Crown bank (see ./mcrown2): the gather merges and the city/crown build are
+  // appended after the planner's matching loop, because the engine runs several
+  // moves into one cell per tick while `take()` allows one order per target.
+  if (mcrown2Layer) {
+    for (const op of mcrown2Orders(
+      mcrown2Layer,
+      { tile, teams, units, neighbors, frontDist, myTeam },
+      orders,
+    ))
+      orders.push(op);
   }
   // Rolling garrison (see ./mhalf): a capture keeps half its stack when the
   // halved push still takes the cell and the source keeps enough army to fire
