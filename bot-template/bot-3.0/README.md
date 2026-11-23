@@ -2,7 +2,7 @@
 
 Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](../bot-2.0/) 的 1v1 结构，目标是在官方小图（1v1 标准尺寸，`0.34`）上继续提升对 Apex、Anti-Human、Bot(2.0) 与 Relay 的实战胜率。首个提交是 Relay 2.16.0 策略的完整副本，作为后续改动的基线。
 
-当前主线已合入迷宫走廊相位、单线收尾纵队、迷雾单线层、第 7–13 轮的默认层（先涂地、影子预测、迷雾迷宫、反向救援、群岛、抢地、沼泽惩罚 + 武装斩杀），第 15–16 轮的多线扩张形状层与持续施压层，并同步上游 relay 的 opening/reinforcement pricing 与多线 burst 移除。最终小图 1v1 基线为 **1726/266/56（84.3%）**，较第 13 轮基线 1688/299/61 **+38 胜且逐格零退化**；Relay 单线 8 格全部 >=65%，多线 8 格 50.0%–93.8%（random 明牌 68.8%、med 明牌 65.6%、med 迷雾 93.8% 达标，其余仍是镜像残余，证据见 [MULTI.md](MULTI.md) 与 [ROUND17-ROUNDUP.md](ROUND17-ROUNDUP.md)）。完整矩阵见 [BASELINE.md](BASELINE.md)，后续方向见 [NEXT.md](NEXT.md)，第 15–16 轮汇总见 [ROUND16-ROUNDUP.md](ROUND16-ROUNDUP.md)。
+当前主线已合入迷宫走廊相位、单线收尾纵队、迷雾单线层、第 7–13 轮的默认层（先涂地、影子预测、迷雾迷宫、反向救援、群岛、抢地、沼泽惩罚 + 武装斩杀），第 15–16 轮的多线扩张形状层与持续施压层，并同步上游 relay 的 opening/reinforcement pricing 与多线 burst 移除。最终小图 1v1 基线为 **1739/254/55（84.9%）**，较第 13 轮基线 1688/299/61 **+51 胜且逐格零退化**；Relay 单线 8 格全部 >=65%，多线 8 格 50.0%–93.8%（random 明牌 68.8%、arch 明牌 65.6%、med 明牌与迷雾均 93.8% 达标，四格仍是镜像残余，证据见 [MULTI.md](MULTI.md) 与 [ROUND17-ROUNDUP.md](ROUND17-ROUNDUP.md)）。完整矩阵见 [BASELINE.md](BASELINE.md)，后续方向见 [NEXT.md](NEXT.md)，第 15–16 轮汇总见 [ROUND16-ROUNDUP.md](ROUND16-ROUNDUP.md)。
 
 ## 基线（新引擎，最终）
 
@@ -32,7 +32,7 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 | 迷雾 / 单线 |  512 | 406 |  74 |   32 | 79.3% |
 | 迷雾 / 多线 |  512 | 441 |  64 |    7 | 86.1% |
 
-非 Relay 三对手全部 >=50% 且无负向格；Relay **11/16 格达标**——单线 8 格 65.6%–71.9%，多线 random 明牌 68.8%（22/32）、med 明牌 65.6%（21/32）、med 迷雾 93.8%（30/32），其余五格 50.0%–59.4%（证据见 [MULTI.md](MULTI.md)、[ROUND16-ROUNDUP.md](ROUND16-ROUNDUP.md)、[ROUND17-ROUNDUP.md](ROUND17-ROUNDUP.md)）。完整 64 格逐项数据见 [BASELINE.md](BASELINE.md)，原始逐局记录见 [baseline-results.jsonl](baseline-results.jsonl) 与 [baseline-summary.json](baseline-summary.json)。
+非 Relay 三对手全部 >=50% 且无负向格；Relay **12/16 格达标**——单线 8 格 65.6%–71.9%，多线 random 明牌 68.8%、arch 明牌 65.6%、med 明牌与迷雾均 93.8%，其余四格 50.0%–59.4%（证据见 [MULTI.md](MULTI.md)、[ROUND16-ROUNDUP.md](ROUND16-ROUNDUP.md)、[ROUND17-ROUNDUP.md](ROUND17-ROUNDUP.md)）。完整 64 格逐项数据见 [BASELINE.md](BASELINE.md)，原始逐局记录见 [baseline-results.jsonl](baseline-results.jsonl) 与 [baseline-summary.json](baseline-summary.json)。
 
 ## 结构
 
@@ -49,6 +49,7 @@ Bot(3.0) 以 [`relay-bot`](../relay-bot/) 为基础框架，参考 [`bot-2.0`](.
 - `mhalf.js`：多线房间「持续施压」层（第 16 轮，**默认开启**，`BOT3_MHALF=0` 回基线）：按我方领土到前线环的跳数场重新排序**自己的合并**——把「补满一个本 Tick 无法出兵、补后达到 3 兵（全冲推出的下限）」的合并排到最前（跳数越深扣分越多），并把补不满的合并压到占领之下；另有一条默认关闭的 `retain` 模式策略（半兵保留滚动驻军）。实测（`mshape` 之上）：种子 1–16 的 256 局 `129 → 136`（+7，random 明牌 21/32 达标），独立半区 17–32 回吐 `-6`，合计 512 局基本持平；但全量 2048 局 `1702/290/56`（83.1%，相对上一版基线 +14、逐格零退化，组合基线成立），因此随 `mshape` 一起默认开启；`retain` 模式因「占领至少需要三兵」在结构上惰性，保持默认关闭（见 [ROUND16-MHALF.md](ROUND16-MHALF.md)）。
 - `mtune.js`：多线评估的自博弈调参层（第 17 轮，默认关闭，`BOT3_MTUNE=1` + `BOT3_MTUNE_JSON` 开启）：用一个 JSON 球（14 个加性分数权重 + 7 个 mshape/mhalf 旋钮，默认值即第 16 轮数值）统一拥有多线房间的占领/敌格/合并/拱形/切断/脉冲/王冠行军/防御价格与订单上限、领先门控，只改分数、不新增机制；配套 `scripts/tune-bot3-mtune.cjs` 在真实引擎上做可续跑的坐标下降/随机重启搜索（种子 1–8 训练、9–16 选择、17–32 确认）。实测：107 个候选在 128 局训练块上只散布在 60–70 胜，冻结权重 1–16 为 `136 → 140`、17–32 为 `119 → 120`、全量 2048 局净 0 胜（4 格 +7 / 4 格 −7），每格均未达 65%，因此默认关闭（见 [ROUND17-MTUNE.md](ROUND17-MTUNE.md)）。
 - `m2ply.js` + `msim.js` + `mqueue.js`：多线精确搜索层（第 17–18 轮，**默认开启**，`BOT3_M3PLY=0` 关闭；`BOT3_M2PLY=1 BOT3_M3PLY=0` 复现第 17 轮两 Tick 版本）：`msim` 是引擎的精确一 Tick 仿真（增长、多线队列的链式/成环/建造背压、推兵与 1:1 互损、连通性减半与衰减、主城斩杀），`mqueue` 重放 relay 的规划器预测它下一 Tick 的整批指令（整盘逐格校验门，任何漂移即停用），`m2ply` 用三 Tick 仿真 + 「剩余脉冲折现」的地盘估值（外加兵力、主城安全、环宽、断链）在规划器候选之外补充它从不提出的横向合并与一对多灌兵，超过余量才改选。实测：512 局明牌多线 51.4% → 57.6%，验收屏 256 局 136 → 143（random 明牌 68.8%、med 明牌 65.6% 过线），全量 2048 局 1702 → 1709 且零退化，8.2ms/Tick、改选率 30%（见 [MSIM.md](MSIM.md)、[ROUND18-MSEARCH3.md](ROUND18-MSEARCH3.md)）。
+- `bankgate.js`：几何门控后方主城层（第 19 轮，**默认开启，仅明牌房间**，`BOT3_BANKGATE=0` 关闭）：第 18 轮的后方金库机制 + 实测几何门控（前线无中立地可拿、后方盆地存得住兵、地盘不领先），把 hop≥3 的搁浅兵力汇成主城；随机图实测为「管道」因此被排除，迷雾房间交给 `mcrown2.js` 的迷雾版（分工比任一层全房间实测 +4 胜）。
 - `mcrown2.js`：沼泽迷雾后方主城层（第 19 轮，**默认开启**，`BOT3_FOGBANK=0` 关闭）：只在迷雾房间且全图沼泽占比 ≥30%（迷雾下仍可见）时启动，把 hop≥3 的搁浅兵力沿 BFS 场一格一格汇入后方金库，50 兵建指挥所、再 50 兵升主城（+1 兵/Tick）；实测迷雾多线 65 → 82 胜（med 迷雾 30/32），其余 62 格 0.0pp（`BOT3_MCROWN2=1` 是第 18 轮不分迷雾的全图版本，实测 3 格退化）。
 - `mtune.js`：多线评分自博弈调参层（第 17 轮，默认关闭，`BOT3_MTUNE=1` + `BOT3_MTUNE_JSON`）：一个 JSON 球持有 14 个加性评分权重与 7 个层旋钮，配合 `scripts/tune-bot3-mtune.cjs`（128 局 16 秒、内容哈希可续跑）；最佳冻结集在样本内 +4 但样本外 +1、全量净 0，因此保留为工具而不是默认路径（见 [ROUND17-ROUNDUP.md](ROUND17-ROUNDUP.md)）。
 - `fog.js`：迷雾单线前线瞄准/柱状推进层（默认开启，`BOT3_FOG=0` 关闭）。柱状推进的「先涂地」封顶默认开启（`BOT3_FOG_PAINT3=0` 回到 round-4 基线，见 [BOT3_FOG.md](BOT3_FOG.md)）。
