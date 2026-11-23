@@ -44,12 +44,17 @@ const flagOn = (value) => {
   const text = String(value).trim().toLowerCase();
   return text !== '0' && text !== 'false' && text !== 'off';
 };
-const enabled = () =>
-  !unavailable &&
-  (flagOn(process.env.BOT3_M2PLY) ||
-    flagOn(process.env.BOT3_M3PLY) ||
-    flagOn(process.env.BOT3_MSEARCH) ||
-    flagOn(process.env.BOT3_MSEARCH_DEBUG));
+// The search ships on (round 18): with neither `BOT3_M2PLY` nor `BOT3_M3PLY`
+// set the predictor is live, and an explicit `0`/`off` on either switch turns it
+// off, so `BOT3_M3PLY=0` is the documented way back to the round-16 path.
+const enabled = () => {
+  if (unavailable) return false;
+  if (flagOn(process.env.BOT3_MSEARCH) || flagOn(process.env.BOT3_MSEARCH_DEBUG)) return true;
+  const three = process.env.BOT3_M3PLY;
+  const two = process.env.BOT3_M2PLY;
+  if (three === undefined && two === undefined) return true;
+  return flagOn(three) || flagOn(two);
+};
 const statsOn = () => flagOn(process.env.BOT3_MSEARCH_STATS);
 
 const totals = {
