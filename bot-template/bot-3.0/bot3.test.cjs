@@ -3418,11 +3418,18 @@ function crownStrip(units = [1, 1, 1, 4, 4, 5, 4, 1], hop = [0, 1, 2, 3, 4, 5, 6
   };
 }
 
-test('ship the crown-economy layer off and clamp its knobs', () => {
-  assert.equal(mcrown2Config({}, {}).enabled, false);
+test('ship the fog bank on and the clear crown-economy layer off, and clamp its knobs', () => {
+  // Round 19 ships the fog-only bank (swamp gate); the round-18 clear-room
+  // experiment stays behind `BOT3_MCROWN2`.
+  assert.equal(mcrown2Config({}, {}).enabled, true);
+  assert.equal(mcrown2Config({}, {}).fogOnly, true);
+  assert.equal(mcrown2Config({}, { BOT3_FOGBANK: 'off' }).enabled, false);
   assert.equal(mcrown2Config({}, { BOT3_MCROWN2: '1' }).enabled, true);
-  assert.equal(mcrown2Config({}, { BOT3_MCROWN2: 'off' }).enabled, false);
-  const defaults = mcrown2Config({ enabled: true }, {});
+  assert.equal(
+    mcrown2Config({}, { BOT3_MCROWN2: 'off', BOT3_FOGBANK: 'off' }).enabled,
+    false,
+  );
+  const defaults = mcrown2Config({ enabled: true }, { BOT3_FOGBANK: 'off' });
   assert.equal(defaults.hop, DEFAULT_HOP);
   assert.equal(defaults.feed, DEFAULT_FEED);
   assert.equal(defaults.gain, DEFAULT_GAIN);
@@ -3456,9 +3463,9 @@ test('ship the crown-economy layer off and clamp its knobs', () => {
 
 test('reach the crown layer only from a losing multi-line room', () => {
   const { b, ctx } = crownStrip();
-  const off = mcrown2Config({});
+  const off = mcrown2Config({}, { BOT3_FOGBANK: 'off' });
   assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true }, off), null);
-  const on = mcrown2Config({ enabled: true });
+  const on = mcrown2Config({ enabled: true }, { BOT3_FOGBANK: 'off' });
   assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: false }, on), null);
   assert.equal(mcrown2Update(b, { ...ctx, turn: 10, multi: true }, on), null);
   assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true, size: 100000 }, on), null);
@@ -3537,7 +3544,7 @@ function flatField(ctx) {
 
 test('redirect rear merges into the bank and keep defence work', () => {
   const { b, ctx } = crownStrip();
-  const on = mcrown2Config({ enabled: true });
+  const on = mcrown2Config({ enabled: true }, { BOT3_FOGBANK: 'off' });
   const plan = mcrown2Update(b, { ...ctx, turn: 60, multi: true, army: 100, enemyArmy: 200 }, on);
   assert.ok(plan);
   assert.equal(plan.active[0].cell, 3);
@@ -3616,7 +3623,7 @@ test('feed the bank from several sources and buy the crown in two steps', () => 
 
 test('never chain two appended merges in one tick', () => {
   const { b, ctx } = crownStrip([1, 1, 1, 2, 5, 5, 5, 1]);
-  const on = mcrown2Config({ enabled: true });
+  const on = mcrown2Config({ enabled: true }, { BOT3_FOGBANK: 'off' });
   const plan = mcrown2Update(b, { ...ctx, turn: 60, multi: true, army: 100, enemyArmy: 200 }, on);
   assert.ok(plan);
   const extra = mcrown2Orders(plan, ctx, []);
@@ -3649,21 +3656,25 @@ test('leave the planner byte-identical while the crown layer is off', () => {
 });
 
 test('gate the fog bank on the room, the swamp share and the pick window', () => {
-  // The fog switch is a separate switch that turns the fog defaults on with it,
-  // so a fog run and the round-18 clear experiment never share a default.
+  // The fog switch ships on (`BOT3_FOGBANK` unset) and turns its fog defaults
+  // with it, so a fog run and the round-18 clear experiment never share a state.
   const fogOnly = mcrown2Config({}, { BOT3_FOGBANK: '1' });
   assert.equal(fogOnly.enabled, true);
   assert.equal(fogOnly.fogOnly, true);
   assert.equal(fogOnly.swamp, DEFAULT_FOGBANK_SWAMP);
-  assert.equal(mcrown2Config({}, {}).enabled, false);
-  assert.equal(mcrown2Config({}, {}).swamp, 0, 'the round-18 default stays off');
-  assert.equal(mcrown2Config({}, { BOT3_MCROWN2: '1' }).fogOnly, false);
+  // The fog bank ships on; the round-18 clear experiment stays off.
+  assert.equal(mcrown2Config({}, {}).enabled, true);
+  assert.equal(mcrown2Config({}, {}).fogOnly, true);
+  assert.equal(mcrown2Config({}, { BOT3_FOGBANK: 'off' }).enabled, false);
+  assert.equal(mcrown2Config({}, { BOT3_FOGBANK: 'off' }).swamp, 0, 'the round-18 default stays off');
+  assert.equal(mcrown2Config({}, { BOT3_MCROWN2: '1', BOT3_FOGBANK: 'off' }).fogOnly, false);
   assert.equal(mcrown2Config({}, { BOT3_MCROWN2_FOGONLY: '1' }).fogOnly, true);
   assert.equal(mcrown2Config({}, { BOT3_MCROWN2_SWAMP: '999' }).swamp, 100);
   assert.equal(mcrown2Config({}, { BOT3_MCROWN2_PICKEND: '-3' }).pickEnd, 0);
   const { b, ctx } = crownStrip();
-  // A clear room is refused by the fog gate, a fog room is not.
-  const fogRoom = mcrown2Config({ enabled: true, fogOnly: true });
+  // A clear room is refused by the fog gate, a fog room is not (the swamp gate
+  // is checked separately below, so it is pinned off here).
+  const fogRoom = mcrown2Config({ enabled: true, fogOnly: true, swamp: 0 });
   assert.equal(mcrown2Update(b, { ...ctx, turn: 60, multi: true, fog: false }, fogRoom), null);
   assert.ok(mcrown2Update(b, { ...ctx, turn: 60, multi: true, fog: true }, fogRoom));
   // Swamp share: `204` is the fog encoding of an unowned swamp, `150+owner` of an
@@ -3687,10 +3698,10 @@ test('gate the fog bank on the room, the swamp share and the pick window', () =>
   assert.ok(mcrown2Update(heavyBoard, { ...heavy, turn: 60, multi: true, fog: true }, fogOnly));
   // The pick window is a *pick* gate: it refuses a new vault after the tick and
   // keeps a running one (the measured reason it must not be a run gate).
-  const late = mcrown2Config({ enabled: true, pickEnd: 60 });
+  const late = mcrown2Config({ enabled: true, pickEnd: 60, swamp: 0 }, { BOT3_FOGBANK: 'off' });
   const { b: b2, ctx: ctx2 } = crownStrip();
   assert.equal(mcrown2Update(b2, { ...ctx2, turn: 60, multi: true }, late), null);
-  const early = mcrown2Config({ enabled: true, pickEnd: 60 });
+  const early = mcrown2Config({ enabled: true, pickEnd: 60, swamp: 0 }, { BOT3_FOGBANK: 'off' });
   const { b: b3, ctx: ctx3 } = crownStrip();
   assert.ok(mcrown2Update(b3, { ...ctx3, turn: 59, multi: true }, early));
   assert.ok(

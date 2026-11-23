@@ -140,7 +140,7 @@ function flag(raw, fallback = false) {
 
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function mcrown2Config(overrides = {}, env = process.env) {
-  const fogBank = flag(env.BOT3_FOGBANK, false);
+  const fogBank = flag(env.BOT3_FOGBANK, true);
   return {
     enabled: overrides.enabled ?? (flag(env.BOT3_MCROWN2, false) || fogBank),
     fogBank: overrides.fogBank ?? fogBank,
