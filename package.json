@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "2.28.0",
+  "version": "2.19.0",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
