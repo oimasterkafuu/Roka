@@ -2461,3 +2461,462 @@ test('keep a rolling garrison only when the halved push still takes the cell', (
   );
   assert.equal(tiny[0].mode, 2);
 });
+// ---------------------------------------------------------------------------
+// Multi-line exact simulator, relay batch predictor and two-tick search
+// (./msim, ./mqueue, ./m2ply).
+// ---------------------------------------------------------------------------
+const msim = require('./msim');
+const mqueue = require('./mqueue');
+const m2ply = require('./m2ply');
+const relayOpening = require('../relay-bot/opening');
+
+// Hand-built board in the engine's encoded grid (200 is empty plain).
+function simBoard(rows, cols, cells, me = 1) {
+  const b = createBoard(rows, cols, me);
+  b.grid_type.fill(200);
+  for (const [index, code, army] of cells) {
+    b.grid_type[index] = code;
+    b.army_cnt[index] = army;
+  }
+  return b;
+}
+
+function simOf(b) {
+  const st = msim.createState(b.size);
+  msim.loadBoard(st, b);
+  return st;
+}
+
+test('msim: growth, queue order and attack follow the engine rules', () => {
+  // Crown +1 every tick, plain and city only on the growth marks, swamp never,
+  // and an isolated cell never pays (a crown always does).
+  assert.equal(msim.growthAt(101, 0, 7, true), 1);
+  assert.equal(msim.growthAt(1, 0, 7, true), 0);
+  assert.equal(msim.growthAt(1, 0, 50, true), 1);
+  assert.equal(msim.growthAt(1, 0, 50, false), 2, 'the single-line burst adds one');
+  assert.equal(msim.growthAt(51, 0, 50, true), 1);
+  assert.equal(msim.growthAt(151, 0, 50, true), 0, 'swamp pays nothing');
+  assert.equal(msim.growthAt(1, 1, 50, true), 0, 'isolation stops production');
+  // A chain advances tail-first: only the order leaving the un-targeted cell.
+  const chain = simBoard(1, 3, [
+    [0, 1, 9],
+    [1, 1, 0],
+    [2, 200, 0],
+  ]);
+  const ctx = msim.contextOf(chain);
+  const st = simOf(chain);
+  const queue = [
+    { from: 0, to: 1, mode: 2, build: null, me: 1 },
+    { from: 1, to: 2, mode: 2, build: null, me: 1 },
+  ];
+  msim.executeQueue(st, ctx, 1, queue, true);
+  assert.equal(queue.length, 1, 'the second order waits one tick');
+  assert.deepEqual([st.army[0], st.army[1]], [1, 8]);
+  // Two army cannot take a one-army cell, three can, and a failed assault trades.
+  const push = simBoard(1, 3, [
+    [0, 1, 2],
+    [1, 200, 1],
+    [2, 2, 4],
+  ]);
+  const st2 = simOf(push);
+  const ctx2 = msim.contextOf(push);
+  assert.equal(msim.pushAt(st2, ctx2, 0, 1, 2), 1);
+  assert.equal(msim.attack(st2, ctx2, 0, 1, 2), true);
+  assert.equal(msim.ownerOf(st2.code[1]), 0, 'a push of one does not take a garrison of one');
+  st2.army[0] = 4;
+  assert.equal(msim.attack(st2, ctx2, 0, 1, 2), true);
+  assert.equal(msim.ownerOf(st2.code[1]), 1, 'three army push two and take the cell');
+  // A seat resolves first on even ticks and second on odd ticks.
+  const race = simBoard(1, 3, [
+    [0, 101, 9],
+    [1, 200, 0],
+    [2, 102, 9],
+  ]);
+  const queues = () =>
+    new Map([
+      [1, [{ from: 0, to: 1, mode: 2, build: null, me: 1 }]],
+      [2, [{ from: 2, to: 1, mode: 2, build: null, me: 2 }]],
+    ]);
+  const even = simOf(race);
+  msim.step(even, msim.contextOf(race), { turn: 2, multi: true, players: [1, 2], queues: queues() });
+  assert.equal(msim.ownerOf(even.code[1]), 1);
+  const odd = simOf(race);
+  msim.step(odd, msim.contextOf(race), { turn: 3, multi: true, players: [1, 2], queues: queues() });
+  assert.equal(msim.ownerOf(odd.code[1]), 2);
+});
+
+test('mqueue: refuses serial and fogged rooms, predicts and verifies a clear one', () => {
+  const previousOn = process.env.BOT3_M2PLY;
+  const previousArm = process.env.BOT3_MSEARCH_ARM;
+  process.env.BOT3_M2PLY = '1';
+  process.env.BOT3_MSEARCH_ARM = '1';
+  try {
+    const b = simBoard(5, 5, [
+      [12, 101, 5],
+      [11, 200, 0],
+      [13, 200, 0],
+      [7, 200, 0],
+      [17, 200, 0],
+      [18, 102, 5],
+    ]);
+    b.openingBudget = relayOpening.openingBudget(1);
+    const board = [
+      { id: 1, team: 1, army: 30, land: 3, dead: 0 },
+      { id: 2, team: 2, army: 30, land: 3, dead: 0 },
+    ];
+    assert.equal(mqueue.predict(simBoard(3, 3, []), 0, board, false), null, 'serial rooms are refused');
+    const fogged = simBoard(3, 3, []);
+    fogged.fog[4] = 1;
+    assert.equal(mqueue.isClear(fogged), false);
+    assert.equal(mqueue.predict(fogged, 0, board, true), null);
+    const pred = mqueue.predict(b, 0, board, true);
+    assert.ok(pred, 'the first frame yields a batch');
+    assert.equal(pred.armed, false, 'an unverified frame is not armed');
+    assert.equal(pred.relayMe, 2);
+    // The batch is relay's own planner output on the shadow board.
+    const shadow = relayPlanner.createBoard(5, 5, 2);
+    shadow.grid_type.set(b.grid_type);
+    shadow.army_cnt.set(b.army_cnt);
+    shadow.openingBudget = b.openingBudget;
+    assert.deepEqual(
+      pred.ops.map((op) => [op.from, op.to, op.mode]),
+      relayPlanner.chooseOrders(shadow, 0, board, true).map((op) => [op.from, op.to, op.mode]),
+    );
+    mqueue.record(b, 0, [{ from: 12, to: 11, mode: 2 }]);
+    // One exact engine tick arms the layer (the simulator is the model here).
+    const st = simOf(b);
+    msim.step(st, msim.contextOf(b), {
+      turn: 1,
+      multi: true,
+      players: [1, 2],
+      queues: new Map([
+        [1, [{ from: 12, to: 11, mode: 2, build: null, me: 1 }]],
+        [2, pred.ops.map((op) => ({ ...op }))],
+      ]),
+    });
+    b.grid_type.set(st.code);
+    b.army_cnt.set(st.army);
+    b.isolated.set(st.iso);
+    const second = mqueue.predict(b, 1, board, true);
+    assert.ok(second);
+    assert.equal(second.armed, true, 'one exact frame arms the layer');
+    assert.equal(pred.state.stats.matched, 1);
+    // One tick ahead: relay's batch on the *simulated* board, without disturbing
+    // the shadow board or its bookkeeping.
+    const aheadState = simOf(b);
+    aheadState.army[12] += 4;
+    const ahead = mqueue.predictAhead(second, aheadState, 2, [1, 2], 1);
+    assert.ok(Array.isArray(ahead));
+    assert.deepEqual(
+      Array.from(second.state.board.grid_type),
+      Array.from(b.grid_type),
+      'shadow board restored',
+    );
+    assert.deepEqual(Array.from(second.state.board.army_cnt), Array.from(b.army_cnt));
+    // Any unexplained frame disables the layer for the rest of the game.
+    b.army_cnt[12] += 5;
+    assert.equal(mqueue.predict(b, 2, board, true), null);
+    assert.equal(pred.state.stats.drift, 1);
+  } finally {
+    if (previousOn === undefined) delete process.env.BOT3_M2PLY;
+    else process.env.BOT3_M2PLY = previousOn;
+    if (previousArm === undefined) delete process.env.BOT3_MSEARCH_ARM;
+    else process.env.BOT3_MSEARCH_ARM = previousArm;
+  }
+});
+
+test('m2ply: default off, clamped knobs and a pulse-clock land weight', () => {
+  assert.equal(m2ply.configOf({}, {}).enabled, false);
+  assert.equal(m2ply.configOf({}, { BOT3_M2PLY: '1' }).enabled, true);
+  assert.equal(m2ply.configOf({}, { BOT3_M2PLY: 'off' }).enabled, false);
+  const defaults = m2ply.configOf({ enabled: true }, {});
+  assert.equal(defaults.margin, m2ply.DEFAULTS.margin);
+  assert.equal(defaults.sims, m2ply.DEFAULTS.sims);
+  assert.equal(defaults.keep, 0, 'the trim family measured negative and ships off');
+  assert.equal(defaults.retain, 0, 'the halved-capture family measured neutral and ships off');
+  const clamped = m2ply.configOf(
+    {},
+    { BOT3_M2PLY: '1', BOT3_M2PLY_SIMS: '999', BOT3_M2PLY_MARGIN: '-4', BOT3_M2PLY_LAND_CAP: '0' },
+  );
+  assert.equal(clamped.sims, 64);
+  assert.equal(clamped.margin, 0);
+  assert.equal(clamped.landCap, 1);
+  assert.equal(m2ply.configOf({}, { BOT3_M2PLY: '1', BOT3_M2PLY_SIMS: 'abc' }).sims, m2ply.DEFAULTS.sims);
+  // Land is worth its remaining growth pulses, so it decays with the clock.
+  const config = m2ply.configOf({ enabled: true, horizon: 250, landCap: 5 }, {});
+  assert.ok(m2ply.landWeight(10, config) > m2ply.landWeight(200, config));
+  assert.equal(m2ply.landWeight(10, config), 5);
+  assert.equal(m2ply.landWeight(400, config), 1);
+});
+
+test('m2ply: the baseline set is the planner matching, and batches leave no leftovers', () => {
+  const op = (from, to, score) => ({ from, to, mode: 2, build: null, score, send: 1 });
+  const candidates = [op(0, 1, 9), op(0, 2, 8), op(1, 3, 7), op(3, 4, 6)];
+  assert.deepEqual(
+    m2ply.collect(candidates, 16).map((o) => [o.from, o.to]),
+    [
+      [0, 1],
+      [3, 4],
+    ],
+    'one order per source and per target',
+  );
+  const many = m2ply.collect(
+    Array.from({ length: 40 }, (_, i) => op(i * 2, i * 2 + 1, 40 - i)),
+    16,
+  );
+  assert.equal(many.length, 16, 'the cap is the room slot count');
+  assert.deepEqual(
+    m2ply.collect(candidates, 16, new Set([candidates[0]])).map((o) => [o.from, o.to]),
+    [
+      [0, 2],
+      [1, 3],
+    ],
+    'a banned order frees its source and target for the next best',
+  );
+  // Multi-feed keeps the duplicate target, but an order whose source is another
+  // order's target would stay queued in the engine, so it is dropped.
+  const sanitized = m2ply.sanitize([
+    { from: 1, to: 4, mode: 2, build: null },
+    { from: 3, to: 4, mode: 2, build: null },
+    { from: 4, to: 5, mode: 2, build: null },
+    { from: 1, to: 4, mode: 2, build: null },
+  ]);
+  assert.deepEqual(
+    sanitized.map((o) => [o.from, o.to]),
+    [
+      [1, 4],
+      [3, 4],
+    ],
+  );
+});
+
+test('m2ply: the value prices army, land, crown safety and isolation', () => {
+  const b = simBoard(1, 5, [
+    [0, 101, 10],
+    [1, 1, 0],
+    [2, 200, 0],
+    [3, 102, 70],
+    [4, 2, 5],
+  ]);
+  const ctx = msim.contextOf(b);
+  const st = simOf(b);
+  const config = m2ply.configOf(
+    { enabled: true, land: 1, landCap: 1, crown: 120, ring: 0, mass: 0, cut: 0.5, guard: 0 },
+    {},
+  );
+  // 10 army and two cells against 75 army and two cells, one crown each.
+  assert.equal(m2ply.value(st, ctx, 1, 2, 60, config), 10 - 75);
+  st.army[1] = 4;
+  assert.equal(m2ply.value(st, ctx, 1, 2, 60, config), 14 - 75, 'interior army is plain army');
+  st.code[2] = 1;
+  assert.equal(m2ply.value(st, ctx, 1, 2, 60, config), 14 - 75 + 1, 'land is worth its weight');
+  // A crown next to a bigger enemy stack is cheaper than a safe one.
+  const safe = m2ply.value(st, ctx, 1, 2, 60, { ...config, guard: 1 });
+  st.code[1] = 2;
+  st.army[1] = 40;
+  assert.ok(m2ply.value(st, ctx, 1, 2, 60, { ...config, guard: 1 }) < safe, 'an exposed crown is priced');
+  st.code[1] = 1;
+  st.army[1] = 4;
+  // A finished game is bounded far outside any material difference.
+  st.code[3] = 2;
+  assert.ok(m2ply.value(st, ctx, 1, 2, 60, config) > 1e6, 'the rival has no crown left');
+  st.code[3] = 102;
+  st.code[0] = 1;
+  assert.ok(m2ply.value(st, ctx, 1, 2, 60, config) < -1e6, 'we have no crown left');
+  // Isolation is army the rival cannot spend.
+  const cut = simBoard(1, 4, [
+    [0, 101, 10],
+    [1, 1, 4],
+    [2, 1, 4],
+    [3, 102, 10],
+  ]);
+  const cutState = simOf(cut);
+  cutState.code[2] = 2;
+  cutState.iso[2] = 1;
+  const cutCtx = msim.contextOf(cut);
+  assert.ok(
+    m2ply.value(cutState, cutCtx, 1, 2, 60, config) >
+      m2ply.value(cutState, cutCtx, 1, 2, 60, { ...config, cut: 0 }),
+  );
+});
+
+test('m2ply: the tick+2 rollout fires captures, then feeds the ring', () => {
+  const b = simBoard(2, 3, [
+    [0, 101, 5],
+    [1, 1, 6],
+    [2, 200, 0],
+    [3, 1, 4],
+    [4, 1, 1],
+    [5, 200, 0],
+  ]);
+  const st = simOf(b);
+  const ctx = msim.contextOf(b);
+  const config = m2ply.configOf({ enabled: true, fan: 0 }, {});
+  const pairs = m2ply.rollout(st, ctx, 1, config).map((op) => [op.from, op.to, op.mode]);
+  assert.ok(
+    pairs.some(([from, to, mode]) => from === 1 && to === 2 && mode === 2),
+    'a cell that can take a neutral cell does so with an all-in push',
+  );
+  assert.ok(
+    pairs.some(([from, to]) => from === 3 && to === 4),
+    'a spare cell feeds the armed frontier cell',
+  );
+  // Cell 0 faces a small garrison: it fires, so it is not a feed source either.
+  assert.ok(!pairs.some(([from]) => from === 0), 'cell 0 only has the wall to its left');
+});
+
+test('m2ply: the candidate supply adds the shapes the planner cannot propose', () => {
+  const b = simBoard(2, 3, [
+    [0, 101, 5],
+    [1, 1, 4],
+    [2, 200, 0],
+    [3, 1, 4],
+    [4, 1, 1],
+    [5, 200, 2],
+  ]);
+  const units = Float64Array.from(b.army_cnt);
+  units[0] += 1; // crown growth on the tick the orders run
+  const teams = new Uint8Array(b.size);
+  for (let i = 0; i < b.size; i++) teams[i] = msim.ownerOf(b.grid_type[i]);
+  const store = m2ply.freshStore(b.size);
+  const ring = m2ply.ringMask(b.grid_type, teams, b.neighbors, 1, store);
+  assert.deepEqual(Array.from(ring), [0, 1, 0, 0, 1, 0], 'cells 1 and 4 are frontier');
+  const base = [{ from: 1, to: 2, mode: 2, build: null, send: 3, score: 40 }];
+  const config = m2ply.configOf({ enabled: true, feeds: 3 }, {});
+  const sets = m2ply.feedSets({
+    b,
+    turn: 10,
+    candidates: base,
+    base,
+    pred: { relayMe: 2, ops: [] },
+    units,
+    teams,
+    myTeam: 1,
+    ring,
+    config,
+  });
+  assert.ok(sets.length > 0, 'a ring cell that cannot take its target is fed');
+  const feed = sets.find((variant) => variant.kind === 'feed');
+  assert.ok(feed, 'two sources into one cell is offered (multi-feed)');
+  assert.equal(feed.set.filter((op) => op.to === 4).length, 2, 'both neighbours feed the same cell');
+  assert.ok(
+    feed.set.every((op) => op.build || op.from !== 4),
+    'the fed cell does not also try to fire on the same tick',
+  );
+  // A ring cell that can already capture is not a feed target.
+  const easy = simBoard(2, 3, [
+    [0, 101, 5],
+    [1, 1, 4],
+    [2, 200, 0],
+    [3, 1, 1],
+    [4, 1, 1],
+    [5, 200, 0],
+  ]);
+  const easyUnits = Float64Array.from(easy.army_cnt);
+  const easyTeams = new Uint8Array(easy.size);
+  for (let i = 0; i < easy.size; i++) easyTeams[i] = msim.ownerOf(easy.grid_type[i]);
+  const easyRing = m2ply.ringMask(easy.grid_type, easyTeams, easy.neighbors, 1, store);
+  const easySets = m2ply.feedSets({
+    b: easy,
+    turn: 10,
+    candidates: [],
+    base: [],
+    pred: { relayMe: 2, ops: [] },
+    units: easyUnits,
+    teams: easyTeams,
+    myTeam: 1,
+    ring: easyRing,
+    config,
+  });
+  assert.equal(easySets.length, 1, 'the unarmed frontier cell is still fed');
+  assert.ok(
+    easySets.every((variant) => variant.set.every((op) => op.to !== 1)),
+    'an armed ring cell is already firing, so it is not a feed target',
+  );
+});
+
+test('m2ply: adopts a two-tick arming plan only when it wins the simulation', () => {
+  const previousOn = process.env.BOT3_M2PLY;
+  const previousArm = process.env.BOT3_MSEARCH_ARM;
+  process.env.BOT3_M2PLY = '1';
+  process.env.BOT3_MSEARCH_ARM = '1';
+  try {
+    // Our crown can arm the ring cell 1, which then takes relay's last crown on
+    // the second tick. The planner's own candidate is an unrelated merge.
+    const b = simBoard(1, 5, [
+      [0, 101, 9],
+      [1, 1, 1],
+      [2, 102, 3],
+      [3, 1, 4],
+      [4, 200, 0],
+    ]);
+    b.openingBudget = relayOpening.openingBudget(1);
+    const board = [
+      { id: 1, team: 1, army: 18, land: 4, dead: 0 },
+      { id: 2, team: 2, army: 4, land: 1, dead: 0 },
+    ];
+    const pred = mqueue.predict(b, 5, board, true);
+    assert.ok(pred);
+    const candidates = [{ from: 3, to: 4, mode: 2, build: null, send: 3, score: 60 }];
+    const teams = new Uint8Array(b.size);
+    const units = Float64Array.from(b.army_cnt);
+    for (let i = 0; i < b.size; i++) teams[i] = msim.ownerOf(b.grid_type[i]);
+    units[0] += 1;
+    const config = m2ply.configOf({ enabled: true, margin: 0 }, {});
+    // Not armed yet: the search stands down with the planner's own set.
+    pred.armed = false;
+    assert.equal(
+      m2ply.choose({ b, turn: 5, candidates, pred, slots: 16, config, units, teams, myTeam: 1 }),
+      null,
+    );
+    pred.armed = true;
+    const picked = m2ply.choose({
+      b,
+      turn: 5,
+      candidates,
+      pred,
+      slots: 16,
+      config,
+      units,
+      teams,
+      myTeam: 1,
+    });
+    assert.ok(picked, 'the arming plan is adopted');
+    assert.ok(
+      picked.some((op) => op.from === 0 && op.to === 1),
+      'the crown feeds the frontier cell',
+    );
+    assert.ok(!picked.some((op) => op.from === 1), 'the fed cell does not also fire on the same tick');
+    // A margin above the measured gain keeps the planner's set.
+    const guarded = simBoard(1, 5, [
+      [0, 101, 9],
+      [1, 1, 1],
+      [2, 102, 40],
+      [3, 1, 4],
+      [4, 200, 0],
+    ]);
+    guarded.openingBudget = b.openingBudget;
+    const guardedPred = mqueue.predict(guarded, 5, board, true);
+    guardedPred.armed = true;
+    const cautious = m2ply.configOf({ enabled: true, margin: 100000 }, {});
+    assert.equal(
+      m2ply.choose({
+        b: guarded,
+        turn: 5,
+        candidates,
+        pred: guardedPred,
+        slots: 16,
+        config: cautious,
+        units,
+        teams,
+        myTeam: 1,
+      }),
+      null,
+    );
+  } finally {
+    if (previousOn === undefined) delete process.env.BOT3_M2PLY;
+    else process.env.BOT3_M2PLY = previousOn;
+    if (previousArm === undefined) delete process.env.BOT3_MSEARCH_ARM;
+    else process.env.BOT3_MSEARCH_ARM = previousArm;
+  }
+});
