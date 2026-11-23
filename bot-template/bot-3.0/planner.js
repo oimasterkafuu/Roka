@@ -45,6 +45,7 @@ const { landConfig, landContext } = require('./land');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
 const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
+const { mhalfConfig, mhalfUpdate, applyMhalf, applyMhalfModes } = require('./mhalf');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
 const {
@@ -472,6 +473,28 @@ function chooseOrders(b, turn, leaderboard, multi) {
       enemyArmy,
     },
     mshapeConfig(),
+  );
+  // Sustained-pressure layer (see ./mhalf). A multi-line empire spends each
+  // growth pulse on rear merges because the army sits two to six hops behind a
+  // frontier ring that fired itself down to one army. The layer routes our own
+  // merges by a hop field and chooses the move mode per capture, so the ring
+  // keeps a rolling garrison instead of being drained all-in every tick. Off by
+  // default and inert outside a multi-line room.
+  const mhalfLayer = mhalfUpdate(
+    b,
+    {
+      turn,
+      multi,
+      size,
+      me,
+      corridor: isMazeBoard(b),
+      fog: Boolean(b.fogMode),
+      land: self.land,
+      enemyLand,
+      army: self.army,
+      enemyArmy,
+    },
+    mhalfConfig(),
   );
   // Fog oracle (see ./fog-oracle). The leaderboard is rebuilt from the unfogged
   // grids, so `rival.army` / `rival.land` are exact even where the vision is
@@ -1355,6 +1378,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
   }
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mshapeLayer) applyMshape(mshapeLayer, { tile, teams, units, neighbors, myTeam }, candidates);
+  if (mhalfLayer) applyMhalf(mhalfLayer, { tile, teams, units, neighbors, myTeam }, candidates);
   // Shadow pricing: the scores of the existing candidates move, and the
   // prediction also creates the candidates re-ranking cannot produce (see
   // ./shadow: an approach step toward its next objective, the counter-capture
@@ -1412,6 +1436,10 @@ function chooseOrders(b, turn, leaderboard, multi) {
   if (mshapeLayer && multi) {
     for (const op of applyFan(mshapeLayer, { tile, teams, units, neighbors }, orders)) orders.push(op);
   }
+  // Rolling garrison (see ./mhalf): a capture keeps half its stack when the
+  // halved push still takes the cell and the source keeps enough army to fire
+  // again next tick, so a fork stays actable instead of being drained to one.
+  if (mhalfLayer && multi) applyMhalfModes(mhalfLayer, { tile, teams, units, neighbors, myTeam }, orders);
   // A fully blocked frame must not idle: keep the previous behaviour when no
   // lane passed the guard (the cooldown expires within four ticks).
   if (maze && !orders.length && candidates.length) take(candidates[0]);

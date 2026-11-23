@@ -2276,3 +2276,188 @@ test('split one stack over two neutral fronts only when asked', () => {
     [],
   );
 });
+
+// --- Sustained-pressure layer for multi-line rooms (./mhalf) ----------------
+const {
+  mhalfConfig,
+  mhalfUpdate,
+  mhalfField,
+  mhalfPush,
+  forkCount,
+  applyMhalf,
+  applyMhalfModes,
+  freshMhalf,
+  DEFAULT_FLOOR,
+  DEFAULT_FORK,
+  DEFAULT_ROUTE,
+  DEFAULT_RETAIN,
+  DEFAULT_RELOAD,
+  DEFAULT_STALE,
+  DEFAULT_MIN_FIRE,
+  DEFAULT_LEAD,
+} = require('./mhalf');
+
+test('default the sustained-pressure layer off and clamp its knobs', () => {
+  assert.equal(mhalfConfig({}, {}).enabled, false);
+  assert.equal(mhalfConfig({}, { BOT3_MHALF: '1' }).enabled, true);
+  assert.equal(mhalfConfig({}, { BOT3_MHALF: 'off' }).enabled, false);
+  const defaults = mhalfConfig({ enabled: true }, {});
+  assert.equal(defaults.route, DEFAULT_ROUTE);
+  assert.equal(defaults.retain, DEFAULT_RETAIN);
+  assert.equal(defaults.floor, DEFAULT_FLOOR);
+  assert.equal(defaults.fork, DEFAULT_FORK);
+  assert.equal(defaults.reload, DEFAULT_RELOAD);
+  assert.equal(defaults.stale, DEFAULT_STALE);
+  assert.equal(defaults.minFire, DEFAULT_MIN_FIRE);
+  assert.equal(defaults.leadCap, DEFAULT_LEAD);
+  assert.equal(defaults.convoy, 0);
+  assert.equal(defaults.corridor, false);
+  // Every knob is clamped and read per call.
+  const clamped = mhalfConfig({}, { BOT3_MHALF: '1', BOT3_MHALF_RETAIN: '9', BOT3_MHALF_FLOOR: '0' });
+  assert.equal(clamped.retain, 2);
+  assert.equal(clamped.floor, 1);
+  assert.equal(mhalfConfig({}, { BOT3_MHALF: '1', BOT3_MHALF_HOP: 'abc' }).route, DEFAULT_ROUTE);
+  assert.equal(mhalfConfig({}, { BOT3_MHALF: '1', BOT3_MHALF_MIN_FIRE: '1' }).minFire, 2);
+});
+
+test('reach the sustained-pressure layer only from a multi-line room', () => {
+  const b = mshapeBlob();
+  const input = { turn: 60, multi: true, size: b.size, me: 1, land: 30, enemyLand: 30 };
+  assert.equal(mhalfUpdate(b, input, mhalfConfig({}, {})), null);
+  const on = mhalfConfig({ enabled: true });
+  assert.equal(mhalfUpdate(b, { ...input, multi: false }, on), null);
+  assert.equal(mhalfUpdate(b, { ...input, size: 100000 }, { ...on, maxBoard: 800 }), null);
+  // A corridor room and a fog room are gated independently, and the land lead
+  // stands the layer down (the weaker-opponent archipelago cells regress
+  // without it).
+  assert.equal(mhalfUpdate(b, { ...input, corridor: true }, on), null);
+  assert.equal(mhalfUpdate(b, { ...input, fog: true }, { ...on, fog: false }), null);
+  assert.equal(mhalfUpdate(b, { ...input, land: 90 }, { ...on, leadCap: 110 }), null);
+  const plan = mhalfUpdate(b, input, on);
+  assert.ok(plan);
+  assert.equal(plan.turn, 60);
+  assert.equal(b.mhalfLine.ticks, 1);
+  assert.deepEqual(freshMhalf(), { ticks: 0 });
+});
+
+test('measure hops to the frontier ring through our own territory', () => {
+  // 1x6 corridor: our cells on 0..3, neutral ground on 4, wall on 5.
+  const b = createBoard(1, 6, 1);
+  b.grid_type.set([1, 1, 1, 1, 200, 201]);
+  const field = mhalfField(b.grid_type, Uint8Array.from([1, 1, 1, 1, 0, 0]), b.neighbors, 1);
+  assert.deepEqual([...field.ring], [0, 0, 0, 1, 0, 0]);
+  assert.deepEqual([...field.hop], [3, 2, 1, 0, -1, -1]);
+});
+
+test('compute the engine push of the three move modes', () => {
+  // A 6-army cell next to a 3-army rival stack and a neutral cell: the threat
+  // sum (3 - 1 = 2) is reserved by modes 0 and 1, mode 2 pushes everything.
+  const b = createBoard(1, 3, 1);
+  b.grid_type.set([1, 2, 200]);
+  const push = mhalfPush(b.grid_type, Uint8Array.from([1, 2, 0]), Float64Array.from([6, 3, 1]), b.neighbors, 1, 0, 2);
+  assert.equal(push.mode2, 5);
+  assert.equal(push.mode0, 3);
+  assert.equal(push.mode1, 1);
+  assert.equal(forkCount(b.grid_type, Uint8Array.from([1, 2, 0]), b.neighbors, 1, 0, 2), 1);
+});
+
+test('price the reload of a spent ring cell and cap a pit delivery', () => {
+  // 2x2: ring cell 0 (one army, one neutral neighbour at 1) and cell 2 behind
+  // it (five army), plus a ring cell 3 that already holds three army.
+  const b = createBoard(2, 2, 1);
+  b.grid_type.set([1, 200, 1, 1]);
+  b.army_cnt.set([1, 0, 5, 3]);
+  const ctx = {
+    tile: b.grid_type,
+    teams: Uint8Array.from([1, 0, 1, 1]),
+    units: Float64Array.from([1, 0, 5, 3]),
+    neighbors: b.neighbors,
+    myTeam: 1,
+  };
+  const cfg = { config: { route: 1, retain: 0, convoy: 0, reload: 60, hop: 6, stale: 28, exempt: 300, minFire: 3, armRing: 0, armWater: 0, cheap: 0, leak: 0, sideways: 0 }, state: {} };
+  // 2 -> 0 arms the ring cell (result 5 >= 3): a big bonus.
+  const arm = [{ score: 20, from: 2, to: 0, mode: 2, send: 4 }];
+  applyMhalf(cfg, ctx, arm);
+  assert.ok(arm[0].score >= 60, `expected a reload bonus, got ${arm[0].score}`);
+  // 0 -> 2 walks away from the ring and must not be capped (it is progress in
+  // the planner's own terms only), while a delivery that cannot reach the fire
+  // threshold is capped below every capture.
+  const thin = createBoard(2, 2, 1);
+  thin.grid_type.set([1, 200, 1, 1]);
+  thin.army_cnt.set([1, 0, 2, 3]);
+  const pit = [{ score: 90, from: 2, to: 0, mode: 2, send: 1 }];
+  applyMhalf(
+    cfg,
+    {
+      tile: thin.grid_type,
+      teams: Uint8Array.from([1, 0, 1, 1]),
+      units: Float64Array.from([1, 0, 2, 3]),
+      neighbors: thin.neighbors,
+      myTeam: 1,
+    },
+    pit,
+  );
+  assert.equal(pit[0].score, 28);
+  // An armed ring cell (three army) captures this tick, so a merge into it is
+  // left to the inherited steal rule instead of being boosted above the capture.
+  const busy = [{ score: 40, from: 2, to: 3, mode: 2, send: 1 }];
+  applyMhalf(cfg, ctx, busy);
+  assert.equal(busy[0].score, 40);
+  // Defence/rescue work (>= exempt) is never re-priced.
+  const defence = [{ score: 560, from: 2, to: 0, mode: 2, send: 4 }];
+  applyMhalf(cfg, ctx, defence);
+  assert.equal(defence[0].score, 560);
+});
+
+test('keep a rolling garrison only when the halved push still takes the cell', () => {
+  // 2x2: a six-army cell on 0 with two neutral neighbours (a fork), one on 1.
+  const b = createBoard(2, 2, 1);
+  b.grid_type.set([1, 200, 200, 201]);
+  const ctx = {
+    tile: b.grid_type,
+    teams: Uint8Array.from([1, 0, 0]),
+    units: Float64Array.from([6, 1, 1]),
+    neighbors: b.neighbors,
+    myTeam: 1,
+  };
+  const orders = () => [{ score: 32, from: 0, to: 1, mode: 2 }];
+  const off = orders();
+  applyMhalfModes({ config: { retain: 0 }, state: {} }, ctx, off);
+  assert.equal(off[0].mode, 2);
+  // Halved push is 2, which takes a one-army garrison, and three army stay
+  // behind - enough to fire again next tick.
+  const fork = orders();
+  applyMhalfModes({ config: { retain: 1, floor: 2, fork: 1 }, state: {} }, ctx, fork);
+  assert.equal(fork[0].mode, 1);
+  // Without a second open direction the fork rule keeps the inherited all-in:
+  // the captured cell inherits the army either way.
+  const lone = createBoard(1, 2, 1);
+  lone.grid_type.set([1, 200]);
+  applyMhalfModes(
+    { config: { retain: 1, floor: 2, fork: 1 }, state: {} },
+    {
+      tile: lone.grid_type,
+      teams: Uint8Array.from([1, 0]),
+      units: Float64Array.from([6, 1]),
+      neighbors: lone.neighbors,
+      myTeam: 1,
+    },
+    orders(),
+  );
+  // A two-army cell cannot halve into a capture at all.
+  const small = createBoard(2, 2, 1);
+  small.grid_type.set([1, 200, 200, 201]);
+  const tiny = [{ score: 32, from: 0, to: 1, mode: 2 }];
+  applyMhalfModes(
+    { config: { retain: 2, floor: 2, fork: 0 }, state: {} },
+    {
+      tile: small.grid_type,
+      teams: Uint8Array.from([1, 0, 0]),
+      units: Float64Array.from([2, 1, 1]),
+      neighbors: small.neighbors,
+      myTeam: 1,
+    },
+    tiny,
+  );
+  assert.equal(tiny[0].mode, 2);
+});
