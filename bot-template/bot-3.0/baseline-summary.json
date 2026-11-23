@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-23T07:59:51.872Z",
-  "evaluatedCommit": "363f1510bbf82c75679fdf0fa61522b48bd0c8c5",
-  "sourceSha256": "330c9c09eccab830b9b0133b579204f756fc7c151f64d51b4d157423ff283c87",
+  "generatedAt": "2026-11-23T08:48:58.206Z",
+  "evaluatedCommit": "cd9f2ab1cea064acbe0d96277d396ff4638b9a0f",
+  "sourceSha256": "cdca85600e62a986dbc9b390e0d012f20e31e780b8cb21e2ae79d595b1f323a6",
   "settings": {
     "bot": "bot-template/bot-3.0",
     "mapSize": "official-small (0.34)",
@@ -32,10 +32,10 @@
   },
   "total": {
     "games": 2048,
-    "win": 1726,
-    "loss": 266,
-    "timeout": 56,
-    "winRate": 0.8427734375
+    "win": 1739,
+    "loss": 254,
+    "timeout": 55,
+    "winRate": 0.84912109375
   },
   "byOpponent": {
     "anti": {
@@ -54,10 +54,10 @@
     },
     "relay": {
       "games": 512,
-      "win": 337,
-      "loss": 166,
-      "timeout": 9,
-      "winRate": 0.658203125
+      "win": 350,
+      "loss": 154,
+      "timeout": 8,
+      "winRate": 0.68359375
     },
     "v2": {
       "games": 512,
@@ -70,10 +70,10 @@
   "byMap": {
     "archipelago": {
       "games": 512,
-      "win": 427,
-      "loss": 78,
+      "win": 431,
+      "loss": 74,
       "timeout": 7,
-      "winRate": 0.833984375
+      "winRate": 0.841796875
     },
     "maze": {
       "games": 512,
@@ -84,10 +84,10 @@
     },
     "mediterranean": {
       "games": 512,
-      "win": 442,
-      "loss": 47,
-      "timeout": 23,
-      "winRate": 0.86328125
+      "win": 451,
+      "loss": 39,
+      "timeout": 22,
+      "winRate": 0.880859375
     },
     "random": {
       "games": 512,
@@ -107,10 +107,10 @@
     },
     "fog=false,multi=true": {
       "games": 512,
-      "win": 450,
-      "loss": 59,
-      "timeout": 3,
-      "winRate": 0.87890625
+      "win": 463,
+      "loss": 47,
+      "timeout": 2,
+      "winRate": 0.904296875
     },
     "fog=true,multi=false": {
       "games": 512,
@@ -144,10 +144,10 @@
     },
     "relay/archipelago": {
       "games": 128,
-      "win": 82,
-      "loss": 44,
+      "win": 86,
+      "loss": 40,
       "timeout": 2,
-      "winRate": 0.640625
+      "winRate": 0.671875
     },
     "v2/archipelago": {
       "games": 128,
@@ -200,10 +200,10 @@
     },
     "relay/mediterranean": {
       "games": 128,
-      "win": 94,
-      "loss": 30,
-      "timeout": 4,
-      "winRate": 0.734375
+      "win": 103,
+      "loss": 22,
+      "timeout": 3,
+      "winRate": 0.8046875
     },
     "v2/mediterranean": {
       "games": 128,
@@ -989,12 +989,12 @@
       "fog": false,
       "multi": true,
       "games": 32,
-      "win": 17,
-      "loss": 15,
+      "win": 21,
+      "loss": 11,
       "timeout": 0,
-      "winRate": 0.53125,
-      "meanWinTick": 578.7,
-      "meanTick": 595.4
+      "winRate": 0.65625,
+      "meanWinTick": 556.7,
+      "meanTick": 490.5
     },
     {
       "opponent": "relay",
@@ -1041,12 +1041,12 @@
       "fog": false,
       "multi": true,
       "games": 32,
-      "win": 21,
-      "loss": 9,
-      "timeout": 2,
-      "winRate": 0.65625,
-      "meanWinTick": 559.9,
-      "meanTick": 564.2
+      "win": 30,
+      "loss": 1,
+      "timeout": 1,
+      "winRate": 0.9375,
+      "meanWinTick": 587,
+      "meanTick": 573.7
     },
     {
       "opponent": "relay",

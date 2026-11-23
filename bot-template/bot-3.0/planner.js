@@ -49,6 +49,7 @@ const { configOf: twoPlyConfig, choose: twoPlyChoose } = require('./m2ply');
 const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
 const { mhalfConfig, mhalfUpdate, applyMhalf, applyMhalfModes } = require('./mhalf');
 const { mcrown2Config, mcrown2Update, applyMcrown2, mcrown2Orders } = require('./mcrown2');
+const { bankgateConfig, bankgateUpdate, applyBankgate, bankgateOrders } = require('./bankgate');
 const { mtuneConfig, mtuneUpdate, applyMtune, mshapeOverrides, mhalfOverrides } = require('./mtune');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
 const { fogMultiConfig, fogMultiUpdate } = require('./fog-multi');
@@ -512,14 +513,14 @@ function chooseOrders(b, turn, leaderboard, multi) {
     },
     mhalfConfig(mhalfOverrides(mtuneCfg)),
   );
-  // Crown economy from the stranded rear army (see ./mcrown2, round 18). The
-  // hop4+ pool is idle (61 army at t50-250, 90-190 by t300 on long games) while
-  // a crown pays +1 every tick forever, so the layer banks that rear army into
-  // one cell three or more hops from the ring and buys a crown with it. It never
-  // touches hop 0/1, so the frontier exchange keeps its army. Off by default;
-  // round 19 restricts it to fog rooms (`BOT3_FOGBANK`), where the vault is
-  // hidden from the rival by construction and the measured gains reproduce.
-  const mcrown2Layer = mcrown2Update(b, {
+  // Crown banks. Round 18 measured that the stranded rear army (hop >= 3; 61
+  // army at t50-250 versus 21.5 at the ring) can buy a crown that pays +1 army
+  // every tick forever, and round 19 found the gate that makes it safe: the
+  // bank only runs where the rear basin actually holds a reservoir instead of
+  // feeding the frontier (`./bankgate`, measured geometry, ships on) and, in a
+  // fog room, where the swamp share proves the same thing while the vault is
+  // hidden from the rival (`./mcrown2` via `BOT3_FOGBANK`).
+  const bankInput = {
     turn,
     multi,
     size,
@@ -535,11 +536,14 @@ function chooseOrders(b, turn, leaderboard, multi) {
     frontDist,
     enemyDist,
     cut,
+    fogMask: b.fog,
     army: self.army,
     enemyArmy,
     land: self.land,
     enemyLand,
-  });
+  };
+  const mcrown2Layer = mcrown2Update(b, bankInput);
+  const bankgateLayer = bankgateUpdate(b, bankInput);
   // Fog oracle (see ./fog-oracle). The leaderboard is rebuilt from the unfogged
   // grids, so `rival.army` / `rival.land` are exact even where the vision is
   // not: the difference against the visible half is the interior reserve, and
@@ -1423,9 +1427,12 @@ function chooseOrders(b, turn, leaderboard, multi) {
   if (multiLayer) applyMulti(multiLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mshapeLayer) applyMshape(mshapeLayer, { tile, teams, units, neighbors, myTeam }, candidates);
   if (mhalfLayer) applyMhalf(mhalfLayer, { tile, teams, units, neighbors, myTeam }, candidates);
-  // Crown bank (see ./mcrown2). Runs last so the redirect of a rear merge
-  // survives every other score layer: the army is already moving and the only
-  // decision left is whether it walks to the ring or to the bank.
+  // Geometry-gated crown bank (see ./bankgate, round 19) and the fog-only
+  // variant (see ./mcrown2 `BOT3_FOGBANK`). Both run last so the redirect of a
+  // rear merge survives every other score layer: the army is already moving and
+  // the only decision left is whether it walks to the ring or to the bank.
+  if (bankgateLayer)
+    applyBankgate(bankgateLayer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   if (mcrown2Layer)
     applyMcrown2(mcrown2Layer, { tile, teams, units, neighbors, myTeam, frontDist }, candidates);
   // Self-play-tuned multi-line evaluation (see ./mtune). Rounds 15/16 each moved
@@ -1486,6 +1493,13 @@ function chooseOrders(b, turn, leaderboard, multi) {
     if (picked) {
       // The crown bank is additive: the search decides the exchange, the layer
       // still delivers its rear merges and its build on the same tick.
+      if (bankgateLayer)
+        for (const op of bankgateOrders(
+          bankgateLayer,
+          { tile, teams, units, neighbors, frontDist, myTeam },
+          picked,
+        ))
+          picked.push(op);
       if (mcrown2Layer)
         for (const op of mcrown2Orders(
           mcrown2Layer,
@@ -1559,6 +1573,17 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // halved push still takes the cell and the source keeps enough army to fire
   // again next tick, so a fork stays actable instead of being drained to one.
   if (mhalfLayer && multi) applyMhalfModes(mhalfLayer, { tile, teams, units, neighbors, myTeam }, orders);
+  // Crown bank (see ./bankgate): the gather merges and the city/crown build are
+  // appended after the planner's matching loop, because the engine runs several
+  // moves into one cell per tick while `take()` allows one order per target.
+  if (bankgateLayer) {
+    for (const op of bankgateOrders(
+      bankgateLayer,
+      { tile, teams, units, neighbors, frontDist, myTeam },
+      orders,
+    ))
+      orders.push(op);
+  }
   // A fully blocked frame must not idle: keep the previous behaviour when no
   // lane passed the guard (the cooldown expires within four ticks).
   if (maze && !orders.length && candidates.length) take(candidates[0]);
