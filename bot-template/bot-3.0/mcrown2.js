@@ -126,6 +126,28 @@ const DEFAULT_FOGBANK_SWAMP = 30;
 // gates the pick only - a bank that is already filling is always finished.
 const DEFAULT_PICKEND = 0;
 
+// Round 20 (`BOT3_MCROWN2_MINBANK`): army the bank must already hold before the
+// *first* of the two builds is issued (0 = the shipped 50, i.e. a city is bought
+// as soon as the vault can pay for it). A crown costs two builds of 50, and the
+// rear basin that fed the vault is usually drained by the first one: measured on
+// the archipelago fog multi cell, every pick that built a city at 50 but never
+// reached the second 50 lost the game (0W/9L), while every pick that completed
+// the crown won (8W/1L/1T). Waiting until the vault can pay for both builds in
+// two ticks turns a failed pick into "no build" instead of a 50-army hole.
+const DEFAULT_MINBANK = 0;
+
+// Round 20 (`BOT3_MCROWN2_SHALLOW`): swamp share (percent) above which the
+// gather band may be shortened from `hop` 3 to 2. This is the round-20 result on
+// the archipelago fog multi cell: the rear basin on an island board is drained
+// by the first build of the crown (the two builds cost 100 army), and the only
+// army left is one hop shallower than the round-18 band. Shortening the band to
+// hop 2 fills the bank out of that ring - measured +5 wins on the cell (19 ->
+// 24) with the archipelago clear cell and the other three fog cells untouched,
+// because the gate is the board's swamp share (archipelago 64-67 %, the next
+// wettest room, mediterranean, is 36-47 %). Off at 0, so the shipped path is
+// byte-identical.
+const DEFAULT_SHALLOW = 0;
+
 function number(raw, fallback, min, max) {
   const value = Number(raw);
   if (!Number.isFinite(value)) return fallback;
@@ -165,6 +187,8 @@ function mcrown2Config(overrides = {}, env = process.env) {
     // regressions (random clear -15.6pp, relay random clear) are clear cells.
     fogOnly: overrides.fogOnly ?? flag(env.BOT3_MCROWN2_FOGONLY, DEFAULT_FOGONLY === 1 || fogBank),
     pickEnd: overrides.pickEnd ?? number(env.BOT3_MCROWN2_PICKEND, DEFAULT_PICKEND, 0, 10000),
+    minBank: overrides.minBank ?? number(env.BOT3_MCROWN2_MINBANK, DEFAULT_MINBANK, 0, 1000),
+    shallow: overrides.shallow ?? number(env.BOT3_MCROWN2_SHALLOW, DEFAULT_SHALLOW, 0, 100),
     swamp:
       overrides.swamp ??
       number(env.BOT3_MCROWN2_SWAMP, fogBank ? DEFAULT_FOGBANK_SWAMP : DEFAULT_SWAMP, 0, 100),
@@ -392,6 +416,14 @@ function mcrown2Update(b, input, config = mcrown2Config()) {
     enemyDist: input.enemyDist,
     cut: input.cut,
   };
+  // Shallow gather band (`BOT3_MCROWN2_SHALLOW`): on a swamp-heavy island board
+  // the crown's first build drains the rear basin and the army that would finish
+  // the second one sits one hop shallower. Everything below reads `cfg`, so the
+  // pick, the redirect, the feed and the basin walk all move together.
+  const cfg =
+    config.shallow > 0 && swampShare(input) >= config.shallow && config.hop > 2
+      ? { ...config, hop: 2 }
+      : config;
   const state = (b.mcrown2 ??= freshMcrown2());
   state.ticks += 1;
   // A vault that reached the crown is finished: count it, stop feeding it and
@@ -409,7 +441,7 @@ function mcrown2Update(b, input, config = mcrown2Config()) {
       state.cells.splice(state.cells.indexOf(vault), 1);
       continue;
     }
-    if (!vaultOk(ctx, vault.cell, config, false)) {
+    if (!vaultOk(ctx, vault.cell, cfg, false)) {
       state.cells.splice(state.cells.indexOf(vault), 1);
       continue;
     }
@@ -423,7 +455,7 @@ function mcrown2Update(b, input, config = mcrown2Config()) {
   const pickOpen = !(config.pickEnd > 0 && turn >= config.pickEnd);
   if (budget > 0 && pickOpen && behindOk(config, input)) {
     const taken = state.cells.map((vault) => vault.cell);
-    const cell = pickVault(ctx, config, taken);
+    const cell = pickVault(ctx, cfg, taken);
     if (cell >= 0) {
       state.cells.push({ cell, done: false });
       state.picks += 1;
@@ -433,6 +465,7 @@ function mcrown2Update(b, input, config = mcrown2Config()) {
   if (!active.length) {
     trace({
       turn,
+      me: ctx.me,
       vaults: state.cells.map((vault) => vault.cell),
       feed: 0,
       build: [],
@@ -447,7 +480,7 @@ function mcrown2Update(b, input, config = mcrown2Config()) {
   for (const vault of active)
     vault.field = ownField(ctx.size, ctx.neighbors, ctx.teams, ctx.myTeam, vault.cell);
   const crowns = state.cells.filter((vault) => vault.done).map((vault) => vault.cell);
-  return { config, turn, ctx, active, state, keep: config.keep, crowns, input };
+  return { config: cfg, turn, ctx, active, state, keep: cfg.keep, crowns, input };
 }
 
 // One step down the vault field from `from`: the own neighbour that is closest
@@ -605,7 +638,12 @@ function mcrown2Orders(plan, ctx, orders) {
     if (baseSrc.has(cell)) continue;
     if (orders.some((op) => op.build && op.from === cell)) continue;
     const bank = units[cell] + (incoming.get(cell) ?? 0);
-    if (bank < 50) continue;
+    // A city is only worth buying when the *crown* it upgrades into is already
+    // affordable: `minBank` (default 0 -> the shipped 50) raises the first build
+    // to the two-build total, so a bank that cannot finish spends nothing. The
+    // second build (city -> crown) keeps the engine's single 50.
+    const need = plain(tile[cell]) ? Math.max(50, config.minBank) : 50;
+    if (bank < need) continue;
     if (plain(tile[cell])) {
       extra.push({ score: 0, from: cell, to: cell, mode: 2, build: 'b', mcrown2: true });
       plan.state.builds += 1;
@@ -617,6 +655,7 @@ function mcrown2Orders(plan, ctx, orders) {
   plan.state.feeds += feed;
   trace({
     turn: plan.turn,
+    me: plan.ctx.me,
     vaults: plan.active.map((vault) => vault.cell),
     feed,
     build: extra.filter((op) => op.build).map((op) => `${op.build}@${op.from}`),
@@ -668,6 +707,8 @@ module.exports = {
   DEFAULT_FOGONLY,
   DEFAULT_SWAMP,
   DEFAULT_PICKEND,
+  DEFAULT_MINBANK,
+  DEFAULT_SHALLOW,
   DEFAULT_FOGBANK_SWAMP,
   swampShare,
   swampOk,
