@@ -235,13 +235,14 @@ on wins, not on value. In-sample block = seeds 1–16 (128 games), replication =
 | `exchange 1.0`                  | 75/128    | 73/128    | negative |
 | `exchange 2.5` (`minFeed 3`)    | 74/128    | —         | noise |
 | `feeds 6`                       | 76/128    | 79/128    | neutral (+1 on 256) |
-| `plies 2` (compounding value + supply, no third tick) | 72/128 | 73/128 | the third tick is worth +11 on 256 |
+| `horizon` 300 / 400 (`landCap` 6 / 8) | 78/128 | 78/128 | identical (156/256) |
 
 On 256-game blocks the defaults score **156** (`minFeed 2`), `margin 3` 154,
 `feeds 6` 155 and `exchange 1.0` 150 — all inside noise of each other, so the
 defaults were kept rather than fitted to a block. The one knob that is clearly
 not noise is the donor bar (`minFeed` 3 → 2: +8 wins on 256) and the third tick
-itself (+11 on 256 over the same value and supply at two plies).
+itself (+11 on 256 over the same value and supply at two plies: 145 with
+`BOT3_M3PLY_PLIES=2`).
 
 ## Honest negatives
 
@@ -256,7 +257,16 @@ itself (+11 on 256 over the same value and supply at two plies).
 | `feeds` 6                           | 155/256                                            | neutral |
 | `minFeed` 3 (round-17 bar)          | 148/256 against 156                                | the round-17 supply is the bottleneck |
 | two plies + this value and supply   | 145/256 against 156                                | the third tick is the in-sample gain |
+| `horizon` 300 / 400 (`landCap` 6 / 8) | 156/256, identical to the default on both blocks | the game clock is not the lever |
 | fog rooms                           | refused by construction (see round 17)             | out of reach |
+
+A clear multi game actually ends at tick **316 (p10) / 468 (median) / 789
+(p90)**, so a horizon of 250 under-counts the pulses a cell taken at t=100 will
+really pay (seven, not three). Raising the horizon to 400 with `landCap 8`
+(landW ≈8.6 at t=50 and ≈5.3 at t=200 instead of ≈5.3 and ≈1.4) leaves the win
+count **exactly** at 156/256: the land term moves both seats' evaluations
+together, so the *ordering* of the candidate sets is unchanged. The linear land
+weight was not the binding constraint on adoptions; the supply was.
 
 ## Why the bar is still missed
 
