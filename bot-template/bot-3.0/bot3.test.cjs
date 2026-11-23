@@ -2920,6 +2920,260 @@ test('m2ply: adopts a two-tick arming plan only when it wins the simulation', ()
   }
 });
 
+// --- Round 18: the third tick and the compounding value ---------------------
+
+test('m3ply: the third tick and the compounding value are a separate switch', () => {
+  const off = m2ply.configOf({}, {});
+  assert.equal(off.enabled, false);
+  assert.equal(off.plies, 2);
+  assert.equal(off.stream, false, 'the round-17 linear land weight');
+  assert.equal(off.minFeed, 3, 'the round-17 donor bar');
+  assert.equal(off.width, 0);
+  assert.equal(off.cheap, 0);
+  assert.equal(off.split, 0);
+  assert.equal(off.stage, 0);
+  // BOT3_M2PLY alone is still exactly the round-17 two-tick layer.
+  const two = m2ply.configOf({}, { BOT3_M2PLY: '1' });
+  assert.equal(two.enabled, true);
+  assert.equal(two.plies, 2);
+  assert.equal(two.stream, false);
+  assert.equal(two.minFeed, 3);
+  assert.equal(two.split, 0);
+  const three = m2ply.configOf({}, { BOT3_M3PLY: '1' });
+  assert.equal(three.enabled, true);
+  assert.equal(three.plies, 3);
+  assert.equal(three.stream, true);
+  assert.equal(three.minFeed, 2);
+  assert.ok(three.width > 0 && three.cheap > 0);
+  assert.ok(three.split > 1 && three.stage >= 1);
+  assert.equal(m2ply.configOf({}, { BOT3_M3PLY: 'off' }).enabled, false);
+  const clamped = m2ply.configOf(
+    {},
+    {
+      BOT3_M3PLY: '1',
+      BOT3_M3PLY_PLIES: '9',
+      BOT3_M3PLY_DECAY: '4',
+      BOT3_M3PLY_EXCHANGE: '-2',
+      BOT3_M3PLY_MINFEED: '0',
+      BOT3_M3PLY_STAGE: '99',
+      BOT3_M3PLY_SPLIT: '42',
+    },
+  );
+  assert.equal(clamped.plies, 3);
+  assert.equal(clamped.decay, 1);
+  assert.equal(clamped.exchange, 0);
+  assert.equal(clamped.minFeed, 2);
+  assert.equal(clamped.stage, 8);
+  assert.equal(clamped.split, 8);
+  // The compounding value can be asked for on its own, at two plies.
+  assert.equal(m2ply.configOf({ enabled: true, plies: 2, stream: true }, {}).stream, true);
+});
+
+test('m3ply: land is priced as the remaining income stream, not one pulse', () => {
+  const config = m2ply.configOf(
+    { enabled: true, plies: 3, horizon: 250, landCap: 8, exchange: 1.5, decay: 0.95 },
+    {},
+  );
+  assert.ok(m2ply.streamWeight(10, config) > m2ply.streamWeight(200, config));
+  assert.ok(m2ply.streamWeight(200, config) > 1, 'a cell taken late still pays its one pulse');
+  assert.equal(m2ply.streamWeight(250, config), 1, 'past the horizon a cell is just a cell');
+  assert.ok(
+    m2ply.streamWeight(100, { ...config, exchange: 3 }) > m2ply.streamWeight(100, config),
+    'the exchange rate scales the stream',
+  );
+  const linear = { ...config, stream: false };
+  assert.ok(
+    m2ply.streamWeight(100, config) > m2ply.landWeight(100, linear),
+    'the stream is at least the linear weight it replaces',
+  );
+  assert.equal(m2ply.landValue(100, config), m2ply.streamWeight(100, config));
+  assert.equal(m2ply.landValue(100, linear), m2ply.landWeight(100, linear));
+});
+
+test('m3ply: the value prices ring width and a capture that is one feed away', () => {
+  // Our ring cell 1 has two army and faces a one-army neutral (one feed away);
+  // relay's ring is two cells wide but every cell there can fire already.
+  const b = simBoard(1, 6, [
+    [0, 101, 9],
+    [1, 1, 2],
+    [2, 200, 1],
+    [3, 2, 3],
+    [4, 102, 9],
+    [5, 200, 0],
+  ]);
+  const ctx = msim.contextOf(b);
+  const st = simOf(b);
+  const zero = m2ply.configOf(
+    {
+      enabled: true,
+      plies: 3,
+      land: 0,
+      crown: 0,
+      ring: 0,
+      mass: 0,
+      cut: 0,
+      guard: 0,
+      width: 0,
+      cheap: 0,
+    },
+    {},
+  );
+  assert.equal(m2ply.value(st, ctx, 1, 2, 60, zero), 11 - 12, 'plain army difference');
+  assert.equal(
+    m2ply.value(st, ctx, 1, 2, 60, { ...zero, cheap: 2 }),
+    -1 + 2,
+    'one ring cell becomes able to capture with a single feed',
+  );
+  assert.equal(
+    m2ply.value(st, ctx, 1, 2, 60, { ...zero, width: 3 }),
+    -1 - 3,
+    'a ring one cell narrower than relay is a cost',
+  );
+  assert.equal(
+    m2ply.value(st, ctx, 1, 2, 60, { ...zero, ring: 0, mass: 0, cheap: 0, width: 0 }),
+    -1,
+    'the terms are additive',
+  );
+});
+
+test('m3ply: a two-army donor is enough to arm a ring cell', () => {
+  // Cell 3 is a one-army ring cell facing an empty plain; its only donor is cell
+  // 0 with two army, which pushes exactly one. The round-17 bar (three army)
+  // finds no donor at all, which is why the supply was 1.14 donors per target.
+  const b = simBoard(2, 3, [
+    [0, 1, 2],
+    [1, 200, 0],
+    [2, 200, 0],
+    [3, 1, 1],
+    [4, 200, 0],
+    [5, 201, 0],
+  ]);
+  const units = Float64Array.from(b.army_cnt);
+  const teams = new Uint8Array(b.size);
+  for (let i = 0; i < b.size; i++) teams[i] = msim.ownerOf(b.grid_type[i]);
+  const store = m2ply.freshStore(b.size);
+  const ring = m2ply.ringMask(b.grid_type, teams, b.neighbors, 1, store);
+  assert.deepEqual(Array.from(ring), [1, 0, 0, 1, 0, 0]);
+  const strict = m2ply.configOf({ enabled: true, minFeed: 3 }, {});
+  assert.equal(m2ply.feedPlans({ b, units, teams, myTeam: 1, ring, config: strict }).length, 0);
+  const cheapCfg = m2ply.configOf({ enabled: true, minFeed: 2 }, {});
+  const plans = m2ply.feedPlans({ b, units, teams, myTeam: 1, ring, config: cheapCfg });
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].target, 3);
+  assert.deepEqual(
+    plans[0].sources.map((s) => s.cell),
+    [0],
+    'the two-army neighbour is a donor',
+  );
+});
+
+test('m3ply: the split and stage families arm two ring cells at once', () => {
+  // Two independent lanes, each with a one-army ring cell and a spare donor.
+  const b = simBoard(3, 2, [
+    [0, 1, 2],
+    [1, 1, 2],
+    [2, 1, 1],
+    [3, 1, 1],
+    [4, 200, 0],
+    [5, 200, 0],
+  ]);
+  const units = Float64Array.from(b.army_cnt);
+  const teams = new Uint8Array(b.size);
+  for (let i = 0; i < b.size; i++) teams[i] = msim.ownerOf(b.grid_type[i]);
+  const store = m2ply.freshStore(b.size);
+  const ring = m2ply.ringMask(b.grid_type, teams, b.neighbors, 1, store);
+  const config = m2ply.configOf({ enabled: true, plies: 3, split: 2, stage: 2, feeds: 0 }, {});
+  const plans = m2ply.feedPlans({ b, units, teams, myTeam: 1, ring, config });
+  assert.equal(plans.length, 2, 'both ring cells are plans');
+  const split = m2ply.splitSets({ plans, base: [], units, config });
+  assert.equal(split.length, 1);
+  assert.equal(split[0].kind, 'split');
+  assert.deepEqual(
+    split[0].set.map((op) => [op.from, op.to]).sort(),
+    [
+      [0, 2],
+      [1, 3],
+    ],
+    'one donor into each ring cell',
+  );
+  const stage = m2ply.stageSets({ plans, base: [], units, config });
+  assert.equal(stage.length, 1);
+  assert.equal(stage[0].kind, 'stage');
+  // Neither family may leave an order whose source is another order's target.
+  for (const variant of [...split, ...stage]) {
+    const targets = new Set(variant.set.map((op) => op.to));
+    assert.ok(variant.set.every((op) => !targets.has(op.from)), 'sanitized batch');
+  }
+});
+
+test('m3ply: the three-tick scorer prices an arming tick and adopts a clean batch', () => {
+  const previousThree = process.env.BOT3_M3PLY;
+  const previousArm = process.env.BOT3_MSEARCH_ARM;
+  process.env.BOT3_M3PLY = '1';
+  process.env.BOT3_MSEARCH_ARM = '1';
+  try {
+    // The crown arms ring cell 1, which takes the neutral cell 2 on tick + 2; the
+    // planner's own order is a hopeless push into relay's forty-army crown.
+    const b = simBoard(1, 5, [
+      [0, 101, 9],
+      [1, 1, 1],
+      [2, 200, 1],
+      [3, 1, 4],
+      [4, 102, 40],
+    ]);
+    b.openingBudget = relayOpening.openingBudget(1);
+    const board = [
+      { id: 1, team: 1, army: 18, land: 4, dead: 0 },
+      { id: 2, team: 2, army: 41, land: 1, dead: 0 },
+    ];
+    const pred = mqueue.predict(b, 5, board, true);
+    assert.ok(pred);
+    pred.armed = true;
+    const candidates = [{ from: 3, to: 4, mode: 2, build: null, send: 3, score: 60 }];
+    const teams = new Uint8Array(b.size);
+    const units = Float64Array.from(b.army_cnt);
+    for (let i = 0; i < b.size; i++) teams[i] = msim.ownerOf(b.grid_type[i]);
+    units[0] += 1;
+    const config = m2ply.configOf({ enabled: true, plies: 3, margin: 0 }, {});
+    const picked = m2ply.choose({
+      b,
+      turn: 5,
+      candidates,
+      pred,
+      slots: 16,
+      config,
+      units,
+      teams,
+      myTeam: 1,
+    });
+    assert.ok(picked, 'the three-tick search adopts the arming plan');
+    const targets = new Set(picked.map((op) => op.to));
+    assert.ok(picked.every((op) => !targets.has(op.from)), 'emitted batch leaves no queued order');
+    assert.ok(
+      picked.some((op) => op.from === 0 && op.to === 1),
+      'the crown arms the frontier cell',
+    );
+    // The scorer itself must prefer the arming set over the planner's own order
+    // once the third tick is included.
+    const ctx = msim.contextOf(b);
+    const store = m2ply.freshStore(b.size);
+    msim.loadBoard(store.start, b, pred.ages ?? null);
+    const base = m2ply.collect(candidates, 16).map((op) => ({ ...op, me: 1 }));
+    // The feed family keeps every planner order that does not use the fed cell
+    // or the donor as a source, and adds the arming move.
+    const armed = [...base, { from: 0, to: 1, mode: 2, build: null, send: 8, me: 1 }];
+    const baseScore = m2ply.threeTick(store, ctx, 5, [1, 2], 1, 2, base, pred.ops, pred, config);
+    const feedScore = m2ply.threeTick(store, ctx, 5, [1, 2], 1, 2, armed, pred.ops, pred, config);
+    assert.ok(Number.isFinite(baseScore) && Number.isFinite(feedScore));
+    assert.ok(feedScore > baseScore, 'arming the ring wins the three-tick comparison');
+  } finally {
+    if (previousThree === undefined) delete process.env.BOT3_M3PLY;
+    else process.env.BOT3_M3PLY = previousThree;
+    if (previousArm === undefined) delete process.env.BOT3_MSEARCH_ARM;
+    else process.env.BOT3_MSEARCH_ARM = previousArm;
+  }
+});
+
 // --- Self-play-tuned multi-line evaluation (./mtune) ------------------------
 const {
   mtuneConfig,

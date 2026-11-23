@@ -47,6 +47,7 @@ const flagOn = (value) => {
 const enabled = () =>
   !unavailable &&
   (flagOn(process.env.BOT3_M2PLY) ||
+    flagOn(process.env.BOT3_M3PLY) ||
     flagOn(process.env.BOT3_MSEARCH) ||
     flagOn(process.env.BOT3_MSEARCH_DEBUG));
 const statsOn = () => flagOn(process.env.BOT3_MSEARCH_STATS);
