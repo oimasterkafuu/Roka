@@ -145,7 +145,7 @@ function flag(raw, fallback = false) {
 // Read on every call so tests and A/B runs can toggle the layer in-process.
 function foggrassConfig(overrides = {}, env = process.env) {
   return {
-    enabled: overrides.enabled ?? flag(env.BOT3_FOGRASS, false),
+    enabled: overrides.enabled ?? flag(env.BOT3_FOGRASS, true),
     maxBoard: overrides.maxBoard ?? number(env.BOT3_FOGRASS_BOARD, DEFAULT_MAX_BOARD, 1, 100000),
     swamp: overrides.swamp ?? number(env.BOT3_FOGRASS_SWAMP, DEFAULT_SWAMP, 0, 100),
     ring: overrides.ring ?? flag(env.BOT3_FOGRASS_RING, DEFAULT_RING === 1),

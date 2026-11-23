@@ -3941,8 +3941,8 @@ function foggrassCtx(b, overrides = {}) {
   };
 }
 
-test('ship the grass-fog switch off and clamp its knobs', () => {
-  assert.equal(foggrassConfig({}, {}).enabled, false);
+test('ship the grass-fog pulse refill on and clamp its knobs', () => {
+  assert.equal(foggrassConfig({}, {}).enabled, true);
   assert.equal(foggrassConfig({}, { BOT3_FOGRASS: '1' }).enabled, true);
   assert.equal(foggrassConfig({}, { BOT3_FOGRASS: 'off' }).enabled, false);
   const defaults = foggrassConfig({ enabled: true }, {});
