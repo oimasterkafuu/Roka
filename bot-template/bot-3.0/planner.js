@@ -44,6 +44,8 @@ const {
 const { landConfig, landContext } = require('./land');
 const { planFinish, finishEnabled, finishOptions } = require('./kill');
 const { multiUpdate, applyMulti } = require('./multi');
+const { predict: queuePredict, record: queueRecord } = require('./mqueue');
+const { configOf: twoPlyConfig, choose: twoPlyChoose } = require('./m2ply');
 const { mshapeConfig, mshapeUpdate, applyMshape, applyFan } = require('./mshape');
 const { mhalfConfig, mhalfUpdate, applyMhalf, applyMhalfModes } = require('./mhalf');
 const { cutConfig, cutUpdate, cutApply } = require('./cut');
@@ -373,6 +375,11 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // relay's private opening bookkeeping is built up frame by frame. Only scores
   // move here; the candidate set and the untouched planner stay as is.
   const shadow = shadowPredict(b, turn, leaderboard, multi);
+  // Multi-line queue predictor (see ./mqueue). Relay is deterministic and a
+  // clear room shows the whole grid, so its in-flight batch is known one tick
+  // early -- but only once the model has replayed consecutive frames exactly.
+  // It feeds ./m2ply; off by default, multi-line clear rooms only.
+  const mqPred = queuePredict(b, turn, leaderboard, multi);
   // Fog single-line layer (see ./fog). `fogOpen` is the room gate that also
   // supplies the objective fallback; the column needs a measured material edge
   // on top of it (`fogUpdate`) and pauses whenever a home is threatened.
@@ -424,6 +431,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
     );
     if (!approach && !contested && !exposedStem && !tacticalCapture) {
       if (shadow) shadowRecord(b, turn, orders);
+      if (mqPred) queueRecord(b, turn, orders);
       return orders;
     }
     b.opening = null;
@@ -1395,6 +1403,47 @@ function chooseOrders(b, turn, leaderboard, multi) {
       candidates.splice(0, candidates.length, ...kept);
   }
   candidates.sort((a, c) => c.score - a.score);
+  // Two-tick exact search (see ./m2ply). `msim` replays tick + 1 for a bounded
+  // set of order shapes the planner cannot supply itself (lateral frontier
+  // merges, multi-feed into one cell, a halved second front) and tick + 2 for a
+  // fixed rollout, against relay's batch predicted by replaying its own planner
+  // on the simulated board. The winner replaces the planner's set only by a
+  // measured margin, and is emitted verbatim: it is a legal, leftover-free batch
+  // that the greedy matching loop below cannot express (a duplicate target). The
+  // maze lane guard lives inside that loop, so the search stands down while it
+  // is active.
+  const twoPly = twoPlyConfig();
+  const laneGuard = maze && (LANE || (mazeFogOpen && fogMazeCfg.lane));
+  if (
+    twoPly.enabled &&
+    multi &&
+    mqPred?.armed &&
+    !laneGuard &&
+    !mshapeLayer?.config.fan &&
+    !mhalfLayer?.config.retain
+  ) {
+    const picked = twoPlyChoose({
+      b,
+      turn,
+      candidates,
+      pred: mqPred,
+      slots: mshapeLayer ? mshapeLayer.slots : 16,
+      config: twoPly,
+      units,
+      teams,
+      myTeam,
+    });
+    if (picked) {
+      for (const op of picked) {
+        if (op.build) continue;
+        b.lastFrom[op.to] = op.from;
+        b.lastMove[op.to] = turn;
+        if (maze) recordLane(b, op.from, op.to);
+      }
+      if (mqPred) queueRecord(b, turn, picked);
+      return picked;
+    }
+  }
   const used = new Set(),
     orders = [];
   // Maze lane discipline: do not spend consecutive ticks on the same corridor
@@ -1444,6 +1493,7 @@ function chooseOrders(b, turn, leaderboard, multi) {
   // lane passed the guard (the cooldown expires within four ticks).
   if (maze && !orders.length && candidates.length) take(candidates[0]);
   if (shadow) shadowRecord(b, turn, orders);
+  if (mqPred) queueRecord(b, turn, orders);
   return orders;
 }
 
