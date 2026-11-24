@@ -22,6 +22,7 @@ const sources = [
 
 function createClient({ platform = 'Linux x86_64', storage = new Map(), multiLine = false } = {}) {
   const sent = [];
+  const storageAccesses = [];
   const handlers = new Map();
   const ready = [];
   const elements = new Map();
@@ -93,8 +94,14 @@ function createClient({ platform = 'Linux x86_64', storage = new Map(), multiLin
     io: { connect: () => socket },
     localStorage: {
       scale: '3',
-      getItem: (key) => storage.get(key) ?? null,
-      setItem: (key, value) => storage.set(key, value),
+      getItem(key) {
+        storageAccesses.push(['getItem', key]);
+        return storage.get(key) ?? null;
+      },
+      setItem(key, value) {
+        storageAccesses.push(['setItem', key]);
+        storage.set(key, value);
+      },
     },
     hideSurrenderAlert() {},
     usernameEnsureColors() {},
@@ -128,7 +135,7 @@ function createClient({ platform = 'Linux x86_64', storage = new Map(), multiLin
   return {
     context,
     sent,
-    storage,
+    storageAccesses,
     replay,
     start,
     update: (turn) =>
@@ -235,7 +242,7 @@ test('arrow keys cross any terrain, while WASD respects mountains and preserves 
   assert.equal(client.sent.length, 2, 'a queued move must not allow an attack from a mountain');
 });
 
-test('slots 0, 9, 10 and 19 persist, overwrite and recall without issuing commands', () => {
+test('slots 0, 9, 10 and 19 can be overwritten and recalled in the same match without issuing commands', () => {
   const client = createClient();
   client.start();
   for (const [number, digit, altKey] of [
@@ -247,7 +254,7 @@ test('slots 0, 9, 10 and 19 persist, overwrite and recall without issuing comman
     for (const row of [0, 2]) {
       client.click(row, 0);
       assert.equal(client.key(digit, { ctrlKey: true, altKey }), true);
-      assert.deepEqual(JSON.parse(client.storage.get(storageKey))[number], [[row, 0]]);
+      assert.match(client.cell(row, 0).innerHTML, new RegExp(`title="[0-9·]*\\b${number}\\b[0-9·]*"`));
     }
     client.click(0, 0);
     client.panOffscreen();
@@ -258,18 +265,16 @@ test('slots 0, 9, 10 and 19 persist, overwrite and recall without issuing comman
   assert.equal(client.key('3'), true);
   assert.deepEqual(client.selection(), [[2, 0]]);
   assert.deepEqual(client.sent, []);
-  const reloaded = createClient({ storage: client.storage });
-  reloaded.start();
-  reloaded.key('9', { altKey: true });
-  assert.deepEqual(reloaded.selection(), [[2, 0]]);
+});
 
+test('macOS uses Command to assign groups and Option for slots 10–19', () => {
   const mac = createClient({ platform: 'MacIntel', multiLine: true });
   mac.start();
   assert.equal(mac.key('1', { ctrlKey: true }), false);
   assert.equal(mac.key('1', { metaKey: true }), true);
   mac.click(2, 0);
   assert.equal(mac.key('º', { metaKey: true, altKey: true, originalEvent: { code: 'Digit0' } }), true);
-  assert.deepEqual(JSON.parse(mac.storage.get(storageKey)), { 1: [[0, 0]], 10: [[2, 0]] });
+  assert.match(mac.cell(2, 0).innerHTML, /class="control-group-label" title="10">10<\/span>/);
   mac.key('1');
   assert.deepEqual(mac.selection(), [[0, 0]]);
   assert.equal(mac.key('º', { altKey: true, code: 'Digit0' }), true);
@@ -279,39 +284,60 @@ test('slots 0, 9, 10 and 19 persist, overwrite and recall without issuing comman
   assert.deepEqual(mac.sent, []);
 });
 
-test('stored groups reject malformed coordinates and ignore cells outside the current map', () => {
-  const storage = new Map([
-    [
-      storageKey,
-      JSON.stringify({
-        0: [[10, 0], [0, 3], ['1', 1], [-1, 0], [0, 3], null, [1, 1, 1], [2, 0.5]],
-        1: [2, 0],
-        2: [[8, 8]],
-        3: '<img>',
-        20: [[0, 0]],
-      }),
-    ],
-  ]);
-  const client = createClient({ storage, multiLine: true });
+test('init_map clears old labels and recalls but allows groups to be reassigned', () => {
+  const client = createClient({ multiLine: true });
   client.start();
-  client.key('0');
-  assert.deepEqual(client.selection(), [[0, 3]]);
-  assert.match(client.cell(0, 3).innerHTML, /class="control-group-label" title="0">0<\/span>/);
-  assert.doesNotMatch(client.cell(0, 0).innerHTML, /control-group-label/);
-  for (const digit of ['1', '2', '3']) client.key(digit);
-  assert.deepEqual(client.selection(), [[0, 3]]);
+  client.click(2, 0);
+  client.click(2, 3, true);
+  client.key('0', { ctrlKey: true });
+  client.key('9', { ctrlKey: true, altKey: true });
+  client.click(0, 0);
+  client.key('9', { altKey: true });
+  assert.deepEqual(client.selection(), [
+    [2, 0],
+    [2, 3],
+  ]);
+  for (const col of [0, 3]) assert.match(client.cell(2, col).innerHTML, /title="0·19">0·19<\/span>/);
 
-  const broken = createClient({ storage: new Map([[storageKey, '{']]) });
-  broken.start();
-  broken.key('0');
-  assert.deepEqual(broken.selection(), [[0, 0]]);
-  broken.context.localStorage.setItem = () => {
-    throw new Error('storage unavailable');
-  };
-  broken.key('9', { ctrlKey: true });
-  broken.click(2, 0);
-  broken.key('9');
-  assert.deepEqual(broken.selection(), [[0, 0]]);
+  client.start();
+  for (const col of [0, 3]) {
+    assert.doesNotMatch(client.cell(2, col).innerHTML, /control-group-label/);
+    assert.doesNotMatch(client.cell(2, col).className, /has-control-group/);
+  }
+  client.key('0');
+  assert.deepEqual(client.selection(), [[0, 0]]);
+  client.key('9', { altKey: true });
+  assert.deepEqual(client.selection(), [[0, 0]]);
+
+  client.click(1, 0);
+  client.key('0', { ctrlKey: true });
+  client.click(0, 0);
+  client.key('0');
+  assert.deepEqual(client.selection(), [[1, 0]]);
+  assert.match(client.cell(1, 0).innerHTML, /class="control-group-label" title="0">0<\/span>/);
+  assert.deepEqual(client.sent, []);
+});
+
+test('a fresh client never reads or writes legacy control-group storage', () => {
+  const legacy = JSON.stringify({ 0: [[2, 0]] });
+  const storage = new Map([[storageKey, legacy]]);
+  const client = createClient({ storage });
+  client.start();
+  assert.doesNotMatch(client.cell(2, 0).innerHTML, /control-group-label/);
+  client.key('0');
+  assert.deepEqual(client.selection(), [[0, 0]]);
+  client.click(1, 0);
+  client.key('0', { ctrlKey: true });
+  assert.deepEqual(client.storageAccesses, []);
+  assert.equal(storage.get(storageKey), legacy);
+
+  const reloaded = createClient({ storage });
+  reloaded.start();
+  reloaded.key('0');
+  assert.deepEqual(reloaded.selection(), [[0, 0]]);
+  assert.doesNotMatch(reloaded.cell(2, 0).innerHTML, /control-group-label/);
+  assert.doesNotMatch(reloaded.cell(1, 0).innerHTML, /control-group-label/);
+  assert.deepEqual(reloaded.storageAccesses, []);
 });
 
 test('multi-line selection supports shift keys, all controllable cells and all crowns', () => {
@@ -441,7 +467,7 @@ test('synchronous WASD queues valid origins once and advances or stops each curs
   assert.deepEqual(structuredClone(client.sent[4]), ['attack', { x: 1, y: 1, dx: 1, dy: 0, mode: 2 }]);
 });
 
-test('ordered multi-cell groups restore a snapshot, render labels and degrade to one cell in single-line', () => {
+test('ordered multi-cell groups restore a snapshot and render labels', () => {
   const client = createClient({ multiLine: true });
   client.start();
   client.key('ArrowRight', { shiftKey: true });
@@ -469,10 +495,6 @@ test('ordered multi-cell groups restore a snapshot, render labels and degrade to
     client.context.render();
     assert.match(client.cell(2, 3).innerHTML, /class="control-group-army".*60.*class="control-group-label"/);
   }
-  client.start({ multiLine: false });
-  client.key('9', { altKey: true });
-  assert.deepEqual(client.selection(), [[2, 3]]);
-  assert.doesNotMatch(client.cell(2, 0).className, /selected/);
   assert.deepEqual(client.sent, []);
 
   const css = read('static/styles/map.css');
@@ -502,7 +524,9 @@ test('chat, replay and pre-game inputs keep their own keyboard handling', () => 
   const chatInput = { matches: (selector) => selector.includes('input') };
   for (const [key, options] of keys) assert.equal(client.key(key, { ...options, target: chatInput }), false);
   assert.deepEqual(client.selection(), [[2, 0]]);
-  assert.deepEqual(JSON.parse(client.storage.get(storageKey)), { 9: [[0, 0]] });
+  client.key('9');
+  assert.deepEqual(client.selection(), [[0, 0]]);
+  client.click(2, 0);
   assert.equal(client.context.selt, 1);
 
   client.context.is_replay = true;
@@ -517,11 +541,12 @@ test('chat, replay and pre-game inputs keep their own keyboard handling', () => 
   assert.deepEqual(client.sent, []);
 });
 
-test('built text tutorial matches its Pug source and documents the new bindings', async () => {
+test('built text tutorial matches its Pug source and uses separate keycaps for bindings', async () => {
   const inputPath = fileURLToPath(new URL('../views/tutorial-text.pug', import.meta.url));
   const filepath = fileURLToPath(new URL('../static/tutorial-text.html', import.meta.url));
   const html = read('static/tutorial-text.html');
-  const generated = await format(pug.renderFile(inputPath, { pretty: false }), {
+  const rendered = pug.renderFile(inputPath, { pretty: false });
+  const generated = await format(rendered, {
     ...(await resolveConfig(filepath)),
     parser: 'html',
     filepath,
@@ -530,12 +555,34 @@ test('built text tutorial matches its Pug source and documents the new bindings'
   for (const phrase of [
     '方向键只移动光标',
     '数字编队 0–19',
-    'Command+Option+数字',
-    'Shift+点击',
-    'Command+A',
+    '仅在当前对局有效，下一局自动清空',
     '多线选中所有己方主城',
   ]) {
     assert.ok(html.includes(phrase), `text tutorial is missing ${phrase}`);
   }
-  assert.doesNotMatch(html, /方向键推兵/);
+  assert.doesNotMatch(html, /方向键推兵|保存在当前浏览器|W\/A\/S\/D|WASD/);
+
+  const keyboardHtml = rendered.replaceAll('&#32;', ' ');
+  const kbd = (key) => `<span class="kbd">${key}</span>`;
+  const digits = `${kbd('0')}–${kbd('9')}`;
+  const move = ['W', 'A', 'S', 'D'].map(kbd).join(' / ');
+  const arrows = ['↑', '←', '↓', '→'].map(kbd).join(' / ');
+  for (const binding of [
+    move,
+    arrows,
+    `${kbd('Shift')} + ${arrows}`,
+    `${kbd('Shift')} + 点击`,
+    `${kbd('Shift')} + ${move}`,
+    `${kbd('Ctrl')} + ${kbd('A')}`,
+    `${kbd('Command')} + ${kbd('A')}`,
+    `${kbd('Ctrl')} + ${digits}`,
+    `${kbd('Ctrl')} + ${kbd('Alt')} + ${digits}`,
+    `${kbd('Command')} + ${digits}`,
+    `${kbd('Command')} + ${kbd('Option')} + ${digits}`,
+    `${kbd('Alt')} + ${digits}`,
+    `${kbd('Option')} + ${digits}`,
+  ]) {
+    assert.ok(keyboardHtml.includes(binding), `text tutorial is missing keycaps: ${binding}`);
+  }
+  assert.doesNotMatch(html, /<span class="kbd">[^<]*[+/][^<]*<\/span>/);
 });

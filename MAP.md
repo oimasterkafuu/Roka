@@ -526,7 +526,7 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 
 ### 实时对局光标与数字编队
 
-- `static/main.js` 处理方向键光标、WASD 推兵、多线选区与数字编队。编队 0–19 使用本地 `roka.controlGroups` 存储，队列继续使用现有 `attack` 指令。
+- `static/main.js` 处理方向键光标、WASD 推兵、多线选区与数字编队。编队 0–19 仅存于当前对局的客户端内存，`init_map` 重置编号及标签，队列继续使用现有 `attack` 指令。
 - `static/main/render-update.js` 与 `static/styles/map.css` 渲染主光标、附加选格与右下角编号。文字教程由 `views/tutorial-text.pug` 生成 `static/tutorial-text.html`。
 - `static/main/render-update.js` 使用 `init_map` 的 `multi_line` 标记判断实时对局是否显示第 26–50 Tick 的爆发期红框，单线保留，多线不显示；教程与不携带模式标记的观看回放不受影响。
 - `scripts/test-cursor-control-groups.mjs` 用 VM 执行真实客户端键鼠、队列和渲染逻辑，覆盖实时爆发期红框和回合计数的边界，并验证文字教程生成物。`pnpm run test:cursor-control-groups` 纳入 `pnpm test`。

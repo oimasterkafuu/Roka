@@ -329,45 +329,88 @@
         <h3>选中与视角</h3>
         <ul>
           <li>鼠标左键点击己方格：选中；点击空白背景：取消选中；拖动地图平移，滚轮缩放。</li>
-          <li>方向键只移动光标，可穿过或停在山脉、沼泽、空地和迷雾格；碰到地图边界时停住。</li>
-          <li><span class="kbd">空格</span>单线选中曼哈顿距离最近的己方主城，多线选中所有己方主城。</li>
+          <li>
+            <span class="kbd">↑</span>&#32;/&#32;<span class="kbd">←</span>&#32;/&#32;<span class="kbd"
+              >↓</span
+            >&#32;/&#32;<span class="kbd">→</span
+            >&#32;方向键只移动光标，可穿过或停在山脉、沼泽、空地和迷雾格；碰到地图边界时停住。
+          </li>
+          <li><span class="kbd">空格</span>&#32;单线选中曼哈顿距离最近的己方主城，多线选中所有己方主城。</li>
         </ul>
         <h3>多线选区</h3>
         <ul>
-          <li>Shift+方向键把光标移到相邻格并保留已有选区。Shift+点击追加格子，普通点击恢复单选。</li>
           <li>
-            Windows/Linux 用 Ctrl+A，macOS 用
-            Command+A，选中所有可操控的己方格。孤军、敌格、空格和山脉不计入。
+            <span class="kbd">Shift</span>&#32;+&#32;<span class="kbd">↑</span>&#32;/&#32;<span class="kbd"
+              >←</span
+            >&#32;/&#32;<span class="kbd">↓</span>&#32;/&#32;<span class="kbd">→</span
+            >&#32;把光标移到相邻格并保留已有选区。&#32;<span class="kbd">Shift</span>&#32;+
+            点击追加格子，普通点击恢复单选。
           </li>
           <li>
-            WASD 让每个选中格各自尝试同方向推兵。遇到障碍的光标留在原格，其他光标照常推进。山脉上的光标按 WASD
-            只能移向非障碍格，不会推兵或入队。
+            Windows/Linux 用&#32;<span class="kbd">Ctrl</span>&#32;+&#32;<span class="kbd">A</span>，macOS
+            用&#32;<span class="kbd">Command</span>&#32;+&#32;<span class="kbd">A</span
+            >，选中所有可操控的己方格。孤军、敌格、空格和山脉不计入。
+          </li>
+          <li>
+            <span class="kbd">W</span>&#32;/&#32;<span class="kbd">A</span>&#32;/&#32;<span class="kbd"
+              >S</span
+            >&#32;/&#32;<span class="kbd">D</span
+            >&#32;让每个选中格各自尝试同方向推兵。遇到障碍的光标留在原格，其他光标照常推进。山脉上的光标只能移向非障碍格，不会推兵或入队。
           </li>
         </ul>
         <h3>数字编队 0–19</h3>
         <ul>
           <li>
-            Windows/Linux 用 Ctrl+数字设置 0–9，Ctrl+Alt+数字设置 10–19。macOS 对应用 Command+数字和
-            Command+Option+数字设置。
+            Windows/Linux 用&#32;<span class="kbd">Ctrl</span>&#32;+&#32;<span class="kbd">0</span>–<span
+              class="kbd"
+              >9</span
+            >&#32;设置 0–9 号，&#32;<span class="kbd">Ctrl</span>&#32;+&#32;<span class="kbd">Alt</span
+            >&#32;+&#32;<span class="kbd">0</span>–<span class="kbd">9</span>&#32;设置 10–19 号。
           </li>
           <li>
-            直接按数字跳转 0–9，按 Alt+数字（macOS 用 Option+数字）跳转
-            10–19。跳转只恢复选区，未设置的编号保持原选区。
+            macOS 用&#32;<span class="kbd">Command</span>&#32;+&#32;<span class="kbd">0</span>–<span
+              class="kbd"
+              >9</span
+            >&#32;设置 0–9 号，&#32;<span class="kbd">Command</span>&#32;+&#32;<span class="kbd">Option</span
+            >&#32;+&#32;<span class="kbd">0</span>–<span class="kbd">9</span>&#32;设置 10–19 号。
           </li>
           <li>
-            编号显示在格子右下角，保存在当前浏览器。再次设置可覆盖原编号，编号不可删除。多线保存整组选区，单线跳转时只取首格。
+            直接按&#32;<span class="kbd">0</span>–<span class="kbd">9</span>&#32;跳转 0–9 号，按&#32;<span
+              class="kbd"
+              >Alt</span
+            >&#32;+&#32;<span class="kbd">0</span>–<span class="kbd">9</span>（macOS 用&#32;<span class="kbd"
+              >Option</span
+            >&#32;+&#32;<span class="kbd">0</span>–<span class="kbd">9</span>）&#32;跳转 10–19
+            号。跳转只恢复选区，未设置的编号保持原选区。
+          </li>
+          <li>
+            编号显示在格子右下角，仅在当前对局有效，下一局自动清空。再次设置可覆盖原编号，编号不可删除。多线保存整组选区，单线设置和跳转都只取首格。
           </li>
         </ul>
         <h3>推兵（移动/进攻）</h3>
         <ul>
           <li>
-            <span class="kbd">W/A/S/D</span>从选中格向对应方向推兵。默认<b>全兵</b>推出（只留 1 兵看守）。
+            <span class="kbd">W</span>&#32;/&#32;<span class="kbd">A</span>&#32;/&#32;<span class="kbd"
+              >S</span
+            >&#32;/&#32;<span class="kbd">D</span>&#32;从选中格向对应方向推兵。默认<b>全兵</b>推出（只留 1
+            兵看守）。
           </li>
-          <li><span class="kbd">Z</span>后按 WASD：下一步<b>半兵</b>（50%，一次性，执行后失效）。</li>
           <li>
-            <span class="kbd">Shift</span> + WASD：<b>智能分兵</b>——为其他方向的威胁保留兵力。设起点兵力为
+            <span class="kbd">Z</span>&#32;后按&#32;<span class="kbd">W</span>&#32;/&#32;<span class="kbd"
+              >A</span
+            >&#32;/&#32;<span class="kbd">S</span>&#32;/&#32;<span class="kbd">D</span
+            >：下一步<b>半兵</b>（50%，一次性，执行后失效）。
+          </li>
+          <li>
+            <span class="kbd">Shift</span>&#32;+&#32;<span class="kbd">W</span>&#32;/&#32;<span class="kbd"
+              >A</span
+            >&#32;/&#32;<span class="kbd">S</span>&#32;/&#32;<span class="kbd">D</span
+            >：<b>智能分兵</b>——为其他方向的威胁保留兵力。设起点兵力为
             \(A\)，其余三个方向相邻格中「非山脉且非己方」格子的驻军之和为 \(B\)： \[ B =
-            \sum_{\text{威胁方向}} (\text{兵力} - 1), \qquad push = \max(0,\ A - B - 1) \] 不消耗 Z。
+            \sum_{\text{威胁方向}} (\text{兵力} - 1), \qquad push = \max(0,\ A - B - 1) \] 不消耗&#32;<span
+              class="kbd"
+              >Z</span
+            >&#32;的半兵状态。
           </li>
           <li>推兵进入操作队列。单线每 Tick 每名玩家最多执行一条，多线可并行执行各战线的指令。</li>
         </ul>
@@ -432,7 +475,7 @@
           攻下敌方最后一座主城后，其所有残余领土不转移归属：锚点全部拆除、兵力按断链规则减半后沦为孤军，随后逐渐衰减至中立。扩张时务必保持连通。
         </div>
         <div class="tips">
-          投降（Esc）=
+          投降（<span class="kbd">Esc</span>）=
           立即放弃所有控制权：若队内仍有其他存活成员，全部领土（含兵力）转移给编号最小的存活队友，主城降级为指挥所；否则主城与所有指挥所被拆除为普通空地，领土兵力减半后沦为孤军，进入自然衰减。
         </div>
       </section>
@@ -440,18 +483,34 @@
         <h2>快捷键</h2>
         <ul>
           <li>
-            <span class="kbd">W/A/S/D</span>推兵，方向键移动光标；<span class="kbd">Z</span>后按 WASD
-            半兵；<span class="kbd">Shift</span> + WASD 智能分兵。
+            <span class="kbd">W</span>&#32;/&#32;<span class="kbd">A</span>&#32;/&#32;<span class="kbd"
+              >S</span
+            >&#32;/&#32;<span class="kbd">D</span>&#32;推兵，&#32;<span class="kbd">↑</span>&#32;/&#32;<span
+              class="kbd"
+              >←</span
+            >&#32;/&#32;<span class="kbd">↓</span>&#32;/&#32;<span class="kbd">→</span
+            >&#32;移动光标；&#32;<span class="kbd">Z</span>&#32;后按&#32;<span class="kbd">W</span
+            >&#32;/&#32;<span class="kbd">A</span>&#32;/&#32;<span class="kbd">S</span>&#32;/&#32;<span
+              class="kbd"
+              >D</span
+            >&#32;半兵；&#32;<span class="kbd">Shift</span>&#32;+&#32;<span class="kbd">W</span
+            >&#32;/&#32;<span class="kbd">A</span>&#32;/&#32;<span class="kbd">S</span>&#32;/&#32;<span
+              class="kbd"
+              >D</span
+            >&#32;智能分兵。
           </li>
           <li>
-            <span class="kbd">X</span> 建指挥所；<span class="kbd">C</span> 升级主城；<span class="kbd"
+            <span class="kbd">X</span> 建指挥所；&#32;<span class="kbd">C</span> 升级主城；&#32;<span
+              class="kbd"
               >Q</span
             >
-            清空队列；<span class="kbd">E</span> 撤销队尾。
+            清空队列；&#32;<span class="kbd">E</span> 撤销队尾。
           </li>
           <li>
-            <span class="kbd">空格</span>选中己方主城（单线最近一座，多线全部）；<span class="kbd">Enter</span
-            >公屏；<span class="kbd">T</span>队伍聊天；<span class="kbd">Esc</span>投降确认。
+            <span class="kbd">空格</span>&#32;选中己方主城（单线最近一座，多线全部）；&#32;<span class="kbd"
+              >Enter</span
+            >&#32;公屏；&#32;<span class="kbd">T</span>&#32;队伍聊天；&#32;<span class="kbd">Esc</span
+            >&#32;投降确认。
           </li>
         </ul>
       </section>
