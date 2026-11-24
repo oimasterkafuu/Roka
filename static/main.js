@@ -165,9 +165,8 @@ var next_seq = 1;
 var general_order = Array();
 var extra_selected_cells = [];
 var match_multi_line = false;
-var control_groups;
+var control_groups = {};
 var control_group_labels = new Map();
-const control_group_storage_key = 'roka.controlGroups';
 
 var room_id = '',
   account_name = '',
@@ -393,10 +392,8 @@ function init_map(_n, _m, general) {
   general_order = Array();
   setSelectedCells([]);
   selt = 1;
-  if (!is_replay) {
-    control_groups ??= loadControlGroups();
-    refreshControlGroupLabels();
-  }
+  control_groups = {};
+  control_group_labels.clear();
 
   var ts = '';
   for (var i = 0; i < n; i++) {
@@ -467,31 +464,8 @@ function getSelectedCells() {
   return cellInBounds(selx, sely) ? [[selx, sely], ...extra_selected_cells] : [];
 }
 
-function loadControlGroups() {
-  const groups = {};
-  try {
-    const stored = JSON.parse(localStorage.getItem(control_group_storage_key));
-    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return groups;
-    for (let number = 0; number < 20; number++) {
-      if (!Array.isArray(stored[number])) continue;
-      const seen = new Set();
-      const cells = stored[number].filter((cell) => {
-        if (!Array.isArray(cell) || cell.length !== 2) return false;
-        const [row, col] = cell;
-        if (!Number.isSafeInteger(row) || !Number.isSafeInteger(col) || row < 0 || col < 0) return false;
-        const key = cell.join('_');
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      if (cells.length) groups[number] = cells;
-    }
-  } catch {}
-  return groups;
-}
-
 function refreshControlGroupLabels() {
-  control_group_labels = new Map();
+  control_group_labels.clear();
   for (const [number, cells] of Object.entries(control_groups)) {
     for (const [row, col] of cells) {
       if (!cellInBounds(row, col)) continue;
@@ -508,9 +482,6 @@ function useControlGroup(number, save) {
     const cells = getSelectedCells();
     if (!cells.length) return;
     control_groups[number] = multiLine ? cells : cells.slice(0, 1);
-    try {
-      localStorage.setItem(control_group_storage_key, JSON.stringify(control_groups));
-    } catch {}
     refreshControlGroupLabels();
   } else {
     const cells = (control_groups[number] || []).filter(([row, col]) => cellInBounds(row, col));
