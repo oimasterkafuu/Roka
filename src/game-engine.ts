@@ -13,7 +13,8 @@ import { generateArchipelagoMap } from './map/archipelago-map-generator';
 import { generateMediterraneanMap } from './map/mediterranean-map-generator';
 import { generateHuaxiaMap } from './map/huaxia-map-generator';
 import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
-import { generateMazeMap } from './map/maze-map-generator';
+import { generateLegacyMazeMap, selectLegacyMazeGenerals } from './map/legacy-maze-replay';
+import { assignMazeSeats, generateMazeMap } from './map/maze-map-generator';
 import { generateRandomMap } from './map/random-map-generator';
 import { ReplayStore } from './replay-store';
 import {
@@ -23,7 +24,7 @@ import {
   ISOLATED_GRACE_TICKS,
   LEFT_GAME,
 } from './game-engine/constants';
-import { selectMazeGenerals, selectRandomGenerals } from './game-engine/general-selection';
+import { selectRandomGenerals } from './game-engine/general-selection';
 import { buildFinalRank, buildFinalRankTeams, buildLeaderboard } from './game-engine/leaderboard';
 import { buildFullVisionArrays } from './game-engine/map-encoding';
 import { buildFoggedVisionArrays, computeTeamVisibility } from './game-engine/fog-vision';
@@ -286,6 +287,8 @@ export class GameEngine {
 
   private generals: GeneralPos[] = [];
 
+  private mazeLayout?: GeneralPos[];
+
   private n = 0;
 
   private m = 0;
@@ -309,6 +312,7 @@ export class GameEngine {
     playerIds: string[],
     gid: string,
     callbacks: GameCallbacks,
+    private readonly legacyMazeReplay = false,
   ) {
     this.startAt = Date.now();
     this.update = callbacks.update;
@@ -357,6 +361,7 @@ export class GameEngine {
       multi_line: this.multiLine,
       map_token: this.mapToken,
       map_mode: gameConf.map_mode,
+      ...(this.mapMode === 'maze' && !this.legacyMazeReplay ? { maze_layout: 'fair-v1' } : {}),
       map_region: this.mapRegion,
       player_names: [...gameConf.player_names],
       player_teams: [...gameConf.player_teams],
@@ -491,6 +496,7 @@ export class GameEngine {
           saveReplay: async () => '',
         } as unknown as ReplayStore,
       },
+      replay.meta.map_mode === 'maze' && replay.meta.maze_layout !== 'fair-v1',
     );
 
     await engine.initializeMap();
@@ -618,14 +624,25 @@ export class GameEngine {
   private async initializeMap(): Promise<void> {
     const requiredPlayers = this.team.filter((team) => team !== 0).length;
     let generated;
-    if (this.mapMode === 'maze') {
-      generated = generateMazeMap(this.rng, {
+    if (this.legacyMazeReplay) {
+      generated = generateLegacyMazeMap(this.rng, {
         widthRatio: this.widthRatio,
         heightRatio: this.heightRatio,
         cityRatio: this.cityRatio,
         mountainRatio: this.mountainRatio,
         swampRatio: this.swampRatio,
       });
+    } else if (this.mapMode === 'maze') {
+      const maze = generateMazeMap(this.rng, {
+        widthRatio: this.widthRatio,
+        heightRatio: this.heightRatio,
+        cityRatio: this.cityRatio,
+        mountainRatio: this.mountainRatio,
+        swampRatio: this.swampRatio,
+        requiredPlayers,
+      });
+      generated = maze;
+      this.mazeLayout = maze.generals;
     } else if (this.mapMode === 'archipelago') {
       generated = generateArchipelagoMap(this.rng, {
         widthRatio: this.widthRatio,
@@ -678,30 +695,18 @@ export class GameEngine {
 
   private selectGenerals(): void {
     const requiredPlayers = this.team.filter((team) => team !== 0).length;
-    let selected: GeneralPos[];
-    if (this.mapMode === 'maze') {
-      selected = selectMazeGenerals(
-        {
-          n: this.n,
-          m: this.m,
-          st: this.st,
-          gridType: this.gridType,
-          rng: this.rng,
-        },
-        requiredPlayers,
-      );
-    } else {
-      selected = selectRandomGenerals(
-        {
-          n: this.n,
-          m: this.m,
-          st: this.st,
-          gridType: this.gridType,
-          rng: this.rng,
-        },
-        requiredPlayers,
-      );
-    }
+    const selectionContext = {
+      n: this.n,
+      m: this.m,
+      st: this.st,
+      gridType: this.gridType,
+      rng: this.rng,
+    };
+    const selected = this.mazeLayout
+      ? assignMazeSeats(this.mazeLayout, this.mapSeed)
+      : this.legacyMazeReplay
+        ? selectLegacyMazeGenerals(selectionContext, requiredPlayers)
+        : selectRandomGenerals(selectionContext, requiredPlayers);
 
     for (let i = 0; i < this.n; i += 1) {
       for (let j = 0; j < this.m; j += 1) {

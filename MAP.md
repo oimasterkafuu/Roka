@@ -137,9 +137,9 @@ _一句话：统一 presence：touch/在线窗口/落盘节流/重启恢复。_
 `LEFT_GAME=52`、`AFK_MIN_TURNS=60`/`AFK_MIN_MS=60_000`（挂机投降需同时满足）、`DISCONNECT_GRACE_MS=10_000`（掉线宽限，1 倍速=20 tick）、`ISOLATED_DECAY_RATIO=0.05`、`ISOLATED_GRACE_TICKS=10`、`FOG_VISION_RADIUS=1`（迷雾视野切比雪夫半径）。调平衡数值只改这里。
 _一句话：AFK/掉线/孤军等数值常量。_
 
-**src/game-engine/general-selection.ts** — 开局主城位置选择。
-`selectRandomGenerals`：500 组最大-最小贪心候选按间距评分加权轮盘抽取，含按面积/人数折算的硬性最小间距约束（不可达时放宽到最优可达值）；`selectMazeGenerals`：保留迷宫预设位 + BFS 最短路贪心选点。选不出的玩家直接出局。
-_一句话：开局主城位置选择（随机/迷宫两套）。_
+**src/game-engine/general-selection.ts** — 非迷宫地图的开局主城位置选择。
+`selectRandomGenerals`：500 组最大-最小贪心候选按间距评分加权轮盘抽取，含按面积/人数折算的硬性最小间距约束（不可达时放宽到最优可达值）。迷宫生成器直接返回完整布局；`GameEngine` 在实时和回放初始化中用独立种子洗牌后映射到参赛座位。
+_一句话：非迷宫选址保持原有逻辑，迷宫消费预选布局。_
 
 **src/game-engine/leaderboard.ts** — 每 tick 排行榜与终局名次。
 `buildLeaderboard` 扫图累加 army/land，`class_` 标记 `dead`/`afk`；`buildFinalRank` 存活者优先，出局者按出局先后/领土/兵力决胜（compareFinalRank 比较器）；`buildFinalRankTeams` 为个人全序的队伍分组投影（组序=队伍名次序、组内=个人名次序、color=组内最小玩家 id），归档回放时写入索引供回放列表组队合并展示。
@@ -180,8 +180,13 @@ _一句话：人数 → 地图宽高比例的纯函数。_
 **src/map/random-map-generator.ts** — 默认随机图：按概率撒山/沼泽（上限 0.24/0.16），反复重试直到连通；同时定义所有生成器共用的 `MapGenerationConfig`/`GeneratedMap` 类型。不预置中立城市（城市只由玩家建造）。
 _一句话：默认随机图生成 + 生成器公共类型定义。_
 
-**src/map/maze-map-generator.ts** — 「峡谷回廊」：DFS 回溯迷宫 + 按面积 3% 打通额外墙（防 2×2 空地）+ 沼泽点缀；尺寸过小回退随机图。
-_一句话：DFS 迷宫 + 限量开墙 + 沼泽点缀。_
+**src/map/maze-map-generator.ts**：为「峡谷回廊」生成 6 张开墙比例不同的连通回廊，联合选择地形、沼泽与主城布局。拥挤时只开足够的内部墙以保证容量；优先保留非死端布局。返回按坐标规整的普通地出生点，`assignMazeSeats` 用独立种子排列座位。
+
+**src/map/maze-layout.ts**：每张候选图最多 5 次最远点重启、52 次单点交换，复用按出生格缓存的 BFS 距离场。按最小点对距离档位、最弱开局平地档位、近程与领地离散度等分层比较。多源 BFS 将等距格均分给最近主城；沼泽分配保留出生格、优先保护半径 6、10 的平地，并扣减平地富余区域的份额。
+
+**src/map/legacy-maze-replay.ts**：只为无 `maze_layout` 标记的旧迷宫操作回放保留原始地形、沼泽和选点顺序。新迷宫回放记录 `maze_layout: 'fair-v1'`；不改变操作流与观看二进制格式。
+
+**scripts/evaluate-maze-fairness.mjs / scripts/test-maze-fairness.mjs**：用房间尺寸规则与真实回放初始化对照 720 局公平性矩阵；专项回归覆盖小图拥挤、活局/操作回放、座位洗牌、平地与 Voronoi、其它地图字节不变。通过 `test:map-generation` 纳入 `pnpm test`。
 
 **src/map/archipelago-map-generator.ts** — 「群岛要塞」：沼泽海上放 3×3–4×4 矩形岛（互不邻接，≥2×人数+1 个），海岸噪声扩边，多次重启贪心挑分散的玩家出生岛；重试上限 220 次，失败回退随机图。
 _一句话：矩形群岛 + 分散出生岛挑选，失败回退随机图。_

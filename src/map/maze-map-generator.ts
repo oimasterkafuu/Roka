@@ -1,161 +1,118 @@
-import {
-  MAX_SWAMP_RATIO,
-  MOVE_DX,
-  MOVE_DY,
-  SeededRandom,
-  Tile,
-  build2D,
-  computeBaseMapDimensions,
-  markLargestComponent,
-  shuffle,
-} from './map-core';
-import { generateRandomMap } from './random-map-generator';
+import { MAX_SWAMP_RATIO, SeededRandom, build2D, computeBaseMapDimensions, shuffle } from './map-core';
+import type { GeneralPos, Tile } from './map-core';
 import type { GeneratedMap, MapGenerationConfig } from './random-map-generator';
+import {
+  MazeGraph,
+  compareLayoutScores,
+  optimizeMazeLayout,
+  placeMazeSwamps,
+  scoreMazeLayout,
+} from './maze-layout';
 
-const generateMazeMap = (rng: SeededRandom, config: MapGenerationConfig): GeneratedMap => {
-  const { n, m } = computeBaseMapDimensions(rng, config.heightRatio, config.widthRatio);
-  const owner = build2D(n, m, 0);
-  const armyCnt = build2D(n, m, 0);
-  const gridType = build2D<Tile>(n, m, 1);
+const TERRAIN_CANDIDATES = 6;
 
-  const mazeRows: number[] = [];
-  const mazeCols: number[] = [];
-  for (let i = 1; i < n; i += 2) {
-    mazeRows.push(i);
-  }
-  for (let j = 1; j < m; j += 2) {
-    mazeCols.push(j);
-  }
-
-  if (mazeRows.length === 0 || mazeCols.length === 0) {
-    return generateRandomMap(rng, config);
-  }
-
-  const visited = build2D(n, m, false);
-  const stack: Array<[number, number]> = [];
-  const start: [number, number] = [
-    mazeRows[rng.intInclusive(0, mazeRows.length - 1)],
-    mazeCols[rng.intInclusive(0, mazeCols.length - 1)],
-  ];
-  stack.push(start);
-  visited[start[0]][start[1]] = true;
-  gridType[start[0]][start[1]] = 0;
-
-  while (stack.length > 0) {
-    const [x, y] = stack[stack.length - 1];
-    const nexts: Array<{ nx: number; ny: number; wx: number; wy: number }> = [];
-
-    for (let d = 0; d < 4; d += 1) {
-      const nx = x + MOVE_DX[d] * 2;
-      const ny = y + MOVE_DY[d] * 2;
-      if (nx <= 0 || nx >= n || ny <= 0 || ny >= m || visited[nx][ny]) {
-        continue;
-      }
-      nexts.push({ nx, ny, wx: x + MOVE_DX[d], wy: y + MOVE_DY[d] });
-    }
-
-    if (nexts.length === 0) {
+const carveMaze = (rng: SeededRandom, rows: number, cols: number, players: number): Uint8Array => {
+  const tiles = new Uint8Array(rows * cols).fill(1);
+  const start =
+    (1 + 2 * rng.intInclusive(0, (rows - 3) / 2)) * cols + 1 + 2 * rng.intInclusive(0, (cols - 3) / 2);
+  const stack = [start];
+  const neighbors: number[] = [];
+  tiles[start] = 0;
+  while (stack.length) {
+    const cell = stack[stack.length - 1];
+    const row = Math.floor(cell / cols);
+    const col = cell % cols;
+    neighbors.length = 0;
+    if (row > 2 && tiles[cell - 2 * cols]) neighbors.push(cell - 2 * cols);
+    if (row + 2 < rows - 1 && tiles[cell + 2 * cols]) neighbors.push(cell + 2 * cols);
+    if (col > 2 && tiles[cell - 2]) neighbors.push(cell - 2);
+    if (col + 2 < cols - 1 && tiles[cell + 2]) neighbors.push(cell + 2);
+    if (!neighbors.length) {
       stack.pop();
       continue;
     }
-
-    const choice = nexts[rng.intInclusive(0, nexts.length - 1)];
-    visited[choice.nx][choice.ny] = true;
-    gridType[choice.wx][choice.wy] = 0;
-    gridType[choice.nx][choice.ny] = 0;
-    stack.push([choice.nx, choice.ny]);
+    const next = neighbors[rng.intInclusive(0, neighbors.length - 1)];
+    tiles[(cell + next) / 2] = 0;
+    tiles[next] = 0;
+    stack.push(next);
   }
 
-  const extraOpeningsTarget = Math.floor(n * m * 0.03);
-  let extraOpenings = 0;
-  const createsOpen2x2 = (x: number, y: number): boolean => {
-    for (let ax = x - 1; ax <= x; ax += 1) {
-      for (let ay = y - 1; ay <= y; ay += 1) {
-        if (ax < 0 || ay < 0 || ax + 1 >= n || ay + 1 >= m) {
-          continue;
-        }
-        let allEmpty = true;
-        for (let dx = 0; dx <= 1; dx += 1) {
-          for (let dy = 0; dy <= 1; dy += 1) {
-            const cx = ax + dx;
-            const cy = ay + dy;
-            const isOpeningCell = cx === x && cy === y;
-            const isEmpty = isOpeningCell ? true : gridType[cx][cy] === 0;
-            if (!isEmpty) {
-              allEmpty = false;
-              break;
-            }
-          }
-          if (!allEmpty) {
-            break;
-          }
-        }
-        if (allEmpty) {
-          return true;
-        }
+  const walls: number[] = [];
+  for (let row = 1; row < rows - 1; row += 1) {
+    for (let col = 1; col < cols - 1; col += 1) {
+      const cell = row * cols + col;
+      if (tiles[cell] && row % 2 !== col % 2) walls.push(cell);
+    }
+  }
+  shuffle(walls, rng);
+  const openings = Math.floor(tiles.length * (0.009 + rng.next() * 0.013));
+  for (let index = 0; index < Math.min(walls.length, openings); index += 1) tiles[walls[index]] = 0;
+
+  let passable = tiles.length - tiles.reduce((sum, tile) => sum + tile, 0);
+  for (const cell of walls) {
+    if (passable >= players) break;
+    if (tiles[cell] === 1) {
+      tiles[cell] = 0;
+      passable += 1;
+    }
+  }
+  return tiles;
+};
+
+const generateMazeMap = (
+  rng: SeededRandom,
+  config: MapGenerationConfig & { requiredPlayers: number },
+): GeneratedMap & { generals: GeneralPos[] } => {
+  const { n, m } = computeBaseMapDimensions(rng, config.heightRatio, config.widthRatio);
+  const requested = Math.max(0, config.requiredPlayers);
+  const swampBudget = Math.max(0, Math.floor(n * m * MAX_SWAMP_RATIO * config.swampRatio));
+  let best:
+    | {
+        tiles: Uint8Array;
+        spawns: number[];
+        internalSpawns: number;
+        score: ReturnType<typeof scoreMazeLayout>;
       }
-    }
-    return false;
-  };
+    | undefined;
 
-  for (
-    let attempt = 0;
-    attempt < extraOpeningsTarget * 10 && extraOpenings < extraOpeningsTarget;
-    attempt += 1
-  ) {
-    if (n <= 2 || m <= 2) {
-      break;
-    }
-    const x = rng.intInclusive(1, n - 2);
-    const y = rng.intInclusive(1, m - 2);
-    if (gridType[x][y] !== 1) {
-      continue;
-    }
-    const openLR = gridType[x][y - 1] !== 1 && gridType[x][y + 1] !== 1;
-    const openUD = gridType[x - 1][y] !== 1 && gridType[x + 1][y] !== 1;
-    if (!openLR && !openUD) {
-      continue;
-    }
-    if (createsOpen2x2(x, y)) {
-      continue;
-    }
-    gridType[x][y] = 0;
-    extraOpenings += 1;
-  }
-
-  const st = build2D(n, m, false);
-  markLargestComponent(gridType, n, m, st);
-
-  const passable: Array<[number, number]> = [];
-  for (let i = 0; i < n; i += 1) {
-    for (let j = 0; j < m; j += 1) {
-      if (st[i][j] && gridType[i][j] === 0) {
-        passable.push([i, j]);
-      }
+  for (let candidate = 0; candidate < TERRAIN_CANDIDATES; candidate += 1) {
+    const tiles = carveMaze(rng, n, m, requested);
+    const graph = new MazeGraph(tiles, m);
+    const players = Math.min(requested, graph.cells.length);
+    const distanceTarget = Math.round(
+      Math.sqrt((n * m) / Math.max(1, players)) * (2.8 + 1.25 / Math.max(1, players)),
+    );
+    const spawns = optimizeMazeLayout(graph, players, distanceTarget, rng);
+    placeMazeSwamps(graph, spawns, swampBudget, rng);
+    const internalSpawns = spawns.filter((cell) => graph.degree[cell] >= 2).length;
+    const score = scoreMazeLayout(graph, spawns, distanceTarget);
+    if (!best || (internalSpawns - best.internalSpawns || compareLayoutScores(score, best.score)) > 0) {
+      best = { tiles, spawns, internalSpawns, score };
     }
   }
 
-  shuffle(passable, rng);
-  // Roka: no pre-placed cities in the maze; cities only appear via player builds.
-  const swampCandidates = passable;
-  shuffle(swampCandidates, rng);
-  const swampTarget = Math.min(
-    swampCandidates.length,
-    Math.floor(n * m * MAX_SWAMP_RATIO * config.swampRatio),
+  if (!best) throw new Error('Maze terrain candidates exhausted');
+  const gridType = Array.from({ length: n }, (_, row) =>
+    Array.from(best.tiles.subarray(row * m, (row + 1) * m), (tile) => tile as Tile),
   );
-  for (let i = 0; i < swampTarget; i += 1) {
-    const [x, y] = swampCandidates[i];
-    gridType[x][y] = 2;
-  }
-
+  const generals: GeneralPos[] = best.spawns
+    .sort((left, right) => left - right)
+    .map((cell) => [Math.floor(cell / m), cell % m]);
   return {
     n,
     m,
-    owner,
-    armyCnt,
+    owner: build2D(n, m, 0),
+    armyCnt: build2D(n, m, 0),
     gridType,
-    st,
+    st: gridType.map((row) => row.map((tile) => tile !== 1)),
+    generals,
   };
 };
 
-export { generateMazeMap };
+const assignMazeSeats = (layout: GeneralPos[], mapSeed: string): GeneralPos[] => {
+  const seats = [...layout];
+  shuffle(seats, new SeededRandom(`${mapSeed}:maze-seats`));
+  return seats;
+};
+
+export { assignMazeSeats, generateMazeMap };
