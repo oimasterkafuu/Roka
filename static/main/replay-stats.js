@@ -38,7 +38,7 @@ function initReplayTitle() {
   var lb0 = replay_data && replay_data.initial && replay_data.initial.leaderboard;
   if (!is_replay || !lb0 || !lb0.length) return;
   var teamGame = fogTeamGame(lb0);
-  var fogView = Boolean(replay_data.meta && replay_data.meta.fog);
+  var fogView = replay_data.meta.fog_mode !== 'visible';
   // 终局名次取自末帧 leaderboard（最后一个 forward patch；无 patch 时用 initial），
   // 其 dead 字段为出局序号、team 为队伍归属，足以现算与 rating 清算一致的名次。
   var lastLb = lb0;

@@ -57,7 +57,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── types.ts            # 全项目共享类型与协议定义
 │   ├── *-store.ts          # 四个持久化存储（公告/用户/动态/回放）
 │   ├── binary-store.ts     # 存储底座：v8+brotli 编码、原子写+.bak 备份、合并写盘
-│   ├── replay-patch-binary.ts  # RPB4 观看二进制编码器
+│   ├── replay-patch-binary.ts  # RPB5 观看二进制编码器
 │   ├── text-render.ts      # Markdown+LaTeX → 消毒 HTML（公告/动态共用）
 │   ├── rating-color.ts     # Codeforces 风格段位配色
 │   └── runtime-env.ts      # .env 引导与密钥自动生成
@@ -129,9 +129,9 @@ _一句话：统一 presence：touch/在线窗口/落盘节流/重启恢复。_
 
 ### 对局引擎
 
-**src/game-engine.ts** — 对局核心：全状态 + Tick 主循环；默认无迷雾全图广播，迷雾对局按接收者视野过滤（见 fog-vision.ts）。
+**src/game-engine.ts** — 对局核心：全状态 + Tick 主循环；正常模式默认按队伍维护探索历史，迷雾对局按接收者视野过滤（见 fog-vision.ts）。
 
-`GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X 建指挥所、C 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连 ×2）→ AFK 判定 → 胜负判定 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量；`buildSnapshotFor` 按接收者出快照：迷雾对局中存活参赛者经 fog-vision 过滤并附 `fog` 数组，观战/出局者默认全视野+全 0 fog，`fogLast` 按玩家做 diff 基线；观战者经 `spectatorViewTeams`（sid→队伍）选了玩家视角时改收该队伍迷雾帧——`setSpectatorView` 校验非存活参赛者后记录偏好并立即补发全量帧同步 diff 基线；外部观战者按 `spectatorSnapshotLast` 独立维护差分基线，复用 tick 级 visionCache，不退回每 tick 全量；队伍全员淘汰后已选/新选该视角均安全回退全图，存活但尚未选主城的队伍仍保持自身迷雾视野）。v3 全局队列：每玩家一个全局大队列（`pmove: QueuedOp[]`，操作按到达顺序入队，入队分配单调递增 seq），不再有战线编号与队列路由。Tick 调度按房间开关 `multi_line`（`multiLine`）分派两种模式：单线串行（默认，`multi_line=false`）——每 Tick 每玩家只从大队列头部依次弹出指令，丢弃失效指令（chkMove/attack 失败、chkBuildCity/chkUpgradeCrown 不满足），直到成功执行第一条有效指令为止，本 Tick 不再执行后续；全局队列并行（`multi_line=true`，issue #107）——把队列里的移动指令看作有向边 (x,y)→(dx,dy)，所有入度为 0 的头部指令各执行一步（chkMove+attack，失效即丢弃），头部出队后下一格指令下一 Tick 自动成为新头部；拓扑剥离后仍成环的移动指令每 Tick 按入队序强制尝试 seq 最小的一条以打破死锁（失效则正常丢弃，issue #121）；建造指令（b/c）不参与入度图，当该格不再是任何待发移动指令的出发格时尝试执行，条件不满足即丢弃；空队列不耗 Tick，单链节奏与单线一致。两种模式的汇报协议同为 `lst_moves: number[]`（本 Tick 所有出队项的 seq，含执行与丢弃，客户端按 seq 摘除本地镜像队列）；`init_map` 开局附 `next_seq/queue_ops`，多线对局另附 `multi_line: true`（单线缺省即旧协议行为）；回放 ops-v1 协议不变，旧回放 `lst_move` 标量格式在回放重建路径兼容。Q/E（`retractLast`）撤回大队列尾部最后一条指令。对外接口：`addMove/addBuild/retractLast/clearQueue/popQueue/addSpectator/setSpectatorView/sendMessage/surrender/leaveGame`（server.ts 把 `pop_queue` 分派到 `retractLast` 撤回全局最后一条（E 键），`clear_queue` 不分模式一律分派到 `clearQueue` 清空操作队列（Q 键，issue #120））。友军推兵进入存活队友主城时累兵；当刻原拥有者主城数 ≥2 则 owner 自动转属出兵玩家，最后一座只累兵；原始回放一律按当前推兵规则重建，显式 `t` 转让不兼容。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、迁移观战视角偏好、补发 `init_map`（携带 `next_seq`/`queue_ops` 序号同步字段，客户端据此对齐本地 seq 计数，修复断线重连后 lst_moves 错位）+全量帧——迷雾对局按该玩家视野或其选择的观战视角过滤，并把 diff 基线对齐到补发快照）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。部署清算 `forceFinish(endMessage)`：停表后走正常终局路径（`sendMap(true)` 存档回放 + `finishGame` 结算，`buildGameResult` 以当前排行榜名次出结果），与正常终局共用 `finished` 幂等守卫防重复结算；`finishGame` 支持自定义结束消息（清算时不报「获胜」）。回放：终局 `saveHistory` 存 ops-v2 操作流；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（回放重建、地图示例均走此路，回放始终全视野不含 fog）。
+`GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X 建指挥所、C 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连 ×2）→ AFK 判定 → 胜负判定 → 计算并缓存队伍视野 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量；`buildSnapshotFor` 按接收者出快照：迷雾对局中存活参赛者经 fog-vision 过滤并附 `fog` 数组，观战/出局者默认全视野+全 0 fog，`fogLast` 按玩家做 diff 基线；观战者经 `spectatorViewTeams`（sid→队伍）选了玩家视角时改收该队伍迷雾帧——`setSpectatorView` 校验非存活参赛者后记录偏好并立即补发全量帧同步 diff 基线；外部观战者按 `spectatorSnapshotLast` 独立维护差分基线，复用 Tick 与队伍级过滤快照，不退回每 tick 全量；队伍全员淘汰后已选/新选该视角均安全回退全图，存活但尚未选主城的队伍仍保持自身迷雾视野）。v3 全局队列：每玩家一个全局大队列（`pmove: QueuedOp[]`，操作按到达顺序入队，入队分配单调递增 seq），不再有战线编号与队列路由。Tick 调度按房间开关 `multi_line`（`multiLine`）分派两种模式：单线串行（默认，`multi_line=false`）——每 Tick 每玩家只从大队列头部依次弹出指令，丢弃失效指令（chkMove/attack 失败、chkBuildCity/chkUpgradeCrown 不满足），直到成功执行第一条有效指令为止，本 Tick 不再执行后续；全局队列并行（`multi_line=true`，issue #107）——把队列里的移动指令看作有向边 (x,y)→(dx,dy)，所有入度为 0 的头部指令各执行一步（chkMove+attack，失效即丢弃），头部出队后下一格指令下一 Tick 自动成为新头部；拓扑剥离后仍成环的移动指令每 Tick 按入队序强制尝试 seq 最小的一条以打破死锁（失效则正常丢弃，issue #121）；建造指令（b/c）不参与入度图，当该格不再是任何待发移动指令的出发格时尝试执行，条件不满足即丢弃；空队列不耗 Tick，单链节奏与单线一致。两种模式的汇报协议同为 `lst_moves: number[]`（本 Tick 所有出队项的 seq，含执行与丢弃，客户端按 seq 摘除本地镜像队列）；`init_map` 开局附 `next_seq/queue_ops`，多线对局另附 `multi_line: true`（单线缺省即旧协议行为）；`ops-v3` 按 Tick 记录成功操作和队伍的首次探索增量。Q/E（`retractLast`）撤回大队列尾部最后一条指令。对外接口：`addMove/addBuild/retractLast/clearQueue/popQueue/addSpectator/setSpectatorView/sendMessage/surrender/leaveGame`（server.ts 把 `pop_queue` 分派到 `retractLast` 撤回全局最后一条（E 键），`clear_queue` 不分模式一律分派到 `clearQueue` 清空操作队列（Q 键，issue #120））。友军推兵进入存活队友主城时累兵；当刻原拥有者主城数 ≥2 则 owner 自动转属出兵玩家，最后一座只累兵；原始回放一律按当前推兵规则重建，显式 `t` 转让不兼容。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、迁移观战视角偏好、补发 `init_map`（携带 `next_seq`/`queue_ops` 序号同步字段，客户端据此对齐本地 seq 计数，修复断线重连后 lst_moves 错位）+全量帧——迷雾对局按该玩家视野或其选择的观战视角过滤，并把 diff 基线对齐到补发快照）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。部署清算 `forceFinish(endMessage)`：停表后走正常终局路径（`sendMap(true)` 存档回放 + `finishGame` 结算，`buildGameResult` 以当前排行榜名次出结果），与正常终局共用 `finished` 幂等守卫防重复结算；`finishGame` 支持自定义结束消息（清算时不报「获胜」）。回放：终局 `saveHistory` 存 ops-v3 操作流和首次探索增量；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（重建全知棋盘与队伍视野时间线，并与存档探索增量校验）。
 
 **src/game-engine/constants.ts** — 数值常量集中地。
 `LEFT_GAME=52`、`AFK_MIN_TURNS=60`/`AFK_MIN_MS=60_000`（挂机投降需同时满足）、`DISCONNECT_GRACE_MS=10_000`（掉线宽限，1 倍速=20 tick）、`ISOLATED_DECAY_RATIO=0.05`、`ISOLATED_GRACE_TICKS=10`、`FOG_VISION_RADIUS=1`（迷雾视野切比雪夫半径）。调平衡数值只改这里。
@@ -149,21 +149,20 @@ _一句话：每 tick 排行榜与终局名次计算。_
 `buildFullVisionArrays` 产出 `{grid_type, army_cnt, isolated}`；grid_type 编码：山 201、中立 200、沼泽 204/owner+150、指挥所 owner+50、主城 owner+100、普通格 owner；isolated：0 正常/1 宽限期/2 衰减期。前端渲染直接消费，**改动需前后端同步**。
 _一句话：棋盘状态 → 扁平协议数组编码。_
 
-**src/game-engine/fog-vision.ts** — 迷雾远征（issue #27，房间可开关，默认关；#52 显示语义）。
-`computeTeamVisibility` 算队伍可见格（己方格切比雪夫半径 FOG_VISION_RADIUS），`buildFoggedVisionArrays` 在全视野快照上过滤：视野外格子 grid_type 只留 204 沼泽 / 201 未知占位（前端渲染「山+问号」，不下发真实地形），兵力与孤军归零，附 `fog` 扁平数组（1=迷雾格）；视野内敌队指挥所/主城降级为普通领地（保留归属与兵力），中立城市（50）不受影响。观战者/出局者/回放默认不过滤；观战者可经 `spectate_view` 主动选择某队伍视角，由引擎复用 `buildTeamFoggedSnapshot` 按同一套过滤下发（纯显示层）。
+**src/game-engine/fog-vision.ts** — `computeTeamVisibility` 单次扫描棋盘计算所有队伍当前视野，连接正常的己方格扩展一圈，断联格仅看自身。`FogVision` 只为正常模式维护发现位集与首见增量，按 Tick 缓存已过滤的队伍快照。`fog=1` 只留下自然山脉/沼泽，`fog=2` 一律下发 `200/0/0`。重建时导出每队每格的可见性变化与全员淘汰 Tick。
 _一句话：队伍视野计算 + 视野外快照过滤。_
 
 **src/game-engine/replay-helpers.ts** — 帧差分与克隆工具。
-`getDiff` 生成 `[index, value]` 对（实时 diff 帧同用）；`buildReplayPatch` 生成 forward/backward 双向 patch；`toMoveDirection` 坐标→方向索引。
+`getDiff` 生成 `[index, value]` 对（实时 diff 帧同用）；`buildReplayPatch` 生成 forward/backward 双向 patch。
 _一句话：回放/实时帧 diff 与 patch 构建。_
 
-**src/game-engine/replay-turns.ts** — 每 tick 操作 → ops-v2 紧凑操作流（存储格式）。
+**src/game-engine/replay-turns.ts** — 每 tick 操作 → ops-v3 紧凑操作流（存储格式）。
 无操作累加 `w n`，投降记录为 `r`，成功的推兵、建造与升级按实际执行顺序记录为 `q.actions`。与 `replay-scheduling.ts` 互为逆变换，**改动需成对检查**。
-_一句话：每 tick 操作 → ops-v2 紧凑操作流。_
+_一句话：每 tick 操作 → ops-v3 紧凑操作流。_
 
-**src/game-engine/replay-scheduling.ts** — ops-v1 / ops-v2 操作流 → 按回合调度的动作表。
+**src/game-engine/replay-scheduling.ts** — ops-v3 操作流 → 按回合调度的动作表。
 校验坐标、操作和回合，将选中格指令或动作批次解码为 `scheduledBatches` 与 `scheduledSurrenders`。`buildReplayFromActions` 按当前规则逐 tick 重建，无法执行任何一条已记录操作即判为不兼容。
-_一句话：ops-v1 / ops-v2 操作流 → 按回合调度的动作表。_
+_一句话：ops-v3 操作流 → 按回合调度的动作表。_
 
 **src/game-engine/tick-growth.ts** — 兵力增长规则。
 主城每 tick +1；正常普通格与指挥所每 50 tick +1。仅单线的正常普通格在第 26–50 tick 每 tick 额外 +1（第 50 tick 合计 +2）；多线没有爆发加成。孤军、沼泽和中立格不产兵。`scripts/test-tick-growth.mjs` 覆盖两种模式下的增长边界，纳入 `pnpm test`。
@@ -231,11 +230,11 @@ _一句话：动态帖子/点赞/评论存储（含 @提及落库），带发帖
 _一句话：公告单文件 JSON 存储，原子串行写。_
 
 **src/replay-store.ts** — 回放存取、索引与观看二进制 gzip 缓存（`data/replays/`）。
-原始 ops-v1 操作流经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`（未压缩 v8 serialize，历史格式）启动时载入内存缓存，读路径不再重复读盘反序列化，写路径更新缓存后经 `CoalescingFileWriter` 合并落盘，主文件/备份均损坏时按空索引兜底并告警。索引项 `ReplayListItem` 含 `rank`（终局个人名次）与 `teams`（终局队伍分组 `{members, color}[]`，组序=队伍名次序，旧索引项无此字段前端回退平铺）。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且流式解压前 4 字节（`gunzipPrefix`，不整体解压大缓存）魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB4 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
+原始 ops-v3 操作流及首次探索增量经 v8+brotli 存 `<id>.rpl`（id = 内容 sha256 前 9 字节 base64）；索引 `index.bin`（未压缩 v8 serialize，历史格式）启动时载入内存缓存，读路径不再重复读盘反序列化，写路径更新缓存后经 `CoalescingFileWriter` 合并落盘，主文件/备份均损坏时按空索引兜底并告警。索引项 `ReplayListItem` 含 `rank`（终局个人名次）与 `teams`（终局队伍分组 `{members, color}[]`，组序=队伍名次序，旧索引项无此字段前端回退平铺）。`readReplayViewGzip`：观看路径——缓存 `<id>.rpb.gz` 命中且流式解压前 4 字节（`gunzipPrefix`，不整体解压大缓存）魔数等于当前 `REPLAY_BINARY_MAGIC` 即返回（`size` 取自 gzip 尾 ISIZE 供进度条），否则（未命中/损坏/编码升级后的旧缓存）重建整场 → RPB5 编码 → gzip 落盘缓存。`resolveReplayPath` 校验 id 防路径穿越；`deleteReplay` 同删 .rpl/.rpb.gz/索引。
 _一句话：回放存储与 RPB gzip 缓存，id 为内容哈希。_
 
-**src/replay-patch-binary.ts** — `ReplayData` → RPB4 观看二进制编码器（手写 LE；initial 全量帧 + 逐 patch forward/backward 差分 + 玩家 meta；RPB4 起 meta 末尾追加 fog 标志，供前端回放视角选择器）。`ByteWriter` 分块流式写入（1 MiB 块顺序填满后拼接，issue #83：旧的整体字节数组在超长回放编码时 OOM）。仅编码无解码——解码在前端 `static/main/replay-binary.js`；**改格式需同步前端并升魔数**，导出 `REPLAY_BINARY_MAGIC` 供缓存陈旧性校验。
-_一句话：ReplayData → RPB4 观看二进制编码器。_
+**src/replay-patch-binary.ts** — `ReplayData` → RPB5 观看二进制编码器（手写 LE；initial 全量帧 + 逐 patch forward/backward 差分 + 玩家 meta；meta 含三态 `fog_mode`，后接按队伍和格子索引的可见性变化 Tick（差值变长整数））。`ByteWriter` 分块流式写入（1 MiB 块顺序填满后拼接，issue #83：旧的整体字节数组在超长回放编码时 OOM）。仅编码无解码——解码在前端 `static/main/replay-binary.js`；**改格式需同步前端并升魔数**，导出 `REPLAY_BINARY_MAGIC` 供缓存陈旧性校验。
+_一句话：ReplayData → RPB5 观看二进制编码器。_
 
 **src/text-render.ts** — 服务端富文本渲染，公告与动态共用唯一入口 `renderRichText`。
 流程：KaTeX 预渲染 `$$..$$`/`$..$` → marked（GFM+breaks）→ 换回公式 HTML → sanitize-html 白名单（仅 http(s)/mailto scheme）过滤 XSS。新增允许的 KaTeX 标签/样式需同步改 `sanitizeOptions`。`renderRichTextWithMentions(text, resolve)` 在其后追加 @提及渲染（动态/评论用）。
@@ -251,7 +250,7 @@ _一句话：Codeforces 式 rating 段位颜色映射。_
 **src/runtime-env.ts** — 启动期 `.env` 自解析（不依赖 dotenv），`JWT_SECRET`/`WEBHOOK_SECRET` 缺失则自动生成并回写 `.env`。
 _一句话：.env 加载与密钥自动生成回写。_
 
-**src/types.ts** — 全项目共享类型与协议常量（纯类型）：`MAX_TEAMS=16`、`MoveMode`（0 智能分兵/1 半兵/2 全冲）、`ChatScope`、`ChatFoldPayload`（chat_message 可选折叠负载 `{name, verb}`：进出类系统消息由客户端连续合并显示，issue #113）、大厅/房间视图（`LobbyConfig`/`RoomUpdatePayload` 含 `fog` 迷雾开关、`multi_line` 全局队列开关、`map_size` 大地图开关、九地区 `map_region` 华夏字段与 `map_token_custom` 自定义种子标记）、`UpdatePayload`（grid_type/army_cnt/isolated/可选 fog/lst_moves（本 Tick 出队 seq 列表）/leaderboard/kills/is_diff）、回放类型（`ReplayPatch` forward/backward、`ReplayActionData` ops-v1 操作流，含主城转让 op `t x y`）、Feed 类型。公开请求拒绝非法地区值，缺省为 `china`；内部历史回放在 normalize 层保留旧地区转换。**改协议字段基本都要动这里。**
+**src/types.ts** — 全项目共享类型与协议常量（纯类型）：`MAX_TEAMS=16`、`MoveMode`（0 智能分兵/1 半兵/2 全冲）、`ChatScope`、`ChatFoldPayload`（chat_message 可选折叠负载 `{name, verb}`：进出类系统消息由客户端连续合并显示，issue #113）、大厅/房间视图（`LobbyConfig`/`RoomUpdatePayload` 含 `fog_mode` 三态模式、`multi_line` 全局队列开关、`map_size` 大地图开关、九地区 `map_region` 华夏字段与 `map_token_custom` 自定义种子标记）、`UpdatePayload`（grid_type/army_cnt/isolated/可选 fog/lst_moves（本 Tick 出队 seq 列表）/leaderboard/kills/is_diff）、回放类型（`ReplayPatch` forward/backward、`ReplayActionData` ops-v3 操作流及首次探索增量，含主城转让 op `t x y`）、Feed 类型。公开请求拒绝非法地区值，缺省为 `china`；内部历史回放在 normalize 层保留旧地区转换。**改协议字段基本都要动这里。**
 _一句话：共享类型/协议定义汇总。_
 
 **dist/** — `pnpm run build`（tsc）产物，目录结构与 `src/` 一一对应，是运行时实际加载的代码；勿手改，行为与源码不符时先确认是否重新 build。
@@ -294,20 +293,20 @@ _一句话：回放标题区 + 局势统计曲线图（平滑、游标、点击�
 回放模式：`/replays/local` 读 sessionStorage 且不缓存；服务端回放先查 replay-cache IndexedDB，命中并解码成功即显示完成进度；失效/损坏则 `fetchReplayWithProgress` 流式下载（`X-Replay-Size` 头更新 `#replay-loading-bar/-text` 进度），解码成功后异步写缓存，写失败不影响观看；加载提示在 document.ready 里显示（main.js 在 head 同步执行，顶层访问不到 DOM），最后 `replayStart`。对局模式：`connect` 隐藏断线横幅并重发 `join_game_room`（支撑 10 秒宽限恢复）；房间心跳（每 30s 一次 `room_heartbeat`，防止准备阶段被服务器因 600 秒无心跳踢出）不随 `connect` 启动，改为收到 `room_update`（仅发给房内 socket，即成员身份确认信号）后启动并立即上报一次，`disconnect`/`room_kick` 时停止——未进房的挂着标签页不再发心跳（服务端对房外心跳也不计 presence）；收到 `room_kick` 跳转首页；`disconnect` 区分顶号（跳首页）与断网（显示横幅）；`room_update` 对比成员 uid 快照检测新玩家进房、`starting` 表示开局，两者在页面后台时经 `notify.js` 弹浏览器通知，同时维护 `roomMemberTeams`（uid→队伍）供聊天色块门闸用——房间成员名（`#teams`）统一走 `username.js` 组件（ready 下划线改内联 style，避免 rt-* 的 text-decoration:none 盖掉）；`chat_message` 渲染按三门闸决定用户名色块——跨房转发（带 `room`）不给色、对局中仅排行榜内未淘汰者给分配颜色（`gameLeaderboard`）、准备阶段仅参赛席（team>0）给座位颜色，观战/房外只显用户名；色块是局内配色（.cN），用户名本身经 username.js 组件渲染（rating 颜色 + 点击跳主页）；连续进出类系统消息折叠（issue #113）：带 `fold` 负载且上一条仍是折叠元素时就地合并更新文案（同类谓语续列人名、同名去重仅保留首次出现（issue #124）、超 3 人截「等 N 人」、谓语混杂降级「进出了房间。」），中间插入任何其他消息即断链，纯函数在 core-globals.js；操作入队 `addroute/addbuild/...` 后 emit（`lost`/`game_ended`/不在对局时直接丢弃不入队不发送，防止本地自增 seq 与服务端错位）；`keypress` 分发 WASD/Z/X/C/Q/E/T/Enter/Esc/空格（X 建指挥所、C 升级主城；Q 清空队列、E 撤销队尾，不分模式，issue #120）。主城转让（issue #81）：`click` 点到队友存活玩家的主城（grid_type 100~149 且排行榜同队）弹 `#crown-transfer-alert` 确认后发 `transfer_crown {x,y}`；收到 `crown_transfer_request` 弹 `#crown-transfer-request-alert`，按钮回 `transfer_crown_reply {accept}`；两个弹窗随 `starting`/`init_map`/`left` 关闭。部署更新排队：`deploy_queued` 事件与 `room_update.update_queued` 驱动——对局中显示 `#deploy-banner`（「系统即将更新」），准备阶段禁用 `#force-start` 并显示「系统即将排队更新，请稍等」（点击与服务端 `change_ready` 双重拦截）。
 _一句话：对局/回放主控：socket、输入、队列、回放加载。_
 
-**static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB1/2/3/4、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`、兵力数字缩字档 `armyCountShrinkClass`（位数 → `army-num-d5~d8` 类名，≤4 位返回空串，issue #116）、`replay_view_team`（回放视角：0 全知 / 队伍编号）、`spectate_view_team`/`fog_mode`/`self_team`（实时观战视角状态：所选队伍、是否迷雾局、自己房间队伍）、`roomMemberTeams`（房间准备阶段 uid→队伍表，room_update 维护，聊天色块门闸用）、`gameLeaderboard`/`lb`（当前对局排行榜，render-update.js 每帧更新，聊天色块门闸用）、`lb_lock_digits`/`LB_LOCK_DIGITS_MAX`（排行榜兵力/领土列宽位数锁定状态，封顶 6 位只增不减，issue #93）、`findGameLeaderboardEntry`（按座位号查榜）以及迷雾局观战/回放共享名称显示助手（`fogTeamGame` 组队局判定——任一队伍 ≥2 人；`fogTeamName`/`fogDisplayName` 组队显队名「队伍 N」、非组队显用户名；`fogObserverView` 判定当前是否迷雾局观战/回放视角）——**遮罩只作用于实时观战**：render-update.js 对回放强制关闭（回放为全知复盘，排行榜一律显示真实用户名，组队合并结构保留）；回放标题区/视角 tabs 仍按 fog 规则显队名。、终局名次助手（`replayFinalRankCompare`/`replayFinalRankGroups`——与服务端 `compareFinalRank` 逐字一致的排序口径，末帧 leaderboard 现算队伍名次分组，回放标题区用）。
+**static/main/core-globals.js** — 跨文件共享常量（须最先加载）：`htmlescape`、方向表、回放魔数 RPB5、`replay_class_from_code`、共享 TextDecoder、`normalizeMapTokenInput`、兵力数字缩字档 `armyCountShrinkClass`（位数 → `army-num-d5~d8` 类名，≤4 位返回空串，issue #116）、`replay_view_team`（回放视角：0 全知 / 队伍编号）、`spectate_view_team`/`fog_mode`/`self_team`（实时观战视角状态：所选队伍、是否迷雾局、自己房间队伍）、`roomMemberTeams`（房间准备阶段 uid→队伍表，room_update 维护，聊天色块门闸用）、`gameLeaderboard`/`lb`（当前对局排行榜，render-update.js 每帧更新，聊天色块门闸用）、`lb_lock_digits`/`LB_LOCK_DIGITS_MAX`（排行榜兵力/领土列宽位数锁定状态，封顶 6 位只增不减，issue #93）、`findGameLeaderboardEntry`（按座位号查榜）以及迷雾局观战/回放共享名称显示助手（`fogTeamGame` 组队局判定——任一队伍 ≥2 人；`fogTeamName`/`fogDisplayName` 组队显队名「队伍 N」、非组队显用户名；`fogObserverView` 判定当前是否迷雾局观战/回放视角）——**遮罩只作用于实时观战**：render-update.js 对回放强制关闭（回放为全知复盘，排行榜一律显示真实用户名，组队合并结构保留）；回放标题区/视角 tabs 仍按 fog 规则显队名。、终局名次助手（`replayFinalRankCompare`/`replayFinalRankGroups`——与服务端 `compareFinalRank` 逐字一致的排序口径，末帧 leaderboard 现算队伍名次分组，回放标题区用）。
 
 _一句话：共享常量：方向表、回放魔数、转义工具、进出消息折叠纯函数。_
 
-**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头（全局队列局逐条队列绘制，着色与普通对局完全一致，不区分队列）、建造角标；迷雾格渲染「山+问号」未知占位、沼泽例外、隐藏兵力，回放队伍视角额外把视野内敌方指挥所/主城降级为普通领地；兵力数字超过 4 位时经 `armyCountShrinkClass` 套 em 缩字类只缩不放大，issue #116），仅变化时写 DOM（格子元素与内容走 main.js `init_map` 构建的 `cell_elems`/`cell_html` 缓存表，随 n/m 重建，免每帧 id 选择器查找与 innerHTML 序列化读取，issue #87）；`update(data, options)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），`options.silent` 为静默路径——只应用局面补丁即返回，跳过迷雾重算/渲染/榜单/统计图等（回放跳转中间帧用，见 replay-controls.js `jumpToFrame`），按 `lst_moves` 序号数组同步本地队列，渲染排行榜/回合计数/爆发期红边（每帧把排序后的榜单写入全局 `lb`/`gameLeaderboard` 供聊天色块门闸查榜），处理 `kills[client_id]` 与 `game_end` 结算弹窗。排行榜名字列统一走 `username.js` 组件（`usernameLinkHtml`，td 保留 `.cN` 作局内配色色块背景，名字链接为 rating 颜色 + 点击跳主页，每帧 `usernameEnsureColors` 批量补色带缓存去重）；「你被 X 击败了」弹窗的击败者名同走组件。兵力/领土列宽锁定（issue #93）：`lb_lock_digits` 记录本局显示过的最大位数（封顶 6、只增不减），经 CSS 变量 `--lb-army-w`/`--lb-land-w` 给 `td.lb-army`/`td.lb-land` 下发 ch 单位 min-width（含 0.5ch 非等宽字体余量），`resetLeaderboardColumnLock` 在 init_map 时重置；回放由 replay-stats.js 预处理一次锁定到全程最大值。回放模式每帧经 `applyReplayFogView` 按 `replay_view_team` 重算迷雾遮罩（回放不含历史视野，按当前帧局面以对局相同的半径 1 规则重算）；实时模式由 update 帧是否携带 `fog` 字段置 `fog_mode`，并每帧 `refreshSpectateViewTabs(data.leaderboard)` 维护观战视角 tabs。迷雾局观战（回放不适用）的排行榜名称列按 core-globals 共享规则显示（组队局显「队伍 N」、非组队局显用户名，参赛存活玩家视角不受影响）；回放一律显示真实用户名。组队局回放的排行榜按团队合并：每队一个整体条目显示团队总兵力/领土并按总兵力排序，队内成员按兵力排序缩进附后（成员行显示真实用户名）。每帧末尾调用 `refreshReplayStatsFrame()`（replay-stats.js）刷新统计图游标。
+**static/main/render-update.js** — 帧渲染器：`render()` 全量重算格子 class/内容（归属着色、selected/attackable/isolated、迷雾格 `fog` 遮罩、队列箭头（全局队列局逐条队列绘制，着色与普通对局完全一致，不区分队列）、建造角标；深灰格无地形和内容，浅灰格仅显示自然地形；兵力数字超过 4 位时经 `armyCountShrinkClass` 套 em 缩字类只缩不放大，issue #116），仅变化时写 DOM（格子元素与内容走 main.js `init_map` 构建的 `cell_elems`/`cell_html` 缓存表，随 n/m 重建，免每帧 id 选择器查找与 innerHTML 序列化读取，issue #87）；`update(data, options)` 消费 `is_diff` 差分或全量帧（含可选 fog 数组合并），`options.silent` 为静默路径——只应用局面补丁即返回，跳过视野查询/渲染/榜单/统计图等（回放跳转中间帧用，见 replay-controls.js `jumpToFrame`），按 `lst_moves` 序号数组同步本地队列，渲染排行榜/回合计数/爆发期红边（每帧把排序后的榜单写入全局 `lb`/`gameLeaderboard` 供聊天色块门闸查榜），处理 `kills[client_id]` 与 `game_end` 结算弹窗。排行榜名字列统一走 `username.js` 组件（`usernameLinkHtml`，td 保留 `.cN` 作局内配色色块背景，名字链接为 rating 颜色 + 点击跳主页，每帧 `usernameEnsureColors` 批量补色带缓存去重）；「你被 X 击败了」弹窗的击败者名同走组件。兵力/领土列宽锁定（issue #93）：`lb_lock_digits` 记录本局显示过的最大位数（封顶 6、只增不减），经 CSS 变量 `--lb-army-w`/`--lb-land-w` 给 `td.lb-army`/`td.lb-land` 下发 ch 单位 min-width（含 0.5ch 非等宽字体余量），`resetLeaderboardColumnLock` 在 init_map 时重置；回放由 replay-stats.js 预处理一次锁定到全程最大值。回放模式每帧经 `applyReplayFogView` 按 `replay_view_team` 和当前 Tick 二分查询服务端时间线；实时模式由 update 帧是否携带 `fog` 字段置 `fog_mode`，并每帧 `refreshSpectateViewTabs(data.leaderboard)` 维护观战视角 tabs。迷雾局观战（回放不适用）的排行榜名称列按 core-globals 共享规则显示（组队局显「队伍 N」、非组队局显用户名，参赛存活玩家视角不受影响）；回放一律显示真实用户名。组队局回放的排行榜按团队合并：每队一个整体条目显示团队总兵力/领土并按总兵力排序，队内成员按兵力排序缩进附后（成员行显示真实用户名）。每帧末尾调用 `refreshReplayStatsFrame()`（replay-stats.js）刷新统计图游标。
 _一句话：帧渲染器：update 帧合并 + 地图/榜单更新。_
 
-**static/main/replay-binary.js** — RPB1/2/3/4 回放二进制解码器，产出 `{n,m,initial,patches[],meta}`（RPB4 起 meta 含 fog 标志）；帧结构与 socket `update` 同构，直接喂 render-update.js。**格式变更须与 `src/replay-patch-binary.ts` 同步。**
-_一句话：RPB1/2/3/4 回放二进制解码为 update 帧。_
+**static/main/replay-binary.js** — RPB5 回放二进制解码器，产出 `{n,m,initial,patches[],meta,vision}`，提供 `replayFogAt` 随机读取服务端视野记录；帧结构与 socket `update` 同构，直接喂 render-update.js。**格式变更须与 `src/replay-patch-binary.ts` 同步。**
+_一句话：RPB5 回放二进制解码为 update 帧。_
 
 **static/main/replay-cache.js** — 浏览器 IndexedDB 回放缓存：原始哈希 ID 为键，存解压后 ArrayBuffer、缓存版本、下载/最近查看时间、字节长度以及响应的 ETag/Last-Modified（缺失时以首次下载时间+长度兜底）；命中校验当前 `replay_binary_magic` 与版本，不向服务器重新验证不可变 ID。写前同事务按最近查看时间淘汰至 1 GiB / 200 条；禁用、损坏或配额不足时回退网络。
 _一句话：回放观看二进制的本地 LRU 缓存。_
 
-**static/main/replay-controls.js** — 回放步进/跳转/自动播放（`backTurn/nextTurn/jumpToTurn/jumpToFrame/switchAutoplay`；`jumpToFrame` 按帧下标跳转，供统计图游标点击/拖动使用——前进/后退中间帧均以静默模式应用补丁（`nextTurn(true, silent)`/`backTurn(silent)` → `update(patch, {silent:true})`），仅落点帧走完整 update()，超长回放跳转不再逐帧全量渲染，issue #87）、迷雾对局回放的视角选择器（`initReplayViewTabs` 按 meta.fog 与参赛队伍动态生成「全知 + 各视角」tabs——组队局每队一个「队伍 N」、非组队局各玩家用户名，标签经 `replay_view_teams` 映射队伍编号，与观战视角同一套共享规则；`setReplayViewTeam` 切换即时重绘）与投降弹窗显隐。
+**static/main/replay-controls.js** — 回放步进/跳转/自动播放（`backTurn/nextTurn/jumpToTurn/jumpToFrame/switchAutoplay`；`jumpToFrame` 按帧下标跳转，供统计图游标点击/拖动使用——前进/后退中间帧均以静默模式应用补丁（`nextTurn(true, silent)`/`backTurn(silent)` → `update(patch, {silent:true})`），仅落点帧走完整 update()，超长回放跳转不再逐帧全量渲染，issue #87）、迷雾对局回放的视角选择器（`initReplayViewTabs` 按 `meta.fog_mode` 与参赛队伍动态生成「全知 + 各视角」tabs——组队局每队一个「队伍 N」、非组队局各玩家用户名，标签经 `replay_view_teams` 映射队伍编号，与观战视角同一套共享规则；`setReplayViewTeam` 切换即时重绘）与投降弹窗显隐。
 _一句话：回放步进/跳转/自动播放、视角选择与投降弹窗。_
 
 **static/main/room-controls.js** — 房间大厅 UI：链接复制、设置 tabs 三件套（`getTabVal/setTabVal/initTab`）、地图类型/组队/迷雾/全局队列等开关编解码（`getMapModeCode/setFogModeByCode`/`getMultiLineModeCode/setMultiLineModeByCode` 等）、队伍切换（`change_team`）、房主配置 emit `change_game_conf`（种子失焦上传）、聊天队伍前缀、观战视角选择（`refreshSpectateViewTabs` 按排行榜动态生成「全图 + 各存活视角」tabs——组队局每队一个「队伍 N」、非组队局各玩家用户名，与回放视角同一套共享规则；dead 成员不提供视角，当前选中队伍无存活成员时自动回全图；`onSpectateViewTab` emit `spectate_view` 切换，仅迷雾对局观战者可见，玩家集合不变不重建以保留选中态）。
@@ -426,7 +425,8 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 - **scripts/test-deploy-update.mjs** — `pnpm run test:deploy-update`：部署更新 UX 回归——`ROKA_DEPLOY_GRACE_MS=4000` + `ROKA_DEPLOY_DRY_RUN=1` 起临时服务：对局中触发 webhook 进入排队（queued:true + `deploy_queued` 广播 + `room_update.update_queued` + 宽限提示）、排队期就绪被拒不开局、宽限到期按当前名次清算（game_end 帧 + 回放 id + rating 生效）、dry-run 结束后解除排队可重新开局。
 
-- **scripts/test-fog.mjs** — `pnpm run test:fog`：迷雾远征冒烟——房主 `change_game_conf {fog:true}` 开局后，校验客户端合并局面满足迷雾不变量（帧带 `fog` 数组、迷雾格只泄地形且兵力归零、己方主城可见、视野内无敌方主城），对照默认房间不带 `fog` 字段；观战视角以 node vm + 最小 DOM/jQuery 桩执行真实 `update()/render()`，覆盖初始全图→队伍 1→队伍 2→全图及每段后续差分，并验证 dead 成员 tabs 排除、当前视角失效回退；可控引擎场景覆盖已选/新选淘汰队伍均回全图且后续仍差分、存活但无领土队伍不泄露全图（issue #125）；另覆盖 issue #51：bot 进房后迷雾被强制关闭、房主再次开启请求被拒绝、纯人类房间不受影响。
+- **scripts/test-fog.mjs** 与 **scripts/test-fog-exploration.mjs**：`pnpm run test:fog` 覆盖三态真实 Socket 房间、Bot 权限、全量/diff/观战、断联与探索、地图生成器、逐 Tick 回放以及 Chromium 1440/390。
+- **scripts/benchmark-fog-exploration.mjs**：`node --expose-gc scripts/benchmark-fog-exploration.mjs` 测 8 队大型地图 2000 Tick 的运行、回放体积和 Chromium 跳转。
 
 - **scripts/test-multiline.mjs** — `pnpm run test:multiline`：单线串行（`multi_line: false`）引擎级套件（直驱 dist/game-engine.js）——同 Tick 两个不同出发点各发一条指令时每 Tick 只执行一条、第二条原地等待下 Tick；单链逐 Tick 推进节奏；失效队首被丢弃且 seq 进 `lst_moves`（丢弃 + 执行同帧汇报）；执行首条有效指令后本 Tick 不再处理后续（后续失效指令也不当场丢弃）；建造 b/c 同样每 Tick 一条；E 撤回摘除大队列队尾、Q 清空整个大队列（issue #120）；单线 `init_map` 保持旧协议（无 `multi_line` 标记，`next_seq/queue_ops` 保留）。需先 `pnpm run build`。
 - **scripts/test-multiline-v2.mjs** — `pnpm run test:multiline-v2`：v3 全局队列（`multi_line: true`）并行套件（直驱 dist/game-engine.js）——单链逐 Tick 节奏与单线一致、两条独立链同 Tick 真并行且 seq 同帧汇报、同格 b+c 按序执行、失效移动被丢弃且 seq 进 `lst_moves`、`init_map` 下发 `next_seq/queue_ops`、Q 清空整个大队列且 E 撤回全局最后一条（统一语义，issue #120）；成环死锁回归（issue #121：二环/三环逐 Tick 拆解排空、失效成环节点丢弃后恢复）。需先 `pnpm run build`。
@@ -442,10 +442,10 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **scripts/test-crown-transfer.mjs** — `pnpm run test:crown-transfer`：自动主城转属单元冒烟——直接驱动 dist `GameEngine`（运行时访问 private 字段布置棋盘），覆盖同队多主城自动转属、最后一座仅累兵、来源保留、cnt=0、三种推兵模式、普通地/指挥所/敌方主城回归；需先 `pnpm run build`。
 - **scripts/test-admin-badge.mjs** — `pnpm run test:admin-badge`：管理员与封禁用户名外观（issue #95/#97）回归——第一部分用 node vm + 最小 jQuery/fetch 桩驱动 `static/username.js`（管理员 rt-admin + Headquarters tooltip、无徽标、普通用户不变、撤权恢复 rating）；第二部分临时数据目录起 dist 服务，断言 /api/user-colors、/api/users/search、/api/profile、/api/leaderboard、/api/online、/api/feeds 帖子与评论、/api/admin/users 的管理员与普通用户外观；需先 `pnpm run build`。
 - **scripts/test-asset-versioning.mjs** — `pnpm run test:asset-versioning`（纳入 `pnpm test`）：静态资源版本号注入回归——临时数据目录起 dist 服务，断言首页与对局页（/games/:id，造用户登录）响应中全部本地 .js/.css 引用携带 `?v=<package.json version>`、/main.css 响应的 @import 行携带同一版本号、带 ?v= 的静态资源请求返回 200 且内容正确（模板文件占位符已替换、@fastify/static 直发文件忽略未知 query）、模板路由 ETag/If-None-Match 304 缓存语义保持；需先 `pnpm run build`。
-- **scripts/analyze-replay-compression.mjs** — 回放存储压缩评估（issue #67）：扫描 `data/replays/*.rpl` 统计操作流特征（op 类型分布、选中切换占比）并对比候选编码体积（现状 v8+brotli q6 / q11 / 文本 DSL / 二进制打包）；`--limit=N` 限定扫描数量。
+- **scripts/analyze-replay-compression.mjs** — `ops-v3` 原始回放压缩评估：统计批次、成功动作、首次探索数及 v8/Brotli 大小；`--limit=N` 限定扫描数量，`ROKA_DATA_DIR` 可指定数据目录。
 - **scripts/observe-bot-match.mjs** — `pnpm run observe:bot`：对局观测/病理分析——临时数据目录起 dist 服务 + 进程内观战 recorder 逐 turn 录完整盘面（`frames.jsonl`），按 `OBS_BOTS` 启动 bot 组合（`strategy:`/`random:`/`legacy:` 前缀，`legacy` 从 git main 导出旧版做 A/B 基准），赛后生成 `report.txt`（往返抖动/送兵/前线停滞/切断无救援/主城沦陷时闲散兵力）；环境变量 `OBS_SPEED`/`OBS_MAP_TOKEN`/`OBS_MAP_MODE`/`OBS_OUT`/`OBS_MAX_MS`，输出默认 `data/observe-*/`（gitignored）。
 - **scripts/replay-bot-decisions.mjs** — bot 决策离线复盘：假 socket 驱动真实 `strategy.js` 逐 turn 重放观测目录的 `frames.jsonl`（队列执行按服务端 `chkMove`/`chkBuild` 语义模拟），完整复现跨 tick 决策状态；支持 `--validate`（与 bot 日志逐 op 比对）、`--from/--to`、`--board`、`--cell` 盘面解释；配 `BOT_TRACE=1/2` 输出进攻评估/焦点/候选榜。
-- **scripts/extract-replay-frames.mjs** — 回放转帧：从 `data/replays/<id>.rpl`（ops-v1 / ops-v2）经 `buildReplayFromActions` 校验、重建并展开逐 turn 全量帧，输出 `data/observe-<id>/frames.jsonl` + `meta.json`，供 replay-bot-decisions.mjs 与分析脚本使用。
+- **scripts/extract-replay-frames.mjs** — 回放转帧：从 `data/replays/<id>.rpl`（ops-v3）经 `buildReplayFromActions` 校验、重建并展开逐 turn 全量帧，输出 `data/observe-<id>/frames.jsonl` + `meta.json`，供 replay-bot-decisions.mjs 与分析脚本使用。
 - **scripts/analyze-game.mjs** — 对局病理分析：基于 observe 目录帧 + 回放 ops 流，汇总逐 turn 双方 land/army、bot 大兵堆位置与距敌距离、进攻时间线。
 - **scripts/show-board.mjs** — 复盘打印：输出 observe 目录指定 turn 的 ASCII 棋盘与每格兵力。
 - **bot-template/relay-bot/** — 小图策略模板：`index.js` 支持 `BOT_ONCE=1`；`strategy.js` 提供托管入口；`opening.js` 裁剪棋盘并缓存至 Tick 24 的开局；`planner.js` 组合迷宫、迷雾、单线收尾和多线搜索。`baseline/` 为冻结原版 Relay，也是影子与队列预测的模型；`training/` 运行真实引擎、分片验收、配对比较和调参；`baseline-results.jsonl` 与 `baseline-summary.json` 是 PR 原始记录。`pnpm run test:relay` 运行 `relay.test.cjs` 与 `strategy.test.cjs`。
@@ -466,7 +466,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 | 调平衡数值（AFK/掉线/孤军/增兵） | `src/game-engine/constants.ts`、`tick-growth.ts`                                                                                                                                                                                                         |
 | 改对局规则（战斗/连通/投降）     | `src/game-engine.ts`（+ 教程复刻 `static/tutorial.js`）                                                                                                                                                                                                  |
 | 改 socket 协议/格子编码          | `src/types.ts`、`src/game-engine/map-encoding.ts`、`src/server.ts`、`src/server/lobby-service.ts`；同步 `static/develop-bot.html`、`bot-template/`、`static/main/*`                                                                                      |
-| 改回放格式                       | `src/replay-patch-binary.ts`（编码，升魔数）+ `static/main/replay-binary.js`（解码）+ ops-v1 互逆对 `src/game-engine/replay-turns.ts` ↔ `replay-scheduling.ts`                                                                                           |
+| 改回放格式                       | `src/replay-patch-binary.ts`（编码，升魔数）+ `static/main/replay-binary.js`（解码）+ ops-v3 操作互逆对 `src/game-engine/replay-turns.ts` ↔ `replay-scheduling.ts`                                                                                       |
 | 加/改 REST API                   | `src/server.ts`（路由集中在此；注意限流与认证钩子）                                                                                                                                                                                                      |
 | 改房间/断线/重连逻辑             | `src/server/lobby-service.ts` + `src/game-engine.ts`（宽限三件套）                                                                                                                                                                                       |
 | 改公告/动态渲染                  | `src/text-render.ts`（同一管线；加 KaTeX 标签需同步白名单）                                                                                                                                                                                              |
@@ -522,7 +522,7 @@ Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/front
 
 ### 回放终局 AFK 事件（issue #143）
 
-- `ReplayActionData.afk_surrenders` 是 ops-v1 的可选 `[tick, zero-based player index][]` 事件表；缺省为空，旧 `r` 操作仍在 Tick 前执行。AFK 投降发生在移动/连通之后，单独记录在当前 Tick，避免下一 Tick 未执行时丢失终局事件；重建 `gameTick` 在相同阶段应用事件，不依赖重建时的墙上时间。RPB4 编码与客户端格式不变；新原始文件具有新内容哈希，不复用旧文件的观看缓存。旧文件未记录的 AFK 事件无法恢复。
+- `ReplayActionData.afk_surrenders` 是 ops-v3 的可选 `[tick, zero-based player index][]` 事件表；缺省为空，手动 `r` 操作在 Tick 前执行。AFK 投降发生在移动/连通之后，单独记录在当前 Tick，避免下一 Tick 未执行时丢失终局事件；重建 `gameTick` 在相同阶段应用事件，不依赖重建时的墙上时间。RPB5 编码与客户端格式不变；新原始文件具有新内容哈希，不复用旧文件的观看缓存。旧文件未记录的 AFK 事件无法恢复。
 - `scripts/test-replay-termination.mjs`：真实引擎 FFA/组队 AFK 终局、中途淘汰与手动投降，逐帧比对地图、兵力、孤军、排行榜与结束标记，并用真实 RPB 解码器验证终局；按当前迷宫生成无 AFK 事件的操作流，验证 Tick 600 未终局、随后仍可移动，且重建至 Tick 2151。
 
 Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局队列与
@@ -546,8 +546,8 @@ Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局�
 ### 多线争锋回放录制与重建
 
 - `src/game-engine.ts` 每 Tick 按实战执行顺序采集所有成功动作，失效出队只通过实时 `lst_moves` 确认；保持全局队列按入度并行与单线每玩家每 Tick 最多一个成功动作的规则。
-- `src/game-engine/replay-turns.ts` 写 `ops-v2`：`q.actions` 是一个 Tick 内成功移动/建造/升级的有序数组（坐标、mode，不写战线编号或实时 seq），空 Tick 用 `w` 压缩。`replay-scheduling.ts` 将其还原为 Tick 批次；重建按记录顺序结算成功动作，不再次拓扑调度已经摘除的队列。单线批次超过一个动作会拒绝。
-- `GameEngine.buildReplayFromActions`（当前回放重建入口）与 `ReplayStore.buildReplayFromRaw` 同时读取旧 `ops-v1` 选择/移动/建造/等待/投降流和新 `ops-v2`。RPB4 编码、浏览器差分消费与 seek 保持原格式；旧 RPB1/RPB2 仍可读（RPB1 无孤军字段）。历史文件中已漏录的并行动作无法推导恢复。
+- `src/game-engine/replay-turns.ts` 写 `ops-v3` 操作：`q.actions` 是一个 Tick 内成功移动/建造/升级的有序数组（坐标、mode，不写战线编号或实时 seq），空 Tick 用 `w` 压缩。`replay-scheduling.ts` 将其还原为 Tick 批次；重建按记录顺序结算成功动作，不再次拓扑调度已经摘除的队列。单线批次超过一个动作会拒绝。
+- `GameEngine.buildReplayFromActions` 与 `ReplayStore.buildReplayFromRaw` 只接受 `ops-v3`，使用同一套服务端规则校验首见记录。`RPB5` 的全量/双向补丁保留全知棋盘，并附队伍的按格可见性变化。旧回放格式不再解码，访问失败不删除原始存档。
 - `scripts/test-multiline-replay.mjs` / `scripts/fixtures/multiline-replay.json`：固定地图真实引擎对局、正常终局录制，250 帧逐 Tick 比对地图/兵力/孤军/排行榜与正反补丁；覆盖同 Tick 独立动作、链等待、移动后建造升级、失效确认、单线及旧格式。`pnpm run test:multiline-replay` 纳入 `pnpm test`；加 `--browser` 使用临时 Fastify 服务、真实用户鉴权与 `/api/replay-upload` 转码，再用 Playwright/Chromium 加载真实 `static/game.html` 与全部回放脚本，验收 seek/自动播放与旧标量帧。通过 `ROKA_PLAYWRIGHT_MODULE` / `CHROMIUM_PATH` 指定本地浏览器依赖，`ROKA_REPLAY_ARTIFACT_DIR` 可导出原始 `.rpl` 与观看 `.rpb`，`ROKA_REPLAY_SCREENSHOT` 可保存验收截图。无生产请求。
 
 ### 回放查询与缓存维护

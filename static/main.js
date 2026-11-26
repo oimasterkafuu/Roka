@@ -1,8 +1,6 @@
 //map format
 //n,m,turn
 //grid_type[n][m] byte 0~49=army 50~99=city 100~149=generals 150~199=swamp with army 200=empty 201=mountain 204=swamp
-//迷雾对局（fog=1 格）：201 山脉、204 沼泽保持可见，其余抹成空地（200）；
-//视野内地形、归属与兵力正常下发，包含敌方建筑。
 //army_cnt[n][m] int
 
 function bindMapGestures() {
@@ -953,7 +951,7 @@ socket.on('init_map', function (data) {
   game_ended = false;
   lost = false;
   player = 0;
-  fog_mode = false;
+  match_has_fog = false;
   spectate_view_uids = [];
   // 断线重连补发 init_map 的场景（无 starting 前置）：恢复此前选择的观战视角。
   if (spectate_view_team > 0) {
@@ -1097,7 +1095,7 @@ socket.on('room_update', function (data) {
   if (data.players.some((member) => member.sid === client_id)) startRoomHeartbeat();
   setTabVal('game-speed', data.speed + 'x');
   setAllowTeamModeByCode(Boolean(data.allow_team));
-  setFogModeByCode(Boolean(data.fog));
+  setFogModeByCode(data.fog_mode);
   setMultiLineModeByCode(Boolean(data.multi_line));
   setMapModeByCode(data.map_mode || 'random');
   setMapRegionByCode(data.map_region || 'china');
@@ -1343,7 +1341,7 @@ $(document).ready(function () {
   $('#tabs-fog-mode').each(function () {
     for (var i = 1; i < this.children.length; i++) {
       initTab(this, this.children[i], function () {
-        updateConfPatch({ fog: getFogModeCode() });
+        updateConfPatch({ fog_mode: getFogModeCode() });
       });
     }
   });

@@ -9,7 +9,9 @@ const { GameEngine } = require('../../../dist/game-engine');
 const { resolveMapSizeRatioByPlayers } = require('../../../dist/map/map-size');
 const { FIXED_SWAMP_RATIO } = require('../../../dist/server/lobby-service');
 const { loadHistorical } = require('../../apex-bot/training/historical.cjs');
-const { attachStrategy } = require(process.env.RELAY_ENTRY ? path.resolve(process.env.RELAY_ENTRY) : '../strategy');
+const { attachStrategy } = require(
+  process.env.RELAY_ENTRY ? path.resolve(process.env.RELAY_ENTRY) : '../strategy',
+);
 const SELF = process.env.SELF_ID || 'relay-current';
 // Leaderboard checkpoints the report records. The default list is the frozen
 // acceptance format; the round-17 tuning harness adds t150 so it can tie-break
@@ -31,7 +33,7 @@ async function play({ opponent, map, large, fog, multi, seed, seat, limit }) {
   const lineup = [SELF, ...opponent.split('+')];
   const names = lineup.map((_, i) => lineup[(i - seat + lineup.length) % lineup.length]);
   const ratio = resolveMapSizeRatioByPlayers(names.length) * (large ? 2 : 1);
-  const flags = { multi_line: multi, fog };
+  const flags = { multi_line: multi, fog_mode: fog ? 'normal' : 'visible' };
   const ids = names.map((_, i) => 'seat' + (i + 1));
   const sockets = ids.map(() => new EventEmitter());
   const handles = [],
@@ -156,7 +158,10 @@ async function main() {
   const opponents = (process.env.OPPONENTS || 'apex,anti,v2,relay').split(',');
   for (const opponent of opponents) {
     const others = opponent.split('+');
-    if (new Set(others).size !== others.length || others.some((id) => id === SELF || !Object.hasOwn(entries, id)))
+    if (
+      new Set(others).size !== others.length ||
+      others.some((id) => id === SELF || !Object.hasOwn(entries, id))
+    )
       throw new Error('Invalid lineup: ' + opponent);
   }
   const maps = (process.env.MAPS || 'random,maze,archipelago,mediterranean').split(',');

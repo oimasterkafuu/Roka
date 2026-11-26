@@ -11,10 +11,7 @@ const dire = [
 const dire_char = ['↑', '↓', '←', '→'];
 const dire_class = ['arrow_u', 'arrow_d', 'arrow_l', 'arrow_r'];
 const map_token_max_length = 32;
-const replay_binary_magic = [0x52, 0x50, 0x42, 0x34]; // RPB4（meta 追加 fog 标志，供回放视角选择）
-const replay_binary_magic_v3 = [0x52, 0x50, 0x42, 0x33]; // RPB3（旧格式，meta 无 fog 标志）
-const replay_binary_magic_v2 = [0x52, 0x50, 0x42, 0x32]; // RPB2（旧格式，含 surrender_progress 字段）
-const replay_binary_magic_v1 = [0x52, 0x50, 0x42, 0x31]; // RPB1（旧格式，无 isolated 字段）
+const replay_binary_magic = [0x52, 0x50, 0x42, 0x35];
 const replay_class_from_code = ['', 'dead', 'afk'];
 const replay_text_decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder() : null;
 
@@ -25,7 +22,7 @@ var replay_view_team = 0;
 // 服务端按该队伍可见性下发迷雾帧（语义对齐回放视角 replay_view_team）。
 var spectate_view_team = 0;
 // 当前对局是否为迷雾局：由 update 帧是否携带 fog 字段判定（无迷雾局不显示视角选择）。
-var fog_mode = false;
+var match_has_fog = false;
 // 自己在房间里的队伍（0 = 观战席），由 room_update 维护，用于判定观战视角资格。
 var self_team = 0;
 // 房间准备阶段成员队伍表（uid → team），由 room_update 维护；
@@ -131,10 +128,10 @@ function fogDisplayName(uid, team, teamGame) {
 function fogObserverView() {
   if (typeof is_replay != 'undefined' && is_replay) {
     return Boolean(
-      typeof replay_data != 'undefined' && replay_data && replay_data.meta && replay_data.meta.fog,
+      typeof replay_data != 'undefined' && replay_data && replay_data.meta.fog_mode !== 'visible',
     );
   }
-  return fog_mode && player == 0;
+  return match_has_fog && player == 0;
 }
 
 // 连续进出类系统消息折叠（issue #113）：纯函数，供 main.js 聊天渲染与 node 自测共用。

@@ -16,6 +16,8 @@ import { DEFAULT_MAP_REGION, getHuaxiaRegion, normalizeMapRegion } from '../map/
 import { ReplayStore } from '../replay-store';
 import {
   ChatScope,
+  botForbidsFog,
+  FogMode,
   GameConfig,
   GameResultEntry,
   LobbyConfig,
@@ -27,7 +29,7 @@ import {
 } from '../types';
 
 type EditableLobbyKey =
-  'speed' | 'allow_team' | 'fog' | 'multi_line' | 'map_mode' | 'map_region' | 'map_token' | 'map_size';
+  'speed' | 'allow_team' | 'fog_mode' | 'multi_line' | 'map_mode' | 'map_region' | 'map_token' | 'map_size';
 
 const FIXED_WIDTH_RATIO = 0.5;
 const FIXED_HEIGHT_RATIO = 0.5;
@@ -57,7 +59,7 @@ const BOT_DWELL_DAILY_LIMIT_MS = 4 * 3600_000;
 const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
   allow_team: '允许组队',
-  fog: '迷雾远征',
+  fog_mode: '迷雾模式',
   multi_line: '多线争锋',
   map_mode: '地图类型',
   map_region: '华夏地区',
@@ -355,11 +357,9 @@ class LobbyService {
 
     const player: LobbyPlayer = { sid, uid, team: targetTeam, ready: false };
     if (isBot) {
-      // 第三方 Bot 与未允许迷雾的托管 Bot 不支持迷雾远征：进房时若迷雾已开启
-      // 则强制关闭，房主后续重新开启的请求在 server.ts 的 change_game_conf 里拦截。
       player.bot = true;
-      if (conf.fog && (options?.serverBot !== true || options.serverBotAllowFog !== true)) {
-        conf.fog = false;
+      if (options?.serverBot !== true || options.serverBotAllowFog !== true) {
+        conf.fog_mode = 'visible';
       }
       // 多线争锋同理：第三方 Bot 与未允许多线的托管 Bot 进房时强制关闭多线争锋。
       if (conf.multi_line && (options?.serverBot !== true || options.serverBotAllowMultiLine !== true)) {
@@ -436,9 +436,13 @@ class LobbyService {
       this.enforceLobbyConstraints(gid);
       disabled.push('组队模式');
     }
-    if (!config.allowFog && conf.fog) {
-      conf.fog = false;
-      disabled.push('迷雾远征');
+    if (!config.allowFog && conf.fog_mode !== 'visible') {
+      conf.fog_mode = 'visible';
+      this.sendLobbySystemMessage(
+        io,
+        this.getLobbyVal(gid),
+        '官方策略 Bot 设置已更新，迷雾模式已设为全部可视。',
+      );
     }
     if (!config.allowMultiLine && conf.multi_line) {
       conf.multi_line = false;
@@ -698,7 +702,7 @@ class LobbyService {
     return {
       speed: conf.speed,
       allow_team: conf.allow_team,
-      fog: conf.fog === true,
+      fog_mode: conf.fog_mode,
       multi_line: conf.multi_line === true,
       map_token: conf.map_token,
       map_token_custom: conf.map_token_custom === true,
@@ -826,8 +830,8 @@ class LobbyService {
     if (key === 'allow_team') {
       return value ? '允许' : '不允许';
     }
-    if (key === 'fog') {
-      return value ? '开启' : '关闭';
+    if (key === 'fog_mode') {
+      return { normal: '正常', explored: '已探索', visible: '全部可视' }[value as FogMode];
     }
     if (key === 'multi_line') {
       return value ? '开启' : '关闭';
@@ -1327,8 +1331,10 @@ class LobbyService {
     if (players.some((player) => player.bot !== true)) {
       return;
     }
-    this.lobbyConfig.set(lobbyId, this.defaultLobbyConfig());
-    this.sendLobbySystemMessage(io, this.getLobbyVal(lobbyId), '房间内只剩机器人，房间设置已重置为默认值。');
+    const conf = this.defaultLobbyConfig();
+    if (players.some(botForbidsFog)) conf.fog_mode = 'visible';
+    this.lobbyConfig.set(lobbyId, conf);
+    this.sendLobbySystemMessage(io, this.getLobbyVal(lobbyId), '房间内只剩机器人，房间设置已重置。');
   }
 
   private defaultLobbyConfig(): LobbyConfig {
@@ -1340,7 +1346,7 @@ class LobbyService {
       swamp_ratio: FIXED_SWAMP_RATIO,
       speed: 1,
       allow_team: false,
-      fog: false,
+      fog_mode: 'normal',
       multi_line: false,
       map_token: this.normalizeMapToken(this.randomHexToken()),
       map_token_custom: false,

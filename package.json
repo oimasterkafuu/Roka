@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "2.21.1",
+  "version": "3.0.0",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -32,7 +32,7 @@
     "test:github-link": "node scripts/test-github-link.mjs",
     "test:points": "node scripts/test-points.mjs",
     "test:deploy-update": "node scripts/test-deploy-update.mjs",
-    "test:fog": "node scripts/test-fog.mjs",
+    "test:fog": "node scripts/test-fog.mjs && node scripts/test-fog-exploration.mjs",
     "test:multiline-replay": "node scripts/test-multiline-replay.mjs",
     "test:multiline": "node scripts/test-multiline.mjs",
     "test:tick-growth": "node --test scripts/test-tick-growth.mjs",

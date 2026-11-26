@@ -73,7 +73,7 @@ function jumpToFrame(targetFrame) {
     return;
   }
   if (is_autoplaying) switchAutoplay();
-  // 中间帧走静默路径（issue #87）：只应用局面补丁，跳过迷雾重算/render()/
+  // 中间帧走静默路径（issue #87）：只应用局面补丁，跳过视野查询/render()/
   // 排行榜/统计图等界面刷新；落点帧走完整 update() 一次，保证视角与界面正确。
   while (cur_turn < targetFrame) {
     if (!nextTurn(true, cur_turn + 1 < targetFrame)) break;
@@ -137,7 +137,7 @@ function onReplayViewTab() {
   setReplayViewTeam(val == '全知' ? 0 : replay_view_teams[val] || 0);
 }
 
-// 切换回放视角（0 = 全知，>0 = 队伍编号）：重算迷雾遮罩并立即重绘当前帧。
+// 切换回放视角（0 = 全知，>0 = 队伍编号）：读取当前帧记录并重绘。
 function setReplayViewTeam(team) {
   replay_view_team = team;
   applyReplayFogView();
@@ -159,7 +159,7 @@ function initReplayViewTabs() {
   replay_view_teams = {};
   setTabVal('replay-view', '全知');
   var meta = replay_data && replay_data.meta;
-  if (!meta || !meta.fog || !Array.isArray(meta.player_teams)) {
+  if (meta.fog_mode === 'visible') {
     section.css('display', 'none');
     return;
   }

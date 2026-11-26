@@ -1,11 +1,11 @@
 // 迷雾远征（issue #27）冒烟测试：
 // 1) 临时数据目录 + 随机端口启动 dist/server.js，注册 4 个合成用户；
-// 2) 迷雾房间：房主 change_game_conf { fog: true }，双人对局开始后校验
+// 2) 默认正常模式：双人对局开始后校验
 //    客户端合并后的局面满足迷雾不变量——
 //    a. update 帧携带 fog 数组（全量帧长度 n*m）；
 //    b. fog=1 的格子 grid_type ∈ {200 空地, 201 山脉, 204 沼泽} 且 army_cnt=0（视野外不泄真实地形/归属）；
 //    c. 己方主城格 fog=0；视野内只能看到 1 座主城（自己的）；
-// 3) 对照房间：默认配置（不开迷雾）的 update 帧不得携带 fog 字段。
+// 3) 对照房间：已探索只有 0/1；全部可视不携带 fog 字段。
 // 4) 观战视角：真实 update()/render() 覆盖全图→队伍 1→队伍 2→全图及后续差分；
 //    dead 成员 tabs 排除与失效选中回退；淘汰队伍自动/手动回退全图且不泄露存活空视野。
 // 5) Bot 房间（issue #51）：bot 进房后迷雾被强制关闭，且房主再次开启请求被拒绝。
@@ -25,6 +25,72 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(path.join(rootDir, 'package.json'));
 const jwt = require('jsonwebtoken');
 const { io: ioClient } = require('socket.io-client');
+
+async function testLiveBrowser(baseUrl, tokens, mode) {
+  const { chromium } = require(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
+  const browser = await chromium.launch({
+    executablePath: process.env.CHROMIUM_PATH || undefined,
+    args: ['--no-sandbox'],
+  });
+  const errors = [];
+  try {
+    const pages = [];
+    for (const [index, width] of [1440, 390].entries()) {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, serviceWorkers: 'block' });
+      pages.push(page);
+      await page.context().addCookies([{ name: 'auth_token', value: tokens[index], url: baseUrl }]);
+      await page.addInitScript(() => localStorage.setItem('roka_notify_prompt_shown', '1'));
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.goto(`${baseUrl}/games/ui-${mode}`);
+      await page.locator('#tabs-fog-mode').waitFor({ state: 'visible' });
+      await page.waitForFunction(() => self_team > 0, null, { timeout: 5000 });
+      assert.deepEqual(await page.locator('#tabs-fog-mode .inline-button').allTextContents(), [
+        '正常',
+        '已探索',
+        '全部可视',
+      ]);
+      assert.equal(await page.locator('#tabs-fog-mode input').inputValue(), '正常');
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width);
+    }
+    if (mode === 'explored') {
+      await pages[0].locator('#tabs-fog-mode .inline-button:not(.readonly)').nth(1).click();
+      for (const page of pages) {
+        await page.waitForFunction(
+          () => document.querySelector('#tabs-fog-mode input').value === '已探索',
+          null,
+          { timeout: 5000 },
+        );
+      }
+    }
+    for (const page of pages) await page.evaluate(() => socket.emit('change_ready', { ready: true }));
+    for (const page of pages) {
+      const cell = page
+        .locator(mode === 'normal' ? '#map td.fog-unexplored' : '#map td.mountain.fog, #map td.swamp.fog')
+        .first();
+      await cell.waitFor({ state: 'attached' });
+      const styles = await cell.evaluate((element) => [
+        getComputedStyle(element).backgroundColor,
+        getComputedStyle(element).backgroundImage,
+        element.textContent,
+        getComputedStyle(element).boxShadow,
+      ]);
+      assert.equal(styles[2], '');
+      if (mode === 'normal') assert.deepEqual(styles.slice(0, 2), ['rgb(85, 85, 85)', 'none']);
+      else {
+        assert.notEqual(styles[1], 'none');
+        assert.match(styles[3], /rgba\(0, 0, 0, 0\.32\)/);
+      }
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+        page.viewportSize().width,
+      );
+    }
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+  }
+  log(`Chromium 1440/390：真实房间三态顺序、默认项与 ${mode} 地图样式通过`);
+}
 
 const serverEntry = path.join(rootDir, 'dist', 'server.js');
 
@@ -73,6 +139,7 @@ function finish(code, message) {
     return;
   }
   finished = true;
+  process.exitCode = code;
   cleanup();
   log(message);
   setTimeout(() => process.exit(code), 300).unref();
@@ -224,7 +291,7 @@ function createBrowserRenderer(n, m, multiLine) {
     lost: false,
     lb_lock_digits: { army: 0, land: 0 },
     LB_LOCK_DIGITS_MAX: 6,
-    fog_mode: false,
+    match_has_fog: false,
     setRoomTopLeftVisible() {},
     anyRouteQueued: () => false,
     armyCountShrinkClass: () => '',
@@ -263,10 +330,21 @@ function assertBrowserBoard(client, label) {
   if (client.browserError) throw client.browserError;
   assert(client.browser, `${client.name}：缺少真实客户端渲染器`);
   for (const key of ['grid_type', 'army_cnt', 'fog']) {
-    assert.deepEqual(client.browser.flat(key), client.board[key], `${client.name}：${label} 后 ${key} 合并结果不一致`);
+    assert.deepEqual(
+      client.browser.flat(key),
+      client.board[key],
+      `${client.name}：${label} 后 ${key} 合并结果不一致`,
+    );
   }
-  assert.equal(client.browser.flat('grid_type').length, client.n * client.m, `${client.name}：${label} 后棋盘长度无效`);
-  assert(client.browser.cells.flat().some((cell) => /(?:^| )c\d+(?: |$)/.test(cell.className)), `${client.name}：${label} 后渲染结果没有任何领地`);
+  assert.equal(
+    client.browser.flat('grid_type').length,
+    client.n * client.m,
+    `${client.name}：${label} 后棋盘长度无效`,
+  );
+  assert(
+    client.browser.cells.flat().some((cell) => /(?:^| )c\d+(?: |$)/.test(cell.className)),
+    `${client.name}：${label} 后渲染结果没有任何领地`,
+  );
 }
 
 function testSpectateViewTabs() {
@@ -342,7 +420,7 @@ function testSpectateViewTabs() {
     is_replay: false,
     in_game: true,
     game_ended: false,
-    fog_mode: true,
+    match_has_fog: true,
     player: 0,
     self_team: 0,
     spectate_view_team: 2,
@@ -420,6 +498,7 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
     client.board = {
       grid_type: new Array(data.n * data.m).fill(0),
       army_cnt: new Array(data.n * data.m).fill(0),
+      isolated: new Array(data.n * data.m).fill(0),
       fog: new Array(data.n * data.m).fill(0),
       fogFieldSeen: false,
       fogFieldAbsent: false,
@@ -432,7 +511,10 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
     client.frames += 1;
     client.updates.push(data);
     if (typeof data.fog === 'undefined') client.board.fogFieldAbsent = true;
-    else client.board.fogFieldSeen = true;
+    else {
+      client.board.fogFieldSeen = true;
+      if (!data.is_diff) assert.equal(data.fog.length, client.n * client.m);
+    }
     const merge = (key, flat) => {
       if (typeof flat === 'undefined') return;
       if (data.is_diff) {
@@ -447,6 +529,7 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
     };
     merge('grid_type', data.grid_type);
     merge('army_cnt', data.army_cnt);
+    merge('isolated', data.isolated);
     merge('fog', data.fog);
     if (client.browser && !client.browserError) {
       try {
@@ -457,9 +540,7 @@ function createGameClient(baseUrl, { cookie, room, name, autoReady = true, botTo
     }
   });
   socket.on('room_update', (data) => {
-    if (typeof data?.fog !== 'undefined') {
-      client.roomFogFlag = Boolean(data.fog);
-    }
+    client.roomFogMode = data.fog_mode;
     if (!autoReady || !client.clientId || !Array.isArray(data?.players) || data?.in_game) return;
     const self = data.players.find((player) => String(player?.sid || '') === client.clientId);
     const playing = data.players.filter((player) => Number(player.team) !== 0).length;
@@ -496,8 +577,12 @@ function assertFogInvariants(client) {
   let foggedCells = 0;
   for (let idx = 0; idx < n * m; idx++) {
     const code = board.grid_type[idx];
-    if (!board.fog[idx]) continue;
+    const fog = board.fog[idx];
+    assert.ok([0, 1, 2].includes(fog));
+    if (!fog) continue;
     foggedCells += 1;
+    if (fog === 2) assert.equal(code, 200, '从未探索不得泄露地形');
+    assert.equal(board.isolated[idx], 0, '迷雾不得泄露断联状态');
     if (code !== 200 && code !== 201 && code !== 204) {
       throw new Error(
         `${client.name}：迷雾格 idx=${idx} 泄漏了真实地形/归属信息（grid_type=${code}，应只下发 200 空地、201 山脉或 204 沼泽）`,
@@ -533,7 +618,7 @@ async function testEliminatedSpectatorView() {
       map_mode: 'random',
       map_region: 'china',
       allow_team: true,
-      fog: true,
+      fog_mode: 'normal',
       map_size: 'normal',
       player_names: ['alice', 'bob', 'carol'],
       player_teams: [1, 2, 3],
@@ -568,11 +653,15 @@ async function testEliminatedSpectatorView() {
     engine.gridType[0][player] = -2;
     engine.armyCnt[0][player] = 10;
   }
+  engine.advanceVision();
   engine.addSpectator('spectator');
   engine.setSpectatorView('spectator', 2);
   const aliveFrame = frames.at(-1);
   assert.equal(aliveFrame.is_diff, false, '存活队伍视角切换必须发送全量帧');
-  assert(aliveFrame.fog.some((value) => value === 0), '存活队伍必须有可见区域');
+  assert(
+    aliveFrame.fog.some((value) => value === 0),
+    '存活队伍必须有可见区域',
+  );
   assert(aliveFrame.grid_type.includes(102), '存活队伍必须看到自己的主城');
   assert(browser.cells[0][2].className.includes('general'), '存活队伍主城必须实际渲染');
 
@@ -586,21 +675,40 @@ async function testEliminatedSpectatorView() {
       }
     }
   }
+  engine.advanceVision();
   await engine.sendMap(false);
   const automaticFallback = frames.at(-1);
   assert.equal(automaticFallback.is_diff, true, '已选队伍淘汰后的自动回退应保持差分广播');
-  assert(browser.flat('fog').every((value) => value === 0), '已选队伍淘汰后不得继续发送全 fog 视野');
-  assert(browser.cells.flat().some((cell) => cell.className.includes('general')), '自动回退后的真实渲染不得空白');
+  assert(
+    browser.flat('fog').every((value) => value === 0),
+    '已选队伍淘汰后不得继续发送全 fog 视野',
+  );
+  assert(
+    browser.cells.flat().some((cell) => cell.className.includes('general')),
+    '自动回退后的真实渲染不得空白',
+  );
   engine.setSpectatorView('spectator', 2);
   const eliminatedFrame = frames.at(-1);
   assert.equal(eliminatedFrame.is_diff, false, '淘汰队伍视角回退必须发送全量帧');
-  assert(eliminatedFrame.fog.every((value) => value === 0), '淘汰队伍不得留下全 fog 空棋盘');
-  assert(eliminatedFrame.grid_type.includes(101) && eliminatedFrame.grid_type.includes(103), '回退后应显示其他存活队伍');
-  assert(browser.cells.flat().some((cell) => cell.className.includes('general')), '淘汰后真实渲染不得空白');
+  assert(
+    eliminatedFrame.fog.every((value) => value === 0),
+    '淘汰队伍不得留下全 fog 空棋盘',
+  );
+  assert(
+    eliminatedFrame.grid_type.includes(101) && eliminatedFrame.grid_type.includes(103),
+    '回退后应显示其他存活队伍',
+  );
+  assert(
+    browser.cells.flat().some((cell) => cell.className.includes('general')),
+    '淘汰后真实渲染不得空白',
+  );
   await engine.sendMap(false);
   const eliminatedDiff = frames.at(-1);
   assert.equal(eliminatedDiff.is_diff, true, '淘汰视角回退后仍应使用差分广播');
-  assert(browser.cells.flat().some((cell) => cell.className.includes('general')), '淘汰视角后续差分不得空白');
+  assert(
+    browser.cells.flat().some((cell) => cell.className.includes('general')),
+    '淘汰视角后续差分不得空白',
+  );
 
   engine.pstat[1] = 0;
   engine.spec[1] = false;
@@ -608,8 +716,14 @@ async function testEliminatedSpectatorView() {
   engine.addSpectator('early-spectator');
   engine.setSpectatorView('early-spectator', 2);
   const earlyFrame = frames.at(-1);
-  assert(earlyFrame.fog.every((value) => value === 1), '尚未选主城的存活队伍不得泄露全图');
-  assert(!earlyFrame.grid_type.includes(101) && !earlyFrame.grid_type.includes(103), '存活空视野不得显示其他队伍');
+  assert(
+    earlyFrame.fog.every((value) => value === 1 || value === 2),
+    '存活但无视野源时不得泄露全图',
+  );
+  assert(
+    !earlyFrame.grid_type.includes(101) && !earlyFrame.grid_type.includes(103),
+    '存活空视野不得显示其他队伍',
+  );
   log('场景 4 通过：淘汰队伍回退全图，存活但无领土队伍不泄露全图');
 }
 
@@ -634,12 +748,15 @@ async function main() {
   const tokenE = await signUser(store, env.jwtSecret, 'fog_e', 'fog-pass-5');
   const tokenS = await signUser(store, env.jwtSecret, 'fog_s', 'fog-pass-6');
   const tokenT = await signUser(store, env.jwtSecret, 'fog_t', 'fog-pass-7');
+  const tokenU = await signUser(store, env.jwtSecret, 'fog_u', 'fog-pass-8');
+  const tokenV = await signUser(store, env.jwtSecret, 'fog_v', 'fog-pass-9');
 
   const server = spawn('node', [serverEntry, '--port', String(port)], {
     cwd: rootDir,
     env: {
       ...process.env,
       ROKA_DATA_DIR: dataDir,
+      ROKA_STATIC_CDN: '0',
       ROKA_BOT_TOKENS: `${BOT_TOKEN}:bot_fog`,
     },
   });
@@ -656,16 +773,14 @@ async function main() {
   await waitFor(() => a.clientId !== '', 5000, 'A 进房');
   const b = createGameClient(baseUrl, { cookie: tokenB, room: ROOM_FOG, name: 'B', autoReady: false });
   await waitFor(() => b.clientId !== '', 5000, 'B 进房');
-  await sleep(300);
-  a.socket.emit('change_game_conf', { fog: true });
-  await waitFor(() => a.roomFogFlag === true, 5000, '房间设置同步 fog=true');
-  log('房间设置已同步：fog=true');
+  await waitFor(() => a.roomFogMode === 'normal', 5000, '新房间默认正常');
   a.socket.emit('change_ready', { ready: true });
   b.socket.emit('change_ready', { ready: true });
 
   await waitFor(() => a.frames >= 3 && b.frames >= 3, 30_000, '迷雾对局帧下发');
   assertFogInvariants(a);
   assertFogInvariants(b);
+  assert(a.board.fog.includes(2) && b.board.fog.includes(2));
   log('场景 1 通过：迷雾帧过滤满足全部不变量');
 
   // 场景 1b：观战者视角切换——默认全图；spectate_view 选定队伍后按该队伍迷雾视野下发；
@@ -750,12 +865,55 @@ async function main() {
   }
   s2.socket.disconnect();
   a.socket.disconnect();
+  const rebound = createGameClient(baseUrl, {
+    cookie: tokenA,
+    room: ROOM_FOG,
+    name: 'A rebound',
+    autoReady: false,
+  });
+  await waitFor(() => rebound.frames >= 2, 10_000, '存活玩家重连');
+  assert.equal(rebound.updates[0].is_diff, false);
+  assert.deepEqual(rebound.board.fog, a.board.fog);
+  assert.deepEqual(rebound.board.grid_type, a.board.grid_type);
+  assertFogInvariants(rebound);
+  rebound.socket.disconnect();
   b.socket.disconnect();
 
-  // 场景 2：对照房间（默认不开迷雾）
-  log('场景 2：默认房间（迷雾关闭）');
+  log('场景 2：全部可视与已探索');
+  const exploredRoom = 'explored-room';
+  const exploredA = createGameClient(baseUrl, {
+    cookie: tokenA,
+    room: exploredRoom,
+    name: 'A',
+    autoReady: false,
+  });
+  await waitFor(() => exploredA.roomFogMode === 'normal', 5000, '已探索测试房间创建');
+  exploredA.socket.emit('change_game_conf', { fog_mode: 'explored' });
+  await waitFor(() => exploredA.roomFogMode === 'explored', 5000, '已探索设置同步');
+  const exploredB = createGameClient(baseUrl, {
+    cookie: tokenB,
+    room: exploredRoom,
+    name: 'B',
+    autoReady: false,
+  });
+  await waitFor(() => exploredB.roomFogMode === 'explored', 5000, '第二名玩家进入已探索房间');
+  exploredA.socket.emit('change_ready', { ready: true });
+  exploredB.socket.emit('change_ready', { ready: true });
+  await waitFor(() => exploredA.frames >= 3 && exploredB.frames >= 3, 30_000, '已探索对局帧下发');
+  for (const client of [exploredA, exploredB]) {
+    assertFogInvariants(client);
+    assert(!client.board.fog.includes(2));
+    assert(
+      client.board.grid_type.some(
+        (terrain, index) => client.board.fog[index] && [201, 204].includes(terrain),
+      ),
+    );
+    client.socket.disconnect();
+  }
   const c = createGameClient(baseUrl, { cookie: tokenC, room: ROOM_PLAIN, name: 'C' });
-  await waitFor(() => c.clientId !== '', 5000, 'C 进房');
+  await waitFor(() => c.roomFogMode === 'normal', 5000, 'C 进房');
+  c.socket.emit('change_game_conf', { fog_mode: 'visible' });
+  await waitFor(() => c.roomFogMode === 'visible', 5000, '全部可视设置同步');
   const d = createGameClient(baseUrl, { cookie: tokenD, room: ROOM_PLAIN, name: 'D' });
   await waitFor(() => d.clientId !== '', 5000, 'D 进房');
   await waitFor(() => c.frames >= 3 && d.frames >= 3, 30_000, '普通对局帧下发');
@@ -772,8 +930,9 @@ async function main() {
   const e = createGameClient(baseUrl, { cookie: tokenE, room: ROOM_BOT, name: 'E', autoReady: false });
   await waitFor(() => e.clientId !== '', 5000, 'E 进房');
   await sleep(300);
-  e.socket.emit('change_game_conf', { fog: true });
-  await waitFor(() => e.roomFogFlag === true, 5000, '纯人类房间开启迷雾');
+  e.socket.emit('change_game_conf', { fog_mode: true });
+  await sleep(300);
+  assert.equal(e.roomFogMode, 'normal', '布尔设置无效');
   log('纯人类房间可正常开启迷雾');
   const bot = createGameClient(baseUrl, {
     botToken: BOT_TOKEN,
@@ -782,17 +941,20 @@ async function main() {
     autoReady: false,
   });
   await waitFor(() => bot.clientId !== '', 5000, 'Bot 进房');
-  await waitFor(() => e.roomFogFlag === false, 5000, 'bot 进房后迷雾被强制关闭');
+  await waitFor(() => e.roomFogMode === 'visible', 5000, 'Bot 进房后强制全部可视');
   log('bot 进房后迷雾已强制关闭');
-  e.socket.emit('change_game_conf', { fog: true });
+  e.socket.emit('change_game_conf', { fog_mode: 'normal' });
+  e.socket.emit('change_game_conf', { fog_mode: 'explored' });
   await sleep(800);
-  if (e.roomFogFlag !== false) {
+  if (e.roomFogMode !== 'visible') {
     throw new Error('房间内有 bot 时房主仍能开启迷雾');
   }
   log('场景 3 通过：bot 房间无法开启迷雾');
 
   await testEliminatedSpectatorView();
-  finish(0, '测试通过：迷雾过滤、观战视角切换、默认兼容与 bot 房禁用均符合预期');
+  await testLiveBrowser(baseUrl, [tokenS, tokenT], 'normal');
+  await testLiveBrowser(baseUrl, [tokenU, tokenV], 'explored');
+  finish(0, '测试通过：三态迷雾、观战视角切换、Bot 限制与实时浏览器');
 }
 
 main().catch((error) => finish(1, `测试异常：${error.stack || error.message}`));

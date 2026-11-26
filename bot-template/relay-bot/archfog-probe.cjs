@@ -79,12 +79,7 @@ function islandInfo(frame, cell) {
     else if (owner) enemy++;
     else neutral++;
     // 4-way, exactly the partition ./archipelago uses.
-    for (const j of [
-      i - n,
-      i + n,
-      i % n > 0 ? i - 1 : -1,
-      i % n < n - 1 ? i + 1 : -1,
-    ]) {
+    for (const j of [i - n, i + n, i % n > 0 ? i - 1 : -1, i % n < n - 1 ? i + 1 : -1]) {
       if (j < 0 || j >= size) continue;
       if (seen[j]) continue;
       if (isSwamp(tile[j]) || tile[j] === 201) continue;
@@ -99,7 +94,7 @@ async function play() {
   const lineup = ['bot3', 'relay'];
   const names = lineup.map((_, i) => lineup[(i - seat + lineup.length) % lineup.length]);
   const ratio = resolveMapSizeRatioByPlayers(2) * (large ? 2 : 1);
-  const flags = { multi_line: multi, fog };
+  const flags = { multi_line: multi, fog_mode: fog ? 'normal' : 'visible' };
   const ids = ['seat1', 'seat2'];
   const sockets = ids.map(() => new EventEmitter());
   const handles = [];
@@ -107,7 +102,9 @@ async function play() {
   const builds = [];
   let currentTick = 0;
   let endedFlag = false;
-  let engine, cols = 0, rowsCount = 0;
+  let engine,
+    cols = 0,
+    rowsCount = 0;
   const boards = [null, null];
   const armies = [null, null];
   const fogs = [null, null];
@@ -201,8 +198,11 @@ async function play() {
           }
           const armyBoard = armies[index];
           if (armyBoard && Array.isArray(frame.army_cnt)) {
-            if (!frame.is_diff) for (let i = 0; i < frame.army_cnt.length; i++) armyBoard[i] = frame.army_cnt[i];
-            else for (let i = 0; i < frame.army_cnt.length; i += 2) armyBoard[frame.army_cnt[i]] = frame.army_cnt[i + 1];
+            if (!frame.is_diff)
+              for (let i = 0; i < frame.army_cnt.length; i++) armyBoard[i] = frame.army_cnt[i];
+            else
+              for (let i = 0; i < frame.army_cnt.length; i += 2)
+                armyBoard[frame.army_cnt[i]] = frame.army_cnt[i + 1];
           }
           const fogBoard = fogs[index];
           if (fogBoard && Array.isArray(frame.fog)) {
@@ -211,8 +211,11 @@ async function play() {
           }
           const isoBoard = isos[index];
           if (isoBoard && Array.isArray(frame.isolated)) {
-            if (!frame.is_diff) for (let i = 0; i < frame.isolated.length; i++) isoBoard[i] = frame.isolated[i];
-            else for (let i = 0; i < frame.isolated.length; i += 2) isoBoard[frame.isolated[i]] = frame.isolated[i + 1];
+            if (!frame.is_diff)
+              for (let i = 0; i < frame.isolated.length; i++) isoBoard[i] = frame.isolated[i];
+            else
+              for (let i = 0; i < frame.isolated.length; i += 2)
+                isoBoard[frame.isolated[i]] = frame.isolated[i + 1];
           }
           lastFrames[index] = {
             ...frame,
@@ -243,7 +246,8 @@ async function play() {
       const ended = await engine.gameTick();
       if (ended) endedFlag = true;
       const lastFrame = lastFrames[seat];
-      const sample = lastFrame && (tick % (summaryOnly ? 25 : 10) === 0 || ended || (from && tick >= from && tick <= to));
+      const sample =
+        lastFrame && (tick % (summaryOnly ? 25 : 10) === 0 || ended || (from && tick >= from && tick <= to));
       if (sample) {
         const size = lastFrame.grid_type.length;
         const gridRows = rowsCount || Math.round(Math.sqrt(size));
@@ -317,7 +321,10 @@ async function play() {
             } else if (ownerOf(lastFrame.grid_type[i])) enemy++;
           }
           if (own && !enemy) ownedIslands++;
-          if (own === sizes[island] && !enemy) for (let i = 0; i < size; i++) if (islandId[i] === island && lastFrame.army_cnt[i] > maxStack) maxStack = lastFrame.army_cnt[i];
+          if (own === sizes[island] && !enemy)
+            for (let i = 0; i < size; i++)
+              if (islandId[i] === island && lastFrame.army_cnt[i] > maxStack)
+                maxStack = lastFrame.army_cnt[i];
           if (own === sizes[island] && !enemy) {
             fullIslands++;
             armyOnFull += army;
@@ -367,7 +374,7 @@ async function play() {
               let unseen = 0;
               for (let dx = -1; dx <= 1; dx++)
                 for (let dy = -1; dy <= 1; dy++) {
-                  const nx = (op.dx / n | 0) + dx;
+                  const nx = ((op.dx / n) | 0) + dx;
                   const ny = (op.dx % n) + dy;
                   if (nx < 0 || ny < 0 || nx >= lastFrame.grid_type.length / n || ny >= n) continue;
                   if (lastFrame.fog?.[nx * n + ny]) unseen++;
@@ -395,9 +402,25 @@ async function play() {
           a: stat(1),
           b: stat(2),
           mix,
-          islands: { ownedIslands, fullIslands, armyOnFull, fullCrowned, total: sizes.length, maxStackFull: maxStack },
+          islands: {
+            ownedIslands,
+            fullIslands,
+            armyOnFull,
+            fullCrowned,
+            total: sizes.length,
+            maxStackFull: maxStack,
+          },
           iso: { isoCells, isoArmy, isoStacks },
-          crowns: { mine: myCrowns, foe: foeCrowns, guard, thin, maxOwn, maxFoe, visibleFoeArmy, cells: crownCells },
+          crowns: {
+            mine: myCrowns,
+            foe: foeCrowns,
+            guard,
+            thin,
+            maxOwn,
+            maxFoe,
+            visibleFoeArmy,
+            cells: crownCells,
+          },
           orders: orders.length,
         });
       } else {
@@ -414,7 +437,7 @@ async function play() {
       tick: finalFrame.turn,
       rows,
       builds,
-      bankTrace: process.env.BOT3_MCROWN2_TRACE === '1' ? globalThis.__mcrown2 ?? [] : undefined,
+      bankTrace: process.env.BOT3_MCROWN2_TRACE === '1' ? (globalThis.__mcrown2 ?? []) : undefined,
     };
   } finally {
     handles.forEach((h) => h.stop());

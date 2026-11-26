@@ -12,7 +12,7 @@ import {
   writeFileAtomicWithBackup,
 } from './binary-store';
 import { encodeReplayPatchBinary, REPLAY_BINARY_MAGIC } from './replay-patch-binary';
-import { ReplayActionData, ReplayData, ReplayListItem } from './types';
+import { REPLAY_OPS_VERSION, ReplayActionData, ReplayData, ReplayListItem } from './types';
 
 const gzipAsync = promisify(gzip);
 
@@ -178,12 +178,11 @@ export class ReplayStore {
 
   async loadReplay(id: string): Promise<ReplayData> {
     const content = await this.readRawReplay(id);
-    const replay = await decodeReplayBinary<ReplayActionData>(content);
-    return this.buildReplayFromActions(replay);
+    return this.buildReplayFromRaw(content);
   }
 
   /**
-   * 读取回放的原始存储文件（ops-v1 / ops-v2 操作流），用于“下载回放”。
+   * 读取原始操作流及探索记录，用于下载回放。
    */
   async readRawReplay(id: string): Promise<Buffer> {
     return readFile(this.resolveReplayPath(id, REPLAY_EXT));
@@ -212,7 +211,7 @@ export class ReplayStore {
     try {
       const cached = await readFile(cachePath);
       if (cached.length >= 4) {
-        // 编码格式升级（如 RPB3→RPB4）后旧缓存作废：校验解压后的魔数，不匹配则重建。
+        // 观看缓存以当前魔数校验，旧缓存不用于解码。
         // 只流式解压前 4 字节，不为校验把几十 MB 的缓存整体解压进内存。
         const raw = await gunzipPrefix(cached, 4);
         if (raw.length >= 4 && raw.toString('latin1') === REPLAY_BINARY_MAGIC) {
@@ -232,19 +231,17 @@ export class ReplayStore {
   }
 
   /**
-   * 将上传的原始回放文件（ops-v1 / ops-v2 操作流）解码并重建为可观看的回放数据。
+   * 将原始操作流及探索记录解码并重建为可观看的回放数据。
    * 版本不符或数据损坏时抛错，由上层返回“不兼容”。
    */
   async buildReplayFromRaw(content: Buffer): Promise<ReplayData> {
     const replay = await decodeReplayBinary<ReplayActionData>(content);
-    if (!replay || (replay.version !== 'ops-v1' && replay.version !== 'ops-v2')) {
-      throw new Error('回放版本不兼容。');
-    }
+    if (replay?.version !== REPLAY_OPS_VERSION) throw new Error('回放版本不兼容。');
     return this.buildReplayFromActions(replay);
   }
 
   /**
-   * 删除回放（原始文件 + 索引项）。用于清理已不兼容的旧回放。
+   * 显式删除回放、观看缓存与索引项。
    */
   async deleteReplay(id: string): Promise<void> {
     if (!isReplayIdValid(id)) {

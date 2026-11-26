@@ -1,5 +1,5 @@
 // 回放 ID 由原始内容哈希生成；同一 ID 的观看数据不可变，无需命中时重新请求服务器。
-var REPLAY_CACHE_VERSION = 1;
+var REPLAY_CACHE_VERSION = 5;
 var REPLAY_CACHE_MAX_BYTES = 1024 * 1024 * 1024;
 var REPLAY_CACHE_MAX_ENTRIES = 200;
 

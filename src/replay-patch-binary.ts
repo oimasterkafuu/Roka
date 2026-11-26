@@ -1,9 +1,7 @@
-import { LeaderboardEntry, ReplayData, ReplayPatchPayload, UpdatePayload } from './types';
-
-const MAGIC_BYTES = [0x52, 0x50, 0x42, 0x34] as const; // RPB4（meta 追加 fog 标志，供回放视角选择）
+import { FOG_MODES, LeaderboardEntry, ReplayData, ReplayPatchPayload, UpdatePayload } from './types';
 
 /** 当前回放观看二进制魔数（ASCII），供缓存陈旧性校验。 */
-export const REPLAY_BINARY_MAGIC = 'RPB4';
+export const REPLAY_BINARY_MAGIC = 'RPB5';
 
 const classToCode = (value: string): number => {
   if (value === 'dead') {
@@ -52,6 +50,14 @@ class ByteWriter {
     this.ensure(4);
     this.current.writeUInt32LE(value >>> 0, this.offset);
     this.offset += 4;
+  }
+
+  writeVarUint(value: number): void {
+    while (value >= 128) {
+      this.writeU8((value & 127) | 128);
+      value >>>= 7;
+    }
+    this.writeU8(value);
   }
 
   writeBytes(buffer: Uint8Array): void {
@@ -179,32 +185,38 @@ const writePatchPayload = (writer: ByteWriter, payload: ReplayPatchPayload): voi
 };
 
 const writeReplayMeta = (writer: ByteWriter, replay: ReplayData): void => {
-  const playerNames = replay.meta?.player_names ?? [];
-  const playerTeams = replay.meta?.player_teams ?? [];
-  const count = Math.min(playerNames.length, playerTeams.length);
-  if (count <= 0) {
-    writer.writeU8(0);
-    return;
-  }
-  writer.writeU8(1);
+  const { player_names: playerNames, player_teams: playerTeams, fog_mode: mode } = replay.meta;
+  const count = playerNames.length;
   writer.writeU16(count);
   for (let i = 0; i < count; i += 1) {
     writer.writeString(playerNames[i]);
     writer.writeU8(normalizeU32(playerTeams[i]));
   }
-  // RPB4 起追加迷雾标志：回放全程全视野存储，该标志仅用于前端
-  // 判断是否提供「队伍视角」选择器（按每帧局面在客户端重算视野）。
-  writer.writeU8(replay.meta?.fog === true ? 1 : 0);
+  writer.writeU8(FOG_MODES.indexOf(mode));
+  if (mode === 'visible') return;
+  writer.writeU8(replay.vision.size);
+  for (const [team, { omniscientFrom, cells }] of replay.vision) {
+    writer.writeU8(team);
+    writer.writeU32(omniscientFrom ?? 0xffffffff);
+    writer.writeU32(cells.size);
+    for (const [cell, turns] of cells) {
+      writer.writeU16(cell);
+      writer.writeVarUint(turns.length);
+      let previous = 0;
+      for (const turn of turns) {
+        writer.writeVarUint(turn - previous);
+        previous = turn;
+      }
+    }
+  }
 };
 
 export const encodeReplayPatchBinary = (replay: ReplayData): Buffer => {
-  if (replay.n > 0xffff || replay.m > 0xffff) {
+  if (replay.n > 0xffff || replay.m > 0xffff || replay.n * replay.m > 0x10000) {
     throw new Error('地图尺寸超过当前回放二进制格式限制。');
   }
   const writer = new ByteWriter();
-  for (let i = 0; i < MAGIC_BYTES.length; i += 1) {
-    writer.writeU8(MAGIC_BYTES[i]);
-  }
+  writer.writeBytes(Buffer.from(REPLAY_BINARY_MAGIC, 'ascii'));
   writer.writeU16(replay.n);
   writer.writeU16(replay.m);
   writer.writeU32(replay.patches.length);

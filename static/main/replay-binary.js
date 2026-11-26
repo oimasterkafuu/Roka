@@ -76,13 +76,15 @@ function decodeReplayBinary(buffer) {
     return leaderboard;
   }
 
-  function readSurrenderProgress() {
-    // RPB1/RPB2 遗留字段：读出后直接丢弃，RPB3 起不再存在。
-    var count = readU16();
-    for (var i = 0; i < count; i++) {
-      readU8();
-      readU8();
+  function readVarUint() {
+    var value = 0;
+    for (var shift = 0; shift <= 28; shift += 7) {
+      var byte = readU8();
+      if (shift === 28 && byte > 15) break;
+      value += (byte & 127) * 2 ** shift;
+      if (byte < 128) return value;
     }
+    throw new Error('回放视野数据损坏');
   }
 
   function readFullGrid() {
@@ -123,14 +125,13 @@ function decodeReplayBinary(buffer) {
     return diff;
   }
 
-  function readInitialPayload(version) {
+  function readInitialPayload() {
     var turn = readU32();
     var gameEnd = readU8() == 1;
     var leaderboard = readLeaderboard();
-    if (version <= 2) readSurrenderProgress();
     var grid = readFullGrid();
     var army = readFullArmy();
-    var isolated = version >= 2 ? readFullGrid() : new Array(grid.length).fill(0);
+    var isolated = readFullGrid();
     return {
       grid_type: grid,
       army_cnt: army,
@@ -144,14 +145,13 @@ function decodeReplayBinary(buffer) {
     };
   }
 
-  function readPatchPayload(version) {
+  function readPatchPayload() {
     var turn = readU32();
     var gameEnd = readU8() == 1;
     var leaderboard = readLeaderboard();
-    if (version <= 2) readSurrenderProgress();
     var gridDiff = readGridDiff();
     var armyDiff = readArmyDiff();
-    var isolatedDiff = version >= 2 ? readGridDiff() : [];
+    var isolatedDiff = readGridDiff();
     return {
       grid_type: gridDiff,
       army_cnt: armyDiff,
@@ -165,17 +165,7 @@ function decodeReplayBinary(buffer) {
     };
   }
 
-  function readReplayMeta(version) {
-    if (offset >= view.byteLength) {
-      return null;
-    }
-    var hasMeta = readU8();
-    if (hasMeta == 0) {
-      return null;
-    }
-    if (hasMeta != 1) {
-      throw new Error('回放元数据损坏');
-    }
+  function readReplayMeta() {
     var count = readU16();
     var playerNames = new Array(count);
     var playerTeams = new Array(count);
@@ -183,53 +173,91 @@ function decodeReplayBinary(buffer) {
       playerNames[i] = readString();
       playerTeams[i] = readU8();
     }
-    // RPB4 起 meta 末尾带 fog 标志；旧版本一律视为未开启迷雾。
-    var fog = version >= 4 ? readU8() == 1 : false;
+    var mode = ['normal', 'explored', 'visible'][readU8()];
+    if (!mode) throw new Error('回放迷雾模式损坏');
     return {
       player_names: playerNames,
       player_teams: playerTeams,
-      fog: fog,
+      fog_mode: mode,
     };
   }
 
-  var version = 0;
-  if (
-    readU8() == replay_binary_magic[0] &&
-    readU8() == replay_binary_magic[1] &&
-    readU8() == replay_binary_magic[2]
-  ) {
-    var versionByte = readU8();
-    if (versionByte == replay_binary_magic[3]) {
-      version = 4;
-    } else if (versionByte == replay_binary_magic_v3[3]) {
-      version = 3;
-    } else if (versionByte == replay_binary_magic_v2[3]) {
-      version = 2;
-    } else if (versionByte == replay_binary_magic_v1[3]) {
-      version = 1;
+  function readVision(area, lastTurn, mode, teams) {
+    var vision = new Map();
+    if (mode === 'visible') return vision;
+    var expected = new Set(teams.filter((team) => team > 0));
+    var teamCount = readU8();
+    if (teamCount !== expected.size) throw new Error('回放视野队伍损坏');
+    for (var teamIndex = 0; teamIndex < teamCount; teamIndex++) {
+      var team = readU8();
+      var omniscientFrom = readU32();
+      var cellCount = readU32();
+      if (
+        !expected.delete(team) ||
+        cellCount > area ||
+        (omniscientFrom !== 0xffffffff && omniscientFrom > lastTurn)
+      ) {
+        throw new Error('回放视野数据损坏');
+      }
+      var cells = new Map();
+      for (var cellIndex = 0; cellIndex < cellCount; cellIndex++) {
+        var cell = readU16();
+        var count = readVarUint();
+        if (cell >= area || cells.has(cell) || !count || count > lastTurn + 1)
+          throw new Error('回放视野数据损坏');
+        ensure(count);
+        var changes = new Uint32Array(count);
+        var turn = 0;
+        for (var change = 0; change < count; change++) {
+          var delta = readVarUint();
+          turn += delta;
+          if ((!delta && change) || turn > lastTurn || turn >= omniscientFrom)
+            throw new Error('回放视野数据损坏');
+          changes[change] = turn;
+        }
+        cells.set(cell, changes);
+      }
+      vision.set(team, { omniscientFrom: omniscientFrom, cells: cells });
     }
-  }
-  if (version == 0) {
-    throw new Error('回放格式不支持');
+    return vision;
   }
 
+  for (var byte of replay_binary_magic) if (readU8() !== byte) throw new Error('回放格式不支持');
   var n = readU16();
   var m = readU16();
   var patchCount = readU32();
-  var initial = readInitialPayload(version);
+  var initial = readInitialPayload();
   var patches = new Array(patchCount);
   for (var i = 0; i < patchCount; i++) {
     patches[i] = {
-      forward: readPatchPayload(version),
-      backward: readPatchPayload(version),
+      forward: readPatchPayload(),
+      backward: readPatchPayload(),
     };
   }
-  var meta = readReplayMeta(version);
+  var meta = readReplayMeta();
+  var lastTurn = patchCount ? patches[patchCount - 1].forward.turn : initial.turn;
+  var vision = readVision(n * m, lastTurn, meta.fog_mode, meta.player_teams);
+  if (offset !== view.byteLength) throw new Error('回放数据损坏');
   return {
     n: n,
     m: m,
     initial: initial,
     patches: patches,
-    meta: meta || undefined,
+    meta: meta,
+    vision: vision,
   };
+}
+
+function replayFogAt(history, mode, cell, turn) {
+  if (!history || turn >= history.omniscientFrom) return 0;
+  var changes = history.cells.get(cell);
+  if (!changes || changes[0] > turn) return mode === 'normal' ? 2 : 1;
+  var low = 1;
+  var high = changes.length;
+  while (low < high) {
+    var middle = (low + high) >>> 1;
+    if (changes[middle] <= turn) low = middle + 1;
+    else high = middle;
+  }
+  return low & 1 ? 0 : 1;
 }

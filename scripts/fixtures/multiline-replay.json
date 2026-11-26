@@ -1,5 +1,6 @@
 {
-  "version": "ops-v2",
+  "version": "ops-v3",
+  "exploration": [],
   "meta": {
     "isolated_reinforcement_fix": true,
     "auto_crown_transfer": true,
@@ -10,7 +11,7 @@
     "swamp_ratio": 0,
     "speed": 1,
     "allow_team": false,
-    "fog": false,
+    "fog_mode": "visible",
     "multi_line": true,
     "map_token": "multiline-replay-fixture",
     "map_mode": "random",

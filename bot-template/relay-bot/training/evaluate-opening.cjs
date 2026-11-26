@@ -7,7 +7,9 @@ const { GameEngine } = require('../../../dist/game-engine');
 const { resolveMapSizeRatioByPlayers } = require('../../../dist/map/map-size');
 const { FIXED_SWAMP_RATIO } = require('../../../dist/server/lobby-service');
 const { openingBudget } = require('../opening');
-const { createBoard, chooseOrders } = require(process.env.PLANNER ? path.resolve(process.env.PLANNER) : '../planner');
+const { createBoard, chooseOrders } = require(
+  process.env.PLANNER ? path.resolve(process.env.PLANNER) : '../planner',
+);
 
 async function play(map, count, large, seed, seat, multi, speed) {
   const ids = Array.from({ length: count }, (_, i) => 'p' + i);
@@ -26,6 +28,7 @@ async function play(map, count, large, seed, seat, multi, speed) {
       speed,
       multi_line: multi,
       allow_team: false,
+      fog_mode: 'visible',
       player_names: ids,
       player_teams: ids.map((_, i) => i + 1),
     },

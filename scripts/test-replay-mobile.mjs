@@ -36,10 +36,11 @@ const replay = encodeReplayPatchBinary({
     backward: frameData(index),
   })),
   meta: {
-    fog: true,
+    fog_mode: 'explored',
     player_names: leaderboard.map(({ uid }) => uid),
     player_teams: leaderboard.map(({ team }) => team),
   },
+  vision: new Map(leaderboard.map(({ team }) => [team, { omniscientFrom: null, cells: new Map() }])),
 });
 
 const browser = await chromium.launch({

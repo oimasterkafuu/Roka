@@ -30,7 +30,7 @@ async function createEngine() {
       map_mode: 'random',
       map_region: 'china',
       allow_team: true,
-      fog: false,
+      fog_mode: 'visible',
       map_size: 'normal',
       player_names: ['alice', 'bob', 'carol'],
       player_teams: [1, 1, 2],
@@ -61,7 +61,10 @@ function clearBoard(engine) {
   }
 }
 
-function setup(engine, { sourceArmy = 10, targetArmy = 0, targetType = -2, targetOwner = 2, extraBobCrown = false } = {}) {
+function setup(
+  engine,
+  { sourceArmy = 10, targetArmy = 0, targetType = -2, targetOwner = 2, extraBobCrown = false } = {},
+) {
   clearBoard(engine);
   const sx = 2;
   const sy = 2;
@@ -89,20 +92,38 @@ async function main() {
 
   let pos = setup(engine, { extraBobCrown: true });
   check('有效全兵推入队友多主城自动转属', attack(engine, pos, pos, 2) && engine.owner[pos.tx][pos.ty] === 1);
-  check('自动转属保持主城类型并叠加兵力', engine.gridType[pos.tx][pos.ty] === -2 && engine.armyCnt[pos.tx][pos.ty] === 9);
+  check(
+    '自动转属保持主城类型并叠加兵力',
+    engine.gridType[pos.tx][pos.ty] === -2 && engine.armyCnt[pos.tx][pos.ty] === 9,
+  );
   check('来源保留 1 兵', engine.armyCnt[pos.sx][pos.sy] === 1);
 
   pos = setup(engine, { extraBobCrown: false });
-  check('队友最后一座主城只累兵不转属', attack(engine, pos, pos, 2) && engine.owner[pos.tx][pos.ty] === 2 && engine.armyCnt[pos.tx][pos.ty] === 9);
+  check(
+    '队友最后一座主城只累兵不转属',
+    attack(engine, pos, pos, 2) && engine.owner[pos.tx][pos.ty] === 2 && engine.armyCnt[pos.tx][pos.ty] === 9,
+  );
 
-  for (const [mode, expected] of [[0, 9], [1, 6], [2, 9]]) {
+  for (const [mode, expected] of [
+    [0, 9],
+    [1, 6],
+    [2, 9],
+  ]) {
     pos = setup(engine, { extraBobCrown: true });
     const worked = attack(engine, pos, pos, mode);
-    check(`推兵模式 ${mode} 推出量为 ${expected}（实际 ${engine.armyCnt[pos.tx][pos.ty]}）`, worked && engine.armyCnt[pos.tx][pos.ty] === expected);
+    check(
+      `推兵模式 ${mode} 推出量为 ${expected}（实际 ${engine.armyCnt[pos.tx][pos.ty]}）`,
+      worked && engine.armyCnt[pos.tx][pos.ty] === expected,
+    );
   }
 
   pos = setup(engine, { sourceArmy: 1, extraBobCrown: true });
-  check('cnt=0 不转属且不改变兵力', !attack(engine, pos, pos, 2) && engine.owner[pos.tx][pos.ty] === 2 && engine.armyCnt[pos.tx][pos.ty] === 0);
+  check(
+    'cnt=0 不转属且不改变兵力',
+    !attack(engine, pos, pos, 2) &&
+      engine.owner[pos.tx][pos.ty] === 2 &&
+      engine.armyCnt[pos.tx][pos.ty] === 0,
+  );
 
   pos = setup(engine, { targetType: 0, targetOwner: 2, extraBobCrown: true });
   check('普通同队地块仍转为出兵者', attack(engine, pos, pos, 2) && engine.owner[pos.tx][pos.ty] === 1);

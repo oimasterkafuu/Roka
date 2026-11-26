@@ -11,7 +11,7 @@ const config = {
   map_mode: 'random',
   map_region: 'china',
   allow_team: true,
-  fog: false,
+  fog_mode: 'visible',
   map_size: 'normal',
   player_names: ['alice', 'bob', 'enemy'],
   player_teams: [1, 1, 2],

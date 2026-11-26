@@ -19,7 +19,7 @@ const HUMAN_WIN_MAP = {
   swamp_ratio: 0.5,
   speed: 1,
   allow_team: false,
-  fog: false,
+  fog_mode: 'visible',
   map_token: 'bb704e83aa6bf955413864aa8fba5a9d',
   map_mode: 'random',
   map_region: 'china',
@@ -34,53 +34,37 @@ const INITIAL_MAP_SHA256 = 'c9b15202d0aba7b5cd55c49842d03fee997609b6bbcafc6cad22
 function initialMapHash(arena) {
   const frame = arena.engine.buildFullFramePayload(0, false);
   return createHash('sha256')
-    .update(JSON.stringify({
-      n: arena.engine.n,
-      m: arena.engine.m,
-      grid_type: frame.grid_type,
-      army_cnt: frame.army_cnt,
-      isolated: frame.isolated,
-    }))
+    .update(
+      JSON.stringify({
+        n: arena.engine.n,
+        m: arena.engine.m,
+        grid_type: frame.grid_type,
+        army_cnt: frame.army_cnt,
+        isolated: frame.isolated,
+      }),
+    )
     .digest('hex');
 }
 
 function humanActions(ops) {
   const actions = new Map();
   let turn = 1;
-  let selected = null;
-  const dx = [-1, 1, 0, 0];
-  const dy = [0, 0, -1, 1];
   for (const op of ops) {
     if (op.op === 'w') {
-      turn += Math.max(0, op.n);
-      continue;
-    }
-    if (op.op === 's') {
-      selected = [op.x, op.y];
+      turn += op.n;
       continue;
     }
     if (op.op === 'r') {
       turn += 1;
-      selected = null;
       continue;
     }
-    if (!selected) continue;
-    if (op.op === 'b' || op.op === 'c') {
-      actions.set(turn, { kind: 'build', x: selected[0], y: selected[1], op: op.op });
-      turn += 1;
-      continue;
-    }
-    const action = {
-      kind: 'attack',
-      x: selected[0],
-      y: selected[1],
-      dx: selected[0] + dx[op.d],
-      dy: selected[1] + dy[op.d],
-      mode: op.a === 1 ? 2 : op.h === 1 ? 1 : 0,
-    };
-    actions.set(turn, action);
-    selected = [action.dx, action.dy];
-    turn += 1;
+    assert.equal(op.op, 'q');
+    assert.equal(op.actions.length, 1);
+    const { kind, ...action } = op.actions[0];
+    actions.set(
+      turn++,
+      kind === 'm' ? { ...action, kind: 'attack' } : { ...action, kind: 'build', op: kind },
+    );
   }
   return actions;
 }
@@ -97,10 +81,7 @@ test('Apex wins the human-win replay map against Anti-Human within 600 turns', (
     engineConfig: HUMAN_WIN_MAP,
     maxTurns: 600,
     traceLimit: 600,
-    policies: [
-      (state) => controller.choose(state),
-      (state) => antiAction(state),
-    ],
+    policies: [(state) => controller.choose(state), (state) => antiAction(state)],
   });
   assert.equal(result.ended, true);
   assert.equal(result.winner, 0);

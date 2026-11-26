@@ -1,11 +1,4 @@
-import { MOVE_DX, MOVE_DY } from '../map/map-core';
-import {
-  LeaderboardEntry,
-  ReplayMoveDirection,
-  ReplayPatch,
-  ReplayPatchPayload,
-  ReplayFrame,
-} from '../types';
+import { LeaderboardEntry, ReplayPatch, ReplayPatchPayload, ReplayFrame } from '../types';
 
 const getDiff = (next: number[], prev: number[]): number[] => {
   const diff: number[] = [];
@@ -69,13 +62,4 @@ const buildReplayPatch = (prevFrame: ReplayFrame, nextFrame: ReplayFrame): Repla
   ),
 });
 
-const toMoveDirection = (x: number, y: number, dx: number, dy: number): ReplayMoveDirection | null => {
-  for (let i = 0; i < 4; i += 1) {
-    if (x + MOVE_DX[i] === dx && y + MOVE_DY[i] === dy) {
-      return i as ReplayMoveDirection;
-    }
-  }
-  return null;
-};
-
-export { buildReplayPatch, getDiff, toMoveDirection };
+export { buildReplayPatch, getDiff };

@@ -131,7 +131,10 @@ async function scenarioDisciplineStorage() {
       evidence: 'test evidence',
     });
     const listed = store.listUsersForAdmin().find((item) => item.username === 'discipline_user');
-    check('管理员查询包含封禁理由与证据', listed?.ban?.reason === '发布不当言论' && listed.ban.evidence === 'test evidence');
+    check(
+      '管理员查询包含封禁理由与证据',
+      listed?.ban?.reason === '发布不当言论' && listed.ban.evidence === 'test evidence',
+    );
     const restarted = new UserStore(dataDir);
     await restarted.ensureReady();
     const banStatus = restarted.getBanStatus('discipline_user');
@@ -139,7 +142,9 @@ async function scenarioDisciplineStorage() {
     const visibleMessage = formatBanMessage(banStatus);
     check(
       '普通用户提示包含理由和解除时间但不含证据',
-      visibleMessage === `该账号已被封禁。理由：发布不当言论。解除时间：${new Date(until).getFullYear()}-${String(new Date(until).getMonth() + 1).padStart(2, '0')}-${String(new Date(until).getDate()).padStart(2, '0')} ${String(new Date(until).getHours()).padStart(2, '0')}:${String(new Date(until).getMinutes()).padStart(2, '0')}。` && !visibleMessage.includes('test evidence'),
+      visibleMessage ===
+        `该账号已被封禁。理由：发布不当言论。解除时间：${new Date(until).getFullYear()}-${String(new Date(until).getMonth() + 1).padStart(2, '0')}-${String(new Date(until).getDate()).padStart(2, '0')} ${String(new Date(until).getHours()).padStart(2, '0')}:${String(new Date(until).getMinutes()).padStart(2, '0')}。` &&
+        !visibleMessage.includes('test evidence'),
     );
     check(
       '旧封禁无理由时使用管理员封禁并显示永久',
@@ -150,7 +155,12 @@ async function scenarioDisciplineStorage() {
       type: 'manual',
       reason: '过期测试',
     });
-    check('到期惰性恢复但保留历史', !restarted.getBanStatus('discipline_user').banned && restarted.listUsersForAdmin().find((item) => item.username === 'discipline_user').banHistory.length >= 2);
+    check(
+      '到期惰性恢复但保留历史',
+      !restarted.getBanStatus('discipline_user').banned &&
+        restarted.listUsersForAdmin().find((item) => item.username === 'discipline_user').banHistory.length >=
+          2,
+    );
   } finally {
     await rm(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
@@ -193,8 +203,17 @@ async function scenarioReplayStore() {
     await store.ensureReady();
 
     const mkReplay = (n) => ({
-      version: 'ops-v1',
-      meta: { width_ratio: 1, height_ratio: 1, city_ratio: 0, mountain_ratio: 0, swamp_ratio: 0, speed: 1 },
+      version: 'ops-v3',
+      exploration: [],
+      meta: {
+        width_ratio: 1,
+        height_ratio: 1,
+        city_ratio: 0,
+        mountain_ratio: 0,
+        swamp_ratio: 0,
+        speed: 1,
+        fog_mode: 'visible',
+      },
       total_turns: n,
       player_ops: [[{ op: 'w', n }]],
     });

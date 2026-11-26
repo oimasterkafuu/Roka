@@ -291,7 +291,10 @@ block content
               | （0.5~4）、&#32;
               code allow_team
               | 、
-              code fog
+              code fog_mode
+              | （
+              code normal|explored|visible
+              | ，默认 normal）、
               | 、
               code multi_line
               | （布尔值）、&#32;
@@ -320,7 +323,7 @@ block content
               code Asia/Shanghai
               | &#32;时区 10 月 1 日至 10 月 7 日开放；其他时间不能选用，已有配置在快照与开局时按&#32;
               code random
-              | &#32;使用。房间内有不允许组队的托管 bot 时不能开启组队；有第三方 bot 或未获相应许可的托管 bot 时，不能开启迷雾或全局队列。相关 bot 进房也会强制关闭对应设置。&#32;
+              | &#32;使用。房间内有不允许组队的托管 bot 时不能开启组队；有第三方 bot 或未获迷雾许可的托管 bot 时，迷雾只能为全部可视。没有相应许可的 bot 也会禁用全局队列。&#32;
           tr
             th
               code room_heartbeat
@@ -341,7 +344,7 @@ block content
             td
               | &#32;房间快照字段为&#32;
               code
-                | { speed, allow_team, fog, multi_line, map_size, map_token, map_token_custom, map_mode, map_region, in_game, update_queued, players, ready_counts }
+                | { speed, allow_team, fog_mode, multi_line, map_size, map_token, map_token_custom, map_mode, map_region, in_game, update_queued, players, ready_counts }
               | 。&#32;
               code multi_line=true
               | &#32;表示开启全局队列；
@@ -432,7 +435,7 @@ block content
         b 提示：
         | 准备阶段如果剩余成员全部带有&#32;
         code bot=true
-        | ，房间设置会恢复默认值：速度 1、不组队、无迷雾、无全局队列、随机地图、标准尺寸与新随机种子。对局结束时再执行这项检查。&#32;
+        | ，房间设置会恢复默认值：速度 1、不组队、正常迷雾、无全局队列、随机地图、标准尺寸与新随机种子。对局结束时再执行这项检查。&#32;
     section.doc-panel
       h2 4. 对局阶段协议
       h3
@@ -547,10 +550,12 @@ block content
               code fog
             td
               | &#32;可选数组，仅迷雾对局的实时帧下发。
-              code 1
-              | &#32;表示视野外，
               code 0
-              | &#32;表示可见；全视野接收者收到全 0 数组。差分帧同样使用 index-value 对。&#32;
+              | &#32;表示当前可见，
+              code 1
+              | &#32;表示视野外的浅灰格，
+              code 2
+              | &#32;表示从未探索的深灰格。全视野接收者在迷雾局收到全 0；全部可视模式不下发此数组。差分帧同样使用 index-value 对。&#32;
           tr
             th
               code lst_moves
@@ -640,14 +645,14 @@ block content
             th
               code 201
             td
-              | 山脉，不可通行。迷雾视野外的山脉仍编码为&#32;
+              | 山脉，不可通行。浅灰格内山脉仍编码为&#32;
               code 201
               | 。
           tr
             th
               code 204
             td
-              | 中立沼泽。迷雾视野外的沼泽统一编码为&#32;
+              | 中立沼泽。浅灰格内沼泽统一编码为&#32;
               code 204
               | ，不暴露归属。
       p
@@ -719,13 +724,12 @@ block content
         code isolated=2
         | ）：\[ n \leftarrow n - \max\left(1, \lceil 0.05\,n \rceil\right) \] 归零变中立并拆除建筑；重新连通后立即恢复正常且兵力翻倍。&#32;
       p 孤军格不能推兵或建造。
-      h3 5.4 迷雾远征
-      p 默认关闭。开启后，存活参赛者只收到己方队伍视野内的真实状态；观战者与已出局玩家默认全视野。
-      div.formula
-        | &#32;视野为己方任意格子的切比雪夫距离 1 范围：\[ \mathrm{visible}(i) = \exists (x, y) \in \text{己方格}:\ \max(|x_i-x|,\ |y_i-y|) \le 1 \]&#32;
+      h3 5.4 迷雾模式
+      p 正常（默认）按队共享当前视野和探索历史；已探索模式预先显示视野外的自然地形；全部可视开放全图。观战和已出局玩家默认全图。
+      p 己方格子总是可见；只有未断联的己方格子提供切比雪夫半径 1 的邻格视野。断联格不会探索邻格。
       ul
         li
-          | &#32;视野外：山脉为&#32;
+          | &#32;浅灰格：山脉为&#32;
           code 201
           | ，所有沼泽为&#32;
           code 204
@@ -738,6 +742,7 @@ block content
           | &#32;都为 0，
           code fog=1
           | 。&#32;
+        li 深灰格：服务端只下发空地 200，兵力和断联状态均为 0；不得将其视为已知可通行。
         li 视野内：真实地形、归属与兵力完整下发，包括敌方指挥所与主城。
         li
           | 观战者可用&#32;
@@ -755,8 +760,10 @@ block content
           | &#32;与回放 ID 的全量帧。部署清算也会走正常终局与结算流程。&#32;
         li
           | 回放以&#32;
-          code ops-v1
-          | &#32;操作流保存，观看时由引擎重建；bot 不需要消费回放数据。
+          code ops-v3
+          | &#32;保存成功操作和服务端首次探索增量，观看时由引擎重建为&#32;
+          code RPB5
+          | ；bot 不需要消费回放数据。
       h3 5.6 单线串行与全局队列并行
       p
         | &#32;两种模式都为每名玩家维护一个按到达顺序排列的队列。每条指令入队时获得单调递增的&#32;
@@ -952,7 +959,7 @@ block content
           code allowFog
           | 、
           code allowMultiLine
-          | &#32;决定对应房间设置是否可用；第三方 bot 不允许开启迷雾或全局队列。&#32;
+          | &#32;为布尔能力开关；未允许迷雾时，房间只可使用全部可视。第三方 bot 不支持迷雾或全局队列。&#32;
         li 策略要自行处理对局结束后的重新准备；管理器不保证自动重开。
         li
           | &#32;非托管 bot 进入已有托管 bot 的房间后，按服务器本地日历日累计停留最多 4 小时。到限后在准备阶段被移出，当天不能再次进入这类房间；对局中不会中途移出，断线重连保留计时。&#32;

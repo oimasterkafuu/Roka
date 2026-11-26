@@ -115,9 +115,10 @@ test('live and action replay initialization share deterministic, independently s
   assert.equal(base.m, generated.m);
   assert.deepEqual(frame.grid_type, base.grid_type);
   assert.deepEqual(frame.army_cnt, base.army_cnt);
-  for (const version of ['ops-v1', 'ops-v2']) {
+  {
     const replay = await GameEngine.buildReplayFromActions({
-      version,
+      version: 'ops-v3',
+      exploration: [],
       meta: live.replayMeta,
       total_turns: 1,
       player_ops: ids.map(() => [{ op: 'w', n: 1 }]),

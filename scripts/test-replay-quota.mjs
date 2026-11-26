@@ -172,7 +172,7 @@ try {
 
   viewError = true;
   assert.equal((await download('198.51.100.6', '/api/getreplay/broken')).statusCode, 404);
-  assert.equal(deleteCalls, 1, 'existing getreplay failure semantics remain');
+  assert.equal(deleteCalls, 0, 'an unreadable viewing replay must not delete the original archive');
   viewError = false;
   assert.equal((await download('198.51.100.6')).statusCode, 200, 'getreplay error releases concurrency');
 

@@ -61,4 +61,4 @@ const buildFullVisionArrays = (state: BoardState): FlatMapArrays => {
 };
 
 export { buildFullVisionArrays };
-export type { FlatMapArrays };
+export type { BoardState, FlatMapArrays };

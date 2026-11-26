@@ -1,38 +1,10 @@
-// 回放「队伍视角」：回放数据不含历史视野，按当前帧合并后的完整局面
-// 以与对局内相同的规则（己方格子切比雪夫半径 1 邻域可见）重算该队伍
-// 的迷雾格并写入全局 fog 数组（fog=1 表示视野外）；全知视角复位为全可见。
-function replayFogViewActive() {
-  return is_replay && replay_view_team > 0 && replay_data && replay_data.meta && replay_data.meta.fog;
-}
-
 function applyReplayFogView() {
-  var visible = null;
-  if (replayFogViewActive()) {
-    var teams = replay_data.meta.player_teams || [];
-    visible = Array(n);
-    for (var i = 0; i < n; i++) {
-      visible[i] = Array(m).fill(false);
-    }
-    for (var i = 0; i < n; i++) {
-      for (var j = 0; j < m; j++) {
-        var code = grid_type[i][j];
-        if (code >= 200) continue;
-        var ownerId = code % 50;
-        if (ownerId <= 0 || teams[ownerId - 1] != replay_view_team) continue;
-        for (var dx = -1; dx <= 1; dx++) {
-          var x = i + dx;
-          if (x < 0 || x >= n) continue;
-          for (var dy = -1; dy <= 1; dy++) {
-            var y = j + dy;
-            if (y >= 0 && y < m) visible[x][y] = true;
-          }
-        }
-      }
-    }
-  }
+  var history = replay_data.vision.get(replay_view_team);
+  var turn = cur_turn ? replay_data.patches[cur_turn - 1].forward.turn : replay_data.initial.turn;
+  var mode = replay_data.meta.fog_mode;
   for (var i = 0; i < n; i++) {
     for (var j = 0; j < m; j++) {
-      fog[i][j] = visible ? (visible[i][j] ? 0 : 1) : 0;
+      fog[i][j] = replayFogAt(history, mode, i * m + j, turn);
     }
   }
 }
@@ -110,17 +82,15 @@ function render() {
     for (var j = 0; j < m; j++) {
       var cls = 's' + scale,
         txt = '';
-      const groupLabel = showControlGroups ? control_group_labels.get(i * m + j) : undefined;
+      var fogState = fog[i][j];
+      const groupLabel =
+        showControlGroups && fogState !== 2 ? control_group_labels.get(i * m + j) : undefined;
       var cellType = displayGrid[i][j];
       var cellArmy = displayArmy[i][j];
-      // 迷雾格（仿原版）：山脉（201）与沼泽（204 / 150~199）保持可见，
-      // 其余一律抹成空地（200）；归属与兵力隐藏（实时对局服务端已过滤，
-      // 此处主要服务回放视角）。
-      if (fog[i][j]) {
-        var isMountain = cellType == 201;
-        var isSwamp = cellType == 204 || (cellType >= 150 && cellType < 200);
-        if (!isMountain && !isSwamp) cellType = 200;
-        else if (isSwamp) cellType = 204;
+      if (is_replay && fogState) {
+        if (fogState === 2) cellType = 200;
+        else if (cellType >= 150 && cellType < 200) cellType = 204;
+        else if (cellType !== 201 && cellType !== 204) cellType = 200;
         cellArmy = 0;
       }
 
@@ -155,10 +125,8 @@ function render() {
       } else if (cellType == 204) {
         cls += ' swamp';
       }
-      // 迷雾远征：视野外格子叠轻微暗色遮罩（归属/兵力已由服务端隐藏）。
-      if (fog[i][j]) {
-        cls += ' fog';
-      }
+      if (fogState === 1) cls += ' fog';
+      else if (fogState === 2) cls += ' fog-unexplored';
       if (i == selx && j == sely) {
         if (selt == 1) {
           cls += ' selected';
@@ -191,6 +159,7 @@ function render() {
         cls += ' has-control-group';
         txt += '<span class="control-group-label" title="' + groupLabel + '">' + groupLabel + '</span>';
       }
+      if (fogState === 2) txt = '';
       // 格子元素走 init_map 构建的缓存表（issue #87）：避免每帧每格两次
       // id 选择器查找；cell_html 影子表避免每帧 innerHTML 序列化读取。
       var cell = cell_elems[i][j];
@@ -210,7 +179,7 @@ function update(data, options) {
   if (!is_replay) {
     game_ended = Boolean(data.game_end);
     // 迷雾对局的帧始终携带 fog 数组（全视野接收者为全 0），据此判定是否显示观战视角选择。
-    if (typeof data.fog != 'undefined') fog_mode = true;
+    match_has_fog = typeof data.fog != 'undefined';
   }
   if (data.is_diff) {
     for (var i = 0; i * 2 < data.grid_type.length; i++) {
@@ -260,13 +229,12 @@ function update(data, options) {
     }
   }
   if (options && options.silent) {
-    // 回放跳转的中间帧（issue #87）：只应用上面的局面补丁，迷雾重算、
+    // 回放跳转的中间帧（issue #87）：只应用上面的局面补丁，视野查询、
     // render()、排行榜/统计图/回合计数器等界面刷新留待落点帧的完整
     // update() 一次处理（见 replay-controls.js jumpToFrame）。
     return;
   }
   if (is_replay) {
-    // 回放帧不带 fog 字段：按当前视角（全知/队伍）重算迷雾遮罩。
     applyReplayFogView();
   }
   if (player > 0) {

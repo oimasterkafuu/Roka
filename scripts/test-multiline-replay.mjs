@@ -18,7 +18,7 @@ const config = {
   swamp_ratio: 0,
   speed: 1,
   allow_team: false,
-  fog: false,
+  fog_mode: 'visible',
   multi_line: true,
   map_token: 'multiline-replay-fixture',
   map_mode: 'random',
@@ -157,34 +157,6 @@ assert.deepEqual(live.raw, fixture, 'fixture is reproduced by real play');
 for (const result of [live, single])
   compareReplay(await GameEngine.buildReplayFromActions(result.raw), result.frames);
 
-// Legacy selected-cell streams, including ignored historical line metadata.
-function toLegacy(raw) {
-  const legacy = structuredClone(raw);
-  legacy.version = 'ops-v1';
-  legacy.player_ops = legacy.player_ops.map((ops) =>
-    ops.flatMap((op) => {
-      if (op.op !== 'q') return [{ ...op, line: 2 }];
-      return op.actions.flatMap((a) => {
-        const selected = { op: 's', x: a.x, y: a.y, line: 2 };
-        if (a.kind !== 'm') return [selected, { op: a.kind, line: 2 }];
-        const d = [
-          [-1, 0],
-          [1, 0],
-          [0, -1],
-          [0, 1],
-        ].findIndex(([x, y]) => a.x + x === a.dx && a.y + y === a.dy);
-        return [
-          selected,
-          { op: 'm', d, ...(a.mode === 2 ? { a: 1 } : a.mode === 1 ? { h: 1 } : {}), line: 2 },
-        ];
-      });
-    }),
-  );
-  return legacy;
-}
-const legacy = toLegacy(single.raw);
-compareReplay(await GameEngine.buildReplayFromActions(legacy), single.frames);
-
 const [x, y] = live.crown;
 const [dx, dy] = live.branches[0];
 const opening = {
@@ -192,7 +164,8 @@ const opening = {
   total_turns: 51,
   player_ops: [[{ op: 'q', actions: [{ kind: 'm', x, y, dx, dy, mode: 2 }] }], []],
 };
-for (const raw of [opening, toLegacy(opening)]) {
+{
+  const raw = opening;
   for (const oldFlags of [
     {},
     {
@@ -225,9 +198,7 @@ needsBurst.player_ops[0].push(
   { op: 'w', n: 24 },
   { op: 'q', actions: [{ kind: 'm', x: dx, y: dy, dx: x, dy: y, mode: 2 }] },
 );
-for (const raw of [needsBurst, toLegacy(needsBurst)]) {
-  await assert.rejects(GameEngine.buildReplayFromActions(raw), /Tick 26.*未能执行/);
-}
+await assert.rejects(GameEngine.buildReplayFromActions(needsBurst), /Tick 26.*未能执行/);
 await assert.rejects(
   GameEngine.buildReplayFromActions({
     ...opening,
@@ -236,11 +207,11 @@ await assert.rejects(
   /回放不兼容/,
 );
 await assert.rejects(
-  GameEngine.buildReplayFromActions({ ...legacy, player_ops: [[{ op: 'b' }], []] }),
+  GameEngine.buildReplayFromActions({ ...opening, player_ops: [[{ op: 'b' }], []] }),
   /回放不兼容/,
 );
 console.log(
-  'PASS: both raw formats use current maps and growth; malformed, obsolete and unexecutable actions rejected',
+  'PASS: current raw format uses current maps and growth; malformed, obsolete and unexecutable actions rejected',
 );
 const malformed = structuredClone(live.raw);
 malformed.meta.multi_line = false;
@@ -270,10 +241,7 @@ try {
     ArrayBuffer,
     Uint8Array,
     DataView,
-    replay_binary_magic_v1: [82, 80, 66, 49],
-    replay_binary_magic_v2: [82, 80, 66, 50],
-    replay_binary_magic_v3: [82, 80, 66, 51],
-    replay_binary_magic: [82, 80, 66, 52],
+    replay_binary_magic: [82, 80, 66, 53],
     replay_text_decoder: new TextDecoder(),
     replay_class_from_code: ['', 'dead', 'afk'],
   });
@@ -285,26 +253,13 @@ try {
     binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength),
   );
   compareReplay(JSON.parse(JSON.stringify(decoded)), live.frames);
-  for (const version of [1, 2]) {
-    const bytes = encodeLegacyView(await GameEngine.buildReplayFromActions(legacy), version);
-    const old = context.decodeReplayBinary(
-      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-    );
-    compareReplay(
-      JSON.parse(JSON.stringify(old)),
-      version === 1
-        ? single.frames.map((frame) => ({ ...frame, isolated: frame.isolated.map(() => 0) }))
-        : single.frames,
-    );
-  }
-  console.log(
-    'PASS: legacy ops-v1 with line metadata, RPB1/RPB2 decoders, malformed single-line batch rejected',
-  );
+  assert.throws(() => context.decodeReplayBinary(Uint8Array.of(82, 80, 66, 52).buffer), /格式不支持/);
+  await assert.rejects(GameEngine.buildReplayFromActions({ ...opening, version: 'ops-v2' }), /版本不兼容/);
   if (process.argv.includes('--browser')) {
     await browserCheck(binary, live, rawBytes);
   }
   console.log(
-    `PASS: live -> raw ops -> ReplayStore raw upload/cache -> RPB4 decoder; ${live.frames.length} frames forward/backward; single-line <=1 action/tick`,
+    `PASS: live -> raw ops -> ReplayStore raw upload/cache -> RPB5 decoder; ${live.frames.length} frames forward/backward; single-line <=1 action/tick`,
   );
 } finally {
   await rm(dir, { recursive: true, force: true });
@@ -378,17 +333,6 @@ async function browserCheck(binary, live, rawBytes) {
     });
     if (process.env.ROKA_REPLAY_SCREENSHOT)
       await page.screenshot({ path: process.env.ROKA_REPLAY_SCREENSHOT });
-    // Historical frame objects may carry a scalar lst_move and line. Viewer maps are authoritative.
-    const oldState = await page.evaluate(() => {
-      jumpToFrame(240);
-      const patch = structuredClone(replay_data.patches[240].forward);
-      delete patch.lst_moves;
-      patch.lst_move = { x: 23, y: 1, dx: 24, dy: 1, mode: 2, line: 3 };
-      update(patch);
-      return { grid_type: grid_type.flat(), army_cnt: army_cnt.flat(), isolated: isolated.flat() };
-    });
-    for (const key of keys)
-      assert.deepEqual(oldState[key], live.frames[241][key], `legacy scalar browser ${key}`);
     assert.deepEqual(errors, []);
     console.log(
       'PASS: real authenticated HTTP upload -> Chromium game.html/main scripts, forward/reverse seek, autoplay ticks 241–244, zero page errors',
@@ -401,66 +345,3 @@ async function browserCheck(binary, live, rawBytes) {
 }
 
 export { live, compareReplay };
-
-// Historical wire layout: legacy surrender-progress pairs, no fog meta;
-// RPB1 has no isolated arrays. These fixtures use a connected real game.
-function encodeLegacyView(replay, version) {
-  const chunks = [];
-  const u8 = (n) => chunks.push(Buffer.from([n]));
-  const u16 = (n) => {
-    const b = Buffer.alloc(2);
-    b.writeUInt16LE(n);
-    chunks.push(b);
-  };
-  const u32 = (n) => {
-    const b = Buffer.alloc(4);
-    b.writeUInt32LE(n);
-    chunks.push(b);
-  };
-  const str = (s) => {
-    const b = Buffer.from(s);
-    u16(b.length);
-    chunks.push(b);
-  };
-  chunks.push(Buffer.from(`RPB${version}`));
-  u16(replay.n);
-  u16(replay.m);
-  u32(replay.patches.length);
-  function payload(p, diff) {
-    u32(p.turn);
-    u8(p.game_end ? 1 : 0);
-    u16(p.leaderboard.length);
-    for (const a of p.leaderboard) {
-      u8(a.team);
-      str(a.uid);
-      u32(a.army);
-      u32(a.land);
-      u8(a.class_ === 'dead' ? 1 : a.class_ === 'afk' ? 2 : 0);
-      u16(a.dead);
-      u8(a.id);
-    }
-    u16(1);
-    u8(1);
-    u8(0); // real nonempty historical surrender-progress field
-    for (const key of version === 1 ? ['grid_type', 'army_cnt'] : keys) {
-      const values = p[key];
-      u32(diff ? values.length / 2 : values.length);
-      for (let i = 0; i < values.length; i++) {
-        if (diff) u16(values[i++]);
-        (key === 'army_cnt' ? u32 : u8)(values[i]);
-      }
-    }
-  }
-  payload(replay.initial, false);
-  for (const patch of replay.patches) {
-    payload(patch.forward, true);
-    payload(patch.backward, true);
-  }
-  u8(1);
-  u16(replay.meta.player_names.length);
-  replay.meta.player_names.forEach((name, i) => {
-    str(name);
-    u8(replay.meta.player_teams[i]);
-  });
-  return Buffer.concat(chunks);
-}

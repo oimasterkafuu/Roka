@@ -31,7 +31,7 @@ import {
 } from './replay-store';
 import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText, renderRichTextWithMentions } from './text-render';
-import { FeedComment, FeedPost, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
+import { botForbidsFog, FeedComment, FeedPost, isFogMode, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { ChatModeration, CHAT_TEXT_MAX } from './server/chat-moderation';
 import { CaptchaService } from './server/captcha-service';
@@ -73,7 +73,7 @@ const gitCommit = (() => {
 
 const staticAssets = new StaticAssetDelivery(packageVersion);
 
-// 回放上传：接收原始 .rpl 文件（ops-v1 操作流，通常仅几百字节）。
+// 回放上传：接收包括操作与探索增量的原始 .rpl 文件。
 app.addContentTypeParser(
   'application/octet-stream',
   { parseAs: 'buffer', bodyLimit: 1024 * 1024 },
@@ -292,6 +292,7 @@ const buildMapExample = async (
     swamp_ratio: FIXED_SWAMP_RATIO,
     speed: 1,
     allow_team: false,
+    fog_mode: 'visible',
     map_token: mapToken,
     map_mode: mapMode,
     map_region: normalizeMapRegion(mapRegion),
@@ -1801,14 +1802,12 @@ const boot = async (listen = true): Promise<void> => {
           .type('application/octet-stream')
           .send(view.gzip);
       } catch {
-        // 加载/重建失败说明该回放已与当前版本不兼容，直接从库中删除。
-        await replayStore.deleteReplay(id);
-        return reply.code(404).send({ error: '回放不存在或已因不兼容被删除。' });
+        return reply.code(404).send({ error: '回放不存在或与当前版本不兼容。' });
       }
     }),
   );
 
-  // 下载回放：直接返回原始 .rpl 存储文件（ops-v1 操作流，通常仅几百字节）。
+  // 下载回放：直接返回原始 .rpl 存储文件。
   app.get('/api/downloadreplay/:id', async (request, reply) =>
     handleReplayDownload(request, reply, async () => {
       const { id } = request.params as { id: string };
@@ -2234,7 +2233,7 @@ const boot = async (listen = true): Promise<void> => {
 
       if (!lobbyService.lobbyOfSid.has(socket.id)) {
         const hadAllowTeam = lobbyService.lobbyConfig.get(room)?.allow_team === true;
-        const hadFog = lobbyService.lobbyConfig.get(room)?.fog === true;
+        const previousFogMode = lobbyService.lobbyConfig.get(room)?.fog_mode;
         const hadMultiLine = lobbyService.lobbyConfig.get(room)?.multi_line === true;
         const joinResult = lobbyService.joinLobby(socket.id, username, room, {
           serverBot: socket.data.isServerBot === true,
@@ -2269,14 +2268,13 @@ const boot = async (listen = true): Promise<void> => {
         ) {
           lobbyService.sendLobbySystemMessage(io, roomVal, '官方策略 Bot 进入房间，组队模式已关闭。');
         }
-        // 不允许迷雾的 Bot 进房会强制关闭迷雾远征（见 lobby-service.joinLobby），补充提示。
         if (
           socket.data.isBot === true &&
           socket.data.serverBotAllowFog !== true &&
-          hadFog &&
-          lobbyService.lobbyConfig.get(room)?.fog === false
+          previousFogMode !== 'visible' &&
+          lobbyService.lobbyConfig.get(room)?.fog_mode === 'visible'
         ) {
-          lobbyService.sendLobbySystemMessage(io, roomVal, 'Bot 进入房间，迷雾远征已关闭。');
+          lobbyService.sendLobbySystemMessage(io, roomVal, 'Bot 进入房间，迷雾模式已设为全部可视。');
         }
         // 不允许多线的 Bot 进房会强制关闭多线争锋（见 lobby-service.joinLobby），补充提示。
         if (
@@ -2438,24 +2436,17 @@ const boot = async (listen = true): Promise<void> => {
           }
         }
 
-        if (hasOwn('fog')) {
-          const fogRaw = payload.fog;
-          const fog = Boolean(fogRaw === true || fogRaw === 1 || fogRaw === '1' || fogRaw === 'true');
-          if (fog !== (oldConf.fog === true)) {
-            if (
-              fog &&
-              players.some(
-                (player) =>
-                  player.bot === true && (player.serverBot !== true || player.serverBotAllowFog !== true),
-              )
-            ) {
-              // 房间内有不支持迷雾的 Bot（第三方或未允许迷雾的官方托管）时禁止开启：
-              // 拒绝改动并回发房间状态复位前端开关。
-              lobbyService.sendLobbySystemMessage(io, roomVal, '房间内有 Bot 不支持迷雾远征，无法开启。');
+        if (hasOwn('fog_mode')) {
+          const mode = payload.fog_mode;
+          if (!isFogMode(mode)) {
+            lobbyService.emitRoomUpdate(io, gid);
+          } else if (mode !== oldConf.fog_mode) {
+            if (mode !== 'visible' && players.some(botForbidsFog)) {
+              lobbyService.sendLobbySystemMessage(io, roomVal, '房间内有 Bot 不支持迷雾，只能选择全部可视。');
               lobbyService.emitRoomUpdate(io, gid);
             } else {
-              nextConf.fog = fog;
-              changed.push('fog');
+              nextConf.fog_mode = mode;
+              changed.push('fog_mode');
             }
           }
         }

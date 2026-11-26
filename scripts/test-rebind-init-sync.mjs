@@ -10,7 +10,7 @@ const base = {
   swamp_ratio: 0,
   speed: 1,
   allow_team: false,
-  fog: false,
+  fog_mode: 'visible',
   multi_line: true,
   map_token: 'rebind-sync',
   map_mode: 'random',

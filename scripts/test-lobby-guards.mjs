@@ -529,7 +529,7 @@ async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
     reset.map_mode !== 'random' ||
     reset.map_size !== 'normal' ||
     reset.allow_team !== false ||
-    reset.fog !== false ||
+    reset.fog_mode !== 'visible' ||
     reset.map_token === MAP_RESET_TOKEN
   ) {
     throw new Error(`重置后的设置不是默认值：${JSON.stringify(reset)}`);
@@ -550,7 +550,12 @@ async function scenarioNoResetDuringGame(baseUrl, tokenA) {
     name: 'rstg-A',
   });
   await waitFor(() => a.clientId !== '', 5000, 'A 进房');
-  const bot = createRoomClient(baseUrl, { token: BOT_TOKEN, room: ROOM_RESET_GAME, autoReady: false, name: 'rstg-bot' });
+  const bot = createRoomClient(baseUrl, {
+    token: BOT_TOKEN,
+    room: ROOM_RESET_GAME,
+    autoReady: false,
+    name: 'rstg-bot',
+  });
   await waitFor(() => bot.clientId !== '', 5000, 'bot 进房');
 
   a.socket.emit('change_game_conf', { speed: 2, map_mode: 'maze' });

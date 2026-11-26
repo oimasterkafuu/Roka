@@ -23,7 +23,7 @@ export const mapConfig = (players, size, seed, overrides = {}) => {
     swamp_ratio: FIXED_SWAMP_RATIO,
     speed: 1,
     allow_team: false,
-    fog: false,
+    fog_mode: 'visible',
     multi_line: false,
     map_token: seed,
     map_mode: 'maze',

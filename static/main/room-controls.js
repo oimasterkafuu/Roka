@@ -158,12 +158,14 @@ function setAllowTeamModeByCode(allow) {
   setTabVal('team-mode', allow ? '允许' : '不允许');
 }
 
+const fogModeLabels = { normal: '正常', explored: '已探索', visible: '全部可视' };
+
 function getFogModeCode() {
-  return getTabVal('fog-mode') == '开启';
+  return Object.keys(fogModeLabels).find((mode) => fogModeLabels[mode] === getTabVal('fog-mode'));
 }
 
-function setFogModeByCode(fog) {
-  setTabVal('fog-mode', fog ? '开启' : '关闭');
+function setFogModeByCode(mode) {
+  setTabVal('fog-mode', fogModeLabels[mode]);
 }
 
 function getMultiLineModeCode() {
@@ -238,7 +240,7 @@ var spectate_view_teams = {};
 // 观战视角资格：迷雾对局中的纯观战者（中途进房/观战席/已战败/终局前），
 // 存活参赛者不可切换（服务端同样拒绝，防止借视角窥探他队视野）。
 function spectateViewEligible() {
-  return !is_replay && in_game && !game_ended && fog_mode && (player == 0 || self_team == 0);
+  return !is_replay && in_game && !game_ended && match_has_fog && (player == 0 || self_team == 0);
 }
 
 function onSpectateViewTab() {

@@ -169,23 +169,30 @@ async function connectHost(room, token) {
 async function setSwitches(room, expected) {
   const changed = waitRoomUpdate(
     room,
-    (data) => data.allow_team === expected && data.fog === expected && data.multi_line === expected,
+    (data) =>
+      data.allow_team === expected &&
+      data.fog_mode === (expected ? 'explored' : 'visible') &&
+      data.multi_line === expected,
     `${room} switches ${expected}`,
   );
   const socket = [...sockets].find((item) => item.hostRoom === room);
-  socket.emit('change_game_conf', { allow_team: expected, fog: expected, multi_line: expected });
+  socket.emit('change_game_conf', {
+    allow_team: expected,
+    fog_mode: expected ? 'explored' : 'visible',
+    multi_line: expected,
+  });
   await changed;
 }
 
 async function assertSwitchesRejected(room) {
   const before = roomUpdateCounts.get(room) ?? 0;
   const socket = [...sockets].find((item) => item.hostRoom === room);
-  socket.emit('change_game_conf', { allow_team: true, fog: true, multi_line: true });
+  socket.emit('change_game_conf', { allow_team: true, fog_mode: 'explored', multi_line: true });
   await sleep(500);
   assert.ok((roomUpdateCounts.get(room) ?? 0) > before, `${room} did not answer rejected config`);
   const data = latestRooms.get(room);
   assert.equal(data.allow_team, false, `${room} allow_team must stay locked`);
-  assert.equal(data.fog, false, `${room} fog must stay locked`);
+  assert.equal(data.fog_mode, 'visible', `${room} fog must stay locked`);
   assert.equal(data.multi_line, false, `${room} multi_line must stay locked`);
 }
 
@@ -203,7 +210,7 @@ async function startBot(username, room, template) {
     room,
     (data) =>
       data.allow_team === false &&
-      data.fog === false &&
+      data.fog_mode === 'visible' &&
       data.multi_line === false &&
       data.players?.some(
         (player) =>
@@ -311,7 +318,7 @@ async function main() {
   assert.equal(disabled.status, 200, JSON.stringify(disabled.data));
   const locked = waitRoomUpdate(
     yuelanRoom,
-    (data) => data.allow_team === false && data.fog === false && data.multi_line === false,
+    (data) => data.allow_team === false && data.fog_mode === 'visible' && data.multi_line === false,
     'yuelan locks close room switches',
   );
   await locked;

@@ -423,7 +423,9 @@ async function main() {
   });
   const antiClientId = new Promise((resolve) => antiSocket.once('set_id', resolve));
   let antiRoom;
-  antiSocket.on('room_update', (data) => { antiRoom = data; });
+  antiSocket.on('room_update', (data) => {
+    antiRoom = data;
+  });
   await new Promise((resolve, reject) => {
     antiSocket.once('connect', resolve);
     antiSocket.once('connect_error', reject);
@@ -444,20 +446,25 @@ async function main() {
     );
     antiSocket.emit('join_game_room', { room: ANTI_ROOM });
     const joinedRoom = await joined;
-    assert.equal(joinedRoom.players.find((p) => p.uid === NORMAL_USER)?.ai, undefined, '房主必须通过真人验证');
+    assert.equal(
+      joinedRoom.players.find((p) => p.uid === NORMAL_USER)?.ai,
+      undefined,
+      '房主必须通过真人验证',
+    );
     log('anti-human 校验通过：allowTeam=true 的 bot 独占房间时组队默认关闭，由房主决定');
 
-    if (!antiRoom.players.find((p) => p.uid === ANTI_USER)?.ready) await waitRoomUpdate(
-      antiSocket,
-      (d) => d.players.find((p) => p.uid === ANTI_USER)?.ready === true,
-      20_000,
-      'anti-human bot 自动准备',
-    );
+    if (!antiRoom.players.find((p) => p.uid === ANTI_USER)?.ready)
+      await waitRoomUpdate(
+        antiSocket,
+        (d) => d.players.find((p) => p.uid === ANTI_USER)?.ready === true,
+        20_000,
+        'anti-human bot 自动准备',
+      );
     assert.equal(antiRoom.in_game, false, '真人尚未准备时，Bot 自动准备不得提前开局');
     log('anti-human 校验通过：bot 无需聊天命令即自动准备，真人未准备时仍在等待区');
 
-    const fogOn = waitRoomUpdate(antiSocket, (d) => d.fog === true, 10_000, 'allowFog 开启');
-    antiSocket.emit('change_game_conf', { fog: true });
+    const fogOn = waitRoomUpdate(antiSocket, (d) => d.fog_mode === 'explored', 10_000, 'allowFog 开启');
+    antiSocket.emit('change_game_conf', { fog_mode: 'explored' });
     const fogRoom = await fogOn;
     const fogBot = fogRoom.players.find((p) => p.uid === ANTI_USER);
     if (!fogBot || fogBot.server_bot_allow_fog !== true) {
@@ -467,8 +474,8 @@ async function main() {
       );
     }
     log('anti-human 校验通过：allowFog=true 的房间允许房主开启迷雾远征');
-    const fogOff = waitRoomUpdate(antiSocket, (d) => d.fog === false, 10_000, 'allowFog 关闭');
-    antiSocket.emit('change_game_conf', { fog: false });
+    const fogOff = waitRoomUpdate(antiSocket, (d) => d.fog_mode === 'visible', 10_000, 'allowFog 关闭');
+    antiSocket.emit('change_game_conf', { fog_mode: 'visible' });
     await fogOff;
 
     // 房主（普通用户）开启组队不应被拒绝（allowTeam=true 的托管 bot 房间不受限）。

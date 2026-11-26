@@ -9,7 +9,7 @@
  *
  * 数据路径（服务器上写死，可用 --data-dir 覆盖）：
  *   <dataDir>/replays/index.bin   v8.deserialize 的对局索引（ReplayListItem[]：id/time/rank/turn）
- *   <dataDir>/replays/<id>.rpl    v8.deserialize(brotliDecompress(...))，ops-v1 操作流，meta 含
+ *   <dataDir>/replays/<id>.rpl    v8.deserialize(brotliDecompress(...))，回放存档，meta 含
  *                                 player_names / player_teams / map_mode 等
  *   <dataDir>/users.bin           v8.deserialize(brotliDecompress(...))，{ users: StoredUser[] }
  *
@@ -219,7 +219,8 @@ const main = async () => {
         if (other === team) {
           continue;
         }
-        expected += 1 / (1 + 10 ** (((teamRating.get(other) ?? 1200) - (teamRating.get(team) ?? 1200)) / 400));
+        expected +=
+          1 / (1 + 10 ** (((teamRating.get(other) ?? 1200) - (teamRating.get(team) ?? 1200)) / 400));
       }
       expected /= teams.length - 1;
       const delta = RATING_K * (score - expected);
@@ -320,11 +321,7 @@ const main = async () => {
   }
 
   // ---- --apply：强制带时间戳备份，再以与 auth-store.persist 逐字节一致的格式写回 ----
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:]/g, '')
-    .replace(/\..+$/, '')
-    .replace('T', '-');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
   const backupPath = `${USERS_BIN}.recalc-backup-${stamp}`;
   await copyFile(USERS_BIN, backupPath);
   console.log(`已备份: ${backupPath}`);

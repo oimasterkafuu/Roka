@@ -1,4 +1,3 @@
-import { MOVE_DX, MOVE_DY } from '../map/map-core';
 import type { ReplayActionData, ReplayExecutedOp } from '../types';
 
 const buildScheduledReplayActions = (replay: ReplayActionData, rows: number, cols: number) => {
@@ -18,7 +17,6 @@ const buildScheduledReplayActions = (replay: ReplayActionData, rows: number, col
 
   for (const [player, ops] of replay.player_ops.entries()) {
     let turn = 1;
-    let selected: [number, number] | null = null;
     const invalid = () => new Error(`回放不兼容：玩家 ${player + 1} 在 Tick ${turn} 的操作无效。`);
     const batch = (actions: ReplayExecutedOp[]) => {
       if (!Array.isArray(actions) || !actions.length) throw invalid();
@@ -43,41 +41,12 @@ const buildScheduledReplayActions = (replay: ReplayActionData, rows: number, col
             throw invalid();
           turn += op.n;
           break;
-        case 's':
-          if (!onMap(op.x, op.y)) throw invalid();
-          selected = [op.x, op.y];
-          break;
         case 'r':
           scheduledSurrenders[player].add(turn++);
-          selected = null;
           break;
         case 'q':
           batch(op.actions);
-          selected = null;
           break;
-        case 'b':
-        case 'c':
-          if (!selected) throw invalid();
-          batch([{ kind: op.op, x: selected[0], y: selected[1] }]);
-          break;
-        case 'm': {
-          if (
-            !selected ||
-            !Number.isInteger(op.d) ||
-            op.d < 0 ||
-            op.d >= MOVE_DX.length ||
-            (op.a !== undefined && op.a !== 1) ||
-            (op.h !== undefined && op.h !== 1) ||
-            (op.a && op.h)
-          )
-            throw invalid();
-          const [x, y]: [number, number] = selected;
-          const dx: number = x + MOVE_DX[op.d];
-          const dy: number = y + MOVE_DY[op.d];
-          batch([{ kind: 'm', x, y, dx, dy, mode: op.a ? 2 : op.h ? 1 : 0 }]);
-          selected = [dx, dy];
-          break;
-        }
         default:
           throw invalid();
       }

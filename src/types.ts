@@ -1,4 +1,8 @@
 export const MAX_TEAMS = 16;
+export const FOG_MODES = ['normal', 'explored', 'visible'] as const;
+export type FogMode = (typeof FOG_MODES)[number];
+export const isFogMode = (value: unknown): value is FogMode => FOG_MODES.some((mode) => mode === value);
+export const REPLAY_OPS_VERSION = 'ops-v3';
 
 export type MapRegion = 'qin' | 'han' | 'tang' | 'song' | 'yuan' | 'ming' | 'liao' | 'china' | 'taiwan';
 
@@ -32,8 +36,7 @@ export interface LobbyConfig {
   swamp_ratio: number;
   speed: number;
   allow_team: boolean;
-  /** 迷雾远征开关：开启后玩家仅可见己方队伍视野范围内的归属与兵力。 */
-  fog: boolean;
+  fog_mode: FogMode;
   /** 多线争锋开关：开启后每名玩家维护多条战线队列，每 Tick 轮转调度。 */
   multi_line: boolean;
   map_token: string;
@@ -63,6 +66,9 @@ export interface LobbyPlayer {
   bot?: boolean;
 }
 
+export const botForbidsFog = (player: LobbyPlayer): boolean =>
+  player.bot === true && (player.serverBot !== true || player.serverBotAllowFog !== true);
+
 export interface RoomPlayerView {
   sid: string;
   uid: string;
@@ -85,8 +91,7 @@ export interface RoomPlayerView {
 export interface RoomUpdatePayload {
   speed: number;
   allow_team: boolean;
-  /** 迷雾远征开关（房间设置同步给前端展示）。 */
-  fog: boolean;
+  fog_mode: FogMode;
   /** 多线争锋开关（房间设置同步给前端展示）。 */
   multi_line: boolean;
   map_token: string;
@@ -147,8 +152,8 @@ export interface UpdatePayload {
   army_cnt: number[];
   isolated: number[];
   /**
-   * 迷雾远征扁平数组（1 = 视野外迷雾格），仅迷雾开启的实时对局下发；
-   * diff 帧中与 grid_type 一样以 [index, value] 对编码。回放不含此字段。
+   * 0 当前可见，1 视野外且已探索，2 从未探索；全部可视不下发。
+   * diff 帧与 grid_type 一样以 [index, value] 对编码。
    */
   fog?: number[];
   lst_moves: number[];
@@ -187,7 +192,13 @@ export interface ReplayData {
   m: number;
   initial: ReplayFrame;
   patches: ReplayPatch[];
-  meta?: ReplayMeta;
+  meta: ReplayMeta;
+  vision: Map<number, ReplayTeamVision>;
+}
+
+export interface ReplayTeamVision {
+  omniscientFrom: number | null;
+  cells: Map<number, number[]>;
 }
 
 export interface GameConfig extends LobbyConfig {
@@ -203,8 +214,7 @@ export interface ReplayMeta {
   swamp_ratio: number;
   speed: number;
   allow_team: boolean;
-  /** 对局是否开启迷雾远征（仅作元信息记录；回放始终全视野）。 */
-  fog?: boolean;
+  fog_mode: FogMode;
   /** 对局是否开启多线争锋（仅作元信息记录；回放操作流与单线局同构）。 */
   multi_line?: boolean;
   map_token: string;
@@ -231,29 +241,6 @@ export interface ReplayListItem {
   teams?: { members: string[]; color: number }[];
 }
 
-export type ReplayMoveDirection = 0 | 1 | 2 | 3;
-
-export interface ReplayPlayerOpSelect {
-  op: 's';
-  x: number;
-  y: number;
-}
-
-export interface ReplayPlayerOpMove {
-  op: 'm';
-  d: ReplayMoveDirection;
-  h?: 1;
-  a?: 1;
-}
-
-export interface ReplayPlayerOpBuild {
-  op: 'b';
-}
-
-export interface ReplayPlayerOpUpgrade {
-  op: 'c';
-}
-
 export interface ReplayPlayerOpWait {
   op: 'w';
   n: number;
@@ -273,20 +260,15 @@ export interface ReplayPlayerOpBatch {
   actions: ReplayExecutedOp[];
 }
 
-export type ReplayPlayerOp =
-  | ReplayPlayerOpBatch
-  | ReplayPlayerOpSelect
-  | ReplayPlayerOpMove
-  | ReplayPlayerOpBuild
-  | ReplayPlayerOpUpgrade
-  | ReplayPlayerOpWait
-  | ReplayPlayerOpSurrender;
+export type ReplayPlayerOp = ReplayPlayerOpBatch | ReplayPlayerOpWait | ReplayPlayerOpSurrender;
 
 export interface ReplayActionData {
-  version: 'ops-v1' | 'ops-v2';
+  version: typeof REPLAY_OPS_VERSION;
   meta: ReplayMeta;
   total_turns: number;
   player_ops: ReplayPlayerOp[][];
+  /** 正常模式按队伍存首见增量 [格子下标, Tick, ...]；其他模式为空。 */
+  exploration: [number, Uint32Array][];
   /** AFK eliminations after tick movement/connectivity: [tick, zero-based player index]. */
   afk_surrenders?: Array<[number, number]>;
 }

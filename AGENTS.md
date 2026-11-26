@@ -29,6 +29,11 @@
   - 修改行为时，需同步更新 `README.md`（如运行方式、接口、配置变化）。
   - 涉及结构/功能变化时（新增/删除/移动文件、改动文件职责、改协议或数据格式），需同步更新根目录 `MAP.md` 项目地图。
 
+## 迷雾与回放协议
+
+- 房间 `fog_mode` 为 `normal | explored | visible`；服务端在初始帧和每个实际 Tick 计算队伍视野，并独立维护各连接的差分基线。客户端不得从全知棋盘推测探索历史。
+- `ops-v3` 原始回放保存首次探索增量，`RPB5` 观看数据保存可按 Tick 查询的可见性变化。改动协议时同时更新存储、编码、解码、缓存校验和测试；不可增加旧格式兼容路径。
+
 ## 分支与推送流程
 
 - **任何更新完成并验证后，第一时间推送到 GitHub**。生产部署以 GitHub `main` 为准（webhook 触发自动 `git reset --hard origin/main` + 构建 + 重启）：只在本地改等于没有生效，且未推送的本地改动会被下一次自动部署直接覆盖丢失。
@@ -109,7 +114,7 @@
 示例：
 
 ```text
-feat(replay): support ops-v1 binary patch stream
+feat(replay): record team exploration history
 fix(auth): invalidate previous session on re-login
 docs(readme): replace npm commands with pnpm
 chore(deps): migrate lockfile to pnpm-lock.yaml

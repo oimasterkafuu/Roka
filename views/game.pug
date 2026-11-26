@@ -150,13 +150,14 @@ html
             div.inline-button 允许
           p#team-mode-bot-hint(style='display: none') 房间内有官方策略 Bot，不允许组队。
         div#fog-mode-section
-          h3 迷雾远征：
+          h3 迷雾模式：
           div#tabs-fog-mode.tabs.background.unselectable
-            input(type='hidden', value='关闭')
-            div.inline-button.inverted 关闭
-            div.inline-button 开启
-          p 开启后仅可见己方队伍周围一圈的归属与兵力，其余地块加暗色遮罩。
-          p#fog-mode-bot-hint(style='display: none') Bot 对局不支持迷雾远征。
+            input(type='hidden', value='正常')
+            div.inline-button.inverted 正常
+            div.inline-button 已探索
+            div.inline-button 全部可视
+          p 队友共享视野，断联格只看自身。正常模式下，探索前不显示地形。
+          p#fog-mode-bot-hint(style='display: none') 房间内有不支持迷雾的 Bot，只能全部可视。
         div#multi-line-mode-section
           h3 多线争锋：
           div#tabs-multi-line-mode.tabs.background.unselectable

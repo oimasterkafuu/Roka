@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { REPLAY_OPS_VERSION } from '../dist/types.js';
 const require = createRequire(import.meta.url);
 const { GameEngine } = require('../dist/game-engine.js');
 const { MOVE_DX, MOVE_DY } = require('../dist/map/map-core.js');
@@ -16,7 +17,7 @@ const context = vm.createContext({
   ArrayBuffer,
   Uint8Array,
   DataView,
-  replay_binary_magic: [82, 80, 66, 52],
+  replay_binary_magic: [82, 80, 66, 53],
   replay_text_decoder: new TextDecoder(),
   replay_class_from_code: ['', 'dead', 'afk'],
 });
@@ -37,7 +38,7 @@ try {
         map_mode: 'random',
         map_region: 'china',
         allow_team: teamed,
-        fog: false,
+        fog_mode: 'visible',
         multi_line: false,
         map_size: 'normal',
         player_names: ['alice', 'bob', 'carol'],
@@ -142,6 +143,7 @@ const meta = {
   map_token: 'replay-termination-143',
   map_mode: 'maze',
   allow_team: false,
+  fog_mode: 'visible',
   player_names: ['alice', 'bob', 'carol'],
   player_teams: [1, 2, 3],
 };
@@ -163,14 +165,19 @@ const direction = MOVE_DX.findIndex((rowOffset, index) => {
 });
 assert.ok(direction >= 0, 'the first seat needs an adjacent plain tile');
 const replay = await GameEngine.buildReplayFromActions({
-  version: 'ops-v1',
+  version: REPLAY_OPS_VERSION,
+  exploration: [],
   meta,
   total_turns: 2151,
   player_ops: [
     [
       { op: 'w', n: 600 },
-      { op: 's', x: row, y: col },
-      { op: 'm', d: direction, a: 1 },
+      {
+        op: 'q',
+        actions: [
+          { kind: 'm', x: row, y: col, dx: row + MOVE_DX[direction], dy: col + MOVE_DY[direction], mode: 2 },
+        ],
+      },
     ],
     [{ op: 'w', n: 2150 }, { op: 'r' }],
     [{ op: 'w', n: 138 }, { op: 'r' }],

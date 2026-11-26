@@ -397,7 +397,7 @@ function createArena({
       swamp_ratio: configured.swamp_ratio ?? 0.05,
       speed: configured.speed ?? 1,
       allow_team: configured.allow_team ?? false,
-      fog: configured.fog ?? Boolean(fog),
+      fog_mode: configured.fog_mode ?? (fog ? 'normal' : 'visible'),
       multi_line: configured.multi_line === true,
       map_token: configured.map_token ?? String(seed),
       map_mode: configuredMode,

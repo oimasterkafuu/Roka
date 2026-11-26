@@ -85,10 +85,14 @@ pnpm run dev        # http://localhost:23333
       </section>
       <section class="doc-panel">
         <h2>3. 项目结构</h2>
+        <p>
+          迷雾模式由房间配置 fog_mode 声明。实时视野和首次探索由服务端维护；原始回放 ops-v3
+          保存首见增量，浏览器从 RPB5 读取任意 Tick 的队伍视野。
+        </p>
         <pre class="code-snippet"><code>src/           后端 TypeScript 源码
   server.ts      唯一入口：Fastify 路由与 Socket.IO 事件
   game-engine.ts 对局核心：Tick、战斗、连通、投降与回放
-  game-engine/   常量、选点、榜单、编码、迷雾、回放与增兵模块
+  game-engine/   常量、选点、榜单、队伍视野与探索、回放与增兵模块
   map/           地图生成器与华夏地区配置
   server/        认证、验证码、房间、在线状态、托管与部署服务
   types.ts       共享类型与协议定义

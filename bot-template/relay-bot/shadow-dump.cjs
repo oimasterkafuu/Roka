@@ -70,7 +70,7 @@ function cities(engine, player) {
 async function play() {
   const names = ['bot3', 'relay'];
   const ratio = resolveMapSizeRatioByPlayers(2) * (large ? 2 : 1);
-  const flags = { multi_line: multi, fog };
+  const flags = { multi_line: multi, fog_mode: fog ? 'normal' : 'visible' };
   const ids = ['seat1', 'seat2'];
   const sockets = ids.map(() => new EventEmitter());
   const handles = [];
