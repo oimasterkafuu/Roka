@@ -586,7 +586,8 @@ socket.on('set_id', (id) =&gt; {
           &#32;断链瞬间兵力减半：\[ n' = \lfloor n / 2 \rfloor \quad (n = 1 \text{ 时保持 } 1) \]
           减半后归零直接变中立。前 10 Tick 为宽限期（<code>isolated=1</code>）；第 11 Tick 起每 2 Tick
           衰减一次（<code>isolated=2</code>）：\[ n \leftarrow n - \max\left(1, \lceil 0.05\,n \rceil\right)
-          \] 归零变中立并拆除建筑；重新连通后立即恢复正常且兵力翻倍。&#32;
+          \] 归零变中立并拆除建筑；重新连通后立即恢复正常，仅当前兵力大于 1
+          且本次孤军期间未接兵的格子兵力翻倍。&#32;
         </div>
         <p>孤军格不能推兵或建造。</p>
         <h3>5.4 迷雾模式</h3>

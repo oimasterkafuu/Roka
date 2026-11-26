@@ -1553,8 +1553,8 @@ export class GameEngine {
         const wasIsolated = this.isolated[i][j];
         if (connected[i][j]) {
           if (wasIsolated) {
-            // 仅未接兵的孤军恢复翻倍；接兵标记在本次重连后清除。
-            if (!this.isolatedReinforced[i][j]) this.armyCnt[i][j] *= 2;
+            // 仅未接兵且兵力大于 1 的孤军恢复翻倍；接兵标记在本次重连后清除。
+            if (this.armyCnt[i][j] > 1 && !this.isolatedReinforced[i][j]) this.armyCnt[i][j] *= 2;
             this.isolated[i][j] = false;
             this.isolatedAge[i][j] = 0;
             this.isolatedReinforced[i][j] = false;

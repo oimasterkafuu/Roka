@@ -76,6 +76,23 @@
   color: #ffffff !important;
   text-shadow: 0 0 2px black;
 }
+#game-leaderboard
+  td.leaderboard-name
+  a:is(
+    .rt-unrated,
+    .rt-gray,
+    .rt-green,
+    .rt-cyan,
+    .rt-blue,
+    .rt-violet,
+    .rt-orange,
+    .rt-red,
+    .rt-admin,
+    .rt-banned
+  )
+  .username-star-initial {
+  color: #ffffff !important;
+}
 /* 组队局回放排行榜：队条目加粗显示团队合计，成员行缩进弱化 */
 #game-leaderboard tr.lb-team td {
   font-family: Quicksand-Bold, HYMaQiDuo-Bold;

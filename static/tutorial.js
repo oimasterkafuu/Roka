@@ -164,7 +164,7 @@
     },
     {
       title: '连通与孤军',
-      body: '己方格经己方格四方向连通到任意己方主城或指挥所 = 正常；组队时只计算队内存活成员的格子与锚点。与所有锚点断开的领土会沦为孤军：兵力立即减半（1 兵保持为 1）、无法操作；前 10 Tick 为宽限期不衰减，此后每 2 Tick 衰减 5%，归零变中立；重新连通后兵力翻倍。请看左下角演示区。',
+      body: '己方格经己方格四方向连通到任意己方主城或指挥所 = 正常；组队时只计算队内存活成员的格子与锚点。与所有锚点断开的领土会沦为孤军：兵力立即减半（1 兵保持为 1）、无法操作；前 10 Tick 为宽限期不衰减，此后每 2 Tick 衰减 5%，归零变中立；恢复连通时，只有未接兵且当前兵力大于 1 的格子翻倍。请看左下角演示区。',
       hint: '观察左下角演示区。',
       targets: DEMO_CELLS,
       manual: true,
@@ -954,7 +954,7 @@
   }
 
   // 重算双方连通（以己方主城/指挥所为锚点）：断链减半（1 兵保持为 1）、
-  // 前 10 Tick 宽限期只快速闪烁不衰减，此后每 2 Tick 衰减 5%、重连 ×2。
+  // 前 10 Tick 宽限期只快速闪烁不衰减，此后每 2 Tick 衰减 5%、重连时 1 兵不翻倍。
   function applyConnectivity() {
     const owners = [PLAYER_ID, ENEMY_ID];
     for (let o = 0; o < owners.length; o += 1) {
@@ -970,7 +970,7 @@
             if (state.isolated[x][y]) {
               state.isolated[x][y] = false;
               state.isolatedAge[x][y] = 0;
-              tile.army *= 2;
+              if (tile.army > 1) tile.army *= 2;
             }
             continue;
           }
@@ -1061,7 +1061,7 @@
       const link = tileAt(DEMO.link[0], DEMO.link[1]);
       link.owner = PLAYER_ID;
       link.army = 10;
-      state.demoHint = '增援收复要道：孤军重新连通，兵力按当前值翻倍恢复。演示结束，点击「继续」。';
+      state.demoHint = '增援收复要道：未接兵的孤军恢复连通，兵力大于 1 的格子翻倍。演示结束，点击「继续」。';
     }
   }
 

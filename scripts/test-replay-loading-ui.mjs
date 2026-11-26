@@ -82,6 +82,34 @@ try {
       }
     });
     await page.goto('http://roka.test/');
+    const leaderboardColors = await page.evaluate(() => {
+      const leaderboard = document.createElement('table');
+      leaderboard.id = 'game-leaderboard';
+      leaderboard.innerHTML =
+        '<tr><td class="leaderboard-name"><a class="rt-orange" href="#"><span class="username-star-initial">A</span>lice</a></td></tr>';
+      document.body.append(leaderboard);
+      const link = leaderboard.querySelector('a');
+      const textNodes = [];
+      const walker = document.createTreeWalker(link, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        textNodes.push({ text: node.nodeValue, color: getComputedStyle(node.parentElement).color });
+      }
+      const outside = document.createElement('a');
+      outside.className = 'rt-orange';
+      outside.textContent = 'outside';
+      document.body.append(outside);
+      return {
+        textNodes,
+        linkColor: getComputedStyle(link).color,
+        outsideColor: getComputedStyle(outside).color,
+      };
+    });
+    assert.deepEqual(leaderboardColors.textNodes, [
+      { text: 'A', color: 'rgb(255, 255, 255)' },
+      { text: 'lice', color: 'rgb(255, 255, 255)' },
+    ]);
+    assert.equal(leaderboardColors.linkColor, 'rgb(255, 255, 255)');
+    assert.equal(leaderboardColors.outsideColor, 'rgb(255, 140, 0)');
     await page.addScriptTag({ content: loading });
     await page.evaluate(() => {
       // Minimal DOM adapter for the unchanged loading function's jQuery API.

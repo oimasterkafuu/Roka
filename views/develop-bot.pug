@@ -722,7 +722,7 @@ block content
         code isolated=1
         | ）；第 11 Tick 起每 2 Tick 衰减一次（
         code isolated=2
-        | ）：\[ n \leftarrow n - \max\left(1, \lceil 0.05\,n \rceil\right) \] 归零变中立并拆除建筑；重新连通后立即恢复正常且兵力翻倍。&#32;
+        | ）：\[ n \leftarrow n - \max\left(1, \lceil 0.05\,n \rceil\right) \] 归零变中立并拆除建筑；重新连通后立即恢复正常，仅当前兵力大于 1 且本次孤军期间未接兵的格子兵力翻倍。&#32;
       p 孤军格不能推兵或建造。
       h3 5.4 迷雾模式
       p 正常（默认）按队共享当前视野和探索历史；已探索模式预先显示视野外的自然地形；全部可视开放全图。观战和已出局玩家默认全图。

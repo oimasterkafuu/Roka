@@ -59,13 +59,34 @@ for (const multi of [false, true])
     for (const dead of [false, true]) {
       const e = await setup({ owner, dead, multi });
       assert.equal(e.attack(2, 2, 2, 3, 2), true);
+      assert.equal(e.armyCnt[2][3], 15);
+      assert.equal(e.isolatedReinforced[2][3], true);
       e.applyConnectivity();
       assert.equal(e.armyCnt[2][3], 15, `owner=${owner} dead=${dead} multi=${multi}`);
+      assert.equal(e.isolated[2][3], false);
+      assert.equal(e.isolatedAge[2][3], 0);
       assert.equal(e.isolatedReinforced[2][3], false);
     }
-const normal = await setup();
-normal.applyConnectivity();
-assert.equal(normal.armyCnt[2][3], 10);
+for (const { beforeCut, beforeReconnect, afterReconnect } of [
+  { beforeCut: 1, beforeReconnect: 1, afterReconnect: 1 },
+  { beforeCut: 3, beforeReconnect: 1, afterReconnect: 1 },
+  { beforeCut: 4, beforeReconnect: 2, afterReconnect: 4 },
+]) {
+  const e = await setup();
+  e.armyCnt[2][3] = beforeCut;
+  e.isolated[2][3] = false;
+  e.isolatedAge[2][3] = 0;
+  e.gridType[2][2] = 0;
+  e.applyConnectivity();
+  assert.equal(e.armyCnt[2][3], beforeReconnect);
+  assert.equal(e.isolated[2][3], true);
+  assert.equal(e.isolatedReinforced[2][3], false);
+  e.gridType[2][2] = -2;
+  e.applyConnectivity();
+  assert.equal(e.armyCnt[2][3], afterReconnect, `reconnect after cutting ${beforeCut} armies`);
+  assert.equal(e.isolated[2][3], false);
+  assert.equal(e.isolatedAge[2][3], 0);
+}
 const delayed = await setup({ dead: true });
 delayed.gridType[2][2] = 0;
 delayed.attack(2, 2, 2, 3, 2);
