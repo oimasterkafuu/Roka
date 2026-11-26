@@ -209,7 +209,6 @@ export interface ReplayMeta {
   multi_line?: boolean;
   map_token: string;
   map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
-  maze_layout?: 'fair-v1';
   /** 新回放写入地区；旧回放缺省时按汉重建。 */
   map_region?: MapRegion;
   player_names: string[];

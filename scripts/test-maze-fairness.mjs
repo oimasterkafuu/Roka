@@ -105,13 +105,14 @@ test('live and action replay initialization share deterministic, independently s
   });
   assert.deepEqual(seats, expected);
   const base = await GameEngine.buildReplayBaseMap(config);
-  assert.equal(JSON.stringify(base), JSON.stringify(await GameEngine.buildReplayBaseMap(config)));
+  assert.deepEqual(base, await GameEngine.buildReplayBaseMap(config));
   assert.notDeepEqual(
     base.grid_type,
     (await GameEngine.buildReplayBaseMap({ ...config, map_token: 'different-maze' })).grid_type,
   );
   const frame = live.buildReplayFrame(false);
-  assert.equal(live.replayMeta.maze_layout, 'fair-v1');
+  assert.equal(base.n, generated.n);
+  assert.equal(base.m, generated.m);
   assert.deepEqual(frame.grid_type, base.grid_type);
   assert.deepEqual(frame.army_cnt, base.army_cnt);
   for (const version of ['ops-v1', 'ops-v2']) {
@@ -121,6 +122,8 @@ test('live and action replay initialization share deterministic, independently s
       total_turns: 1,
       player_ops: ids.map(() => [{ op: 'w', n: 1 }]),
     });
+    assert.equal(replay.n, base.n);
+    assert.equal(replay.m, base.m);
     assert.deepEqual(replay.initial, frame);
     assert.equal(replay.patches.length, 1);
   }

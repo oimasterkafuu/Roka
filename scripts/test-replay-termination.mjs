@@ -7,9 +7,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { GameEngine } = require('../dist/game-engine.js');
-const { deserialize, serialize } = require('node:v8');
-const { brotliDecompressSync, gunzipSync } = require('node:zlib');
-const { getReplayId, ReplayStore } = require('../dist/replay-store.js');
+const { MOVE_DX, MOVE_DY } = require('../dist/map/map-core.js');
+const { serialize } = require('node:v8');
+const { gunzipSync } = require('node:zlib');
+const { ReplayStore } = require('../dist/replay-store.js');
 const { encodeReplayPatchBinary } = require('../dist/replay-patch-binary.js');
 const context = vm.createContext({
   ArrayBuffer,
@@ -133,15 +134,53 @@ try {
 }
 console.log('replay AFK termination, mid-game elimination, manual surrender and RPB round-trip passed');
 
-// Public issue evidence is raw ops, never inferred from a previously encoded view.
-const evidence = readFileSync(new URL('./fixtures/replay-143-danrgjM9hfR7.rpl', import.meta.url));
-assert.equal(getReplayId(evidence), 'danrgjM9hfR7');
-const raw = deserialize(brotliDecompressSync(evidence));
-assert.equal(raw.total_turns, 2151);
-assert.equal(raw.afk_surrenders, undefined, 'the recording contains no explicit AFK events');
-const original = await GameEngine.buildReplayFromActions(raw);
-assert.equal(original.patches.length, 2151);
-assert.equal(original.patches[599].forward.game_end, false);
-assert.equal(original.patches[599].forward.leaderboard.filter((p) => p.class_ !== 'dead').length, 2);
-assert.equal(original.patches.at(-1).forward.game_end, true);
-console.log('public raw replay danrgjM9hfR7 reaches tick 2151; tick 600 is not terminal');
+const meta = {
+  speed: 1,
+  width_ratio: 0.5,
+  height_ratio: 0.5,
+  swamp_ratio: 0.1,
+  map_token: 'replay-termination-143',
+  map_mode: 'maze',
+  allow_team: false,
+  player_names: ['alice', 'bob', 'carol'],
+  player_teams: [1, 2, 3],
+};
+const { n: rows, m: cols, grid_type: tiles } = await GameEngine.buildReplayBaseMap(meta);
+const crown = tiles.indexOf(101);
+assert.ok(crown >= 0);
+const row = Math.floor(crown / cols);
+const col = crown % cols;
+const direction = MOVE_DX.findIndex((rowOffset, index) => {
+  const nextRow = row + rowOffset;
+  const nextCol = col + MOVE_DY[index];
+  return (
+    nextRow >= 0 &&
+    nextRow < rows &&
+    nextCol >= 0 &&
+    nextCol < cols &&
+    tiles[nextRow * cols + nextCol] === 200
+  );
+});
+assert.ok(direction >= 0, 'the first seat needs an adjacent plain tile');
+const replay = await GameEngine.buildReplayFromActions({
+  version: 'ops-v1',
+  meta,
+  total_turns: 2151,
+  player_ops: [
+    [
+      { op: 'w', n: 600 },
+      { op: 's', x: row, y: col },
+      { op: 'm', d: direction, a: 1 },
+    ],
+    [{ op: 'w', n: 2150 }, { op: 'r' }],
+    [{ op: 'w', n: 138 }, { op: 'r' }],
+  ],
+});
+const destination = (row + MOVE_DX[direction]) * cols + col + MOVE_DY[direction];
+assert.equal(replay.patches.length, 2151);
+assert.equal(replay.patches[599].forward.game_end, false);
+assert.equal(replay.patches[599].forward.leaderboard.filter((p) => p.class_ !== 'dead').length, 2);
+assert.deepEqual(replay.patches[600].forward.grid_type, [destination, 1]);
+assert.equal(replay.patches.at(-1).forward.game_end, true);
+assert.equal(replay.patches.at(-1).forward.leaderboard.filter((p) => p.class_ !== 'dead').length, 1);
+console.log('current maze ops replay without AFK events remains active at tick 600 and reaches tick 2151');

@@ -184,7 +184,7 @@ _一句话：默认随机图生成 + 生成器公共类型定义。_
 
 **src/map/maze-layout.ts**：每张候选图最多 5 次最远点重启、52 次单点交换，复用按出生格缓存的 BFS 距离场。按最小点对距离档位、最弱开局平地档位、近程与领地离散度等分层比较。多源 BFS 将等距格均分给最近主城；沼泽分配保留出生格、优先保护半径 6、10 的平地，并扣减平地富余区域的份额。
 
-**src/map/legacy-maze-replay.ts**：只为无 `maze_layout` 标记的旧迷宫操作回放保留原始地形、沼泽和选点顺序。新迷宫回放记录 `maze_layout: 'fair-v1'`；不改变操作流与观看二进制格式。
+迷宫只保留当前的生成与初始化路径，不为旧算法或旧录像保留兼容副本、版本标记或双路径；实时对局与地图预览共用此路径，操作回放直接按当前规则重建。
 
 **scripts/evaluate-maze-fairness.mjs / scripts/test-maze-fairness.mjs**：用房间尺寸规则与真实回放初始化对照 720 局公平性矩阵；专项回归覆盖小图拥挤、活局/操作回放、座位洗牌、平地与 Voronoi、其它地图字节不变。通过 `test:map-generation` 纳入 `pnpm test`。
 
@@ -523,7 +523,7 @@ Anti-Human 迷宫决策：`bot/cutoff.cjs` 共享走廊威胁预算，`bot/front
 ### 回放终局 AFK 事件（issue #143）
 
 - `ReplayActionData.afk_surrenders` 是 ops-v1 的可选 `[tick, zero-based player index][]` 事件表；缺省为空，旧 `r` 操作仍在 Tick 前执行。AFK 投降发生在移动/连通之后，单独记录在当前 Tick，避免下一 Tick 未执行时丢失终局事件；重建 `gameTick` 在相同阶段应用事件，不依赖重建时的墙上时间。RPB4 编码与客户端格式不变；新原始文件具有新内容哈希，不复用旧文件的观看缓存。旧文件未记录的 AFK 事件无法恢复。
-- `scripts/test-replay-termination.mjs`：真实引擎 FFA/组队 AFK 终局、中途淘汰与手动投降，逐帧比对地图、兵力、孤军、排行榜与结束标记，并用真实 RPB 解码器验证终局；`scripts/fixtures/replay-143-danrgjM9hfR7.rpl` 为公开原始 ops 证据，断言 Tick 600 未终局且重建至 Tick 2151。
+- `scripts/test-replay-termination.mjs`：真实引擎 FFA/组队 AFK 终局、中途淘汰与手动投降，逐帧比对地图、兵力、孤军、排行榜与结束标记，并用真实 RPB 解码器验证终局；按当前迷宫生成无 AFK 事件的操作流，验证 Tick 600 未终局、随后仍可移动，且重建至 Tick 2151。
 
 Anti-Human v3 多线：`bot-template/anti-human-bot/bot/state.cjs` 镜像全局队列与
 `next_seq`/`lst_moves` 摘除确认；`bot/client.cjs` 按开关选择单线或多动作发送；
