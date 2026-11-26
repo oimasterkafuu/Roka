@@ -206,6 +206,7 @@ block content
     section.doc-panel
       h2 地图示例
       p 如果觉得地图的名字晦涩难懂，可以生成一张示例地图参考。
+      p 超级随机先抽地形骨架，再决定方向、岸线和通路。山地不能通行，沼泽可以穿越；房间不会预告本局抽到了哪种骨架。
       p
         | 房间地图尺寸有
         b 标准
@@ -221,6 +222,7 @@ block content
             option(value='archipelago') 群岛要塞
             option(value='mediterranean') 地中海
             option(value='twin_continents') 双陆通衢
+            option(value='mega_random') 超级随机
             option(value='huaxia') 华夏系列
         label#map-example-region-control.map-example-control(style='display: none')
           | 地区：
@@ -516,6 +518,7 @@ block scripts
       if (mapMode === 'archipelago') return '群岛要塞';
       if (mapMode === 'mediterranean') return '地中海';
       if (mapMode === 'twin_continents') return '双陆通衢';
+      if (mapMode === 'mega_random') return '超级随机';
       return '标准地图';
     }
 

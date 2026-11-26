@@ -16,6 +16,7 @@ import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
 import { assignMazeSeats, generateMazeMap } from './map/maze-map-generator';
 import { generateRandomMap } from './map/random-map-generator';
 import { generateTwinContinentsMap } from './map/twin-continents-map-generator';
+import { generateMegaRandomMap } from './map/mega-random-map-generator';
 import { ReplayStore } from './replay-store';
 import {
   AFK_MIN_MS,
@@ -283,7 +284,7 @@ export class GameEngine {
 
   private generals: GeneralPos[] = [];
 
-  private mazeLayout?: GeneralPos[];
+  private assignedSeats?: GeneralPos[];
 
   private n = 0;
 
@@ -652,7 +653,16 @@ export class GameEngine {
         requiredPlayers,
       });
       generated = maze;
-      this.mazeLayout = maze.generals;
+      this.assignedSeats = assignMazeSeats(maze.generals, this.mapSeed);
+    } else if (this.mapMode === 'mega_random') {
+      const mega = generateMegaRandomMap(
+        this.rng,
+        this.heightRatio,
+        this.widthRatio,
+        this.team.filter((team) => team !== 0),
+      );
+      generated = mega;
+      this.assignedSeats = mega.generals;
     } else if (this.mapMode === 'archipelago') {
       generated = generateArchipelagoMap(this.rng, {
         widthRatio: this.widthRatio,
@@ -721,9 +731,7 @@ export class GameEngine {
       gridType: this.gridType,
       rng: this.rng,
     };
-    const selected = this.mazeLayout
-      ? assignMazeSeats(this.mazeLayout, this.mapSeed)
-      : selectRandomGenerals(selectionContext, requiredPlayers);
+    const selected = this.assignedSeats ?? selectRandomGenerals(selectionContext, requiredPlayers);
 
     for (let i = 0; i < this.n; i += 1) {
       for (let j = 0; j < this.m; j += 1) {

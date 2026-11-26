@@ -476,6 +476,12 @@ async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
   await waitFor(() => bot.clientId !== '', 5000, 'bot 进房');
 
   // A 是房主：改一组非默认设置（bot 房迷雾强制关闭，不在此列）。
+  a.socket.emit('change_game_conf', { map_mode: 'mega_random' });
+  await waitFor(
+    () => [a, bot].every((client) => lastRoomUpdate(client)?.map_mode === 'mega_random'),
+    5000,
+    '超级随机广播给房主和另一连接',
+  );
   a.socket.emit('change_game_conf', {
     speed: 2,
     allow_team: true,

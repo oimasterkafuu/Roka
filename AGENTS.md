@@ -20,6 +20,7 @@
   - 自动格式化：`pnpm run format`
   - Bot 集成测试：`pnpm run test:bot`（临时数据目录启动服务，两个 random-patch-bot 自动开局）
   - 双陆通衢专项：`pnpm run test:twin-continents`（真实引擎初始输出、三桥独立性、公平性矩阵、组队初始化与回放重建）
+  - 超级随机专项：`pnpm run test:mega-random`（按地形族分层检查真实引擎输出、断路、最弱席位、组队、迷雾和逐格回放）。骨架 ID 不得成为房间选项。
 - 提交前最小检查：
   - `pnpm run lint`
   - `pnpm run build`

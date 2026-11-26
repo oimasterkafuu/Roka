@@ -7,6 +7,7 @@ import {
   computeBaseMapDimensions,
 } from './map-core';
 import { MazeGraph } from './maze-layout';
+import { crossingStart, paintCrossing } from './map-geometry';
 import type { GeneratedMap, MapGenerationConfig } from './random-map-generator';
 
 type TwinContinentsOrientation = 'horizontal' | 'vertical';
@@ -253,13 +254,13 @@ const generateTwinContinentsMap = (
   const starts: number[] = [];
   const bridges = [0.18, 0.5, 0.82].map((fraction, index): TwinContinentsBridge => {
     const width = length >= 27 && rng.next() > 0.35 ? 3 : 2;
-    const start = Math.round((length - 1) * fraction - (width - 1) / 2);
+    const start = crossingStart(length, fraction, width);
     starts.push(start);
     const cells: GeneralPos[] = [];
     const headlands: GeneralPos[] = [];
+    paintCrossing(tiles, cross, start, width, wallStart, wallEnd, index === 1 ? 2 : 0);
     for (let along = start; along < start + width; along++) {
       for (let across = wallStart; across <= wallEnd; across++) {
-        tiles[along * cross + across] = index === 1 ? 2 : 0;
         cells.push(point(along, across));
       }
       headlands.push(point(along, wallStart - 1), point(along, wallEnd + 1));

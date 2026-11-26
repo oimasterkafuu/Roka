@@ -35,6 +35,14 @@ Roka 是一个实时方格领土战争游戏，玩法类似 generals.io。玩家
 
 房主可固定种子复现开局。公开示例接口按请求随机选种；实时对局与 ops-v3 操作回放共用初始化路径，RPB5 观看端直接解码棋盘，无需新增地形或修改规则。`pnpm run test:twin-continents` 在标准/large 下对 2/4/8/16 人各跑 256 个种子，另对 2–16 人各跑 32 个种子，共 3008 张真实引擎初始图。逐图检查资源和最近敌距的变异系数、最弱座位、三桥先到及封桥连通性；指标和 2/8 人预览输出到 `/tmp/roka-twin-continents/`。该命令已纳入 `pnpm run test:map-generation` 与 `pnpm test`。
 
+## 超级随机
+
+房主选择「超级随机」（`mega_random`）后，种子先等概率选一种骨架，再决定方向、大小，以及该骨架的山体、岸线、浅滩或桥宽。14 个族分别是斑块平原、中央山体、双池、环壕、曲流、四角湖、环海大陆、个人岛、队伍岛、中枢潮岛、平行地带、异岸、三陆多桥、密林空场。房间不会预告抽签结果。山地仍不可通过；沼泽仍可通过，没有资源或开局奖励。
+
+实际地形确定后，按步行距离比较各席的扩张空间、沼泽负担、最近敌距与普通地领地。个人岛间要涉沼，队伍岛把相邻的队友分区连成陆地；曲流和三陆的每组渡口不能由同一人全部独占先到。固定种子、人数、尺寸和队伍配置可重现同一开局；公开示例、实战及 ops-v3 回放共用引擎生成路径，RPB5 格式不变。
+
+`pnpm run test:mega-random` 按族验证标准和大图的 2–16 人开局，将分布、最差席位指标和 14 张 ASCII 预览写入 `/tmp/roka-mega-random/`。
+
 ## 本地开发
 
 需要 Node.js，并使用仓库声明的 pnpm 版本。首次运行：
@@ -106,6 +114,7 @@ pnpm run test:replay-cache
 pnpm run test:guest-access
 pnpm run test:build-pages
 pnpm run test:twin-continents
+pnpm run test:mega-random
 ```
 
 `test:build-pages` 覆盖全部 13 页的同名 Pug/HTML 集合、连续构建字节一致性、关键 DOM 与脚本顺序，并断言共享 Header 只出现在指定五页，其余八页保留专用控件且不加载共享 Header 资源。

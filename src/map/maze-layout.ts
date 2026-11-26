@@ -326,4 +326,12 @@ const placeMazeSwamps = (
   }
 };
 
-export { MazeGraph, compareLayoutScores, optimizeMazeLayout, placeMazeSwamps, scoreMazeLayout };
+export {
+  MazeGraph,
+  compareLayoutScores,
+  localCounts,
+  optimizeMazeLayout,
+  placeMazeSwamps,
+  scoreMazeLayout,
+  variation,
+};

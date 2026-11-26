@@ -95,7 +95,15 @@ const callbacks = {
     },
   },
 };
-for (const map_mode of ['random', 'maze', 'archipelago', 'mediterranean', 'huaxia', 'twin_continents']) {
+for (const map_mode of [
+  'random',
+  'maze',
+  'archipelago',
+  'mediterranean',
+  'huaxia',
+  'twin_continents',
+  'mega_random',
+]) {
   const engine = await GameEngine.create({ ...config, map_mode }, ids, ids, 'maps', callbacks);
   const initial = engine.buildSnapshotFor(0);
   for (const [row, col] of engine.generals.slice(0, 2)) {

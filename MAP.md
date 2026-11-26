@@ -52,7 +52,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── server.ts           # 主入口：Fastify 路由 + socket.io 事件
 │   ├── game-engine.ts      # 对局引擎核心（~1500 行）
 │   ├── game-engine/        # 引擎子模块（常量/选点/榜单/编码/回放/增兵）
-│   ├── map/                # 地图生成器（含 twin_continents、huaxia 与九个 map_region）
+│   ├── map/                # 地图生成器（含 mega_random、twin_continents、huaxia 与九个 map_region）
 │   ├── server/             # 服务层：auth / captcha / lobby / webhook / auto-ban-policy（自动封禁策略）
 │   ├── types.ts            # 全项目共享类型与协议定义
 │   ├── *-store.ts          # 四个持久化存储（公告/用户/动态/回放）
@@ -188,6 +188,10 @@ _一句话：默认随机图生成 + 生成器公共类型定义。_
 **scripts/evaluate-maze-fairness.mjs / scripts/test-maze-fairness.mjs**：用房间尺寸规则与真实回放初始化对照 720 局公平性矩阵；专项回归覆盖小图拥挤、活局/操作回放、座位洗牌、平地与 Voronoi、其它地图字节不变。通过 `test:map-generation` 纳入 `pnpm test`。
 
 **src/map/twin-continents-map-generator.ts**：中央山墙沿棋盘镜轴分隔两岸，三条独立桥由两条普通桥和中间的连续沼泽桥组成。偶数座位按等面积分行、跨墙镜像；奇数用一组三席对角线与镜像对固定三桥先到平局，复用 `maze-layout.ts` 的 `MazeGraph` 比较最近敌距、局部资源、等距领地与桥距。通用 `selectRandomGenerals` 分配实际座位；不改其他地图输出或回放协议。
+
+**src/map/mega-random-map-generator.ts / mega-random-seats.ts / map-geometry.ts**：依次负责 14 族地形和种子变体、基于实际距离场的主城筛选、共用的桥梁与席位分区几何。仅生成器诊断返回族 ID 和渡口位置；不写入房间、示例或回放协议。
+
+**scripts/test-mega-random.mjs**：复用 `evaluate-maze-fairness.mjs` 的独立引擎棋盘测量，覆盖标准/大图全部人数、单格断路、岛岸、渡口先到、组队和观战席、正常迷雾、ops-v3 和 RPB5 客户端。输出 `/tmp/roka-mega-random/metrics.json` 与逐族预览。
 
 **scripts/test-twin-continents.mjs**：`pnpm run test:twin-continents` 从 `GameEngine.buildReplayBaseMap()` 解码实际主城与地形。2048 张重点图，加标准/large 各 2–16 人 × 32 个种子；逐格验镜轴、锁定两人墙轴与三人拥挤反例，测最短路、局部资源、等距领地和三桥并列先到。分别封一桥、仅留一桥、封三桥，另验组队初始化、公开示例 API、ops-v3 与 RPB5 观看端逐格重建。实际房主选图见 `scripts/test-lobby-guards.mjs`。
 

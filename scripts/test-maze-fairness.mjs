@@ -130,8 +130,10 @@ test('live and action replay initialization share deterministic, independently s
   }
 });
 
-test('non-maze initialization is byte-identical to the pre-rewrite engine', async () => {
+test('existing map initialization stays byte-identical', async () => {
   const hashes = {
+    maze: '7495f3b82893f274254b801e0d09f9ded61f51b942eb4963681375f945e11fda',
+    twin_continents: '6b85d21d6458117bde2f2bd0ec6d5bd4611ba917e2eaf948674a58d4b08dfc63',
     random: 'b2650d0e03284817af8d211f30144ed2875d6c2f04e375b0571377302fb4a206',
     archipelago: '34dcccd9a54f968d3103b4a43900b971d024418fade7c15089b5b56a6ed204c1',
     mediterranean: '36798ab53bf9a18c91309a950876ab405d79bce6077d642dce25fa7e5e7b795e',
