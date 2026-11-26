@@ -42,7 +42,7 @@ export interface LobbyConfig {
   map_token: string;
   /** 种子来源：true = 房主自定义（对局结束后保留沿用）；false/缺省 = 随机生成（每局重随机）。 */
   map_token_custom?: boolean;
-  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
+  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia' | 'twin_continents';
   /** 华夏模式的地区；旧配置缺省时使用汉。 */
   map_region: MapRegion;
   /** 地图大小：normal 标准；large 大地图（边长约 2 倍，面积约 4 倍）。 */
@@ -97,7 +97,7 @@ export interface RoomUpdatePayload {
   map_token: string;
   /** 当前种子是否为房主自定义（自定义种子沿用不重随机，前端据此显示提示）。 */
   map_token_custom: boolean;
-  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
+  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia' | 'twin_continents';
   /** 华夏模式的地区；旧房间快照缺省时使用汉。 */
   map_region: MapRegion;
   /** 地图大小（房间设置同步给前端展示）。 */
@@ -218,7 +218,7 @@ export interface ReplayMeta {
   /** 对局是否开启多线争锋（仅作元信息记录；回放操作流与单线局同构）。 */
   multi_line?: boolean;
   map_token: string;
-  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia';
+  map_mode: 'random' | 'maze' | 'archipelago' | 'mediterranean' | 'huaxia' | 'twin_continents';
   /** 新回放写入地区；旧回放缺省时按汉重建。 */
   map_region?: MapRegion;
   player_names: string[];

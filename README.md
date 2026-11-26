@@ -29,6 +29,12 @@ Roka 是一个实时方格领土战争游戏，玩法类似 generals.io。玩家
 
 `pnpm run test:maze-fairness` 运行专项回归（也包含在 `pnpm run test:map-generation` 和 `pnpm test` 中）。使用 `pnpm exec tsx scripts/evaluate-maze-fairness.mjs /tmp/maze-final.json /tmp/maze-baseline.json` 对照基线；不传基线即可生成基线 JSON。两次均通过引擎和房间尺寸规则测量 2–16 人、标准与 large、每档 24 个固定种子。
 
+## 双陆通衢
+
+「双陆通衢」是 `twin_continents` 地图模式：中央山墙分隔两片开阔大陆，仅由三条彼此独立、宽 2–3 格的桥连接。外侧两条是连续普通空地桥，中间一条是连续沼泽桥；方向、桥宽、墙厚和尺寸随确定性种子变化。山墙与两岸共用棋盘镜轴，偶数席位逐对镜像。奇数局有一岸多一人：三席按到桥步数组成对角布局，其余主城成对分布，用实际路径、6/10 步平地、等距均分的领地与沼泽负担比较整组候选。每座桥都至少有两个座位并列最先可达。FFA 与组队仍由通用主城流程从预置点分配，不指定哪个队先到。
+
+房主可固定种子复现开局。公开示例接口按请求随机选种；实时对局与 ops-v3 操作回放共用初始化路径，RPB5 观看端直接解码棋盘，无需新增地形或修改规则。`pnpm run test:twin-continents` 在标准/large 下对 2/4/8/16 人各跑 256 个种子，另对 2–16 人各跑 32 个种子，共 3008 张真实引擎初始图。逐图检查资源和最近敌距的变异系数、最弱座位、三桥先到及封桥连通性；指标和 2/8 人预览输出到 `/tmp/roka-twin-continents/`。该命令已纳入 `pnpm run test:map-generation` 与 `pnpm test`。
+
 ## 本地开发
 
 需要 Node.js，并使用仓库声明的 pnpm 版本。首次运行：
@@ -99,6 +105,7 @@ pnpm run test:replays-page
 pnpm run test:replay-cache
 pnpm run test:guest-access
 pnpm run test:build-pages
+pnpm run test:twin-continents
 ```
 
 `test:build-pages` 覆盖全部 13 页的同名 Pug/HTML 集合、连续构建字节一致性、关键 DOM 与脚本顺序，并断言共享 Header 只出现在指定五页，其余八页保留专用控件且不加载共享 Header 资源。
@@ -139,7 +146,7 @@ pnpm run test:build-pages
 
 房间设置 `fog_mode` 依次为 `normal`（正常，默认）、`explored`（已探索）和 `visible`（全部可视）。队友共享视野；连接正常的己方格子看周围一圈，断联格只看自身。正常模式的深灰格未探索，不下发地形；浅灰格已探索但在视野外，只显示自然山脉、沼泽，不保留建筑、归属与兵力。已探索模式从开局就显示视野外的自然地形。含不支持迷雾的 Bot 时，只能选择全部可视。
 
-4.0.0 直接替换回放协议：原始 `ops-v3` 存成功操作与队伍首次探索增量，服务端按同一套实时规则重建并校验；观看格式 `RPB5` 存全知棋盘和服务端记录的可见性时间线，支持任意 Tick 切换队伍视角，不需从头累计探索。旧原始格式和旧观看格式不再接受，访问失败不会删除原始存档。
+3.0.0 直接替换回放协议：原始 `ops-v3` 存成功操作与队伍首次探索增量，服务端按同一套实时规则重建并校验；观看格式 `RPB5` 存全知棋盘和服务端记录的可见性时间线，支持任意 Tick 切换队伍视角，不需从头累计探索。旧原始格式和旧观看格式不再接受，访问失败不会删除原始存档。
 
 ## 许可
 

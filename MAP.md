@@ -22,7 +22,7 @@ src/server.ts ── Fastify 路由 + socket.io 事件（唯一入口）
    ▼
 src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降、回放记录）
    ├── src/game-engine/*              常量/主城选择/排行榜/编码/回放工具/增兵
-   └── src/map/*                      五种 map_mode 地图生成器、华夏地区配置与年度开放窗口（纯函数）
+   └── src/map/*                      六种 map_mode 地图生成器、华夏地区配置与年度开放窗口（纯函数）
    ▼
 持久化（data/，均被 gitignore）：announcement-store / auth-store / feed-store / replay-store / security-audit.json；server-bots.json（托管 bot 重启恢复状态）；github-stargazers.json（全量 Star 表 + webhook 增量）
 ```
@@ -52,7 +52,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── server.ts           # 主入口：Fastify 路由 + socket.io 事件
 │   ├── game-engine.ts      # 对局引擎核心（~1500 行）
 │   ├── game-engine/        # 引擎子模块（常量/选点/榜单/编码/回放/增兵）
-│   ├── map/                # 地图生成器（含 huaxia 与九个 map_region，含辽与中国视口）
+│   ├── map/                # 地图生成器（含 twin_continents、huaxia 与九个 map_region）
 │   ├── server/             # 服务层：auth / captcha / lobby / webhook / auto-ban-policy（自动封禁策略）
 │   ├── types.ts            # 全项目共享类型与协议定义
 │   ├── *-store.ts          # 四个持久化存储（公告/用户/动态/回放）
@@ -186,6 +186,10 @@ _一句话：默认随机图生成 + 生成器公共类型定义。_
 迷宫只保留当前的生成与初始化路径，不为旧算法或旧录像保留兼容副本、版本标记或双路径；实时对局与地图预览共用此路径，操作回放直接按当前规则重建。
 
 **scripts/evaluate-maze-fairness.mjs / scripts/test-maze-fairness.mjs**：用房间尺寸规则与真实回放初始化对照 720 局公平性矩阵；专项回归覆盖小图拥挤、活局/操作回放、座位洗牌、平地与 Voronoi、其它地图字节不变。通过 `test:map-generation` 纳入 `pnpm test`。
+
+**src/map/twin-continents-map-generator.ts**：中央山墙沿棋盘镜轴分隔两岸，三条独立桥由两条普通桥和中间的连续沼泽桥组成。偶数座位按等面积分行、跨墙镜像；奇数用一组三席对角线与镜像对固定三桥先到平局，复用 `maze-layout.ts` 的 `MazeGraph` 比较最近敌距、局部资源、等距领地与桥距。通用 `selectRandomGenerals` 分配实际座位；不改其他地图输出或回放协议。
+
+**scripts/test-twin-continents.mjs**：`pnpm run test:twin-continents` 从 `GameEngine.buildReplayBaseMap()` 解码实际主城与地形。2048 张重点图，加标准/large 各 2–16 人 × 32 个种子；逐格验镜轴、锁定两人墙轴与三人拥挤反例，测最短路、局部资源、等距领地和三桥并列先到。分别封一桥、仅留一桥、封三桥，另验组队初始化、公开示例 API、ops-v3 与 RPB5 观看端逐格重建。实际房主选图见 `scripts/test-lobby-guards.mjs`。
 
 **src/map/archipelago-map-generator.ts** — 「群岛要塞」：沼泽海上放 3×3–4×4 矩形岛（互不邻接，≥2×人数+1 个），海岸噪声扩边，多次重启贪心挑分散的玩家出生岛；重试上限 220 次，失败回退随机图。
 _一句话：矩形群岛 + 分散出生岛挑选，失败回退随机图。_
@@ -386,7 +390,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 ## 配置 / CI / 脚本 / bot 模板
 
-- **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:rate-limit-html、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+- **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:rate-limit-html、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:twin-continents、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 
 - **scripts/build-pages.mjs / test-build-pages.mjs** — 自动枚举并用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出全部 13 个同名 `static/*.html`；测试断言 Pug/HTML 同名集合完全相等、连续两次构建字节一致，检查各页关键 DOM、脚本顺序、favicon/`{{V}}` 资源及 standards/quirks 模式，并断言共享 Header 仅用于指定七页、其余六页无共享 Header 资源且保留专用控件，replays 另断言当前导航、唯一 h1 与原有功能控件，纳入 `pnpm test`。
 

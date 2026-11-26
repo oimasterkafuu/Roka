@@ -89,6 +89,7 @@ function getMapModeCode() {
   if (mapMode == '峡谷回廊') return 'maze';
   if (mapMode == '群岛要塞') return 'archipelago';
   if (mapMode == '地中海') return 'mediterranean';
+  if (mapMode == '双陆通衢') return 'twin_continents';
   if (mapMode == '华夏系列') return 'huaxia';
   return 'random';
 }
@@ -123,6 +124,10 @@ function setMapModeByCode(code) {
   }
   if (code == 'mediterranean') {
     setTabVal('map-mode', '地中海');
+    return;
+  }
+  if (code == 'twin_continents') {
+    setTabVal('map-mode', '双陆通衢');
     return;
   }
   setTabVal('map-mode', '标准地图');

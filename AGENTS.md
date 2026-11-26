@@ -19,6 +19,7 @@
   - 代码检查：`pnpm run lint`
   - 自动格式化：`pnpm run format`
   - Bot 集成测试：`pnpm run test:bot`（临时数据目录启动服务，两个 random-patch-bot 自动开局）
+  - 双陆通衢专项：`pnpm run test:twin-continents`（真实引擎初始输出、三桥独立性、公平性矩阵、组队初始化与回放重建）
 - 提交前最小检查：
   - `pnpm run lint`
   - `pnpm run build`
@@ -33,6 +34,7 @@
 
 - 房间 `fog_mode` 为 `normal | explored | visible`；服务端在初始帧和每个实际 Tick 计算队伍视野，并独立维护各连接的差分基线。客户端不得从全知棋盘推测探索历史。
 - `ops-v3` 原始回放保存首次探索增量，`RPB5` 观看数据保存可按 Tick 查询的可见性变化。改动协议时同时更新存储、编码、解码、缓存校验和测试；不可增加旧格式兼容路径。
+- `twin_continents` 只使用现有地形编码和当前主城选择流程；地图专项统计必须以 `GameEngine.buildReplayBaseMap()` 的实际初始输出为准，不能用生成器内部预置点替代引擎验收。
 
 ## 分支与推送流程
 

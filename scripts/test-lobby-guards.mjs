@@ -479,19 +479,21 @@ async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
   a.socket.emit('change_game_conf', {
     speed: 2,
     allow_team: true,
-    map_mode: 'maze',
+    map_mode: 'twin_continents',
     map_size: 'large',
     map_token: MAP_RESET_TOKEN,
   });
   await waitFor(
     () => {
       const update = lastRoomUpdate(a);
-      return update && update.speed === 2 && update.map_mode === 'maze' && update.map_size === 'large';
+      return (
+        update && update.speed === 2 && update.map_mode === 'twin_continents' && update.map_size === 'large'
+      );
     },
     5000,
     '自定义设置生效',
   );
-  log('自定义设置已生效（speed=2 / maze / large / allow_team）');
+  log('自定义设置已生效（speed=2 / twin_continents / large / allow_team）');
 
   // 边界：观战席的人类仍算人类占用——A 离开后 B 还在，不触发重置。
   const b = createRoomClient(baseUrl, { cookie: tokenB, room: ROOM_RESET, autoReady: false, name: 'rst-B' });
@@ -509,7 +511,7 @@ async function scenarioResetWhenOnlyBots(baseUrl, tokenA, tokenB) {
   a.socket.disconnect();
   await sleep(1000);
   const afterHostLeft = lastRoomUpdate(bot);
-  if (!afterHostLeft || afterHostLeft.speed !== 2 || afterHostLeft.map_mode !== 'maze') {
+  if (!afterHostLeft || afterHostLeft.speed !== 2 || afterHostLeft.map_mode !== 'twin_continents') {
     throw new Error('房主离开但观战人类仍在时设置被重置（应保留自定义设置）');
   }
   log('场景 4a 通过：观战人类仍在房时不触发重置');

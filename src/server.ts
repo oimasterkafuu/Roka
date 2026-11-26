@@ -213,6 +213,7 @@ const MAP_EXAMPLE_MAP_MODES: LobbyConfig['map_mode'][] = [
   'archipelago',
   'mediterranean',
   'huaxia',
+  'twin_continents',
 ];
 
 const USERNAME_REGEX = /^[A-Za-z0-9_]{3,20}$/;
@@ -2496,6 +2497,8 @@ const boot = async (listen = true): Promise<void> => {
               return;
             }
             mapMode = 'huaxia';
+          } else if (mapModeRaw === 'twin_continents') {
+            mapMode = 'twin_continents';
           }
           if (mapMode !== oldConf.map_mode) {
             nextConf.map_mode = mapMode;

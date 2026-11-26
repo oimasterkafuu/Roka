@@ -15,6 +15,7 @@ import { generateHuaxiaMap } from './map/huaxia-map-generator';
 import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
 import { assignMazeSeats, generateMazeMap } from './map/maze-map-generator';
 import { generateRandomMap } from './map/random-map-generator';
+import { generateTwinContinentsMap } from './map/twin-continents-map-generator';
 import { ReplayStore } from './replay-store';
 import {
   AFK_MIN_MS,
@@ -678,6 +679,15 @@ export class GameEngine {
         mountainRatio: this.mountainRatio,
         swampRatio: this.swampRatio,
         mapRegion: this.mapRegion,
+      });
+    } else if (this.mapMode === 'twin_continents') {
+      generated = generateTwinContinentsMap(this.rng, {
+        widthRatio: this.widthRatio,
+        heightRatio: this.heightRatio,
+        cityRatio: this.cityRatio,
+        mountainRatio: this.mountainRatio,
+        swampRatio: this.swampRatio,
+        requiredPlayers,
       });
     } else {
       generated = generateRandomMap(this.rng, {
