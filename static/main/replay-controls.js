@@ -9,8 +9,8 @@ function backTurn(silent = false) {
   if (!patch || !patch.backward) {
     return false;
   }
-  update(patch.backward, silent ? { silent: true } : undefined);
   cur_turn -= 1;
+  update(patch.backward, silent ? { silent: true } : undefined);
   return true;
 }
 
@@ -23,8 +23,8 @@ function nextTurn(ignore = false, silent = false) {
   if (!patch || !patch.forward) {
     return false;
   }
-  update(patch.forward, silent ? { silent: true } : undefined);
   cur_turn += 1;
+  update(patch.forward, silent ? { silent: true } : undefined);
   return true;
 }
 
@@ -83,17 +83,36 @@ function jumpToFrame(targetFrame) {
   }
 }
 
+var autoplay_timer;
+
+function bindReplayPlaybackControls() {
+  var buttons = $('#replay-bottom-bar').children();
+  buttons.eq(0).on('click', function () {
+    backTurn();
+  });
+  buttons
+    .eq(1)
+    .add('#replay-autoplay-btn')
+    .on('click', function () {
+      switchAutoplay();
+    });
+  buttons.eq(2).on('click', function () {
+    nextTurn();
+  });
+}
+
 function switchAutoplay(keepRateTabsVisible = false) {
   var autoplayBtn = $('#replay-autoplay-btn');
   is_autoplaying = !is_autoplaying;
   if (!is_autoplaying) {
+    clearTimeout(autoplay_timer);
     autoplayBtn.attr('class', 'small');
     $('#tabs-replay-autoplay').css('display', keepRateTabsVisible ? 'inline-block' : 'none');
     return;
   }
   autoplayBtn.attr('class', 'small inverted');
   $('#tabs-replay-autoplay').css('display', 'inline-block');
-  setTimeout(autoplay, 500 / autoplay_speed);
+  autoplay_timer = setTimeout(autoplay, 500 / autoplay_speed);
 }
 
 function autoplay() {
@@ -102,7 +121,7 @@ function autoplay() {
     switchAutoplay(true);
     return;
   }
-  setTimeout(autoplay, 500 / autoplay_speed);
+  autoplay_timer = setTimeout(autoplay, 500 / autoplay_speed);
 }
 
 function setAutoplayRate() {

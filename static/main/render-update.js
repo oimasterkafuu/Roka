@@ -412,7 +412,7 @@ function update(data, options) {
   lockLeaderboardColumnDigits(frameArmyDigits, frameLandDigits);
   $('#game-leaderboard').html(th);
   $('#game-leaderboard').css('display', '');
-  // 回放统计图：逐帧刷新进度游标并把面板贴到排行榜正下方（见 replay-stats.js）。
+  // 回放统计图：逐帧刷新进度游标（见 replay-stats.js）。
   if (typeof refreshReplayStatsFrame == 'function') {
     refreshReplayStatsFrame();
   }

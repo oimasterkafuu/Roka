@@ -67,21 +67,23 @@ html
         div#tabs-spectate-view.tabs.unselectable
           input(type='hidden', value='全图')
           div.inline-button.inverted 全图
-    table#game-leaderboard(style='display: none')
-      tbody
-        tr
-          td 队伍
-          td 玩家
-          td 兵力
-          td 领土
     div#replay-title.fixed-center-horizontal.background(style='display: none')
-    div#replay-stats(style='display: none')
-      div#tabs-replay-stats.tabs.unselectable
-        input(type='hidden', value='兵力')
-        div.inline-button.inverted 兵力
-        div.inline-button 领土
-      canvas#replay-stats-canvas
-      div#replay-stats-legend
+    div#game-info
+      div#game-leaderboard-scroll
+        table#game-leaderboard(style='display: none')
+          tbody
+            tr
+              td 队伍
+              td 玩家
+              td 兵力
+              td 领土
+      div#replay-stats(style='display: none')
+        div#tabs-replay-stats.tabs.unselectable
+          input(type='hidden', value='兵力')
+          div.inline-button.inverted 兵力
+          div.inline-button 领土
+        canvas#replay-stats-canvas
+        div#replay-stats-legend
     div#room-top-left(style='display: none; position: fixed; top: 12px; left: 12px; z-index: 24')
       button#room-home-btn.small 返回首页
     div#menu.center.center-tag(style='display: none')

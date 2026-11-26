@@ -9,7 +9,6 @@ var replay_stats_groups = null;
 var replay_stats_max_digits = { army: 1, land: 1 };
 // 当前帧游标位置对应的缓存画布（坐标轴与曲线只需画一次，逐帧只补游标竖线）。
 var replay_stats_base = null;
-var replay_stats_seeking = false;
 // 颜色未就绪时的底图重绘重试计数（见 drawReplayStatsBase）。
 var replay_stats_color_retry = 0;
 
@@ -37,7 +36,7 @@ function replayPlayerColor(id) {
 // 不再按队号排序。迷雾组队局沿用 fog-team-names 规则：只显示队名「队伍 N」，不列成员用户名。
 function initReplayTitle() {
   var lb0 = replay_data && replay_data.initial && replay_data.initial.leaderboard;
-  if (!is_replay || !lb0 || !lb0.length || window.innerWidth <= 1000) return;
+  if (!is_replay || !lb0 || !lb0.length) return;
   var teamGame = fogTeamGame(lb0);
   var fogView = Boolean(replay_data.meta && replay_data.meta.fog);
   // 终局名次取自末帧 leaderboard（最后一个 forward patch；无 patch 时用 initial），
@@ -153,8 +152,6 @@ function drawReplayStatsBase() {
   if (canvas.width != cssW * dpr || canvas.height != cssH * dpr) {
     canvas.width = cssW * dpr;
     canvas.height = cssH * dpr;
-    canvas.style.width = cssW + 'px';
-    canvas.style.height = cssH + 'px';
   }
   var frames = replay_data.patches.length + 1;
   if (frames < 2 || !replay_stats_groups.length) return;
@@ -268,14 +265,11 @@ function formatReplayStatsValue(v) {
   return String(Math.round(v));
 }
 
-// 每帧钩子（render-update.js 的 update() 调用）：底图 blit + 当前进度竖线游标，
-// 并把统计图面板贴到排行榜正下方（排行榜高度随队伍层级变化）。
+// 每帧钩子（render-update.js 的 update() 调用）：底图 blit + 当前进度竖线游标。
 function refreshReplayStatsFrame() {
   if (!is_replay || !replay_stats_groups || !replay_stats_base) return;
   var panel = $('#replay-stats');
   if (panel.css('display') == 'none') return;
-  var lbH = $('#game-leaderboard').outerHeight() || 0;
-  panel.css('top', lbH + 8 + 'px');
   var canvas = $('#replay-stats-canvas')[0];
   var ctx = canvas.getContext('2d');
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -312,9 +306,41 @@ function onReplayStatsTab() {
   refreshReplayStatsFrame();
 }
 
+function bindReplayStatsSeek(canvas) {
+  var activePointer = null;
+
+  function endSeek(event) {
+    if (event.pointerId !== activePointer) return;
+    activePointer = null;
+    event.stopPropagation();
+    if (event.type === 'pointerup') seekReplayStats(event.clientX);
+  }
+
+  canvas.addEventListener('pointerdown', function (event) {
+    if (activePointer !== null || event.button !== 0) return;
+    canvas.setPointerCapture(event.pointerId);
+    activePointer = event.pointerId;
+    event.preventDefault();
+    event.stopPropagation();
+    seekReplayStats(event.clientX);
+  });
+  canvas.addEventListener('pointermove', function (event) {
+    if (event.pointerId !== activePointer) return;
+    event.stopPropagation();
+    seekReplayStats(event.clientX);
+  });
+  canvas.addEventListener('pointerup', endSeek);
+  canvas.addEventListener('pointercancel', endSeek);
+  canvas.addEventListener('lostpointercapture', endSeek);
+  window.addEventListener('blur', function () {
+    if (activePointer === null) return;
+    if (canvas.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
+    activePointer = null;
+  });
+}
+
 function initReplayStats() {
   if (!is_replay || !replay_data || !replay_data.patches || !replay_data.initial) return;
-  if (window.innerWidth <= 1000) return;
   replay_stats_groups = buildReplayStatsGroups();
   if (!replay_stats_groups.length) return;
   // 排行榜兵力/领土列宽一次锁定到全程最大位数（issue #93），
@@ -343,18 +369,12 @@ function initReplayStats() {
       initTab(this, this.children[i], onReplayStatsTab);
     }
   });
-  var canvas = $('#replay-stats-canvas')[0];
-  $(canvas).on('mousedown', function (e) {
-    replay_stats_seeking = true;
-    seekReplayStats(e.clientX);
-    e.preventDefault();
-  });
-  $(document).on('mousemove.replay-stats', function (e) {
-    if (replay_stats_seeking) seekReplayStats(e.clientX);
-  });
-  $(document).on('mouseup.replay-stats', function () {
-    replay_stats_seeking = false;
-  });
+  bindReplayStatsSeek(document.getElementById('replay-stats-canvas'));
+  var panel = document.getElementById('replay-stats');
+  var leaderboard = document.getElementById('game-leaderboard');
+  new ResizeObserver(function () {
+    panel.style.setProperty('--replay-leaderboard-height', leaderboard.offsetHeight + 'px');
+  }).observe(leaderboard);
   drawReplayStatsBase();
   $('#replay-stats').css('display', '');
   refreshReplayStatsFrame();

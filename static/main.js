@@ -5,137 +5,81 @@
 //视野内地形、归属与兵力正常下发，包含敌方建筑。
 //army_cnt[n][m] int
 
-$(document).ready(function () {
-  ((x = -1), (y = -1));
-  $('body').on('mousedown', function (e) {
-    ((x = e.pageX), (y = e.pageY));
-  });
-  $('body').on('mousemove', function (e) {
-    var w, X, Y;
-    if (typeof e.originalEvent.buttons == 'undefined') {
-      w = e.which;
-    } else {
-      w = e.originalEvent.buttons;
-    }
-    X = e.clientX || e.originalEvent.clientX;
-    Y = e.clientY || e.originalEvent.clientY;
-    if (w == 1) {
-      $('#map').css('left', parseInt($('#map').css('left')) - x + X);
-      $('#map').css('top', parseInt($('#map').css('top')) - y + Y);
-      ((x = e.pageX), (y = e.pageY));
-    }
-  });
-  var touches = [],
-    expected_scale;
-  function startTouch(s) {
-    expected_scale = scale_sizes[scale];
-    if (s.length <= 2) touches = s;
-    else touches = [];
-  }
-  function handleMove(s) {
-    var x = touches[0].pageX,
-      y = touches[0].pageY,
-      X = s[0].pageX,
-      Y = s[0].pageY;
-    $('#map').css('left', parseInt($('#map').css('left')) - x + X);
-    $('#map').css('top', parseInt($('#map').css('top')) - y + Y);
-  }
-  function dis(a, b) {
-    return Math.sqrt((a.pageX - b.pageX) * (a.pageX - b.pageX) + (a.pageY - b.pageY) * (a.pageY - b.pageY));
-  }
-  function moveTouch(s) {
-    console.log(s);
-    if (touches.length == 0) return;
-    if (touches.length == 1) {
-      if (s.length == 1) {
-        handleMove(s);
-        touches = s;
-      } else if (s.length == 2) {
-        var dis1 = dis(touches[0], s[0]),
-          dis2 = dis(touches[0], s[1]);
-        if (dis1 > dis2) s = [s[1], s[0]];
-        handleMove(s);
-        touches = s;
-      } else {
-        touches = [];
-      }
-    } else {
-      if (s.length == 1) {
-        var dis1 = dis(touches[0], s[0]),
-          dis2 = dis(touches[1], s[0]);
-        if (dis1 > dis2) touches = [touches[1], touches[0]];
-        handleMove(s);
-        touches = s;
-      } else if (s.length == 2) {
-        var x = (touches[0].pageX + touches[1].pageX) / 2,
-          y = (touches[0].pageY + touches[1].pageY) / 2;
-        var X = (s[0].pageX + s[1].pageX) / 2,
-          Y = (s[0].pageY + s[1].pageY) / 2;
-        $('#map').css('left', parseInt($('#map').css('left')) - x + X);
-        $('#map').css('top', parseInt($('#map').css('top')) - y + Y);
-        var dis1 = dis(touches[0], touches[1]),
-          dis2 = dis(s[0], s[1]);
-        expected_scale *= dis2 / dis1;
-        if (expected_scale.toString().toLowerCase().indexOf('n') != -1) {
-          expected_scale = scale_sizes[scale];
-        } else {
-          var pos,
-            mi = 200;
-          for (var i = 1; i < scale_sizes.length; i++) {
-            var t = Math.abs(scale_sizes[i] - expected_scale);
-            if (t < mi) ((mi = t), (pos = i));
-          }
-          if (pos != scale) {
-            scale = pos;
-            if (typeof localStorage != 'undefined') {
-              localStorage.scale = scale.toString();
-            }
-            render();
-          }
-        }
-        touches = s;
-      } else {
-        touches = [];
-      }
-    }
-  }
-  function endTouch() {
-    touches = [];
-  }
-  function bindTouch(obj) {
-    obj.addEventListener(
-      'touchstart',
-      function (e) {
-        if (!in_game) return;
-        startTouch(e.targetTouches);
-      },
-      false,
-    );
-    obj.addEventListener(
-      'touchmove',
-      function (e) {
-        if (!in_game) return;
-        moveTouch(e.targetTouches);
-      },
-      false,
-    );
-    obj.addEventListener(
-      'touchend',
-      function (e) {
-        if (!in_game) return;
-        moveTouch(e.targetTouches);
-        endTouch();
-      },
-      false,
-    );
-  }
-  bindTouch(document);
+function bindMapGestures() {
+  var map = $('#map');
+  var pointers = new Map();
+  var pointerType;
+  var expectedScale;
 
-  if (window.innerWidth <= 1000) {
-    // shoule be mobile
+  function start(event) {
+    if (!in_game || event.button !== 0) return;
+    if (pointers.size && (pointerType !== 'touch' || event.pointerType !== 'touch')) return;
+    pointerType = event.pointerType;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    expectedScale = scale_sizes[scale];
+  }
+
+  function finish(event) {
+    if (pointers.delete(event.pointerId)) expectedScale = scale_sizes[scale];
+  }
+
+  function move(event) {
+    var previous = pointers.get(event.pointerId);
+    if (!previous) return;
+    if (!in_game || (pointerType !== 'touch' && !(event.buttons & 1))) {
+      finish(event);
+      return;
+    }
+    var current = { x: event.clientX, y: event.clientY };
+    pointers.set(event.pointerId, current);
+    var count = pointers.size;
+    if (count > 2) return;
+    map.css({
+      left: parseFloat(map.css('left')) + (current.x - previous.x) / count,
+      top: parseFloat(map.css('top')) + (current.y - previous.y) / count,
+    });
+    if (count !== 2) return;
+    var other = Array.from(pointers.values()).find(function (point) {
+      return point !== current;
+    });
+    var previousDistance = Math.hypot(previous.x - other.x, previous.y - other.y);
+    var distance = Math.hypot(current.x - other.x, current.y - other.y);
+    if (!previousDistance || !distance) return;
+    expectedScale = Math.max(
+      scale_sizes[1],
+      Math.min(scale_sizes.at(-1), (expectedScale * distance) / previousDistance),
+    );
+    var nearest = scale;
+    for (var index = 1; index < scale_sizes.length; index++) {
+      if (Math.abs(scale_sizes[index] - expectedScale) < Math.abs(scale_sizes[nearest] - expectedScale)) {
+        nearest = index;
+      }
+    }
+    if (nearest !== scale) {
+      scale = nearest;
+      localStorage.scale = scale.toString();
+      render();
+    }
+  }
+
+  document.getElementById('map').addEventListener('pointerdown', start);
+  document.getElementById('map_back').addEventListener('pointerdown', start);
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', finish);
+  window.addEventListener('pointercancel', finish);
+  window.addEventListener('lostpointercapture', finish);
+  window.addEventListener('blur', function () {
+    pointers.clear();
+  });
+}
+
+$(document).ready(function () {
+  bindMapGestures();
+  if (is_replay) {
+    $('body').addClass('replay-page');
+  } else if (window.innerWidth <= 1000) {
     $('#turn-counter').attr('class', 'mobile');
     $('#game-leaderboard').attr('class', 'mobile');
-    $('#replay-top-left').attr('class', 'mobile');
   }
 });
 
@@ -791,7 +735,7 @@ $(document).ready(function () {
     selt = 1;
     render();
   });
-  $('body').bind('mousewheel', function (e) {
+  $('#map, #map_back').on('wheel', function (e) {
     if (in_game) {
       if (e.originalEvent.deltaY > 0) {
         scale = Math.max(scale - 1, 1);
@@ -905,11 +849,11 @@ async function loadAccountProfile() {
 
 // 部署更新横幅：仅对局进行中（含观战）显示；准备阶段由禁用的开始按钮传达。
 // 横幅全宽置顶（z-index 99）会遮住右上角排行榜，显示时把排行榜整体下移
-// 到横幅下方（按实测高度），#replay-stats 面板逐帧按排行榜高度自动跟随。
+// 到横幅下方（按实测高度），回放信息区使用同一偏移量。
 function refreshDeployBanner() {
   var show = deploy_queued && in_game && !game_ended;
   $('#deploy-banner').css('display', show ? '' : 'none');
-  $('#game-leaderboard').css('top', show ? $('#deploy-banner').outerHeight() + 'px' : '');
+  $('body').css('--deploy-offset', show ? $('#deploy-banner').outerHeight() + 'px' : '0px');
 }
 
 socket.on('update', update);
@@ -1058,10 +1002,7 @@ $(document).ready(function () {
       if (e.charCode == 10 || e.charCode == 13) jumpToTurn();
     });
     $('#replay-turn-jump-button').on('click', jumpToTurn);
-    $($('#replay-bottom-bar')[0].children[0]).on('click', backTurn);
-    $($('#replay-bottom-bar')[0].children[1]).on('click', switchAutoplay);
-    $($('#replay-bottom-bar')[0].children[2]).on('click', nextTurn);
-    $('#replay-autoplay-btn').on('click', switchAutoplay);
+    bindReplayPlaybackControls();
     $('#replay-exit-btn').on('click', _exit);
     $('#replay-error-back').on('click', function () {
       location.href = '/';

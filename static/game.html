@@ -75,25 +75,29 @@
         </div>
       </div>
     </div>
-    <table id="game-leaderboard" style="display: none">
-      <tbody>
-        <tr>
-          <td>队伍</td>
-          <td>玩家</td>
-          <td>兵力</td>
-          <td>领土</td>
-        </tr>
-      </tbody>
-    </table>
     <div class="fixed-center-horizontal background" id="replay-title" style="display: none"></div>
-    <div id="replay-stats" style="display: none">
-      <div class="tabs unselectable" id="tabs-replay-stats">
-        <input type="hidden" value="兵力" />
-        <div class="inline-button inverted">兵力</div>
-        <div class="inline-button">领土</div>
+    <div id="game-info">
+      <div id="game-leaderboard-scroll">
+        <table id="game-leaderboard" style="display: none">
+          <tbody>
+            <tr>
+              <td>队伍</td>
+              <td>玩家</td>
+              <td>兵力</td>
+              <td>领土</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <canvas id="replay-stats-canvas"></canvas>
-      <div id="replay-stats-legend"></div>
+      <div id="replay-stats" style="display: none">
+        <div class="tabs unselectable" id="tabs-replay-stats">
+          <input type="hidden" value="兵力" />
+          <div class="inline-button inverted">兵力</div>
+          <div class="inline-button">领土</div>
+        </div>
+        <canvas id="replay-stats-canvas"></canvas>
+        <div id="replay-stats-legend"></div>
+      </div>
     </div>
     <div id="room-top-left" style="display: none; position: fixed; top: 12px; left: 12px; z-index: 24">
       <button class="small" id="room-home-btn">返回首页</button>

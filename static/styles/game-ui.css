@@ -1,6 +1,10 @@
+#game > #map,
+#game > #map_back {
+  touch-action: none;
+}
 #game-leaderboard {
   position: fixed;
-  top: 0;
+  top: var(--deploy-offset, 0px);
   right: 0;
   z-index: 25;
   background: #ffffff;
@@ -90,7 +94,7 @@
 
 /* 回放页顶部参赛者标题区：同队成员逗号分隔、队伍间「>」分隔 */
 #replay-title {
-  top: 0;
+  top: var(--deploy-offset, 0px);
   z-index: 24;
   padding: 5px 14px;
   font-size: 14px;
@@ -149,10 +153,11 @@
   }
 }
 
-/* 回放局势统计图：固定于右上角排行榜正下方（top 由 replay-stats.js 逐帧对齐）；
+/* 回放局势统计图：固定于右上角排行榜正下方（高度由 replay-stats.js 同步）；
    左上与左下均圆角，与上方排行榜的左下圆角沿左缘衔接（issue #93） */
 #replay-stats {
   position: fixed;
+  top: calc(var(--deploy-offset, 0px) + var(--replay-leaderboard-height, 0px) + 8px);
   right: 0;
   z-index: 24;
   width: 264px;
@@ -171,7 +176,10 @@
 }
 #replay-stats-canvas {
   display: block;
+  width: 248px;
+  height: 132px;
   cursor: crosshair;
+  touch-action: none;
 }
 #replay-stats-legend {
   margin-top: 4px;
@@ -294,4 +302,141 @@
 #replay-bottom-bar div:hover {
   cursor: pointer;
   background-color: #f3f5f9;
+}
+
+@media (max-width: 1000px) {
+  .replay-page {
+    --replay-title-height: 28px;
+    --replay-side-width: 128px;
+    --replay-hud-top: calc(var(--deploy-offset, 0px) + var(--replay-title-height) + 4px);
+  }
+  .replay-page #replay-title {
+    left: 4px;
+    right: 4px;
+    height: var(--replay-title-height);
+    box-sizing: border-box;
+    max-width: none;
+    transform: none;
+    text-align: center;
+    font-size: 12px;
+  }
+  .replay-page #turn-counter {
+    top: var(--replay-hud-top);
+    min-width: 60px;
+    padding: 3px;
+    font-size: 12px;
+  }
+  .replay-page #replay-top-left {
+    top: calc(var(--replay-hud-top) + 28px);
+    left: 4px;
+    gap: 4px;
+  }
+  .replay-page #replay-top-left button {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  .replay-page #replay-turn-jump {
+    padding: 2px 4px;
+    font-size: 11px;
+  }
+  .replay-page #replay-turn-jump-input {
+    width: 34px;
+    min-height: 26px;
+    padding: 2px;
+    font-size: inherit;
+  }
+  .replay-page #replay-turn-jump-button {
+    padding: 3px 4px;
+    font-size: inherit;
+  }
+  .replay-page #game-info {
+    position: fixed;
+    top: var(--replay-hud-top);
+    right: 0;
+    z-index: 24;
+    width: min(264px, calc(100% - var(--replay-side-width)));
+  }
+  .replay-page #game-leaderboard-scroll {
+    max-height: min(22dvh, 12rem);
+    overflow: auto;
+  }
+  .replay-page #game-leaderboard {
+    position: static;
+    width: 100%;
+    table-layout: fixed;
+  }
+  .replay-page #game-leaderboard td {
+    padding: 2px 3px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .replay-page #game-leaderboard .leaderboard-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .replay-page #game-leaderboard :is(.lb-army, .lb-land) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .replay-page #game-leaderboard tr:first-child td:first-child {
+    width: 15%;
+  }
+  .replay-page #game-leaderboard tr:first-child td:nth-child(n + 3) {
+    width: 24%;
+  }
+  .replay-page #replay-stats {
+    position: static;
+    width: 100%;
+    margin-top: 4px;
+    padding: 4px 6px;
+  }
+  .replay-page #replay-stats-canvas {
+    width: 100%;
+    height: clamp(44px, 17dvh, 132px);
+  }
+  .replay-page #replay-stats-legend {
+    max-height: min(3em, 8dvh);
+    overflow: auto;
+  }
+  .replay-page #replay-bottom {
+    width: max-content;
+    max-width: calc(100% - 8px);
+  }
+  .replay-page #replay-bottom .tabs {
+    max-width: calc(100% - 6px);
+    box-sizing: border-box;
+    overflow-x: auto;
+    vertical-align: top;
+  }
+  .replay-page #replay-bottom .inline-button {
+    min-width: 0;
+    padding: 6px 4px;
+  }
+  .replay-page #replay-bottom-bar div {
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 1000px) and (max-height: 480px) {
+  .replay-page #game-info {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - var(--replay-hud-top) - 96px);
+  }
+  .replay-page #game-leaderboard-scroll {
+    min-height: 0;
+  }
+  .replay-page #replay-stats {
+    flex-shrink: 0;
+  }
+  .replay-page #replay-bottom > center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .replay-page #replay-bottom > center > br {
+    display: none;
+  }
 }
