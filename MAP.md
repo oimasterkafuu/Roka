@@ -187,9 +187,13 @@ _一句话：默认随机图生成 + 生成器公共类型定义。_
 
 **scripts/evaluate-maze-fairness.mjs / scripts/test-maze-fairness.mjs**：用房间尺寸规则与真实回放初始化对照 720 局公平性矩阵；专项回归覆盖小图拥挤、活局/操作回放、座位洗牌、平地与 Voronoi、其它地图字节不变。通过 `test:map-generation` 纳入 `pnpm test`。
 
-**src/map/twin-continents-map-generator.ts**：中央山墙沿棋盘镜轴分隔两岸，三条独立桥由两条普通桥和中间的连续沼泽桥组成。偶数座位按等面积分行、跨墙镜像；奇数用一组三席对角线与镜像对固定三桥先到平局，复用 `maze-layout.ts` 的 `MazeGraph` 比较最近敌距、局部资源、等距领地与桥距。通用 `selectRandomGenerals` 分配实际座位；不改其他地图输出或回放协议。
+**src/map/twin-continents-map-generator.ts**：中央山墙沿棋盘镜轴分隔两岸，三条独立桥由两条普通桥和中间的连续沼泽桥组成。两岸从候选格抽取预置点，并检查席位间距、资源、领地及三桥先到平局；通用 `selectRandomGenerals` 分配实际座位。
+
+**src/map/crown-spacing.ts / scripts/check-crown-spacing.mjs**：双陆和超级随机共用绝对 14 步与按可通行面积计算的相对下限，取较大值，并禁止同行列直通。验收脚本独立在引擎编码棋盘上做四邻 BFS，统计最近敌距、直通及被山阻断的敌对对数，按人数和尺寸比较去除换色和对称变换后的布局。拥挤小图逐种子报告，含 16 席仅距 6 步的回归。
 
 **src/map/mega-random-map-generator.ts / mega-random-seats.ts / map-geometry.ts**：依次负责 16 族等概率地形（标准散点复用 `scatterRandomTerrain`，峡谷成廊复用 `carveMaze`）、各分区完整候选池抽样与距离场公平筛选、共用的桥梁和分区几何。仅生成器诊断返回族 ID 和渡口位置；不写入房间、示例或回放协议。
+
+**scripts/check-crown-repacking.mjs**：穷举超级随机限次搜索用尽后的确定性重排。按地形族和各队人数的无序组合覆盖全部 2–16 席输入；种子和请求尺寸不参与最后一次重排，座位返回前映射回原玩家顺序。该生成器检查不计入真实引擎样本。
 
 **scripts/test-mega-random.mjs**：复用 `evaluate-maze-fairness.mjs` 的独立引擎棋盘测量，覆盖标准/大图全部人数、地形结构与出生分布、单格断路、岛岸、渡口先到、组队和观战席、正常迷雾、公开示例、ops-v3 和 RPB5 客户端。输出 `/tmp/roka-mega-random/metrics.json` 与逐族预览。
 

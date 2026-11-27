@@ -7,9 +7,15 @@ import vm from 'node:vm';
 import { GameEngine } from '../src/game-engine.ts';
 import { SeededRandom, resolveMapSeed } from '../src/map/map-core.ts';
 import { rectangularPartition, seatDistricts } from '../src/map/map-geometry.ts';
-import { drawMegaFamily, generateMegaRandomMap, megaFamilies } from '../src/map/mega-random-map-generator.ts';
+import {
+  drawMegaFamily,
+  generateMegaRandomMap,
+  megaFamilies,
+  repackMegaCrowns,
+} from '../src/map/mega-random-map-generator.ts';
 import { encodeReplayPatchBinary } from '../src/replay-patch-binary.ts';
 import { mapConfig, measureMap } from './evaluate-maze-fairness.mjs';
+import { checkSeatConfigurations, checkIncidents, crownAudit } from './check-crown-spacing.mjs';
 
 const dir = '/tmp/roka-mega-random';
 const mode = 'mega_random';
@@ -17,6 +23,19 @@ await mkdir(dir, { recursive: true });
 const config = (players, size, token, options = {}) =>
   mapConfig(players, size, token, { map_mode: mode, ...options });
 const familyOf = (token) => drawMegaFamily(new SeededRandom(resolveMapSeed(mode, token)));
+const rush = crownAudit();
+const cramped = await checkSeatConfigurations(config, rush);
+assert.ok(cramped['cramped-crowns-16-0'] >= 14, '16 FFA crowns at ratio 0.34: previously only 6 steps');
+const incidents = await checkIncidents(mode, config, rush);
+for (const family of megaFamilies) {
+  const canonical = repackMegaCrowns(family, [1, 2, 2, 3, 3, 3]);
+  const reordered = repackMegaCrowns(family, [9, 4, 9, 7, 4, 9]);
+  assert.deepEqual(reordered.gridType, canonical.gridType);
+  assert.deepEqual(
+    reordered.generals,
+    [3, 1, 4, 0, 2, 5].map((seat) => canonical.generals[seat]),
+  );
+}
 const newFamilies = ['standard_scatter', 'canyon_corridors'];
 const cases = Object.fromEntries(megaFamilies.map((family) => [family, []]));
 const seedDistribution = Object.fromEntries(megaFamilies.map((family) => [family, 0]));
@@ -237,7 +256,9 @@ function analyze(board, players, token) {
   for (const key of ['nearCV', 'wideCV', 'territoryCV', 'enemyCV'])
     assert.ok(entry[key] <= 0.25, `${token} ${key}=${entry[key]}`);
   assert.ok(
-    entry.minEnemy >= Math.floor(spacing * 0.5) && entry.enemyRatio <= 1.8 && entry.landShare >= 0.55,
+    entry.minEnemy >= Math.max(14, Math.floor(spacing * 1.5)) &&
+      entry.enemyRatio <= 1.8 &&
+      entry.landShare >= 0.55,
     token,
   );
   for (const radius of [6, 10]) {
@@ -255,6 +276,7 @@ function analyze(board, players, token) {
 
 let focus = 0,
   extended = 0;
+const matrixMinimumSteps = { normal: Infinity, large: Infinity };
 for (const size of ['normal', 'large'])
   for (let players = 2; players <= 16; players++) {
     const focused = [2, 4, 8, 16].includes(players),
@@ -272,6 +294,8 @@ for (const size of ['normal', 'large'])
       seen.set(family, count + 1);
       const meta = config(players, size, token);
       const board = await GameEngine.buildReplayBaseMap(meta);
+      const { steps } = rush.check(board, meta, `${family}/${size}/${players}`);
+      matrixMinimumSteps[size] = Math.min(matrixMinimumSteps[size], ...steps);
       analyze(board, players, token);
       if (count === 0 || family === 'home_atolls' || family === 'team_shelves')
         checkRoutes(board, meta, family);
@@ -317,6 +341,7 @@ for (let index = 0, samples = 0; samples < spawnSamples; index++) {
   if (familyOf(token) !== spawnFamily) continue;
   const meta = config(spawnPlayers, 'normal', token);
   const board = await GameEngine.buildReplayBaseMap(meta);
+  rush.check(board, meta, 'scatter-spread');
   assert.deepEqual(await GameEngine.buildReplayBaseMap(meta), board, token);
   analyze(board, spawnPlayers, token);
   const { n, m, grid_type: tiles } = board;
@@ -393,9 +418,9 @@ for (const [token, minority] of [
   const teams = Array.from({ length: 16 }, (_, index) =>
     (minority === 1 ? index === 2 : index < minority) ? 2 : 1,
   );
-  const board = await GameEngine.buildReplayBaseMap(
-    config(16, 'normal', token, { player_teams: teams, allow_team: true }),
-  );
+  const meta = config(16, 'normal', token, { player_teams: teams, allow_team: true });
+  const board = await GameEngine.buildReplayBaseMap(meta);
+  rush.check(board, meta);
   const cells = teams.map((_, index) => board.grid_type.indexOf(index + 101));
   const nearest = cells.map((cell, index) => {
     const field = distances(board, cell);
@@ -426,6 +451,7 @@ for (const [family, { token }] of witnesses) {
     replayStore: { saveReplay: async () => '' },
   });
   const board = await GameEngine.buildReplayBaseMap(meta);
+  rush.check(board, meta);
   assert.deepEqual(live.generals[1], [-1, -1]);
   assert.deepEqual(live.buildReplayFrame(false).grid_type, board.grid_type);
   if (family === 'team_shelves') {
@@ -478,6 +504,7 @@ for (const [family, { token }] of witnesses) {
 }
 
 process.env.ROKA_DATA_DIR = `${dir}/api-data`;
+process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'mega-random-test-secret';
 process.env.WEBHOOK_SECRET = 'mega-random-test-secret';
 process.env.ROKA_STATIC_CDN = '0';
@@ -546,7 +573,11 @@ await writeFile(
       seedDistribution,
       spawnSamples,
       spawnSpread,
+      matrixMinimumSteps,
       worstByFamily,
+      incidents,
+      cramped,
+      crownRush: rush.summary(),
       witnesses: Object.fromEntries(witnesses),
     },
     null,
