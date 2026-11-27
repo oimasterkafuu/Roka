@@ -52,6 +52,7 @@
     "test:twin-continents": "pnpm exec tsx scripts/test-twin-continents.mjs",
     "test:maze-fairness": "pnpm exec tsx --test scripts/test-maze-fairness.mjs",
     "test:huaxia-season": "pnpm exec tsx scripts/test-huaxia-season.mjs",
+    "test:tutorial-huaxia-option": "node scripts/test-tutorial-huaxia-option.mjs",
     "test:strategy": "node scripts/test-strategy-logic.mjs",
     "test:leaderboard": "node scripts/test-leaderboard-activity.mjs",
     "test:storage": "node scripts/test-storage.mjs",

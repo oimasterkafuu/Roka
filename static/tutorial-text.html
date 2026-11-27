@@ -241,7 +241,6 @@
               <option value="mediterranean">地中海</option>
               <option value="twin_continents">双陆通衢</option>
               <option value="mega_random">超级随机</option>
-              <option value="huaxia">华夏系列</option>
             </select></label
           ><label class="map-example-control" id="map-example-region-control" style="display: none"
             >地区：<select id="map-example-region">
@@ -632,7 +631,9 @@
         const seedText = data.seed ? ` · 种子 ${data.seed}` : '';
         document.getElementById('map-example-meta').textContent =
           `${example.n} x ${example.m} · ${data.players} 人` + regionText + seedText;
-        document.getElementById('map-example-mode').value = String(example.map_mode || 'random');
+        const modeSelect = document.getElementById('map-example-mode');
+        modeSelect.value = String(example.map_mode || 'random');
+        if (!modeSelect.value) modeSelect.value = 'random';
         document.getElementById('map-example-region').value = String(example.map_region || 'china');
         syncMapExampleRegionControl();
         document.getElementById('map-example-players').value = String(data.players);
@@ -687,11 +688,13 @@
       }
 
       function refreshHuaxiaOption() {
-        const option = document.querySelector('#map-example-mode option[value="huaxia"]');
-        const active = isHuaxiaSeasonActive();
-        option.hidden = !active;
-        if (!active && getSelectedMapMode() === 'huaxia') {
-          document.getElementById('map-example-mode').value = 'random';
+        const select = document.getElementById('map-example-mode');
+        const option = select.querySelector('option[value="huaxia"]');
+        if (isHuaxiaSeasonActive()) {
+          if (!option) select.add(new Option(mapModeLabel('huaxia'), 'huaxia'));
+        } else if (option) {
+          if (select.value === 'huaxia') select.value = 'random';
+          option.remove();
         }
         syncMapExampleRegionControl();
       }
