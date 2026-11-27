@@ -221,7 +221,6 @@ block content
             option(value='maze') 峡谷回廊
             option(value='archipelago') 群岛要塞
             option(value='mediterranean') 地中海
-            option(value='twin_continents') 双陆通衢
             option(value='mega_random') 超级随机
         label#map-example-region-control.map-example-control(style='display: none')
           | 地区：
@@ -516,7 +515,6 @@ block scripts
       if (mapMode === 'maze') return '峡谷回廊';
       if (mapMode === 'archipelago') return '群岛要塞';
       if (mapMode === 'mediterranean') return '地中海';
-      if (mapMode === 'twin_continents') return '双陆通衢';
       if (mapMode === 'mega_random') return '超级随机';
       return '标准地图';
     }

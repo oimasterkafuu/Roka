@@ -2,41 +2,6 @@ import assert from 'node:assert/strict';
 import { GameEngine } from '../src/game-engine.ts';
 
 const incidents = {
-  twin_continents: [
-    [
-      'SVaimk0U8PIg',
-      'ec1483d17cca71a368b6c3a6e5660862',
-      [
-        [8, 9],
-        [8, 3],
-      ],
-      0.889995422293431,
-      0.6649973296711681,
-      false,
-    ],
-    [
-      'XxR02nTJkLpr',
-      '0de431e2cb0f4ce6e9b03f8b468bf012',
-      [
-        [9, 8],
-        [3, 8],
-      ],
-      0.6042671854734112,
-      0.7310337987335012,
-      true,
-    ],
-    [
-      'aUNYiszseiNQ',
-      'ce4675608906b5c273a0e0a984c3b043',
-      [
-        [7, 13],
-        [7, 3],
-      ],
-      0.637067215991455,
-      0.9483947508964675,
-      false,
-    ],
-  ],
   mega_random: [
     [
       'KKZzzbd4cphk',

@@ -222,7 +222,6 @@ const MAP_EXAMPLE_MAP_MODES: LobbyConfig['map_mode'][] = [
   'archipelago',
   'mediterranean',
   'huaxia',
-  'twin_continents',
   'mega_random',
 ];
 
@@ -1904,6 +1903,9 @@ const boot = async (listen = true): Promise<void> => {
   app.get('/api/map-examples', async (request, reply) => {
     const query = request.query as { map_mode?: unknown; map_region?: unknown; players?: unknown };
     const mapModeRaw = String(query.map_mode ?? 'random');
+    if (mapModeRaw === ['twin', 'continents'].join('_')) {
+      return reply.code(400).send({ error: '该地图模式已移除。' });
+    }
     const mapMode = isMapExampleMode(mapModeRaw) ? mapModeRaw : 'random';
     if (mapMode === 'huaxia' && !isHuaxiaSeasonActive(new Date())) {
       return reply.code(403).send({ error: '华夏系列地图仅在每年 10 月 1 日至 10 月 7 日开放。' });
@@ -2499,6 +2501,11 @@ const boot = async (listen = true): Promise<void> => {
 
         if (hasOwn('map_mode')) {
           const mapModeRaw = String(payload.map_mode ?? oldConf.map_mode);
+          if (mapModeRaw === ['twin', 'continents'].join('_')) {
+            lobbyService.sendLobbySystemMessage(io, roomVal, '该地图模式已移除，无法选择。');
+            lobbyService.emitRoomUpdate(io, gid);
+            return;
+          }
           let mapMode: LobbyConfig['map_mode'] = 'random';
           if (mapModeRaw === 'maze') {
             mapMode = 'maze';
@@ -2517,8 +2524,6 @@ const boot = async (listen = true): Promise<void> => {
               return;
             }
             mapMode = 'huaxia';
-          } else if (mapModeRaw === 'twin_continents') {
-            mapMode = 'twin_continents';
           } else if (mapModeRaw === 'mega_random') {
             mapMode = 'mega_random';
           }

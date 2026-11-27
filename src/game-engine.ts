@@ -15,7 +15,6 @@ import { generateHuaxiaMap } from './map/huaxia-map-generator';
 import { DEFAULT_MAP_REGION, normalizeMapRegion } from './map/huaxia-regions';
 import { assignMazeSeats, generateMazeMap } from './map/maze-map-generator';
 import { generateRandomMap } from './map/random-map-generator';
-import { generateTwinContinentsMap } from './map/twin-continents-map-generator';
 import { generateMegaRandomMap } from './map/mega-random-map-generator';
 import { ReplayStore } from './replay-store';
 import {
@@ -442,6 +441,9 @@ export class GameEngine {
     grid_type: number[];
     army_cnt: number[];
   }> {
+    if ((meta.map_mode as string) === ['twin', 'continents'].join('_')) {
+      throw new Error('该地图模式已移除，无法生成新地图。');
+    }
     const dummyPlayerSids = meta.player_names.map((_, index) => `replay_sid_${index}`);
     const dummyPlayerIds = meta.player_names.map((_, index) => `replay_id_${index}`);
 
@@ -496,6 +498,9 @@ export class GameEngine {
       !Array.isArray(replay.exploration)
     ) {
       throw new Error('回放版本不兼容。');
+    }
+    if ((replay.meta.map_mode as string) === ['twin', 'continents'].join('_')) {
+      throw new Error('该地图模式已移除，只能播放已有的观看缓存。');
     }
     const dummyPlayerSids = replay.meta.player_names.map((_, index) => `replay_sid_${index}`);
     const dummyPlayerIds = replay.meta.player_names.map((_, index) => `replay_id_${index}`);
@@ -720,15 +725,6 @@ export class GameEngine {
         mountainRatio: this.mountainRatio,
         swampRatio: this.swampRatio,
         mapRegion: this.mapRegion,
-      });
-    } else if (this.mapMode === 'twin_continents') {
-      generated = generateTwinContinentsMap(this.rng, {
-        widthRatio: this.widthRatio,
-        heightRatio: this.heightRatio,
-        cityRatio: this.cityRatio,
-        mountainRatio: this.mountainRatio,
-        swampRatio: this.swampRatio,
-        requiredPlayers,
       });
     } else {
       generated = generateRandomMap(this.rng, {

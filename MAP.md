@@ -52,7 +52,7 @@ src/game-engine.ts ── 对局核心（Tick 循环、战斗、连通、投降�
 │   ├── server.ts           # 主入口：Fastify 路由 + socket.io 事件
 │   ├── game-engine.ts      # 对局引擎核心（~1500 行）
 │   ├── game-engine/        # 引擎子模块（常量/选点/榜单/编码/回放/增兵）
-│   ├── map/                # 地图生成器（含 mega_random、twin_continents、huaxia 与九个 map_region）
+│   ├── map/                # 地图生成器（含 mega_random、huaxia 与九个 map_region）
 │   ├── server/             # 服务层：auth / captcha / lobby / webhook / auto-ban-policy（自动封禁策略）
 │   ├── types.ts            # 全项目共享类型与协议定义
 │   ├── *-store.ts          # 四个持久化存储（公告/用户/动态/回放）
@@ -187,9 +187,8 @@ _一句话：默认随机图生成 + 生成器公共类型定义。_
 
 **scripts/evaluate-maze-fairness.mjs / scripts/test-maze-fairness.mjs**：用房间尺寸规则与真实回放初始化对照 720 局公平性矩阵；专项回归覆盖小图拥挤、活局/操作回放、座位洗牌、平地与 Voronoi、其它地图字节不变。通过 `test:map-generation` 纳入 `pnpm test`。
 
-**src/map/twin-continents-map-generator.ts**：中央山墙沿棋盘镜轴分隔两岸，三条独立桥由两条普通桥和中间的连续沼泽桥组成。两岸从候选格抽取预置点，并检查席位间距、资源、领地及三桥先到平局；通用 `selectRandomGenerals` 分配实际座位。
 
-**src/map/crown-spacing.ts / scripts/check-crown-spacing.mjs**：双陆和超级随机共用绝对 14 步与按可通行面积计算的相对下限，取较大值，并禁止同行列直通。验收脚本独立在引擎编码棋盘上做四邻 BFS，统计最近敌距、直通及被山阻断的敌对对数，按人数和尺寸比较去除换色和对称变换后的布局。拥挤小图逐种子报告，含 16 席仅距 6 步的回归。
+**src/map/crown-spacing.ts / scripts/check-crown-spacing.mjs**：超级随机共用绝对 14 步与按可通行面积计算的相对下限，取较大值，并禁止同行列直通。验收脚本独立在引擎编码棋盘上做四邻 BFS，统计最近敌距、直通及被山阻断的敌对对数，按人数和尺寸比较去除换色和对称变换后的布局。拥挤小图逐种子报告，含 16 席仅距 6 步的回归。
 
 **src/map/mega-random-map-generator.ts / mega-random-seats.ts / map-geometry.ts**：依次负责 16 族等概率地形与实际空区填充（标准散点复用 `scatterRandomTerrain`，峡谷成廊复用 `carveMaze`）、各分区完整候选池抽样与距离场公平筛选、共用的桥梁和分区几何。仅生成器诊断返回族 ID 和渡口位置；不写入房间、示例或回放协议。
 
@@ -199,7 +198,6 @@ _一句话：默认随机图生成 + 生成器公共类型定义。_
 
 **scripts/measure-mega-terrain.mjs**：在引擎编码棋盘上用逐行直方图测最大全普通地矩形和方块，独立测不含山沼的最大方块。去掉外圈、归一到 31×31 后，以八种朝向中最小的 Jaccard 距离比较不同种子的山沼位置。超级随机专项按族记录以上指标及峡谷山墙、回廊、最近敌距证据。
 
-**scripts/test-twin-continents.mjs**：`pnpm run test:twin-continents` 从 `GameEngine.buildReplayBaseMap()` 解码实际主城与地形。2048 张重点图，加标准/large 各 2–16 人 × 32 个种子；逐格验镜轴、锁定两人墙轴与三人拥挤反例，测最短路、局部资源、等距领地和三桥并列先到。分别封一桥、仅留一桥、封三桥，另验组队初始化、公开示例 API、ops-v3 与 RPB5 观看端逐格重建。实际房主选图见 `scripts/test-lobby-guards.mjs`。
 
 **src/map/archipelago-map-generator.ts** — 「群岛要塞」：沼泽海上放 3×3–4×4 矩形岛（互不邻接，≥2×人数+1 个），海岸噪声扩边，多次重启贪心挑分散的玩家出生岛；重试上限 220 次，失败回退随机图。
 _一句话：矩形群岛 + 分散出生岛挑选，失败回退随机图。_
@@ -404,7 +402,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 ## 配置 / CI / 脚本 / bot 模板
 
-- **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:rate-limit-html、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:twin-continents、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
+- **package.json** — 脚本入口（dev=tsx 直跑 src、build=build-pages + 介绍片 + tsc、lint、format、test:build-pages、test:rate-limit-html、test:bot、test:server-bot、test:server-bot-config、test:lobby-guards、test:lobby-dwell、test:client-verify、test:bot-dwell-cap、test:guest-access、test:contributors、test:github-link、test:points、test:referral-ambassador、test:deploy-update、test:fog、test:multiline、test:rebind-sync、test:presence、test:map-generation、test:huaxia-season、test:strategy、test:leaderboard、test:storage、test:crown-transfer、test:admin-badge、test:asset-versioning、test:army-num-font、observe:bot）与依赖清单；`packageManager` 锁定 pnpm（Corepack）。
 
 - **scripts/build-pages.mjs / test-build-pages.mjs** — 自动枚举并用 Pug 构建期渲染 `views/*.pug`，经 Prettier 输出全部 13 个同名 `static/*.html`；测试断言 Pug/HTML 同名集合完全相等、连续两次构建字节一致，检查各页关键 DOM、脚本顺序、favicon/`{{V}}` 资源及 standards/quirks 模式，并断言共享 Header 仅用于指定七页、其余六页无共享 Header 资源且保留专用控件，replays 另断言当前导航、唯一 h1 与原有功能控件，纳入 `pnpm test`。
 
