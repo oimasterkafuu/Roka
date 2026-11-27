@@ -9,7 +9,9 @@ import {
   insetPartition,
 } from './map-geometry';
 import type { District, SeatPartition } from './map-geometry';
+import { carveMaze } from './maze-map-generator';
 import { chooseMegaSeats } from './mega-random-seats';
+import { scatterRandomTerrain } from './random-map-generator';
 
 type Brush = (row: number, col: number, vertical: number, horizontal: number) => number;
 
@@ -209,7 +211,42 @@ const painters = {
       return ridge > 0 ? 1 : ridge < -0.5 ? 2 : 0;
     });
   },
+  standard_scatter({ height, width, rng }) {
+    const tiles = scatterRandomTerrain(rng, height * width, range(rng, 0.16, 0.24), range(rng, 0.04, 0.08));
+    const mountains: number[] = [];
+    for (const [cell, tile] of tiles.entries()) {
+      if (tile !== 1) continue;
+      const row = Math.floor(cell / width),
+        col = cell % width;
+      if (row > 0 && row < height - 1 && col > 0 && col < width - 1) mountains.push(cell);
+      tiles[cell] = 0;
+    }
+    shuffle(mountains, rng);
+    for (const cell of mountains) {
+      const passableRing = [cell - width, cell, cell + width].every(
+        (middle) => tiles[middle - 1] !== 1 && tiles[middle] !== 1 && tiles[middle + 1] !== 1,
+      );
+      if (passableRing) tiles[cell] = 1;
+    }
+    return tiles;
+  },
+  canyon_corridors({ height, width, rng }) {
+    const stride = width + 2;
+    const maze = carveMaze(rng, height + 2, stride, 0);
+    const tiles = new Uint8Array(height * width);
+    for (let row = 0; row < height; row++) {
+      const start = (row + 1) * stride + 1;
+      tiles.set(maze.subarray(start, start + width), row * width);
+    }
+    return tiles;
+  },
 } satisfies Record<string, (canvas: Canvas) => Uint8Array>;
+
+function terrainResolution(family: keyof typeof painters, length: number) {
+  if (family === 'standard_scatter') return length;
+  if (family === 'canyon_corridors') return 2 * Math.floor((length + 2) / 6) + 1;
+  return Math.floor(length / 2);
+}
 
 function linkDistricts(canvas: Canvas, tiles: Uint8Array, owners: number[]) {
   const { height, width, partition, rng } = canvas;
@@ -341,8 +378,23 @@ export function generateMegaRandomMap(
       });
     }
     const seatedTeams = order.map((index) => teams[index]);
-    const coarseHeight = Math.floor(height / 2),
-      coarseWidth = Math.floor(width / 2);
+    const coarseHeight = terrainResolution(family, height),
+      coarseWidth = terrainResolution(family, width);
+    const terrainRow = (row: number) => Math.floor((row * coarseHeight) / height);
+    const terrainCol = (col: number) => Math.floor((col * coarseWidth) / width);
+    const landPartition =
+      family === 'inland_continent'
+        ? insetPartition(partition, 0.8)
+        : family === 'home_atolls' || family === 'team_shelves'
+          ? {
+              ...partition,
+              slotAt: (row: number, col: number) =>
+                partition.slotAt(
+                  (terrainRow(Math.floor(row * height)) + 0.5) / coarseHeight,
+                  (terrainCol(Math.floor(col * width)) + 0.5) / coarseWidth,
+                ),
+            }
+          : partition;
     for (let attempt = 0; attempt < 3; attempt++) {
       const coarseCrossings: number[][][] = [];
       const coarse = painters[family]({
@@ -358,11 +410,7 @@ export function generateMegaRandomMap(
       sealPockets(coarse, coarseWidth);
       const tiles = Uint8Array.from(
         { length: height * width },
-        (_, index) =>
-          coarse[
-            Math.floor((Math.floor(index / width) * coarseHeight) / height) * coarseWidth +
-              Math.floor(((index % width) * coarseWidth) / width)
-          ],
+        (_, index) => coarse[terrainRow(Math.floor(index / width)) * coarseWidth + terrainCol(index % width)],
       );
       if (tiles.reduce((sum, tile) => sum + Number(tile === 0), 0) < tiles.length / 2) continue;
       const crossings = coarseCrossings.map((channels) =>
@@ -386,7 +434,6 @@ export function generateMegaRandomMap(
           }),
         ),
       );
-      const landPartition = family === 'inland_continent' ? insetPartition(partition, 0.8) : partition;
       const seats = chooseMegaSeats(tiles, width, landPartition, seatedTeams, crossings, rng);
       if (!seats) continue;
       const gridType = build2D<Tile>(n, m, 0);

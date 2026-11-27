@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import crypto, { createHash } from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
+import { mock } from 'node:test';
 import vm from 'node:vm';
 import { GameEngine } from '../src/game-engine.ts';
 import { SeededRandom, resolveMapSeed } from '../src/map/map-core.ts';
+import { rectangularPartition, seatDistricts } from '../src/map/map-geometry.ts';
 import { drawMegaFamily, generateMegaRandomMap, megaFamilies } from '../src/map/mega-random-map-generator.ts';
 import { encodeReplayPatchBinary } from '../src/replay-patch-binary.ts';
 import { mapConfig, measureMap } from './evaluate-maze-fairness.mjs';
@@ -14,10 +17,16 @@ await mkdir(dir, { recursive: true });
 const config = (players, size, token, options = {}) =>
   mapConfig(players, size, token, { map_mode: mode, ...options });
 const familyOf = (token) => drawMegaFamily(new SeededRandom(resolveMapSeed(mode, token)));
+const newFamilies = ['standard_scatter', 'canyon_corridors'];
 const cases = Object.fromEntries(megaFamilies.map((family) => [family, []]));
 const seedDistribution = Object.fromEntries(megaFamilies.map((family) => [family, 0]));
-for (let index = 0; index < 4096; index++) seedDistribution[familyOf(`mega-lottery-${index}`)]++;
-assert.ok(megaFamilies.length >= 12 && Object.values(seedDistribution).every((count) => count > 180));
+const lotteryDraws = 16_384;
+for (let index = 0; index < lotteryDraws; index++) seedDistribution[familyOf(`mega-lottery-${index}`)]++;
+assert.equal(megaFamilies.length, 16);
+for (const family of newFamilies) assert.ok(megaFamilies.includes(family), family);
+const expectedDraws = lotteryDraws / megaFamilies.length;
+for (const [family, count] of Object.entries(seedDistribution))
+  assert.ok(Math.abs(count - expectedDraws) <= expectedDraws * 0.12, `${family}: ${count} draws`);
 
 function neighbors(cell, width, length) {
   return [
@@ -79,6 +88,55 @@ function distances(board, start, blocked = () => false) {
   return dist;
 }
 
+function checkTerrain({ n, m, grid_type: tiles }, family, token) {
+  if (!newFamilies.includes(family)) return;
+  const mountains = tiles.flatMap((tile, cell) => (tile === 201 ? [cell] : []));
+  if (family === 'standard_scatter') {
+    const isolated = mountains.filter((cell) =>
+      neighbors(cell, m, tiles.length).every((next) => tiles[next] !== 201),
+    );
+    assert.ok(mountains.length >= 0.05 * tiles.length, `${token}: not enough scattered mountains`);
+    assert.ok(isolated.length >= 0.8 * mountains.length, `${token}: not enough single-cell mountains`);
+    assert.ok(
+      tiles.filter((tile) => tile === 204).length >= 0.02 * tiles.length,
+      `${token}: not enough swamps`,
+    );
+    return;
+  }
+  assert.ok(mountains.length >= 0.24 * tiles.length, `${token}: not enough canyon walls`);
+  const unseen = new Set(mountains);
+  let largest = 0;
+  for (const cell of unseen) {
+    const wall = [cell];
+    unseen.delete(cell);
+    for (let head = 0; head < wall.length; head++)
+      for (const next of neighbors(wall[head], m, tiles.length)) if (unseen.delete(next)) wall.push(next);
+    largest = Math.max(largest, wall.length);
+  }
+  assert.ok(largest >= 0.04 * tiles.length, `${token}: canyon walls are too fragmented`);
+
+  let corridors = 0;
+  for (const [cell, tile] of tiles.entries()) {
+    if (tile === 201) continue;
+    const row = Math.floor(cell / m),
+      col = cell % m;
+    const wallDistance = (step, limit) => {
+      for (let distance = 1; distance <= Math.min(4, limit); distance++)
+        if (tiles[cell + step * distance] === 201) return distance;
+      return Infinity;
+    };
+    if (
+      wallDistance(-1, col) + wallDistance(1, m - 1 - col) <= 5 ||
+      wallDistance(-m, row) + wallDistance(m, n - 1 - row) <= 5
+    )
+      corridors++;
+  }
+  assert.ok(
+    corridors >= 0.12 * (tiles.length - mountains.length),
+    `${token}: not enough two-sided corridors`,
+  );
+}
+
 function checkRoutes(board, meta, family) {
   const { m, grid_type: tiles } = board;
   const spawns = tiles.flatMap((tile, cell) => (tile > 100 && tile < 117 ? [cell] : []));
@@ -88,7 +146,7 @@ function checkRoutes(board, meta, family) {
       assert.equal(
         spawns.filter((other) => dry[other] >= 0).length,
         1,
-        `${family} FFA islands must be separated`,
+        `${meta.map_token}: ${family} FFA islands must be separated`,
       );
     }
   }
@@ -165,6 +223,7 @@ function analyze(board, players, token) {
   for (const cell of stats.spawns)
     assert.ok(neighbors(cell, m, tiles.length).filter((next) => tiles[next] === 200).length >= 2, token);
   assertNoChokepoint(board, token);
+  checkTerrain(board, family, token);
   const spacing = Math.sqrt(tiles.filter((tile) => tile !== 201).length / players);
   const entry = {
     nearCV: stats.local[6].plains.cv,
@@ -214,7 +273,8 @@ for (const size of ['normal', 'large'])
       const meta = config(players, size, token);
       const board = await GameEngine.buildReplayBaseMap(meta);
       analyze(board, players, token);
-      if (count === 0) checkRoutes(board, meta, family);
+      if (count === 0 || family === 'home_atolls' || family === 'team_shelves')
+        checkRoutes(board, meta, family);
       if (size === 'normal' && players === 8) {
         hashes.get(family).add(fingerprint(board));
         if (!witnesses.has(family)) {
@@ -242,6 +302,81 @@ for (const size of ['normal', 'large'])
 assert.equal(new Set([...witnesses.values()].map((witness) => witness.signature)).size, megaFamilies.length);
 for (const [family, variants] of hashes)
   assert.ok(variants.size >= 3, `${family} lacks distinct secondary variants`);
+
+const spawnSamples = 32;
+const spawnFamily = 'standard_scatter';
+const spawnPlayers = 4;
+const centerLineOffsets = [0, -Number.EPSILON];
+const spawnDistricts = Array.from({ length: spawnPlayers }, () => ({
+  radii: [],
+  nearest: 0,
+  positions: new Set(),
+}));
+for (let index = 0, samples = 0; samples < spawnSamples; index++) {
+  const token = `mega-scatter-spawns-${index}`;
+  if (familyOf(token) !== spawnFamily) continue;
+  const meta = config(spawnPlayers, 'normal', token);
+  const board = await GameEngine.buildReplayBaseMap(meta);
+  assert.deepEqual(await GameEngine.buildReplayBaseMap(meta), board, token);
+  analyze(board, spawnPlayers, token);
+  const { n, m, grid_type: tiles } = board;
+  const districts = seatDistricts(n, m, spawnPlayers);
+  const { slotAt, centers } = rectangularPartition(districts);
+  const land = tiles.flatMap((tile, cell) =>
+    tile !== 201 && tile !== 204
+      ? [{ cell, row: (Math.floor(cell / m) + 0.5) / n, col: ((cell % m) + 0.5) / m }]
+      : [],
+  );
+  const spawns = land.filter(({ cell }) => tiles[cell] !== 200);
+  assert.ok(
+    districts.every(({ top, bottom, left, right }) => bottom - top === 0.5 && right - left === 0.5),
+    token,
+  );
+  const reflectedSlots = centerLineOffsets.flatMap((rowOffset) =>
+    centerLineOffsets.map(
+      (colOffset) => (row, col) =>
+        slotAt(row === 0.5 ? row + rowOffset : row, col === 0.5 ? col + colOffset : col),
+    ),
+  );
+  const spawnSlot = reflectedSlots.find(
+    (slot) => new Set(spawns.map(({ row, col }) => slot(row, col))).size === spawnPlayers,
+  );
+  assert.ok(spawnSlot, `${token}: expected a seat in each district after reflection`);
+  const nearest = districts.map(() => Infinity);
+  const radius = (row, col, slot) => {
+    const { top, bottom, left, right } = districts[slot];
+    const [centerRow, centerCol] = centers[slot];
+    return Math.hypot((row - centerRow) / (bottom - top), (col - centerCol) / (right - left));
+  };
+  for (const { cell, row, col } of land) {
+    const slot = spawnSlot(row, col);
+    if (
+      neighbors(cell, m, tiles.length).filter((next) => tiles[next] !== 201 && tiles[next] !== 204).length >=
+      2
+    )
+      nearest[slot] = Math.min(nearest[slot], radius(row, col, slot));
+  }
+  for (const { row, col } of spawns) {
+    const slot = spawnSlot(row, col);
+    const distance = radius(row, col, slot);
+    const sample = spawnDistricts[slot];
+    sample.radii.push(distance);
+    sample.positions.add(`${row.toFixed(3)}:${col.toFixed(3)}`);
+    sample.nearest += Number(distance <= nearest[slot] + 1e-9);
+  }
+  samples++;
+}
+const spawnSpread = spawnDistricts.map(({ radii, nearest, positions }, slot) => {
+  assert.equal(radii.length, spawnSamples);
+  const min = Math.min(...radii),
+    max = Math.max(...radii);
+  assert.ok(min <= 0.22 && max >= 0.35, `district ${slot}: radius range ${min} to ${max}`);
+  assert.ok(
+    nearest <= 8 && positions.size >= 16,
+    `district ${slot}: ${nearest} nearest, ${positions.size} positions`,
+  );
+  return { min, max, nearest, positions: positions.size };
+});
 
 const viewer = vm.createContext({
   replay_binary_magic: [...Buffer.from('RPB5')],
@@ -349,15 +484,39 @@ process.env.ROKA_STATIC_CDN = '0';
 const { app, boot } = await import('../src/server.ts');
 await boot(false);
 try {
-  const response = await app.inject({
-    method: 'GET',
-    url: '/api/map-examples?map_mode=mega_random&players=8',
-  });
-  assert.equal(response.statusCode, 200);
-  const { example } = response.json();
-  assert.equal(example.map_mode, mode);
-  assert.equal(example.grid_type.filter((tile) => tile >= 101 && tile <= 108).length, 8);
-  assert.ok(!('family' in example));
+  const exercised = new Set();
+  for (let index = 0; exercised.size < newFamilies.length; index++) {
+    const bytes = createHash('sha256').update(`mega-example-${index}`).digest().subarray(0, 16);
+    const token = bytes.toString('hex');
+    const family = familyOf(token);
+    if (!newFamilies.includes(family) || exercised.has(family)) continue;
+    const entropy = mock.method(
+      crypto,
+      'randomBytes',
+      (length) => {
+        assert.equal(length, bytes.length);
+        return bytes;
+      },
+      { times: 1 },
+    );
+    syncBuiltinESMExports();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/map-examples?map_mode=mega_random&players=8',
+      });
+      assert.equal(response.statusCode, 200);
+      const { players, example } = response.json();
+      assert.equal(players, 8);
+      const preview = await GameEngine.buildReplayBaseMap(config(players, 'normal', token));
+      assert.deepEqual(example, { map_mode: mode, map_region: 'china', ...preview });
+      checkTerrain(example, family, token);
+      exercised.add(family);
+    } finally {
+      entropy.mock.restore();
+      syncBuiltinESMExports();
+    }
+  }
 } finally {
   await app.close();
 }
@@ -381,11 +540,19 @@ const worstByFamily = Object.fromEntries(
 await writeFile(
   `${dir}/metrics.json`,
   JSON.stringify(
-    { focus, extended, seedDistribution, worstByFamily, witnesses: Object.fromEntries(witnesses) },
+    {
+      focus,
+      extended,
+      seedDistribution,
+      spawnSamples,
+      spawnSpread,
+      worstByFamily,
+      witnesses: Object.fromEntries(witnesses),
+    },
     null,
     2,
   ),
 );
 console.log(
-  `PASS ${focus + extended} engine boards, ${witnesses.size} family previews, team/fog/ops-v3/RPB5 and public example`,
+  `PASS ${focus + extended} engine boards, ${spawnSamples} spawn-spread boards, ${witnesses.size} family previews, team/fog/ops-v3/RPB5 and ${newFamilies.length} public examples`,
 );

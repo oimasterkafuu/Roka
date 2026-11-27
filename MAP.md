@@ -176,10 +176,10 @@ _一句话：地图生成器公共底座（Tile 类型、种子 RNG、连通性�
 **src/map/map-size.ts** — `resolveMapSizeRatioByPlayers`：人数 → 地图宽高比例（二次函数，下限 0.34）；`resolveMapSizeRatioByPlayersAndRegion` 为台湾省应用 1.5 倍边长倍率。
 _一句话：人数 → 地图宽高比例的纯函数。_
 
-**src/map/random-map-generator.ts** — 默认随机图：按概率撒山/沼泽（上限 0.24/0.16），反复重试直到连通；同时定义所有生成器共用的 `MapGenerationConfig`/`GeneratedMap` 类型。不预置中立城市（城市只由玩家建造）。
+**src/map/random-map-generator.ts** — 默认随机图：用 `scatterRandomTerrain` 按格撒山/沼泽（上限 0.24/0.16），反复重试直到连通；同时定义所有生成器共用的 `MapGenerationConfig`/`GeneratedMap` 类型。不预置中立城市（城市只由玩家建造）。
 _一句话：默认随机图生成 + 生成器公共类型定义。_
 
-**src/map/maze-map-generator.ts**：为「峡谷回廊」生成 6 张开墙比例不同的连通回廊，联合选择地形、沼泽与主城布局。拥挤时只开足够的内部墙以保证容量；优先保留非死端布局。返回按坐标规整的普通地出生点，`assignMazeSeats` 用独立种子排列座位。
+**src/map/maze-map-generator.ts**：用 `carveMaze` 为「峡谷回廊」生成 6 张开墙比例不同的连通回廊，联合选择地形、沼泽与主城布局。拥挤时只开足够的内部墙以保证容量；优先保留非死端布局。返回按坐标规整的普通地出生点，`assignMazeSeats` 用独立种子排列座位。
 
 **src/map/maze-layout.ts**：每张候选图最多 5 次最远点重启、52 次单点交换，复用按出生格缓存的 BFS 距离场。按最小点对距离档位、最弱开局平地档位、近程与领地离散度等分层比较。多源 BFS 将等距格均分给最近主城；沼泽分配保留出生格、优先保护半径 6、10 的平地，并扣减平地富余区域的份额。
 
@@ -189,9 +189,9 @@ _一句话：默认随机图生成 + 生成器公共类型定义。_
 
 **src/map/twin-continents-map-generator.ts**：中央山墙沿棋盘镜轴分隔两岸，三条独立桥由两条普通桥和中间的连续沼泽桥组成。偶数座位按等面积分行、跨墙镜像；奇数用一组三席对角线与镜像对固定三桥先到平局，复用 `maze-layout.ts` 的 `MazeGraph` 比较最近敌距、局部资源、等距领地与桥距。通用 `selectRandomGenerals` 分配实际座位；不改其他地图输出或回放协议。
 
-**src/map/mega-random-map-generator.ts / mega-random-seats.ts / map-geometry.ts**：依次负责 14 族地形和种子变体、基于实际距离场的主城筛选、共用的桥梁与席位分区几何。仅生成器诊断返回族 ID 和渡口位置；不写入房间、示例或回放协议。
+**src/map/mega-random-map-generator.ts / mega-random-seats.ts / map-geometry.ts**：依次负责 16 族等概率地形（标准散点复用 `scatterRandomTerrain`，峡谷成廊复用 `carveMaze`）、各分区完整候选池抽样与距离场公平筛选、共用的桥梁和分区几何。仅生成器诊断返回族 ID 和渡口位置；不写入房间、示例或回放协议。
 
-**scripts/test-mega-random.mjs**：复用 `evaluate-maze-fairness.mjs` 的独立引擎棋盘测量，覆盖标准/大图全部人数、单格断路、岛岸、渡口先到、组队和观战席、正常迷雾、ops-v3 和 RPB5 客户端。输出 `/tmp/roka-mega-random/metrics.json` 与逐族预览。
+**scripts/test-mega-random.mjs**：复用 `evaluate-maze-fairness.mjs` 的独立引擎棋盘测量，覆盖标准/大图全部人数、地形结构与出生分布、单格断路、岛岸、渡口先到、组队和观战席、正常迷雾、公开示例、ops-v3 和 RPB5 客户端。输出 `/tmp/roka-mega-random/metrics.json` 与逐族预览。
 
 **scripts/test-twin-continents.mjs**：`pnpm run test:twin-continents` 从 `GameEngine.buildReplayBaseMap()` 解码实际主城与地形。2048 张重点图，加标准/large 各 2–16 人 × 32 个种子；逐格验镜轴、锁定两人墙轴与三人拥挤反例，测最短路、局部资源、等距领地和三桥并列先到。分别封一桥、仅留一桥、封三桥，另验组队初始化、公开示例 API、ops-v3 与 RPB5 观看端逐格重建。实际房主选图见 `scripts/test-lobby-guards.mjs`。
 
