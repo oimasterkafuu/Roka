@@ -202,6 +202,9 @@
 .swamp {
   background-image: url('../swamp.png');
 }
+.swamp:not(.fog, .fog-unexplored) {
+  background-color: #e6e6e6;
+}
 .obstacle {
   background-image: url('../obstacle.png');
 }

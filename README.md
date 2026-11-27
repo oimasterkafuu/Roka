@@ -11,6 +11,7 @@ Roka 是一个实时方格领土战争游戏，玩法类似 generals.io。玩家
 ## 主要功能
 
 - 实时 FFA 与组队对局，多种地图、地图尺寸、随机种子和三种迷雾模式（默认正常）。
+- 可见的中性沼泽使用比空地略亮的浅灰底；已占领的沼泽保留玩家配色，视野外仍按原迷雾样式显示。
 - 实时对局用方向键移动光标、用 WASD 推兵。数字编队 0–19 仅在当前对局有效，多线争锋支持多选与同步推兵。快捷键见 `/tutorial`。
 - 实时对局的第 26–50 Tick 爆发期红框只在单线显示；多线争锋无爆发期，不显示红框。
 - 孤军格恢复连通时，仅当前兵力大于 1 且本次孤军期间未接兵的格子翻倍；1 兵保持为 1，已接兵格保持当前兵力。
@@ -191,3 +192,5 @@ pnpm run test:mega-random
 `pnpm run test:replay-loading-ui`（纳入 `pnpm test`，需先构建）使用真实 Chromium，在 1440/390 视口测量 0/25/75/100% 几何位置、单周期动画相位、状态切换、首屏旋转和移除、布局溢出与脚本错误。先运行 `pnpm exec playwright install chromium` 准备浏览器；可用 `ROKA_PLAYWRIGHT_MODULE` / `CHROMIUM_PATH` 指定浏览器依赖，`ROKA_LOADING_OUTPUT=<仓库外目录>` 导出测量 JSON。
 
 `pnpm run test:replay-mobile`（纳入 `pnpm test`，需先构建）在 Chromium 中加载真实回放页面与测试回放，验证窄屏与旋转布局、连续触摸操作、图表拖动与取消、地图平移与双指缩放，以及桌面布局和部署横幅避让。浏览器配置与回放加载测试相同。
+
+`pnpm run test:swamp-background`（纳入 `pnpm test`，无需构建）在桌面和手机视口加载真实棋盘样式，检查中性沼泽、空地及玩家沼泽的底色，并确保沼泽本身没有阴影或滤镜。浏览器配置与回放加载测试相同；可用 `ROKA_SWAMP_OUTPUT=<仓库外目录>` 导出棋盘截图。
