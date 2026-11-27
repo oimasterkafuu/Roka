@@ -1,10 +1,16 @@
-import { SeededRandom } from './map-core';
+import { SeededRandom, shuffle } from './map-core';
 import type { SeatPartition } from './map-geometry';
 import { MazeGraph, localCounts, variation } from './maze-layout';
 
 const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
 
-function penalty(graph: MazeGraph, seats: number[], teams: number[], crossings: number[][][]) {
+function penalty(
+  graph: MazeGraph,
+  seats: number[],
+  teams: number[],
+  crossings: number[][][],
+  exits: Uint8Array,
+) {
   const fields = seats.map((cell) => graph.field(cell));
   const opening = localCounts(graph, seats, fields);
   const territory = graph.territory(seats).plains;
@@ -24,6 +30,13 @@ function penalty(graph: MazeGraph, seats: number[], teams: number[], crossings: 
     );
   }
   if (seats.length > 1) {
+    for (const [seat, { distances }] of fields.entries()) {
+      const openExits = seats.reduce(
+        (count, cell) => count - Number(distances[cell] === 1),
+        exits[seats[seat]],
+      );
+      excess.push((2 - openExits) / 2);
+    }
     for (const channels of crossings) {
       const approaches = channels.map((channel) =>
         fields.map(({ distances }) => Math.min(...channel.map((cell) => distances[cell]))),
@@ -65,45 +78,43 @@ export function chooseMegaSeats(
   const height = tiles.length / width,
     graph = new MazeGraph(tiles, width);
   if (!teams.length) return [];
-  const eligible = graph.cells.filter((cell) => {
-    if (tiles[cell] !== 0) return false;
-    const exits =
+  if (!graph.cells.length) return;
+  const { distances } = graph.field(graph.cells[0]);
+  if (graph.cells.some((cell) => distances[cell] < 0)) return;
+  const exits = new Uint8Array(tiles.length);
+  const pools: number[][] = partition.centers.map(() => []);
+  for (const cell of graph.cells) {
+    if (tiles[cell] !== 0) continue;
+    exits[cell] =
       Number(cell >= width && tiles[cell - width] === 0) +
       Number(cell + width < tiles.length && tiles[cell + width] === 0) +
       Number(cell % width > 0 && tiles[cell - 1] === 0) +
       Number(cell % width < width - 1 && tiles[cell + 1] === 0);
-    return exits >= 2;
-  });
-  const pools: number[][] = partition.centers.map(() => []);
-  for (const cell of eligible)
-    pools[partition.slotAt((Math.floor(cell / width) + 0.5) / height, ((cell % width) + 0.5) / width)].push(
-      cell,
-    );
-  for (const [slot, cells] of pools.entries()) {
-    const [row, col] = partition.centers[slot];
-    const distance = (cell: number) =>
-      ((Math.floor(cell / width) + 0.5) / height - row) ** 2 + (((cell % width) + 0.5) / width - col) ** 2;
-    cells.sort((first, second) => distance(first) - distance(second));
+    if (exits[cell] < 2) continue;
+    const slot = partition.slotAt((Math.floor(cell / width) + 0.5) / height, ((cell % width) + 0.5) / width);
+    pools[slot].push(cell);
   }
   if (pools.some((pool) => !pool.length)) return;
-  const seats = pools.map((pool) => pool[0]);
-  const distances = graph.field(seats[0]).distances;
-  if (graph.cells.some((cell) => distances[cell] < 0)) return;
-  let cost = penalty(graph, seats, teams, crossings);
-  for (let pass = 0; cost > 0 && pass < 5; pass++) {
-    for (const [slot, pool] of pools.entries()) {
-      for (let trial = 0; trial < 5; trial++) {
-        const candidate =
-          pool[rng.intInclusive(0, Math.min(pool.length - 1, Math.ceil((pool.length * (pass + 1)) / 6)))];
-        if (seats[slot] === candidate) continue;
-        const original = seats[slot];
-        seats[slot] = candidate;
-        const score = penalty(graph, seats, teams, crossings);
-        if (score >= cost) seats[slot] = original;
-        else cost = score;
-        if (!cost) return seats;
+  const sample = (pool: number[]) => pool[rng.intInclusive(0, pool.length - 1)];
+  const slots = pools.map((_, slot) => slot);
+  for (let restart = 0; restart < 3; restart++) {
+    const seats = pools.map(sample);
+    let cost = penalty(graph, seats, teams, crossings, exits);
+    if (!cost) return seats;
+    for (let pass = 0; pass < 6; pass++) {
+      shuffle(slots, rng);
+      for (const slot of slots) {
+        for (let trial = 0; trial < 5; trial++) {
+          const candidate = sample(pools[slot]);
+          if (seats[slot] === candidate) continue;
+          const original = seats[slot];
+          seats[slot] = candidate;
+          const score = penalty(graph, seats, teams, crossings, exits);
+          if (score >= cost) seats[slot] = original;
+          else cost = score;
+          if (!cost) return seats;
+        }
       }
     }
   }
-  return cost ? undefined : seats;
 }

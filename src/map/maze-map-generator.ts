@@ -11,7 +11,7 @@ import {
 
 const TERRAIN_CANDIDATES = 6;
 
-const carveMaze = (rng: SeededRandom, rows: number, cols: number, players: number): Uint8Array => {
+export const carveMaze = (rng: SeededRandom, rows: number, cols: number, players: number): Uint8Array => {
   const tiles = new Uint8Array(rows * cols).fill(1);
   const start =
     (1 + 2 * rng.intInclusive(0, (rows - 3) / 2)) * cols + 1 + 2 * rng.intInclusive(0, (cols - 3) / 2);

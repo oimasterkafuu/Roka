@@ -27,6 +27,19 @@ interface GeneratedMap {
   st: Grid<boolean>;
 }
 
+const scatterRandomTerrain = (
+  rng: SeededRandom,
+  length: number,
+  mountainRatio: number,
+  swampRatio: number,
+): Uint8Array => {
+  const blockedRatio = swampRatio + mountainRatio;
+  return Uint8Array.from({ length }, () => {
+    const chance = rng.next();
+    return chance < swampRatio ? 2 : chance < blockedRatio ? 1 : 0;
+  });
+};
+
 const generateRandomMap = (rng: SeededRandom, config: MapGenerationConfig): GeneratedMap => {
   const { n, m } = computeBaseMapDimensions(rng, config.heightRatio, config.widthRatio);
   const owner = build2D(n, m, 0);
@@ -34,21 +47,14 @@ const generateRandomMap = (rng: SeededRandom, config: MapGenerationConfig): Gene
 
   // Roka: no neutral cities are generated; cities only appear via player builds.
   const swampRatio = MAX_SWAMP_RATIO * config.swampRatio;
-  const mountainRatio = swampRatio + MAX_MOUNTAIN_RATIO * config.mountainRatio;
+  const mountainRatio = MAX_MOUNTAIN_RATIO * config.mountainRatio;
 
   let gridType: Grid<Tile> = build2D<Tile>(n, m, 0);
   while (true) {
-    const candidate = build2D<Tile>(n, m, 0);
-    for (let i = 0; i < n; i += 1) {
-      for (let j = 0; j < m; j += 1) {
-        const chance = rng.next();
-        if (chance < swampRatio) {
-          candidate[i][j] = 2;
-        } else if (chance < mountainRatio) {
-          candidate[i][j] = 1;
-        }
-      }
-    }
+    const tiles = scatterRandomTerrain(rng, n * m, mountainRatio, swampRatio);
+    const candidate = Array.from({ length: n }, (_, row) =>
+      Array.from(tiles.subarray(row * m, (row + 1) * m), (tile) => tile as Tile),
+    );
     const [x] = checkConnection(candidate, n, m);
     if (x !== -1) {
       gridType = candidate;
@@ -69,5 +75,5 @@ const generateRandomMap = (rng: SeededRandom, config: MapGenerationConfig): Gene
   };
 };
 
-export { generateRandomMap };
+export { generateRandomMap, scatterRandomTerrain };
 export type { GeneratedMap, MapGenerationConfig };
