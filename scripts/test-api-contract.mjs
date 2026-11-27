@@ -120,6 +120,9 @@ try {
   );
   for (const region of ['three-kingdoms', 'northern-dynasties', 'qing', 'hong-kong'])
     assert.equal((await fetch(`${base}/api/map-examples?map_region=${region}`)).status, 400, region);
+  const removedMapMode = ['twin', 'continents'].join('_');
+  const removedMapResponse = await fetch(`${base}/api/map-examples?map_mode=${removedMapMode}&players=4`);
+  assert.equal(removedMapResponse.status, 400, 'removed map mode must be rejected');
   assert.equal((await fetch(`${base}/api/map-examples?map_region=han`)).status, 200);
 
   const peers = [];

@@ -3,6 +3,8 @@ import { FOG_MODES, LeaderboardEntry, ReplayData, ReplayPatchPayload, UpdatePayl
 /** 当前回放观看二进制魔数（ASCII），供缓存陈旧性校验。 */
 export const REPLAY_BINARY_MAGIC = 'RPB5';
 
+const REPLAY_META_EXTENSION_MARKER = 0xa5;
+
 const classToCode = (value: string): number => {
   if (value === 'dead') {
     return 1;
@@ -186,6 +188,8 @@ const writePatchPayload = (writer: ByteWriter, payload: ReplayPatchPayload): voi
 
 const writeReplayMeta = (writer: ByteWriter, replay: ReplayData): void => {
   const { player_names: playerNames, player_teams: playerTeams, fog_mode: mode } = replay.meta;
+  const aiDifficulty = replay.meta.ai_difficulty === 'simple' ? 1 : 0;
+  const serverBotSeats = replay.meta.server_bot_seats ?? [];
   const count = playerNames.length;
   writer.writeU16(count);
   for (let i = 0; i < count; i += 1) {
@@ -193,6 +197,15 @@ const writeReplayMeta = (writer: ByteWriter, replay: ReplayData): void => {
     writer.writeU8(normalizeU32(playerTeams[i]));
   }
   writer.writeU8(FOG_MODES.indexOf(mode));
+  writer.writeU8(REPLAY_META_EXTENSION_MARKER);
+  writer.writeU8(aiDifficulty);
+  writer.writeU8(serverBotSeats.length);
+  for (const seat of serverBotSeats) {
+    if (!Number.isInteger(seat) || seat < 1 || seat > count) {
+      throw new Error('回放托管席位元数据非法。');
+    }
+    writer.writeU8(seat);
+  }
   if (mode === 'visible') return;
   writer.writeU8(replay.vision.size);
   for (const [team, { omniscientFrom, cells }] of replay.vision) {

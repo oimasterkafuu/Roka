@@ -118,7 +118,6 @@
           <div class="inline-button">峡谷回廊</div>
           <div class="inline-button">群岛要塞</div>
           <div class="inline-button">地中海</div>
-          <div class="inline-button" data-map-mode="twin_continents">双陆通衢</div>
           <div class="inline-button" data-map-mode="mega_random">超级随机</div>
           <div class="inline-button" data-map-mode="huaxia">华夏系列</div>
         </div>
@@ -168,7 +167,7 @@
           <div class="inline-button inverted">标准</div>
           <div class="inline-button">大地图</div>
         </div>
-        <p>选择大地图后，地图面积约为标准地图的 4 倍。</p>
+        <p>地图面积约为标准地图的 4 倍。</p>
         <div id="team-mode-section">
           <h3>允许组队：</h3>
           <div class="tabs background unselectable" id="tabs-team-mode">
@@ -176,7 +175,7 @@
             <div class="inline-button inverted">不允许</div>
             <div class="inline-button">允许</div>
           </div>
-          <p id="team-mode-bot-hint" style="display: none">房间内有官方策略 Bot，不允许组队。</p>
+          <p id="team-mode-bot-hint" style="display: none">官方策略 Bot 不支持组队。</p>
         </div>
         <div id="fog-mode-section">
           <h3>迷雾模式：</h3>
@@ -187,10 +186,9 @@
             <div class="inline-button">全部可视</div>
           </div>
           <p>
-            队友共享视野；普通己方格提供 3×3 视野，指挥所和主城提供 5×5
-            视野，断联格只看自身。正常模式下，探索前不显示地形，离开视野的建筑保留灰化符号和颜色但不显示兵力，重新可见时刷新。
+            普通格 3×3，指挥所和主城 5×5，队友共享视野。断联格仅看自身；离开视野后保留灰化地形，不显示兵力。
           </p>
-          <p id="fog-mode-bot-hint" style="display: none">房间内有不支持迷雾的 Bot，只能全部可视。</p>
+          <p id="fog-mode-bot-hint" style="display: none">房间内有 Bot 不支持迷雾，只能全部可视。</p>
         </div>
         <div id="ai-difficulty-section" style="display: none">
           <h3>AI 难度：</h3>
@@ -207,7 +205,7 @@
             <div class="inline-button inverted">关闭</div>
             <div class="inline-button">开启</div>
           </div>
-          <p>开启后每名玩家可同时下达多组指令，系统自动分线并行执行，一次结算可能移动多步。</p>
+          <p>可同时下达多组指令，一次结算可移动多步。</p>
           <p id="multi-line-mode-bot-hint" style="display: none">Bot 对局不支持多线争锋。</p>
         </div>
         <div id="team-select-section">
@@ -239,15 +237,14 @@
         id="host-true"
         style="background-color: teal; color: #ffffff; display: none"
       >
-        &#32;你是本局房主，只有你可以修改游戏设置。准备阶段连续 15
-        分钟无操作将被移出房间并自动移交房主；聊天、准备、换队或修改设置可重新计时，心跳不续期。对局中不执行。&#32;
+        &#32;你是房主，可修改房间设置。&#32;
       </p>
       <p
         class="custom-host-message"
         id="host-false"
         style="background-color: rgba(255, 0, 0, 0.25); display: none"
       >
-        &#32;你不是房主，无法修改游戏设置。&#32;
+        &#32;你不是房主，无法修改房间设置。&#32;
       </p>
       <div id="you-are" style="display: none">
         <p style="margin-right: 3px; display: inline">你的颜色：</p>

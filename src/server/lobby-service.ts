@@ -864,9 +864,6 @@ class LobbyService {
       if (value === 'huaxia') {
         return '华夏系列';
       }
-      if (value === 'twin_continents') {
-        return '双陆通衢';
-      }
       if (value === 'mega_random') return '超级随机';
       return '标准地图';
     }

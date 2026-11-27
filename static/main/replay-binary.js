@@ -1,6 +1,7 @@
 function decodeReplayBinary(buffer) {
   var view = new DataView(buffer);
   var offset = 0;
+  var replay_meta_extension_marker = 0xa5;
 
   function ensure(size) {
     if (offset + size > view.byteLength) {
@@ -175,18 +176,48 @@ function decodeReplayBinary(buffer) {
     }
     var mode = ['normal', 'explored', 'visible'][readU8()];
     if (!mode) throw new Error('回放迷雾模式损坏');
+    var aiDifficulty = 'normal';
+    var serverBotSeats = [];
+    var visionTeamCount = null;
+    if (offset < view.byteLength) {
+      var extensionOrTeamCount = readU8();
+      if (extensionOrTeamCount === replay_meta_extension_marker) {
+        var difficultyCode = readU8();
+        if (difficultyCode !== 0 && difficultyCode !== 1) throw new Error('回放 AI 难度损坏');
+        aiDifficulty = difficultyCode === 1 ? 'simple' : 'normal';
+        var seatCount = readU8();
+        if (seatCount > count) throw new Error('回放托管席位损坏');
+        for (var seatIndex = 0; seatIndex < seatCount; seatIndex++) {
+          var seat = readU8();
+          if (seat < 1 || seat > count || serverBotSeats.indexOf(seat) !== -1)
+            throw new Error('回放托管席位损坏');
+          serverBotSeats.push(seat);
+        }
+        if (mode !== 'visible') visionTeamCount = readU8();
+      } else if (mode !== 'visible') {
+        visionTeamCount = extensionOrTeamCount;
+      } else {
+        throw new Error('回放数据损坏');
+      }
+    } else if (mode !== 'visible') {
+      throw new Error('回放视野数据损坏');
+    }
     return {
-      player_names: playerNames,
-      player_teams: playerTeams,
-      fog_mode: mode,
+      meta: {
+        player_names: playerNames,
+        player_teams: playerTeams,
+        fog_mode: mode,
+        ai_difficulty: aiDifficulty,
+        server_bot_seats: serverBotSeats,
+      },
+      vision_team_count: visionTeamCount,
     };
   }
 
-  function readVision(area, lastTurn, mode, teams) {
+  function readVision(area, lastTurn, mode, teams, teamCount) {
     var vision = new Map();
     if (mode === 'visible') return vision;
     var expected = new Set(teams.filter((team) => team > 0));
-    var teamCount = readU8();
     if (teamCount !== expected.size) throw new Error('回放视野队伍损坏');
     for (var teamIndex = 0; teamIndex < teamCount; teamIndex++) {
       var team = readU8();
@@ -234,9 +265,10 @@ function decodeReplayBinary(buffer) {
       backward: readPatchPayload(),
     };
   }
-  var meta = readReplayMeta();
+  var replayMeta = readReplayMeta();
+  var meta = replayMeta.meta;
   var lastTurn = patchCount ? patches[patchCount - 1].forward.turn : initial.turn;
-  var vision = readVision(n * m, lastTurn, meta.fog_mode, meta.player_teams);
+  var vision = readVision(n * m, lastTurn, meta.fog_mode, meta.player_teams, replayMeta.vision_team_count);
   if (offset !== view.byteLength) throw new Error('回放数据损坏');
   return {
     n: n,

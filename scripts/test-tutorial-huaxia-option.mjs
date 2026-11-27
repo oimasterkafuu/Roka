@@ -10,7 +10,7 @@ const { chromium } = require(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright')
 const dataDir = await mkdtemp(path.join(tmpdir(), 'roka-tutorial-huaxia-'));
 const opens = Date.parse('2026-09-30T16:00:00Z');
 const closes = Date.parse('2026-10-07T16:00:00Z');
-const regularModes = ['random', 'maze', 'archipelago', 'mediterranean', 'twin_continents', 'mega_random'];
+const regularModes = ['random', 'maze', 'archipelago', 'mediterranean', 'mega_random'];
 const huaxiaLabel = /华夏系列/;
 const apiPath = '/api/map-examples';
 let app;
