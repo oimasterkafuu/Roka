@@ -3,8 +3,8 @@
 // 2) 默认正常模式：双人对局开始后校验
 //    客户端合并后的局面满足迷雾不变量——
 //    a. update 帧携带 fog 数组（全量帧长度 n*m）；
-//    b. fog=1 的格子 grid_type ∈ {200 空地, 201 山脉, 204 沼泽} 且 army_cnt=0（视野外不泄真实地形/归属）；
-//    c. 己方主城格 fog=0；视野内只能看到 1 座主城（自己的）；
+//    b. fog=1 的格子只显示自然地形或最后所见建筑（无兵力），fog=2 仍为 200；
+//    c. 己方主城格 fog=0；当前可见范围内只显示实时主城；
 // 3) 对照房间：已探索只有 0/1；全部可视不携带 fog 字段。
 // 4) 观战视角：真实 update()/render() 覆盖全图→队伍 1→队伍 2→全图及后续差分；
 //    dead 成员 tabs 排除与失效选中回退；淘汰队伍自动/手动回退全图且不泄露存活空视野。
@@ -75,6 +75,25 @@ async function testLiveBrowser(baseUrl, tokens, mode) {
         getComputedStyle(element).boxShadow,
       ]);
       assert.equal(styles[2], '');
+      const swampStyles = await page.evaluate(() => {
+        const table = document.createElement('table');
+        const row = table.insertRow();
+        const cells = ['swamp', 'c1 swamp', 'swamp fog'].map((className) => {
+          const cell = row.insertCell();
+          cell.className = className;
+          return cell;
+        });
+        document.querySelector('#map').append(table);
+        const styles = cells.map((element) => {
+          const computed = getComputedStyle(element);
+          return { backgroundColor: computed.backgroundColor, boxShadow: computed.boxShadow };
+        });
+        table.remove();
+        return styles;
+      });
+      assert.notEqual(swampStyles[0].backgroundColor, 'rgb(128, 128, 128)');
+      assert.notEqual(swampStyles[1].backgroundColor, 'rgb(128, 128, 128)');
+      assert.match(swampStyles[2].boxShadow, /rgba\(0, 0, 0, 0\.32\)/);
       if (mode === 'normal') assert.deepEqual(styles.slice(0, 2), ['rgb(85, 85, 85)', 'none']);
       else {
         assert.notEqual(styles[1], 'none');
@@ -581,15 +600,13 @@ function assertFogInvariants(client) {
     assert.ok([0, 1, 2].includes(fog));
     if (!fog) continue;
     foggedCells += 1;
-    if (fog === 2) assert.equal(code, 200, '从未探索不得泄露地形');
+    if (fog === 2) assert.equal(code, 200, '从未探索不得泄露地形或建筑');
     assert.equal(board.isolated[idx], 0, '迷雾不得泄露断联状态');
-    if (code !== 200 && code !== 201 && code !== 204) {
+    const rememberedBuilding = code >= 51 && code < 150 && code % 50 > 0;
+    if (!rememberedBuilding && code !== 200 && code !== 201 && code !== 204) {
       throw new Error(
-        `${client.name}：迷雾格 idx=${idx} 泄漏了真实地形/归属信息（grid_type=${code}，应只下发 200 空地、201 山脉或 204 沼泽）`,
+        `${client.name}：迷雾格 idx=${idx} 泄漏了真实地形/归属信息（grid_type=${code}）`,
       );
-    }
-    if (code > 50 && code < 150) {
-      throw new Error(`${client.name}：迷雾格 idx=${idx} 泄漏了建筑身份（grid_type=${code}）`);
     }
     if (board.army_cnt[idx] !== 0) {
       throw new Error(`${client.name}：迷雾格 idx=${idx} 泄漏了兵力（army_cnt=${board.army_cnt[idx]}）`);
@@ -713,6 +730,10 @@ async function testEliminatedSpectatorView() {
   engine.pstat[1] = 0;
   engine.spec[1] = false;
   engine.deadOrder[1] = 0;
+  engine.owner[0][2] = 3;
+  engine.gridType[0][2] = -1;
+  engine.armyCnt[0][2] = 42;
+  engine.advanceVision();
   engine.addSpectator('early-spectator');
   engine.setSpectatorView('early-spectator', 2);
   const earlyFrame = frames.at(-1);
@@ -720,10 +741,8 @@ async function testEliminatedSpectatorView() {
     earlyFrame.fog.every((value) => value === 1 || value === 2),
     '存活但无视野源时不得泄露全图',
   );
-  assert(
-    !earlyFrame.grid_type.includes(101) && !earlyFrame.grid_type.includes(103),
-    '存活空视野不得显示其他队伍',
-  );
+  assert.deepEqual(earlyFrame.grid_type.slice(1, 4), [101, 102, 103], '空视野保留旧主城，不显示新指挥所');
+  assert(earlyFrame.army_cnt.every((army) => army === 0), '空视野不得泄露当前兵力');
   log('场景 4 通过：淘汰队伍回退全图，存活但无领土队伍不泄露全图');
 }
 

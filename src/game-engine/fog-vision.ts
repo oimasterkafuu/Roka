@@ -1,13 +1,20 @@
 import type { FogMode, ReplayTeamVision } from '../types';
-import { FOG_VISION_RADIUS } from './constants';
+import { FOG_BUILDING_VISION_RADIUS, FOG_VISION_RADIUS } from './constants';
 import type { BoardState, FlatMapArrays } from './map-encoding';
 
 export type VisionSnapshot = FlatMapArrays & { fog: number[] | null };
 
-type VisibilityInput = Pick<BoardState, 'n' | 'm' | 'owner' | 'isolated'>;
+type VisibilityInput = Pick<BoardState, 'n' | 'm' | 'gridType' | 'owner' | 'isolated'>;
+
+const buildingCode = (tile: number, owner: number): number => {
+  if (owner <= 0) return 0;
+  if (tile === -1) return owner + 50;
+  if (tile === -2) return owner + 100;
+  return 0;
+};
 
 export function computeTeamVisibility(
-  { n: rows, m: cols, owner, isolated }: VisibilityInput,
+  { n: rows, m: cols, gridType, owner, isolated }: VisibilityInput,
   playerTeams: readonly number[],
   masks: ReadonlyMap<number, Uint8Array>,
 ): void {
@@ -22,13 +29,13 @@ export function computeTeamVisibility(
         visible[row * cols + col] = 1;
         continue;
       }
-      const left = Math.max(0, col - FOG_VISION_RADIUS);
-      const right = Math.min(cols, col + FOG_VISION_RADIUS + 1);
-      for (
-        let x = Math.max(0, row - FOG_VISION_RADIUS);
-        x <= Math.min(rows - 1, row + FOG_VISION_RADIUS);
-        x += 1
-      ) {
+      const radius =
+        gridType[row][col] === -1 || gridType[row][col] === -2
+          ? FOG_BUILDING_VISION_RADIUS
+          : FOG_VISION_RADIUS;
+      const left = Math.max(0, col - radius);
+      const right = Math.min(cols, col + radius + 1);
+      for (let x = Math.max(0, row - radius); x <= Math.min(rows - 1, row + radius); x += 1) {
         visible.fill(1, x * cols + left, x * cols + right);
       }
     }
@@ -40,6 +47,7 @@ type Exploration = { bits: Uint32Array; discoveries: number[] };
 export class FogVision {
   private readonly visible = new Map<number, Uint8Array>();
   private readonly exploration = new Map<number, Exploration>();
+  private readonly buildingMemory = new Map<number, Uint8Array>();
   private readonly snapshots = new Map<number, VisionSnapshot>();
   private readonly zeroFog: number[];
 
@@ -52,6 +60,7 @@ export class FogVision {
     for (const team of new Set(playerTeams)) {
       if (team <= 0) continue;
       this.visible.set(team, new Uint8Array(area));
+      this.buildingMemory.set(team, new Uint8Array(area));
       if (mode === 'normal') {
         this.exploration.set(team, { bits: new Uint32Array(Math.ceil(area / 32)), discoveries: [] });
       }
@@ -61,6 +70,17 @@ export class FogVision {
   advance(board: VisibilityInput, turn: number): void {
     this.invalidateSnapshots();
     computeTeamVisibility(board, this.playerTeams, this.visible);
+    for (const [team, visible] of this.visible) {
+      const remembered = this.buildingMemory.get(team)!;
+      for (let row = 0; row < board.n; row += 1) {
+        for (let col = 0; col < board.m; col += 1) {
+          const index = row * board.m + col;
+          if (visible[index]) {
+            remembered[index] = buildingCode(board.gridType[row][col], board.owner[row][col]);
+          }
+        }
+      }
+    }
     for (const [team, { bits, discoveries }] of this.exploration) {
       const visible = this.visible.get(team)!;
       for (let index = 0; index < visible.length; index += 1) {
@@ -85,6 +105,7 @@ export class FogVision {
     const cached = this.snapshots.get(team);
     if (cached) return cached;
     const explored = this.exploration.get(team)?.bits;
+    const remembered = this.buildingMemory.get(team)!;
     const grid_type = full.grid_type.slice();
     const army_cnt = full.army_cnt.slice();
     const isolated = full.isolated.slice();
@@ -95,6 +116,7 @@ export class FogVision {
       fog[index] = known ? 1 : 2;
       const terrain = grid_type[index];
       if (!known) grid_type[index] = 200;
+      else if (remembered[index]) grid_type[index] = remembered[index];
       else if (terrain === 204 || (terrain >= 150 && terrain < 200)) grid_type[index] = 204;
       else if (terrain !== 201) grid_type[index] = 200;
       army_cnt[index] = 0;

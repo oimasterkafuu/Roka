@@ -201,7 +201,6 @@
 }
 .swamp {
   background-image: url('../swamp.png');
-  background-color: gray;
 }
 .obstacle {
   background-image: url('../obstacle.png');
@@ -219,6 +218,10 @@
 .fog {
   /* 迷雾远征：视野外格子叠轻微暗色遮罩，山脉与沼泽仍可见。 */
   box-shadow: inset 0 0 0 1000px rgba(0, 0, 0, 0.32);
+}
+
+.fog-memory {
+  filter: grayscale(0.35) opacity(0.68);
 }
 
 .fog-unexplored {

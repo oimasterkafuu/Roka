@@ -86,8 +86,8 @@ pnpm run dev        # http://localhost:23333
       <section class="doc-panel">
         <h2>3. 项目结构</h2>
         <p>
-          迷雾模式由房间配置 fog_mode 声明。实时视野和首次探索由服务端维护；原始回放 ops-v3
-          保存首见增量，浏览器从 RPB5 读取任意 Tick 的队伍视野。
+          迷雾模式由房间配置 fog_mode 声明。服务端按队伍维护实时视野和建筑记忆；原始回放 ops-v3
+          保存首见增量，RPB5 保存棋盘与队伍可见性，观看端据此还原各 Tick 的视野。
         </p>
         <pre class="code-snippet"><code>src/           后端 TypeScript 源码
   server.ts      唯一入口：Fastify 路由与 Socket.IO 事件

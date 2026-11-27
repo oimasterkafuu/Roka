@@ -3,11 +3,120 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { GameEngine } from '../dist/game-engine.js';
-import { FogVision } from '../dist/game-engine/fog-vision.js';
+import { computeTeamVisibility, FogVision } from '../dist/game-engine/fog-vision.js';
 import { buildFullVisionArrays } from '../dist/game-engine/map-encoding.js';
 import { encodeReplayPatchBinary } from '../dist/replay-patch-binary.js';
 
 const grid = (rows, cols, value) => Array.from({ length: rows }, () => Array(cols).fill(value));
+const visibilityBoard = {
+  n: 7,
+  m: 7,
+  owner: grid(7, 7, 0),
+  isolated: grid(7, 7, false),
+  gridType: grid(7, 7, 0),
+};
+visibilityBoard.owner[3][3] = 1;
+visibilityBoard.gridType[3][3] = -2;
+visibilityBoard.owner[1][1] = 2;
+visibilityBoard.gridType[1][1] = -1;
+visibilityBoard.owner[0][6] = 3;
+visibilityBoard.gridType[0][6] = -1;
+visibilityBoard.isolated[0][6] = true;
+const visibility = new Uint8Array(49);
+visibilityBoard.owner[1][1] = 0;
+visibilityBoard.gridType[1][1] = 0;
+computeTeamVisibility(visibilityBoard, [1, 1, 2], new Map([[1, visibility]]));
+for (let row = 1; row <= 5; row += 1) {
+  for (let col = 1; col <= 5; col += 1) assert.equal(visibility[row * 7 + col], 1);
+}
+assert.equal(visibility[0], 0, 'a building view is exactly 5x5');
+assert.equal(visibility[6], 0, 'a building view is exactly 5x5');
+assert.equal(visibility[0 * 7 + 6], 0, 'an enemy building does not provide this team vision');
+visibilityBoard.owner[1][1] = 2;
+visibilityBoard.gridType[1][1] = -1;
+computeTeamVisibility(visibilityBoard, [1, 1, 2], new Map([[1, visibility]]));
+assert.equal(visibility[0], 1, 'teammate buildings contribute to the shared union');
+visibilityBoard.owner[3][3] = 0;
+visibilityBoard.gridType[3][3] = 0;
+visibilityBoard.owner[0][6] = 0;
+visibilityBoard.gridType[0][6] = 0;
+visibilityBoard.owner[1][1] = 0;
+visibilityBoard.gridType[1][1] = 0;
+visibilityBoard.owner[3][3] = 1;
+computeTeamVisibility(visibilityBoard, [1, 1, 2], new Map([[1, visibility]]));
+assert.equal(visibility[2 * 7 + 2], 1, 'an ordinary cell provides a 3x3 view');
+assert.equal(visibility[1 * 7 + 1], 0, 'an ordinary cell does not provide a 5x5 view');
+visibilityBoard.owner[3][3] = 0;
+visibilityBoard.owner[0][0] = 1;
+visibilityBoard.gridType[0][0] = -1;
+computeTeamVisibility(visibilityBoard, [1, 1, 2], new Map([[1, visibility]]));
+assert.equal(visibility[0], 1, 'an edge building view is clipped to the map');
+assert.equal(visibility[0 * 7 + 3], 0, 'an edge building view remains 5x5 after clipping');
+visibilityBoard.owner[0][0] = 0;
+visibilityBoard.gridType[0][0] = 0;
+visibilityBoard.owner[3][3] = 1;
+visibilityBoard.gridType[3][3] = -2;
+visibilityBoard.isolated[3][3] = true;
+computeTeamVisibility(visibilityBoard, [1, 1, 2], new Map([[1, visibility]]));
+assert.equal(visibility[3 * 7 + 3], 1, 'an isolated building only reveals itself');
+assert.equal(visibility[2 * 7 + 2], 0, 'an isolated building does not expand to 5x5');
+
+const memoryBoard = {
+  n: 7,
+  m: 7,
+  owner: grid(7, 7, 0),
+  isolated: grid(7, 7, false),
+  isolatedAge: grid(7, 7, 0),
+  gridType: grid(7, 7, 0),
+  armyCnt: grid(7, 7, 0),
+};
+memoryBoard.owner[3][3] = 1;
+memoryBoard.armyCnt[3][3] = 20;
+memoryBoard.owner[3][4] = 2;
+memoryBoard.gridType[3][4] = -1;
+memoryBoard.armyCnt[3][4] = 99;
+const memoryVision = new FogVision('normal', 49, [1, 2]);
+const memorySnapshot = () => memoryVision.snapshot(1, buildFullVisionArrays(memoryBoard));
+memoryVision.advance(memoryBoard, 0);
+assert.equal(memorySnapshot().fog[25], 0);
+assert.equal(memorySnapshot().grid_type[25], 52);
+memoryBoard.isolated[3][3] = true;
+memoryVision.advance(memoryBoard, 1);
+assert.equal(memorySnapshot().fog[25], 1);
+assert.equal(memorySnapshot().grid_type[25], 52, 'last-seen building and color are retained');
+memoryBoard.owner[3][3] = 0;
+memoryBoard.owner[3][4] = 0;
+memoryBoard.gridType[3][4] = 0;
+memoryBoard.armyCnt[3][4] = 0;
+memoryVision.advance(memoryBoard, 2);
+assert.ok(memorySnapshot().fog.every((state) => state !== 0), 'team has no remaining vision source');
+assert.equal(memorySnapshot().fog[25], 1);
+assert.equal(memorySnapshot().grid_type[25], 52, 'losing all vision does not reveal the demolition');
+assert.equal(memorySnapshot().army_cnt[25], 0);
+memoryBoard.owner[3][3] = 1;
+memoryBoard.isolated[3][3] = false;
+memoryVision.advance(memoryBoard, 3);
+assert.equal(memorySnapshot().fog[25], 0);
+assert.equal(memorySnapshot().grid_type[25], 200, 'visible empty ground clears memory');
+memoryBoard.isolated[3][3] = true;
+memoryVision.advance(memoryBoard, 4);
+assert.equal(memorySnapshot().fog[25], 1);
+assert.equal(memorySnapshot().grid_type[25], 200, 'cleared building does not return under fog');
+memoryBoard.isolated[3][3] = false;
+memoryBoard.owner[3][4] = 3;
+memoryBoard.gridType[3][4] = -2;
+memoryVision.advance(memoryBoard, 5);
+assert.equal(memorySnapshot().grid_type[25], 103);
+memoryBoard.isolated[3][3] = true;
+memoryVision.advance(memoryBoard, 6);
+memoryBoard.owner[3][4] = 2;
+memoryBoard.gridType[3][4] = -1;
+memoryVision.advance(memoryBoard, 7);
+assert.equal(memorySnapshot().grid_type[25], 103, 'unseen rebuild and recolor do not change memory');
+memoryBoard.isolated[3][3] = false;
+memoryVision.advance(memoryBoard, 8);
+assert.equal(memorySnapshot().grid_type[25], 52, 'revisible building refreshes type and color');
+
 const board = {
   n: 7,
   m: 7,
@@ -166,8 +275,8 @@ const march = [
   [15, 18],
   [16, 18],
 ];
-const site = 322;
-const natural = 321;
+const site = 15 * 19 + 18;
+const natural = 15 * 19 + 16;
 const ally = views.get('Bea');
 await engine.sendMap(false);
 assert.equal(ally[0].fog[natural], 2);
@@ -175,8 +284,8 @@ assert.equal(ally[0].grid_type[natural], 200);
 await engine.gameTick();
 engine.addMove('Alice', ...engine.generals[0], ...pivot, 2);
 await engine.gameTick();
-assert.equal(ally[2].fog[natural], 0);
-assert.ok([201, 204].includes(ally[2].grid_type[natural]));
+assert.equal(ally[2].fog[natural], 2);
+assert.equal(ally[2].grid_type[natural], 200);
 while (engine.turn < 105) await engine.gameTick();
 let origin = engine.generals[2];
 for (const destination of march) {
@@ -184,19 +293,25 @@ for (const destination of march) {
   await engine.gameTick();
   origin = destination;
 }
+engine.addMove('Carol', ...origin, 15, 18, 2);
+await engine.gameTick();
+origin = [15, 18];
 engine.addBuild('Carol', ...origin, 'b');
+await engine.gameTick();
+engine.addMove('Alice', ...pivot, 16, 18, 2);
 await engine.gameTick();
 const visibleTurn = engine.turn;
 assert.equal(ally[visibleTurn].grid_type[site], 53);
 assert.equal(ally[visibleTurn].fog[site], 0);
-engine.addMove('Carol', ...origin, ...pivot, 2);
+engine.addMove('Carol', ...origin, 16, 18, 2);
 await engine.gameTick();
 const shallowTurn = engine.turn;
 assert.equal(ally[shallowTurn].fog[site], 1);
-assert.equal(ally[shallowTurn].grid_type[site], 200);
+assert.equal(ally[shallowTurn].grid_type[site], 53);
 assert.equal(ally[shallowTurn].army_cnt[site], 0);
-assert.equal(ally[shallowTurn].fog[natural], 1);
-assert.equal(ally[shallowTurn].grid_type[natural], ally[2].grid_type[natural]);
+assert.equal(ally[shallowTurn].isolated[site], 0);
+assert.equal(ally[shallowTurn].fog[natural], 2);
+assert.equal(ally[shallowTurn].grid_type[natural], 200);
 engine.surrender('Carol');
 assert.equal(await engine.gameTick(), true);
 assert.ok(
@@ -279,30 +394,42 @@ try {
             const row = Math.floor(index / m),
               col = index % m,
               cell = cell_elems[row][col];
+            const style = getComputedStyle(cell);
             return {
               fog: fog[row][col],
               cls: cell.className,
               text: cell.textContent,
-              image: getComputedStyle(cell).backgroundImage,
+              image: style.backgroundImage,
+              color: style.backgroundColor,
+              filter: style.filter,
             };
           });
         },
         { turn, site, natural },
       );
     const [deepSite, deepMountain] = await state(0);
-    for (const deep of [deepSite, deepMountain]) {
-      assert.equal(deep.fog, 2);
-      assert.match(deep.cls, /fog-unexplored/);
-      assert.equal(deep.image, 'none');
-      assert.equal(deep.text, '');
-    }
-    assert.match((await state(visibleTurn))[0].cls, /city/);
+    assert.equal(deepSite.fog, 2);
+    assert.match(deepSite.cls, /fog-unexplored/);
+    assert.equal(deepSite.image, 'none');
+    assert.equal(deepSite.text, '');
+    assert.equal(deepMountain.fog, 2);
+    assert.match(deepMountain.cls, /fog-unexplored/);
+    assert.equal(deepMountain.image, 'none');
+    assert.equal(deepMountain.text, '');
+    const [liveSite] = await state(visibleTurn);
+    assert.match(liveSite.cls, /c3 city/);
     const [oldSite, oldMountain] = await state(shallowTurn);
     assert.equal(oldSite.fog, 1);
-    assert.match(oldSite.cls, /empty fog/);
+    assert.match(oldSite.cls, /c3 city fog fog-memory/);
+    assert.equal(oldSite.color, liveSite.color);
+    assert.notEqual(oldSite.filter, liveSite.filter);
+    const grayscale = Number(oldSite.filter.match(/grayscale\(([\d.]+)\)/)?.[1]);
+    assert.ok(grayscale > 0 && grayscale < 1, `memory must retain owner hue: ${oldSite.filter}`);
     assert.equal(oldSite.text, '');
-    assert.equal(oldSite.image, 'none');
-    assert.notEqual(oldMountain.image, 'none');
+    assert.notEqual(oldSite.image, 'none');
+    assert.equal(oldMountain.fog, 2);
+    assert.equal(oldMountain.image, 'none');
+    assert.equal(oldMountain.text, '');
     await state(visibleTurn);
     await page.locator('#replay-autoplay-btn').click();
     await page.waitForFunction(

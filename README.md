@@ -111,6 +111,9 @@ pnpm run test:bot
 pnpm run test:github-link
 pnpm run test:replays-page
 pnpm run test:replay-cache
+pnpm run test:fog
+pnpm run test:replay-controls
+pnpm run test:replay-mobile
 pnpm run test:guest-access
 pnpm run test:build-pages
 pnpm run test:twin-continents
@@ -153,9 +156,9 @@ pnpm run test:mega-random
 
 ### 迷雾与回放
 
-房间设置 `fog_mode` 依次为 `normal`（正常，默认）、`explored`（已探索）和 `visible`（全部可视）。队友共享视野；连接正常的己方格子看周围一圈，断联格只看自身。正常模式的深灰格未探索，不下发地形；浅灰格已探索但在视野外，只显示自然山脉、沼泽，不保留建筑、归属与兵力。已探索模式从开局就显示视野外的自然地形。含不支持迷雾的 Bot 时，只能选择全部可视。
+房间设置 `fog_mode` 依次为 `normal`（正常，默认）、`explored`（已探索）和 `visible`（全部可视）。队友共享视野；普通己方格提供 3×3 视野，己方指挥所和主城提供 5×5 视野，断联格只看自身。正常模式的深灰格未探索；浅灰格保留自然地形和最后看见的建筑符号、归属色，但不显示兵力或实时状态，重新可见时才按当前状态刷新或清除。已探索模式从开局就显示视野外的自然地形。含不支持迷雾的 Bot 时，只能选择全部可视。
 
-3.0.0 直接替换回放协议：原始 `ops-v3` 存成功操作与队伍首次探索增量，服务端按同一套实时规则重建并校验；观看格式 `RPB5` 存全知棋盘和服务端记录的可见性时间线，支持任意 Tick 切换队伍视角，不需从头累计探索。旧原始格式和旧观看格式不再接受，访问失败不会删除原始存档。
+迷雾回放支持队伍视角切换、前进、后退、自动播放和跳转，并按当时视野显示实时或最后所见建筑。
 
 ## 许可
 

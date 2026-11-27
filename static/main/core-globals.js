@@ -17,6 +17,12 @@ const replay_text_decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder
 
 // 回放视角：0 = 全知（默认），>0 = 该队伍编号（仅迷雾对局的回放可切换）。
 var replay_view_team = 0;
+// 回放队伍视角的最后所见建筑。该状态随 forward/backward patch 回退，
+// 不把未来帧看见的建筑泄露到当前帧。
+var replay_building_memory = [];
+var replay_building_changes = [];
+var replay_building_frame = -1;
+var replay_building_team = null;
 
 // 实时观战视角（仅迷雾对局）：0 = 全图（默认），>0 = 所选玩家的队伍编号，
 // 服务端按该队伍可见性下发迷雾帧（语义对齐回放视角 replay_view_team）。

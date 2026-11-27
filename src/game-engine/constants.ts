@@ -19,10 +19,12 @@ const ISOLATED_DECAY_RATIO = 0.05;
 const ISOLATED_GRACE_TICKS = 10;
 
 /**
- * 迷雾视野半径（切比雪夫距离）：玩家可见己方（含队友）未断联格子
+ * 迷雾视野半径（切比雪夫距离）：普通己方（含队友）未断联格子
  * 周围 1 圈范围内的地块；范围外只保留山脉与沼泽，隐藏归属与兵力。
  */
 const FOG_VISION_RADIUS = 1;
+/** 指挥所和主城的视野半径，覆盖以建筑为中心的完整 5×5。 */
+const FOG_BUILDING_VISION_RADIUS = 2;
 
 export {
   LEFT_GAME,
@@ -32,4 +34,5 @@ export {
   ISOLATED_GRACE_TICKS,
   DISCONNECT_GRACE_MS,
   FOG_VISION_RADIUS,
+  FOG_BUILDING_VISION_RADIUS,
 };

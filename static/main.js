@@ -315,6 +315,10 @@ function init_map(_n, _m, general) {
   isolated = Array(n);
   have_build = Array(n);
   fog = Array(n);
+  replay_building_memory = [];
+  replay_building_changes = [];
+  replay_building_frame = -1;
+  replay_building_team = null;
   for (var i = 0; i < n; i++) {
     isolated[i] = Array(m);
     have_build[i] = Array(m);
@@ -379,7 +383,7 @@ function cellInBounds(row, col) {
 }
 
 function isOwnCell(row, col) {
-  return player > 0 && grid_type[row][col] < 200 && grid_type[row][col] % 50 == player;
+  return player > 0 && !fog[row][col] && grid_type[row][col] < 200 && grid_type[row][col] % 50 == player;
 }
 
 function isControllableCell(row, col) {
@@ -441,7 +445,7 @@ function click(row, col, shift) {
     if (cells.some(([selectedRow, selectedCol]) => selectedRow === row && selectedCol === col)) return;
     setSelectedCells([...cells, [row, col]]);
   } else {
-    setSelectedCells(is_replay || isOwnCell(row, col) ? [[row, col]] : []);
+    setSelectedCells(!fog[row][col] && (is_replay || isOwnCell(row, col)) ? [[row, col]] : []);
   }
   render();
 }

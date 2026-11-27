@@ -7,6 +7,84 @@ function applyReplayFogView() {
       fog[i][j] = replayFogAt(history, mode, i * m + j, turn);
     }
   }
+  syncReplayBuildingMemory(cur_turn);
+}
+
+function replayBuildingCode(cellType) {
+  return cellType >= 50 && cellType < 150 && cellType % 50 > 0 ? cellType : 0;
+}
+
+function replayCurrentGridType() {
+  var board = new Array(n * m);
+  for (var i = 0; i < n; i++) {
+    for (var j = 0; j < m; j++) board[i * m + j] = grid_type[i][j];
+  }
+  return board;
+}
+
+function applyReplayGridDiff(board, diff) {
+  for (var i = 0; i * 2 < diff.length; i++) board[diff[i * 2]] = diff[i * 2 + 1];
+}
+
+function updateReplayBuildingMemory(frame, board) {
+  var history = replay_data.vision.get(replay_view_team);
+  var turn = frame ? replay_data.patches[frame - 1].forward.turn : replay_data.initial.turn;
+  var changes = [];
+  if (!history || replay_view_team <= 0) {
+    replay_building_changes[frame] = changes;
+    return;
+  }
+  for (var cell = 0; cell < board.length; cell++) {
+    if (replayFogAt(history, replay_data.meta.fog_mode, cell, turn) !== 0) continue;
+    var next = replayBuildingCode(board[cell]);
+    if (replay_building_memory[cell] === next) continue;
+    changes.push([cell, replay_building_memory[cell], next]);
+    replay_building_memory[cell] = next;
+  }
+  replay_building_changes[frame] = changes;
+}
+
+function rebuildReplayBuildingMemory(targetFrame) {
+  replay_building_memory = new Array(n * m).fill(0);
+  replay_building_changes = [];
+  replay_building_frame = -1;
+  replay_building_team = replay_view_team;
+  if (replay_view_team <= 0) {
+    replay_building_frame = targetFrame;
+    return;
+  }
+  var board = replay_data.initial.grid_type.slice();
+  for (var frame = 0; frame <= targetFrame; frame++) {
+    if (frame > 0) applyReplayGridDiff(board, replay_data.patches[frame - 1].forward.grid_type);
+    updateReplayBuildingMemory(frame, board);
+    replay_building_frame = frame;
+  }
+}
+
+function syncReplayBuildingMemory(targetFrame) {
+  if (!is_replay || !replay_data || !replay_data.initial) return;
+  if (replay_building_team !== replay_view_team || replay_building_frame < 0) {
+    rebuildReplayBuildingMemory(targetFrame);
+    return;
+  }
+  if (targetFrame === replay_building_frame + 1) {
+    updateReplayBuildingMemory(targetFrame, replayCurrentGridType());
+    replay_building_frame = targetFrame;
+    return;
+  }
+  if (targetFrame === replay_building_frame - 1) {
+    var changes = replay_building_changes[replay_building_frame];
+    if (!changes) {
+      rebuildReplayBuildingMemory(targetFrame);
+      return;
+    }
+    for (var i = changes.length - 1; i >= 0; i--) {
+      replay_building_memory[changes[i][0]] = changes[i][1];
+    }
+    replay_building_frame = targetFrame;
+    return;
+  }
+  rebuildReplayBuildingMemory(targetFrame);
 }
 
 // 排行榜兵力/领土列宽锁定（issue #93）：把本帧显示的最大位数并入锁定值
@@ -73,6 +151,7 @@ function render() {
     selx >= 0 &&
     sely >= 0 &&
     player > 0 &&
+    !fog[selx][sely] &&
     displayGrid[selx][sely] < 200 &&
     displayGrid[selx][sely] % 50 == player;
   var canAttackFromSelected = selx >= 0 && sely >= 0 && (ownSelected || anyRouteQueued());
@@ -84,15 +163,19 @@ function render() {
         txt = '';
       var fogState = fog[i][j];
       const groupLabel =
-        showControlGroups && fogState !== 2 ? control_group_labels.get(i * m + j) : undefined;
+        showControlGroups && fogState === 0 ? control_group_labels.get(i * m + j) : undefined;
       var cellType = displayGrid[i][j];
       var cellArmy = displayArmy[i][j];
+      var memoryType = is_replay && fogState === 1 ? replay_building_memory[i * m + j] || 0 : 0;
       if (is_replay && fogState) {
         if (fogState === 2) cellType = 200;
+        else if (memoryType) cellType = memoryType;
         else if (cellType >= 150 && cellType < 200) cellType = 204;
         else if (cellType !== 201 && cellType !== 204) cellType = 200;
         cellArmy = 0;
       }
+      var fogMemory = fogState === 1 && replayBuildingCode(cellType) > 0;
+      var cellIsolated = fogState ? 0 : isolated[i][j];
 
       if (cellType < 200) {
         if (cellType < 50) {
@@ -104,14 +187,14 @@ function render() {
         } else if (cellType < 200) {
           cls += ' c' + (cellType - 150) + ' swamp';
         }
-        if (cellType % 50 == player) {
+        if (!fogState && cellType % 50 == player) {
           cls += ' selectable';
         }
-        if (isolated[i][j]) {
+        if (cellIsolated) {
           cls += ' isolated';
-          if (isolated[i][j] === 1) cls += ' isolated-fresh';
+          if (cellIsolated === 1) cls += ' isolated-fresh';
         }
-        if (cellArmy || cellType == 50) {
+        if (!fogMemory && (cellArmy || cellType == 50)) {
           txt = String(cellArmy);
           // 兵力数字超过 4 位时按位数档缩小字体（issue #116）：只缩不放大，
           // ≤4 位维持默认字号。
@@ -127,7 +210,8 @@ function render() {
       }
       if (fogState === 1) cls += ' fog';
       else if (fogState === 2) cls += ' fog-unexplored';
-      if (i == selx && j == sely) {
+      if (fogMemory) cls += ' fog-memory';
+      if (!fogState && i == selx && j == sely) {
         if (selt == 1) {
           cls += ' selected';
         } else {
@@ -135,9 +219,14 @@ function render() {
           if (secondarySelection.size) cls += ' selected-group-primary';
           else txt = '50%';
         }
-      } else if (secondarySelection.has(i * m + j)) {
+      } else if (!fogState && secondarySelection.has(i * m + j)) {
         cls += ' selected-secondary';
-      } else if (canAttackFromSelected && Math.abs(i - selx) + Math.abs(j - sely) == 1 && cellType != 201) {
+      } else if (
+        !fogState &&
+        canAttackFromSelected &&
+        Math.abs(i - selx) + Math.abs(j - sely) == 1 &&
+        cellType != 201
+      ) {
         cls += ' attackable';
       }
       if (txt.length > 0 && scale == 1) txt = '<div class="txt">' + txt + '</div>';
@@ -145,11 +234,11 @@ function render() {
         txt = '<div class="control-group-army">' + txt + '</div>';
       }
       for (var d = 0; d < 4; d++)
-        if (have_route[d][i][j]) {
+        if (!fogState && have_route[d][i][j]) {
           if (scale > 1) txt += '<div class="' + dire_class[d] + '">' + dire_char[d] + '</div>';
           else txt += '<div class="' + dire_class[d] + '"><div class="txt">' + dire_char[d] + '</div></div>';
         }
-      if (have_build[i][j]) {
+      if (!fogState && have_build[i][j]) {
         var hasB = have_build[i][j].indexOf('b') >= 0;
         var hasC = have_build[i][j].indexOf('c') >= 0;
         if (hasB) txt += '<div class="build-badge build-b' + (hasC ? ' with-c' : '') + '"></div>';
@@ -159,7 +248,7 @@ function render() {
         cls += ' has-control-group';
         txt += '<span class="control-group-label" title="' + groupLabel + '">' + groupLabel + '</span>';
       }
-      if (fogState === 2) txt = '';
+      if (fogState === 2 || fogMemory) txt = '';
       // 格子元素走 init_map 构建的缓存表（issue #87）：避免每帧每格两次
       // id 选择器查找；cell_html 影子表避免每帧 innerHTML 序列化读取。
       var cell = cell_elems[i][j];
@@ -228,14 +317,14 @@ function update(data, options) {
       }
     }
   }
+  if (is_replay) {
+    applyReplayFogView();
+  }
   if (options && options.silent) {
     // 回放跳转的中间帧（issue #87）：只应用上面的局面补丁，视野查询、
     // render()、排行榜/统计图/回合计数器等界面刷新留待落点帧的完整
     // update() 一次处理（见 replay-controls.js jumpToFrame）。
     return;
-  }
-  if (is_replay) {
-    applyReplayFogView();
   }
   if (player > 0) {
     var general_seen = {},

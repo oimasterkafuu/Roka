@@ -134,7 +134,7 @@ _一句话：统一 presence：touch/在线窗口/落盘节流/重启恢复。_
 `GameEngine.create()` 静态工厂生成地图（按 `map_mode` 调 `src/map/` 生成器）并选主城；`startGame → beginLoop → scheduleNextTick` 按 `500/speed` ms 走 `gameTick()`：增兵 → pstat 计数/超时击杀 → 按奇偶反转顺序执行每队队首操作（`chkMove/attack`，含智能分兵 `computePush`；X 建指挥所、C 升级主城均耗 50 兵）→ `applyConnectivity` 队伍级连通 BFS（断链减半、孤军 5 回合宽限后每回合 5% 衰减、重连时仅未接兵且兵力大于 1 的格子翻倍）→ AFK 判定 → 胜负判定 → 计算并缓存队伍视野 → 记录回放 → `sendMap`（diff 帧，每 50 tick 或 1/51 概率全量；`buildSnapshotFor` 按接收者出快照：迷雾对局中存活参赛者经 fog-vision 过滤并附 `fog` 数组，观战/出局者默认全视野+全 0 fog，`fogLast` 按玩家做 diff 基线；观战者经 `spectatorViewTeams`（sid→队伍）选了玩家视角时改收该队伍迷雾帧——`setSpectatorView` 校验非存活参赛者后记录偏好并立即补发全量帧同步 diff 基线；外部观战者按 `spectatorSnapshotLast` 独立维护差分基线，复用 Tick 与队伍级过滤快照，不退回每 tick 全量；队伍全员淘汰后已选/新选该视角均安全回退全图，存活但尚未选主城的队伍仍保持自身迷雾视野）。v3 全局队列：每玩家一个全局大队列（`pmove: QueuedOp[]`，操作按到达顺序入队，入队分配单调递增 seq），不再有战线编号与队列路由。Tick 调度按房间开关 `multi_line`（`multiLine`）分派两种模式：单线串行（默认，`multi_line=false`）——每 Tick 每玩家只从大队列头部依次弹出指令，丢弃失效指令（chkMove/attack 失败、chkBuildCity/chkUpgradeCrown 不满足），直到成功执行第一条有效指令为止，本 Tick 不再执行后续；全局队列并行（`multi_line=true`，issue #107）——把队列里的移动指令看作有向边 (x,y)→(dx,dy)，所有入度为 0 的头部指令各执行一步（chkMove+attack，失效即丢弃），头部出队后下一格指令下一 Tick 自动成为新头部；拓扑剥离后仍成环的移动指令每 Tick 按入队序强制尝试 seq 最小的一条以打破死锁（失效则正常丢弃，issue #121）；建造指令（b/c）不参与入度图，当该格不再是任何待发移动指令的出发格时尝试执行，条件不满足即丢弃；空队列不耗 Tick，单链节奏与单线一致。两种模式的汇报协议同为 `lst_moves: number[]`（本 Tick 所有出队项的 seq，含执行与丢弃，客户端按 seq 摘除本地镜像队列）；`init_map` 开局附 `next_seq/queue_ops`，多线对局另附 `multi_line: true`（单线缺省即旧协议行为）；`ops-v3` 按 Tick 记录成功操作和队伍的首次探索增量。Q/E（`retractLast`）撤回大队列尾部最后一条指令。对外接口：`addMove/addBuild/retractLast/clearQueue/popQueue/addSpectator/setSpectatorView/sendMessage/surrender/leaveGame`（server.ts 把 `pop_queue` 分派到 `retractLast` 撤回全局最后一条（E 键），`clear_queue` 不分模式一律分派到 `clearQueue` 清空操作队列（Q 键，issue #120））。友军推兵进入存活队友主城时累兵；当刻原拥有者主城数 ≥2 则 owner 自动转属出兵玩家，最后一座只累兵；原始回放一律按当前推兵规则重建，显式 `t` 转让不兼容。掉线宽限期三件套：`markDisconnected`（只记 `disconnectedAt[id]`，期间跳过 AFK）、`rebindPlayer`（换绑 sid 与 md5 client_id、清队列防幽灵操作、迁移观战视角偏好、补发 `init_map`（携带 `next_seq`/`queue_ops` 序号同步字段，客户端据此对齐本地 seq 计数，修复断线重连后 lst_moves 错位）+全量帧——迷雾对局按该玩家视野或其选择的观战视角过滤，并把 diff 基线对齐到补发快照）、`expireDisconnect`（超时按「挂机」投降，幂等）——计时编排由 lobby-service 负责。投降 `applySurrenderByIndex`：有存活队友则转移领土，否则拆锚点打入孤军。部署清算 `forceFinish(endMessage)`：停表后走正常终局路径（`sendMap(true)` 存档回放 + `finishGame` 结算，`buildGameResult` 以当前排行榜名次出结果），与正常终局共用 `finished` 幂等守卫防重复结算；`finishGame` 支持自定义结束消息（清算时不报「获胜」）。回放：终局 `saveHistory` 存 ops-v3 操作流和首次探索增量；`buildReplayFromActions` 用 `__replay_build__` 哑引擎重放整场生成 `ReplayData`（重建全知棋盘与队伍视野时间线，并与存档探索增量校验）。
 
 **src/game-engine/constants.ts** — 数值常量集中地。
-`LEFT_GAME=52`、`AFK_MIN_TURNS=60`/`AFK_MIN_MS=60_000`（挂机投降需同时满足）、`DISCONNECT_GRACE_MS=10_000`（掉线宽限，1 倍速=20 tick）、`ISOLATED_DECAY_RATIO=0.05`、`ISOLATED_GRACE_TICKS=10`、`FOG_VISION_RADIUS=1`（迷雾视野切比雪夫半径）。调平衡数值只改这里。
+`LEFT_GAME=52`、`AFK_MIN_TURNS=60`/`AFK_MIN_MS=60_000`（挂机投降需同时满足）、`DISCONNECT_GRACE_MS=10_000`（掉线宽限，1 倍速=20 tick）、`ISOLATED_DECAY_RATIO=0.05`、`ISOLATED_GRACE_TICKS=10`、`FOG_VISION_RADIUS=1`（普通格 3×3 视野）、`FOG_BUILDING_VISION_RADIUS=2`（指挥所/主城 5×5 视野）。调平衡数值只改这里。
 _一句话：AFK/掉线/孤军等数值常量。_
 
 **src/game-engine/general-selection.ts** — 非迷宫地图的开局主城位置选择。
@@ -149,8 +149,8 @@ _一句话：每 tick 排行榜与终局名次计算。_
 `buildFullVisionArrays` 产出 `{grid_type, army_cnt, isolated}`；grid_type 编码：山 201、中立 200、沼泽 204/owner+150、指挥所 owner+50、主城 owner+100、普通格 owner；isolated：0 正常/1 宽限期/2 衰减期。前端渲染直接消费，**改动需前后端同步**。
 _一句话：棋盘状态 → 扁平协议数组编码。_
 
-**src/game-engine/fog-vision.ts** — `computeTeamVisibility` 单次扫描棋盘计算所有队伍当前视野，连接正常的己方格扩展一圈，断联格仅看自身。`FogVision` 只为正常模式维护发现位集与首见增量，按 Tick 缓存已过滤的队伍快照。`fog=1` 只留下自然山脉/沼泽，`fog=2` 一律下发 `200/0/0`。重建时导出每队每格的可见性变化与全员淘汰 Tick。
-_一句话：队伍视野计算 + 视野外快照过滤。_
+**src/game-engine/fog-vision.ts** — 按队伍计算当前视野，维护正常模式探索位集和最后所见建筑记忆，生成实时过滤快照并记录回放可见性时间线。
+_一句话：队伍视野、建筑记忆与过滤快照。_
 
 **src/game-engine/replay-helpers.ts** — 帧差分与克隆工具。
 `getDiff` 生成 `[index, value]` 对（实时 diff 帧同用）；`buildReplayPatch` 生成 forward/backward 双向 patch。
