@@ -39,6 +39,14 @@ const brush = ({ height, width }: Canvas, sample: Brush): Uint8Array =>
 const range = (rng: SeededRandom, low: number, high: number) => low + (high - low) * rng.next();
 const radius = Math.hypot;
 
+function offsetBrush(canvas: Canvas, sample: Brush) {
+  const verticalOffset = range(canvas.rng, -0.19, 0.19),
+    horizontalOffset = range(canvas.rng, -0.19, 0.19);
+  return brush(canvas, (row, col, vertical, horizontal) =>
+    sample(row, col, vertical - verticalOffset, horizontal - horizontalOffset),
+  );
+}
+
 const painters = {
   meadow(canvas) {
     const { rng } = canvas;
@@ -79,7 +87,7 @@ const painters = {
     const ring = range(canvas.rng, 0.43, 0.66),
       width = range(canvas.rng, 0.07, 0.14),
       gate = range(canvas.rng, 0.12, 0.24);
-    return brush(canvas, (_row, _col, vertical, horizontal) =>
+    return offsetBrush(canvas, (_row, _col, vertical, horizontal) =>
       Math.abs(radius(vertical, horizontal) - ring) > width || Math.abs(horizontal) < gate
         ? 0
         : Math.abs(vertical) < gate
@@ -160,7 +168,7 @@ const painters = {
   tidal_hub(canvas) {
     const ring = range(canvas.rng, 0.33, 0.53),
       ford = range(canvas.rng, 0.16, 0.32);
-    return brush(canvas, (_row, _col, vertical, horizontal) => {
+    return offsetBrush(canvas, (_row, _col, vertical, horizontal) => {
       const edge = Math.max(Math.abs(vertical), Math.abs(horizontal));
       const diagonal = Math.abs(Math.abs(vertical) - Math.abs(horizontal));
       if (Math.abs(edge - ring) < Math.max(0.085, 1 / Math.min(canvas.height, canvas.width)))
@@ -171,7 +179,7 @@ const painters = {
   parallel_belts(canvas) {
     const offset = range(canvas.rng, 0.26, 0.51),
       reach = range(canvas.rng, 0.62, 0.86);
-    return brush(canvas, (_row, _col, vertical, horizontal) =>
+    return offsetBrush(canvas, (_row, _col, vertical, horizontal) =>
       Math.abs(Math.abs(vertical) - offset) < Math.max(0.075, 1 / canvas.height) &&
       Math.abs(horizontal) < reach
         ? Math.abs(horizontal) < 0.15
@@ -256,6 +264,60 @@ function terrainResolution(family: keyof typeof painters, length: number) {
   if (family === 'standard_scatter') return length;
   if (family === 'canyon_corridors') return 2 * Math.floor((length + 2) / 6) + 1;
   return Math.floor(length / 2);
+}
+
+function textureOpenLand(
+  tiles: Uint8Array,
+  width: number,
+  family: keyof typeof painters,
+  crossings: number[][][],
+  rng: SeededRandom,
+) {
+  const height = tiles.length / width;
+  const fords = new Set(crossings.flat(2));
+  const rocky = family === 'massif' || family === 'parallel_belts' || family === 'three_marches';
+  const wet = ['moat', 'meander', 'twin_basins', 'tidal_hub', 'corner_lakes'].includes(family);
+  const mountainChance = rocky ? 0.8 : wet ? 0.25 : 0.5;
+  for (const [rows, cols] of [
+    [7, 7],
+    [6, 14],
+    [14, 6],
+  ]) {
+    const isPlain = (start: number) => {
+      for (let row = 0; row < rows; row++)
+        for (let col = 0; col < cols; col++) if (tiles[start + row * width + col] !== 0) return false;
+      return true;
+    };
+    const windows: number[] = [];
+    for (let row = 0; row <= height - rows; row++)
+      for (let col = 0; col <= width - cols; col++) {
+        const start = row * width + col;
+        if (isPlain(start)) windows.push(start);
+      }
+    shuffle(windows, rng);
+    for (const start of windows) {
+      if (!isPlain(start)) continue;
+      const extent = rocky || wet ? 3 : 2;
+      const rowsUsed = rng.intInclusive(1, Math.min(rows - 4, extent));
+      const colsUsed = rng.intInclusive(1, Math.min(cols - 4, extent));
+      const top = rng.intInclusive(2, rows - rowsUsed - 2),
+        left = rng.intInclusive(2, cols - colsUsed - 2);
+      const tile = rng.next() < mountainChance ? 1 : 2;
+      const clip = rowsUsed > 1 && colsUsed > 1 ? rng.intInclusive(0, 4) : -1;
+      for (let row = 0; row < rowsUsed; row++)
+        for (let col = 0; col < colsUsed; col++) {
+          if (
+            clip >= 0 &&
+            clip < 4 &&
+            row === (clip < 2 ? 0 : rowsUsed - 1) &&
+            col === (clip % 2 ? 0 : colsUsed - 1)
+          )
+            continue;
+          const cell = start + (top + row) * width + left + col;
+          tiles[cell] = fords.has(cell) ? 2 : tile;
+        }
+    }
+  }
 }
 
 function linkDistricts(canvas: Canvas, tiles: Uint8Array, owners: number[]) {
@@ -456,7 +518,6 @@ function findMegaLayout(
         { length: height * width },
         (_, index) => coarse[terrainRow(Math.floor(index / width)) * coarseWidth + terrainCol(index % width)],
       );
-      if (tiles.reduce((sum, tile) => sum + Number(tile === 0), 0) < tiles.length / 2) continue;
       const crossings = coarseCrossings.map((channels) =>
         channels.map((channel) =>
           channel.flatMap((cell) => {
@@ -478,6 +539,8 @@ function findMegaLayout(
           }),
         ),
       );
+      textureOpenLand(tiles, width, family, crossings, rng);
+      if (tiles.reduce((sum, tile) => sum + Number(tile === 0), 0) < tiles.length / 2) continue;
       const seats = chooseMegaSeats(tiles, width, landPartition, seatedTeams, crossings, rng, guide);
       if (!seats) continue;
       const gridType = build2D<Tile>(n, m, 0);
