@@ -19,6 +19,8 @@ const config = {
   speed: 1,
   allow_team: false,
   fog_mode: 'visible',
+  ai_difficulty: 'normal',
+  server_bot_seats: [],
   multi_line: true,
   map_token: 'multiline-replay-fixture',
   map_mode: 'random',

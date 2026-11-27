@@ -31,7 +31,16 @@ import {
 } from './replay-store';
 import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText, renderRichTextWithMentions } from './text-render';
-import { botForbidsFog, FeedComment, FeedPost, isFogMode, LobbyConfig, MAX_TEAMS, MoveMode } from './types';
+import {
+  botForbidsFog,
+  FeedComment,
+  FeedPost,
+  isAiDifficulty,
+  isFogMode,
+  LobbyConfig,
+  MAX_TEAMS,
+  MoveMode,
+} from './types';
 import { AuthRequest, AuthService, AuthUser } from './server/auth-service';
 import { ChatModeration, CHAT_TEXT_MAX } from './server/chat-moderation';
 import { CaptchaService } from './server/captcha-service';
@@ -2225,7 +2234,7 @@ const boot = async (listen = true): Promise<void> => {
 
       // 对局进行中的同名参赛玩家视为断线重连：换绑到新 socket 并恢复对局。
       // 传入 isBot 做身份匹配：同名的人类连接不得接管 bot 的席位（反之亦然）。
-      if (lobbyService.tryRejoin(io, socket.id, username, room, isBot)) {
+      if (lobbyService.tryRejoin(io, socket.id, username, room, isBot, socket.data.isServerBot === true)) {
         chatModeration.begin(socket.id, username, room, false);
         socket.join(`game_${roomVal}`);
         lobbyService.emitRoomUpdate(io, room);
@@ -2450,6 +2459,16 @@ const boot = async (listen = true): Promise<void> => {
               nextConf.fog_mode = mode;
               changed.push('fog_mode');
             }
+          }
+        }
+
+        if (hasOwn('ai_difficulty')) {
+          const difficulty = payload.ai_difficulty;
+          if (!isAiDifficulty(difficulty) || !players.some((player) => player.serverBot === true)) {
+            lobbyService.emitRoomUpdate(io, gid);
+          } else if (difficulty !== oldConf.ai_difficulty) {
+            nextConf.ai_difficulty = difficulty;
+            changed.push('ai_difficulty');
           }
         }
 

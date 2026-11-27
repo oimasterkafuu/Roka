@@ -4,6 +4,9 @@ export const MAX_TEAMS = 16;
 export const FOG_MODES = ['normal', 'explored', 'visible'] as const;
 export type FogMode = (typeof FOG_MODES)[number];
 export const isFogMode = (value: unknown): value is FogMode => FOG_MODES.some((mode) => mode === value);
+export type AiDifficulty = 'normal' | 'simple';
+export const isAiDifficulty = (value: unknown): value is AiDifficulty =>
+  value === 'normal' || value === 'simple';
 export const REPLAY_OPS_VERSION = 'ops-v3';
 
 export type MapRegion = 'qin' | 'han' | 'tang' | 'song' | 'yuan' | 'ming' | 'liao' | 'china' | 'taiwan';
@@ -39,6 +42,7 @@ export interface LobbyConfig {
   speed: number;
   allow_team: boolean;
   fog_mode: FogMode;
+  ai_difficulty: AiDifficulty;
   /** 多线争锋开关：开启后每名玩家维护多条战线队列，每 Tick 轮转调度。 */
   multi_line: boolean;
   map_token: string;
@@ -94,6 +98,7 @@ export interface RoomUpdatePayload {
   speed: number;
   allow_team: boolean;
   fog_mode: FogMode;
+  ai_difficulty: AiDifficulty;
   /** 多线争锋开关（房间设置同步给前端展示）。 */
   multi_line: boolean;
   map_token: string;
@@ -206,6 +211,7 @@ export interface ReplayTeamVision {
 export interface GameConfig extends LobbyConfig {
   player_names: string[];
   player_teams: number[];
+  server_bot_seats: number[];
 }
 
 export interface ReplayMeta {
@@ -217,6 +223,8 @@ export interface ReplayMeta {
   speed: number;
   allow_team: boolean;
   fog_mode: FogMode;
+  ai_difficulty?: AiDifficulty;
+  server_bot_seats?: number[];
   /** 对局是否开启多线争锋（仅作元信息记录；回放操作流与单线局同构）。 */
   multi_line?: boolean;
   map_token: string;
@@ -291,6 +299,7 @@ export interface GameResultEntry {
   uid: string;
   team: number;
   rank: number;
+  server_bot?: true;
 }
 
 export interface FeedComment {

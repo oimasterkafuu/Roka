@@ -178,6 +178,14 @@ function setFogModeByCode(mode) {
   setTabVal('fog-mode', fogModeLabels[mode]);
 }
 
+function getAiDifficultyCode() {
+  return getTabVal('ai-difficulty') === '简单' ? 'simple' : 'normal';
+}
+
+function setAiDifficultyByCode(difficulty) {
+  setTabVal('ai-difficulty', difficulty === 'simple' ? '简单' : '正常');
+}
+
 function getMultiLineModeCode() {
   return getTabVal('multi-line-mode') == '开启';
 }

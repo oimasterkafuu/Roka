@@ -34,6 +34,7 @@ import { buildScheduledReplayActions } from './game-engine/replay-scheduling';
 import { buildReplayPlayerOps, buildTurnMoves } from './game-engine/replay-turns';
 import { applyTickGrowth } from './game-engine/tick-growth';
 import {
+  AiDifficulty,
   ChatScope,
   FogMode,
   GameConfig,
@@ -49,6 +50,7 @@ import {
   ReplayMeta,
   ReplayTeamVision,
   REPLAY_OPS_VERSION,
+  isAiDifficulty,
   isFogMode,
   UpdatePayload,
 } from './types';
@@ -88,6 +90,8 @@ interface GameCallbacks {
       n: number;
       m: number;
       player_ids: string[];
+      ai_difficulty: AiDifficulty;
+      server_bot_seats: number[];
       general: GeneralPos;
       next_seq?: number;
       queue_ops?: QueuedOp[];
@@ -174,6 +178,12 @@ export class GameEngine {
   private readonly mapRegion: MapRegion;
 
   private readonly fogMode: FogMode;
+
+  private readonly aiDifficulty: AiDifficulty;
+
+  private readonly serverBotSeats: ReadonlySet<number>;
+
+  private readonly simpleCrownOwners: ReadonlySet<number>;
 
   private fogVision: FogVision | null = null;
 
@@ -332,6 +342,9 @@ export class GameEngine {
     this.mapMode = gameConf.map_mode;
     this.mapRegion = normalizeMapRegion(gameConf.map_region ?? DEFAULT_MAP_REGION);
     this.fogMode = gameConf.fog_mode;
+    this.aiDifficulty = gameConf.ai_difficulty ?? 'normal';
+    this.serverBotSeats = new Set(gameConf.server_bot_seats);
+    this.simpleCrownOwners = this.aiDifficulty === 'simple' ? this.serverBotSeats : new Set();
     this.multiLine = gameConf.multi_line === true;
     this.mapSeed = resolveMapSeed(
       this.mapMode,
@@ -354,6 +367,8 @@ export class GameEngine {
       speed: gameConf.speed,
       allow_team: gameConf.allow_team,
       fog_mode: this.fogMode,
+      ai_difficulty: this.aiDifficulty,
+      server_bot_seats: [...this.serverBotSeats],
       multi_line: this.multiLine,
       map_token: this.mapToken,
       map_mode: gameConf.map_mode,
@@ -400,20 +415,25 @@ export class GameEngine {
     await engine.initializeMap();
     engine.selectGenerals();
 
-    for (let i = 0; i < playerSids.length; i += 1) {
-      callbacks.emitInitMap(playerSids[i], {
-        n: engine.n,
-        m: engine.m,
-        player_ids: [...playerIds],
-        general: engine.generals[i],
-        next_seq: engine.nextSeq[i],
-        queue_ops: engine.pmove[i].map((op) => ({ ...op })),
-        // 仅多线争锋对局下发模式标记；单线对局缺省即旧协议单线语义。
-        ...(engine.multiLine ? { multi_line: true as const } : {}),
-      });
+    for (const [index, sid] of playerSids.entries()) {
+      engine.sendInitMap(sid, index);
     }
 
     return engine;
+  }
+
+  private sendInitMap(sid: string, index: number): void {
+    this.emitInitMap(sid, {
+      n: this.n,
+      m: this.m,
+      player_ids: [...this.playerIds],
+      ai_difficulty: this.aiDifficulty,
+      server_bot_seats: [...this.serverBotSeats],
+      general: this.generals[index] ?? [-1, -1],
+      next_seq: this.nextSeq[index] ?? 1,
+      queue_ops: this.pmove[index]?.map((op) => ({ ...op })) ?? [],
+      ...(this.multiLine ? { multi_line: true } : {}),
+    });
   }
 
   static async buildReplayBaseMap(meta: ReplayMeta): Promise<{
@@ -429,6 +449,8 @@ export class GameEngine {
       {
         ...meta,
         allow_team: meta.allow_team ?? false,
+        ai_difficulty: meta.ai_difficulty ?? 'normal',
+        server_bot_seats: meta.server_bot_seats ?? [],
         multi_line: meta.multi_line === true,
         map_size: meta.map_size ?? 'normal',
         map_region: normalizeMapRegion(meta.map_region),
@@ -464,6 +486,13 @@ export class GameEngine {
       !replay ||
       replay.version !== REPLAY_OPS_VERSION ||
       !isFogMode(replay.meta?.fog_mode) ||
+      (replay.meta.ai_difficulty !== undefined && !isAiDifficulty(replay.meta.ai_difficulty)) ||
+      (replay.meta.ai_difficulty === 'simple' && !Array.isArray(replay.meta.server_bot_seats)) ||
+      (replay.meta.server_bot_seats !== undefined &&
+        (!Array.isArray(replay.meta.server_bot_seats) ||
+          replay.meta.server_bot_seats.some(
+            (seat) => !Number.isInteger(seat) || seat < 1 || seat > replay.meta.player_names.length,
+          ))) ||
       !Array.isArray(replay.exploration)
     ) {
       throw new Error('回放版本不兼容。');
@@ -475,6 +504,8 @@ export class GameEngine {
       {
         ...replay.meta,
         allow_team: replay.meta.allow_team ?? false,
+        ai_difficulty: replay.meta.ai_difficulty ?? 'normal',
+        server_bot_seats: replay.meta.server_bot_seats ?? [],
         multi_line: replay.meta.multi_line === true,
         map_size: replay.meta.map_size ?? 'normal',
         map_region: normalizeMapRegion(replay.meta.map_region),
@@ -838,6 +869,7 @@ export class GameEngine {
         uid: entry.uid,
         team: entry.team,
         rank: rankByUid.get(entry.uid) ?? leaderboard.length,
+        ...(this.serverBotSeats.has(entry.id) ? { server_bot: true } : {}),
       });
     }
     return result;
@@ -1053,15 +1085,7 @@ export class GameEngine {
       return;
     }
     this.externalSpectatorSids.add(sid);
-    this.emitInitMap(sid, {
-      n: this.n,
-      m: this.m,
-      player_ids: [...this.playerIds],
-      general: [-1, -1],
-      next_seq: 1,
-      queue_ops: [],
-      ...(this.multiLine ? { multi_line: true } : {}),
-    });
+    this.sendInitMap(sid, -1);
     const snapshot = this.buildSnapshotFor(-1);
     this.spectatorSnapshotLast.set(sid, snapshot);
     this.update(sid, this.fullFrameFromSnapshot(snapshot, false));
@@ -1196,18 +1220,7 @@ export class GameEngine {
     this.afkLastMoveTurn[id] = this.turn;
     this.afkLastMoveAt[id] = Date.now();
     this.pmove[id].length = 0;
-    this.emitInitMap(newSid, {
-      n: this.n,
-      m: this.m,
-      player_ids: [...this.playerIds],
-      general: this.generals[id],
-      // 换绑重连必须补发 seq 同步字段：服务端 nextSeq 已递增，客户端 init_map
-      // 默认从 1 重新计数，缺这两个字段会导致两端 seq 永久错位（lst_moves 摘不到队列项）。
-      // 换绑已清空队列，queue_ops 恒为空拷贝，与开局路径字段对齐。
-      next_seq: this.nextSeq[id],
-      queue_ops: this.pmove[id].map((op) => ({ ...op })),
-      ...(this.multiLine ? { multi_line: true } : {}),
-    });
+    this.sendInitMap(newSid, id);
     // 换绑后补发全量帧：保留观战席/已战败玩家已选的观战视角；同时把 diff 基线
     // 对齐到本次补发的快照（客户端 init_map 已重置棋盘，后续 diff 以此为准）。
     const snapshot = this.buildSnapshotFor(id, povTeam);
@@ -1623,6 +1636,7 @@ export class GameEngine {
       owner: this.owner,
       armyCnt: this.armyCnt,
       isolated: this.isolated,
+      simpleCrownOwners: this.simpleCrownOwners,
       pstat: this.pstat,
       leftGameValue: LEFT_GAME,
     });
