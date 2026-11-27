@@ -16,6 +16,7 @@ import {
 import { encodeReplayPatchBinary } from '../src/replay-patch-binary.ts';
 import { mapConfig, measureMap } from './evaluate-maze-fairness.mjs';
 import { checkSeatConfigurations, checkIncidents, crownAudit } from './check-crown-spacing.mjs';
+import { measurePlainRegions, interiorObstacleMasks, obstacleDistance } from './measure-mega-terrain.mjs';
 
 const dir = '/tmp/roka-mega-random';
 const mode = 'mega_random';
@@ -154,6 +155,11 @@ function checkTerrain({ n, m, grid_type: tiles }, family, token) {
     corridors >= 0.12 * (tiles.length - mountains.length),
     `${token}: not enough two-sided corridors`,
   );
+  return {
+    wallShare: mountains.length / tiles.length,
+    largestWallShare: largest / tiles.length,
+    corridorShare: corridors / (tiles.length - mountains.length),
+  };
 }
 
 function checkRoutes(board, meta, family) {
@@ -242,7 +248,7 @@ function analyze(board, players, token) {
   for (const cell of stats.spawns)
     assert.ok(neighbors(cell, m, tiles.length).filter((next) => tiles[next] === 200).length >= 2, token);
   assertNoChokepoint(board, token);
-  checkTerrain(board, family, token);
+  const canyon = checkTerrain(board, family, token);
   const spacing = Math.sqrt(tiles.filter((tile) => tile !== 201).length / players);
   const entry = {
     nearCV: stats.local[6].plains.cv,
@@ -272,16 +278,60 @@ function analyze(board, players, token) {
     );
   }
   cases[family].push(entry);
+  return canyon;
 }
 
 let focus = 0,
   extended = 0;
 const matrixMinimumSteps = { normal: Infinity, large: Infinity };
+const terrainByFamily = Object.fromEntries(
+  megaFamilies.map((family) => [
+    family,
+    {
+      maps: 0,
+      maxSquare: 0,
+      maxRectangle: { area: 0 },
+      maxObstacleFreeSquare: 0,
+      maxLongSideAtWidthSix: 0,
+      minInteriorObstacles: Infinity,
+      meanInteriorObstacleShare: 0,
+      seedPairs: 0,
+      minObstacleDistance: 1,
+    },
+  ]),
+);
+const canyonEvidence = [];
+function checkInterior(board, token, terrain, previousMasks) {
+  const regions = measurePlainRegions(board);
+  assert.ok(
+    regions.square < 7 && regions.obstacleFreeSquare < 7,
+    `${token}: unbroken ${regions.obstacleFreeSquare}x${regions.obstacleFreeSquare} terrain`,
+  );
+  assert.ok(regions.longSideAtWidthSix < 14, `${token}: broad plain strip`);
+  assert.ok(regions.interiorObstacles > 0, `${token}: missing interior terrain`);
+  terrain.maps++;
+  terrain.maxSquare = Math.max(terrain.maxSquare, regions.square);
+  terrain.maxObstacleFreeSquare = Math.max(terrain.maxObstacleFreeSquare, regions.obstacleFreeSquare);
+  terrain.maxLongSideAtWidthSix = Math.max(terrain.maxLongSideAtWidthSix, regions.longSideAtWidthSix);
+  if (regions.rectangle.area > terrain.maxRectangle.area) terrain.maxRectangle = regions.rectangle;
+  terrain.minInteriorObstacles = Math.min(terrain.minInteriorObstacles, regions.interiorObstacles);
+  const share = regions.interiorObstacles / ((board.n - 2) * (board.m - 2));
+  terrain.meanInteriorObstacleShare += (share - terrain.meanInteriorObstacleShare) / terrain.maps;
+  const variants = interiorObstacleMasks(board);
+  for (const previous of previousMasks) {
+    const change = obstacleDistance(previous.mask, variants);
+    assert.ok(change >= 0.05, `${previous.token} vs ${token}: obstacle distance ${change}`);
+    terrain.minObstacleDistance = Math.min(terrain.minObstacleDistance, change);
+    terrain.seedPairs++;
+  }
+  previousMasks.push({ token, mask: variants[0] });
+}
 for (const size of ['normal', 'large'])
   for (let players = 2; players <= 16; players++) {
     const focused = [2, 4, 8, 16].includes(players),
       quota = focused ? 8 : 2;
     const seen = new Map();
+    const priorMasks = new Map(megaFamilies.map((family) => [family, []]));
     for (
       let index = 0;
       [...seen.values()].reduce((sum, count) => sum + count, 0) < quota * megaFamilies.length;
@@ -296,7 +346,9 @@ for (const size of ['normal', 'large'])
       const board = await GameEngine.buildReplayBaseMap(meta);
       const { steps } = rush.check(board, meta, `${family}/${size}/${players}`);
       matrixMinimumSteps[size] = Math.min(matrixMinimumSteps[size], ...steps);
-      analyze(board, players, token);
+      const canyon = analyze(board, players, token);
+      if (canyon) canyonEvidence.push({ token, ...canyon, minEnemy: Math.min(...steps) });
+      checkInterior(board, token, terrainByFamily[family], priorMasks.get(family));
       if (count === 0 || family === 'home_atolls' || family === 'team_shelves')
         checkRoutes(board, meta, family);
       if (size === 'normal' && players === 8) {
@@ -324,6 +376,12 @@ for (const size of ['normal', 'large'])
     console.log(`PASS ${size}/${players}: ${quota} seeds per family`);
   }
 assert.equal(new Set([...witnesses.values()].map((witness) => witness.signature)).size, megaFamilies.length);
+assert.equal(canyonEvidence.length, (focus + extended) / megaFamilies.length);
+assert.ok(
+  terrainByFamily.canyon_corridors.meanInteriorObstacleShare >
+    terrainByFamily.meadow.meanInteriorObstacleShare + 0.15,
+  'canyon walls should remain denser than meadow patches',
+);
 for (const [family, variants] of hashes)
   assert.ok(variants.size >= 3, `${family} lacks distinct secondary variants`);
 
@@ -574,6 +632,8 @@ await writeFile(
       spawnSamples,
       spawnSpread,
       matrixMinimumSteps,
+      terrainByFamily,
+      canyonEvidence,
       worstByFamily,
       incidents,
       cramped,
