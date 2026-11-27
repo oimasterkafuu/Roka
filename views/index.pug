@@ -501,10 +501,13 @@ html
                   // 参赛者名字接口不带 rating 颜色：先按 rt-unrated 渲染，批量补色后自动刷新。
                   usernameEnsureColors(item.rank || []);
                   // item.time 为 Unix 秒：相对时间展示，完整时间放 title。
-                  $('<td></td>')
-                    .text(relativeTime(item.time * 1000))
-                    .attr('title', fullTime(item.time * 1000))
-                    .appendTo($tr);
+                  var timeMs = typeof item.time === 'number' ? item.time * 1000 : NaN;
+                  var $time = $('<td></td>').appendTo($tr);
+                  if (Number.isFinite(new Date(timeMs).getTime())) {
+                    $time.attr('data-replay-time-ms', timeMs).attr('title', fullTime(timeMs)).text(relativeTime(timeMs));
+                  } else {
+                    $time.text('-');
+                  }
                   $('<td></td>').text(item.turn).appendTo($tr);
                   // 名次列：有队伍分组（组队局归档写入 teams）时同队合并成一组——
                   // 组内 ', '、组间 ' › '、组序为终局队伍名次序（不展示玩家配色色块）；
@@ -531,6 +534,13 @@ html
               } catch (e) {
                 // 加载失败时保留现有列表，等待下次失效通知。
               }
+            }
+
+            function refreshReplayTimes() {
+              document.querySelectorAll('#replays-body td[data-replay-time-ms]').forEach(function (cell) {
+                var label = relativeTime(Number(cell.dataset.replayTimeMs));
+                if (cell.textContent !== label) cell.textContent = label;
+              });
             }
 
             /* ---------- 上传并查看回放 ---------- */
@@ -1203,6 +1213,7 @@ html
                 document.documentElement.dataset.introHomeReady = 'true';
                 document.dispatchEvent(new Event('roka:home-ready'));
                 loadReplays();
+                setInterval(refreshReplayTimes, 1000);
                 loadAnnouncement();
                 loadLeaderboard();
                 loadOnline();
@@ -1240,7 +1251,9 @@ html
                   if (currentUsername && !sessionReloading) checkHomeSession();
                 });
                 document.addEventListener('visibilitychange', function () {
-                  if (!document.hidden && currentUsername) checkHomeSession();
+                  if (document.hidden) return;
+                  refreshReplayTimes();
+                  if (currentUsername) checkHomeSession();
                 });
                 socket.on('home_rooms', queueRoomsRefresh);
                 socket.on('home_replays', function () {

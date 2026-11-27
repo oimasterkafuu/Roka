@@ -1,6 +1,6 @@
 {
   "name": "roka",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "Roka - 实时方格领土战争",
   "main": "dist/server.js",
   "scripts": {
@@ -61,6 +61,7 @@
     "test:replays-page": "node scripts/test-replays-page.mjs",
     "test:build-pages": "node scripts/test-build-pages.mjs",
     "test:home-room-refresh": "node scripts/test-home-room-refresh.mjs",
+    "test:home-replay-time": "node scripts/test-home-replay-time.mjs",
     "test:rate-limit-html": "node scripts/test-rate-limit-html.mjs",
     "test:replay-cache": "node scripts/test-replay-cache.mjs",
     "test:replay-quota": "node scripts/test-replay-quota.mjs",
