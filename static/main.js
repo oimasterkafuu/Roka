@@ -949,6 +949,7 @@ socket.on('set_id', function (data) {
 
 socket.on('init_map', function (data) {
   init_map(data.n, data.m, data.general);
+  setAiDifficultyByCode(data.ai_difficulty);
   match_multi_line = data.multi_line === true;
   if (typeof data.next_seq == 'number') next_seq = data.next_seq;
   in_game = true;
@@ -1100,6 +1101,7 @@ socket.on('room_update', function (data) {
   setTabVal('game-speed', data.speed + 'x');
   setAllowTeamModeByCode(Boolean(data.allow_team));
   setFogModeByCode(data.fog_mode);
+  setAiDifficultyByCode(data.ai_difficulty);
   setMultiLineModeByCode(Boolean(data.multi_line));
   setMapModeByCode(data.map_mode || 'random');
   setMapRegionByCode(data.map_region || 'china');
@@ -1117,6 +1119,7 @@ socket.on('room_update', function (data) {
   var isHost = data.players.length > 0 && data.players[0].sid == client_id;
   var allowTeam = Boolean(data.allow_team);
   var roomRunning = Boolean(data.in_game);
+  var hasServerBot = data.players.some((player) => player.server_bot === true);
   var hasServerBotForbiddingTeam = false;
   var hasBotForbiddingFog = false;
   var hasBotForbiddingMultiLine = false;
@@ -1147,9 +1150,11 @@ socket.on('room_update', function (data) {
   setTabGroupReadonly('tabs-map-size', roomRunning || !isHost);
   setTabGroupReadonly('tabs-team-mode', roomRunning || !isHost || hasServerBotForbiddingTeam);
   setTabGroupReadonly('tabs-fog-mode', roomRunning || !isHost || hasBotForbiddingFog);
+  setTabGroupReadonly('tabs-ai-difficulty', roomRunning || !isHost || !hasServerBot);
   setTabGroupReadonly('tabs-multi-line-mode', roomRunning || !isHost || hasBotForbiddingMultiLine);
   $('#team-mode-bot-hint').css('display', hasServerBotForbiddingTeam ? '' : 'none');
   $('#fog-mode-bot-hint').css('display', hasBotForbiddingFog ? '' : 'none');
+  $('#ai-difficulty-section').css('display', hasServerBot ? '' : 'none');
   $('#multi-line-mode-bot-hint').css('display', hasBotForbiddingMultiLine ? '' : 'none');
   $('#team-mode-section').css('display', isHost && !roomRunning ? '' : 'none');
   if (isHost && !roomRunning) $('#map-token').removeAttr('disabled');
@@ -1346,6 +1351,13 @@ $(document).ready(function () {
     for (var i = 1; i < this.children.length; i++) {
       initTab(this, this.children[i], function () {
         updateConfPatch({ fog_mode: getFogModeCode() });
+      });
+    }
+  });
+  $('#tabs-ai-difficulty').each(function () {
+    for (var i = 1; i < this.children.length; i++) {
+      initTab(this, this.children[i], function () {
+        updateConfPatch({ ai_difficulty: getAiDifficultyCode() });
       });
     }
   });

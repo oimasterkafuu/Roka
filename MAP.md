@@ -165,7 +165,7 @@ _一句话：每 tick 操作 → ops-v3 紧凑操作流。_
 _一句话：ops-v3 操作流 → 按回合调度的动作表。_
 
 **src/game-engine/tick-growth.ts** — 兵力增长规则。
-主城每 tick +1；正常普通格与指挥所每 50 tick +1。仅单线的正常普通格在第 26–50 tick 每 tick 额外 +1（第 50 tick 合计 +2）；多线没有爆发加成。孤军、沼泽和中立格不产兵。`scripts/test-tick-growth.mjs` 覆盖两种模式下的增长边界，纳入 `pnpm test`。
+主城默认每 tick +1；简单难度下官方托管席位的主城只在偶数 tick +1。正常普通格与指挥所每 50 tick +1。仅单线的正常普通格在第 26–50 tick 每 tick 额外 +1（第 50 tick 合计 +2）；多线没有爆发加成。孤军、沼泽和中立格不产兵。`scripts/test-tick-growth.mjs` 覆盖两种模式下的增长边界，纳入 `pnpm test`。
 _一句话：主城/地块/爆发期兵力增长规则。_
 
 ### 地图生成（src/map/，纯函数层）
@@ -281,7 +281,9 @@ _一句话：共享类型/协议定义汇总。_
 
 _一句话：首页大厅，房间/回放/动态/公告/排行榜全内联脚本。_
 
-**views/game.pug → static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。
+**views/game.pug → static/game.html** — 对局页与回放页共用 DOM 骨架，无业务脚本。`static/main.js` 和 `static/main/room-controls.js` 同步官方托管 Bot 房间的 AI 难度选择。
+
+**AI 难度协议** — `src/types.ts` 定义 `ai_difficulty`（`normal | simple`）与 `server_bot_seats`（开局时冻结、从 1 开始的席位编号）。`src/server.ts` 校验房主的 `change_game_conf`，`src/server/lobby-service.ts` 管理房间默认值、`room_update`、开局席位和单局 Elo 有效分。`src/game-engine.ts` 用同一份开局元数据生成 `init_map`（含断线换绑/外部观战）、执行皇冠增长、保存并重建 `ops-v3`；`RPB5` 继续存已重建的棋盘，不改变观看格式。
 按序加载 crown.js → sw-register → username.js → core-globals → notify.js → replay-binary → replay-cache → room-controls → replay-controls → replay-stats → render-update → blink-clock → main.js（顺序敏感）。另加载 `/styles/rating.css`（rt-* 用户名 rating 颜色，对局排行榜/聊天/房间成员名经 username.js 组件使用）。关键 DOM：`#disconnect-banner`（断线横幅）、`#map`、`#menu`、`#status-alert`（按钮按下标访问，改结构需同步 main.js）、`#surrender-alert`（投降确认）、`#spectate-mode`/`#tabs-spectate-mode`（观战中的「下局模式」选择器，仅观战时显示；其容器内另有 `#spectate-view-section`/`#tabs-spectate-view` 观战视角选择器，仅迷雾对局的观战者显示）、`#replay-loading(-bar/-text)`、`#replay-error-alert`、`#replay-view-section`/`#tabs-replay-view`（回放视角选择器，仅迷雾对局回放显示）、`#replay-title`（回放参赛者标题区）、`#replay-stats`/`#tabs-replay-stats`/`#replay-stats-canvas`（回放局势统计图）。
 
 在手机回放中，`#game-info` 将 `#game-leaderboard-scroll`（可滚动的排行榜）与 `#replay-stats` 纵向排列；桌面与实时对局继续使用原有固定定位。排行榜与回放信息区共享 `refreshDeployBanner()` 写入的 `--deploy-offset`。
@@ -423,6 +425,7 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 - **scripts/test-bot.mjs** — `pnpm run test:bot`：临时数据目录起服务 + 两个 bot 自动对局，双方收到 `init_map` 且累计 ≥10 回合即通过。
 - **scripts/test-server-bot.mjs** — `pnpm run test:server-bot`：托管策略 bot 冒烟测试——dist 造用户（首个 = 超管）、调 `/api/admin/bots/start` 进程内启动 simple-strategy-bot、random-patch-bot 作对手，另启动 anti-human-bot 校验模板自动枚举（simple-strategy-bot/anti-human-bot 入选、random-patch-bot 排除）、自动准备进入对局、同房间第二个 bot 409、不可托管模板 400、allowTeam=true 房间组队默认关闭且房主可开启、开启后 bot 自主避让到固定的 2 队、人类换到 bot 队伍不被服务端修正且 bot 再次主动避让；保留 403 权限闸、房长保留（host 落在第三方 bot）、allowTeam=false 托管 bot 房间禁止组队（bot 进房强制关闭已开组队 + 房主开启请求被拒绝）、`init_map` + ≥5 条实际 attack、杀服重启后按状态文件（含 template/allowTeam）自动恢复原配置、停止 API 清空列表与状态文件。
 - **scripts/test-server-bot-config.mjs** — `pnpm run test:server-bot-config`（纳入 `pnpm test`）：临时数据与真实 dist HTTP/socket 覆盖运行中编辑三项许可，严格布尔校验与超管权限、同一 bot 不重启、`yuelan` 改为允许后房间解锁及改为禁止后立即关闭、`bot2_0` 持续禁止、状态写盘失败不改变运行/房间/持久状态，以及重启恢复编辑后的 `yuelan=true` 与 `bot2_0=false`。需先 `pnpm run build`。
+- **scripts/test-ai-difficulty.mjs / scripts/test-ai-difficulty-room.mjs** — `pnpm run test:ai-difficulty`（纳入 `pnpm test`）：逐 Tick 验证皇冠与原有经济、实际录制并重建 ops-v3／RPB5、校验简单局单场 Rating，并用 Chromium 与真实 socket 覆盖房间开关、重进、重置、观战与四种托管模板。
 - **scripts/test-lobby-guards.mjs** — `pnpm run test:lobby-guards`：开局/换绑守卫回归——无效准备或同值命令不发房间、首页或聊天通知，有效变更仍通知；组队模式全员同队拒绝开局（换队后可开）、对局中同名人类连接不得接管 bot 席位（以观战进房且 bot 持续收 update）、bot 与人类各自断线重连仍可恢复席位、大地图面积约为标准 4 倍、只剩 bot 时房间设置重置为默认值（观战人类仍算占用不触发；对局进行中不触发、对局结束后才重置）。
 - **scripts/test-huaxia-season.mjs** — `pnpm run test:huaxia-season`：用固定 UTC 时间验证 `Asia/Shanghai` 下 9/30 关闭、10/1 开启、10/7 开启、10/8 关闭及次年 10/1 开启。
 - **scripts/test-lobby-dwell.mjs** — `pnpm run test:lobby-dwell`：房间停留上限（12 小时）单元测试——tsx 直跑 src 的 LobbyService（假 io 捕获 `room_kick`），覆盖停留超限被踢、未超限保留、对局进行中豁免、heartbeatExempt bot 豁免、原心跳超时踢出不变、离开清理记录且重进重置计时。

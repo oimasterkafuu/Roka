@@ -20,13 +20,14 @@ interface TickGrowthInput {
   owner: Grid<number>;
   armyCnt: Grid<number>;
   isolated: Grid<boolean>;
+  simpleCrownOwners: ReadonlySet<number>;
   pstat: number[];
   leftGameValue: number;
 }
 
 /**
  * Roka 生产规则：
- * - 主城（crown, -2）：每 Tick +1，不生产于孤军之外（主城本身即锚点，恒为正常）。
+ * - 主城（crown, -2）：通常每 Tick +1；简单难度的官方托管席位只在偶数 Tick +1。
  * - 普通地块（0）：每 50 Tick +1（仅正常状态）；爆发期内每 Tick 额外 +1。
  * - 指挥所（city, -1）：每 50 Tick +1（仅正常状态），不享受爆发期加成。
  * - 沼泽（2）/ 孤军 / 中立格：永远不生产兵力。
@@ -34,6 +35,7 @@ interface TickGrowthInput {
 const applyTickGrowth = (input: TickGrowthInput): void => {
   const burst = !input.multiLine && input.turn >= BURST_START_TURN && input.turn <= BURST_END_TURN;
   const plainGrowth = input.turn % PLAIN_GROWTH_INTERVAL === 0;
+  const skipSimpleCrownGrowth = input.turn % 2 !== 0;
   if (!burst && !plainGrowth) {
     for (let i = 0; i < input.n; i += 1) {
       for (let j = 0; j < input.m; j += 1) {
@@ -41,7 +43,11 @@ const applyTickGrowth = (input: TickGrowthInput): void => {
           continue;
         }
         const ownerId = input.owner[i][j];
-        if (ownerId > 0 && input.pstat[ownerId - 1] !== input.leftGameValue) {
+        if (
+          ownerId > 0 &&
+          input.pstat[ownerId - 1] !== input.leftGameValue &&
+          !(skipSimpleCrownGrowth && input.simpleCrownOwners.has(ownerId))
+        ) {
           input.armyCnt[i][j] += 1;
         }
       }
@@ -57,7 +63,9 @@ const applyTickGrowth = (input: TickGrowthInput): void => {
         continue;
       }
       if (tile === -2) {
-        input.armyCnt[i][j] += 1;
+        if (!(skipSimpleCrownGrowth && input.simpleCrownOwners.has(ownerId))) {
+          input.armyCnt[i][j] += 1;
+        }
         continue;
       }
       if (tile === -1) {

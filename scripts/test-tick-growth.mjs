@@ -35,6 +35,7 @@ for (const multiLine of [false, true]) {
         isolated: [tiles.map((tile) => tile.isolated ?? false)],
         pstat: [0, LEFT_GAME],
         leftGameValue: LEFT_GAME,
+        simpleCrownOwners: new Set(),
         armyCnt,
       });
       assert.deepEqual(

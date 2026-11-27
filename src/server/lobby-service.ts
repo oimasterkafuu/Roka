@@ -15,6 +15,7 @@ import { resolveMapSizeRatioByPlayersAndRegion } from '../map/map-size';
 import { DEFAULT_MAP_REGION, getHuaxiaRegion, normalizeMapRegion } from '../map/huaxia-regions';
 import { ReplayStore } from '../replay-store';
 import {
+  AiDifficulty,
   ChatScope,
   botForbidsFog,
   FogMode,
@@ -29,7 +30,15 @@ import {
 } from '../types';
 
 type EditableLobbyKey =
-  'speed' | 'allow_team' | 'fog_mode' | 'multi_line' | 'map_mode' | 'map_region' | 'map_token' | 'map_size';
+  | 'speed'
+  | 'allow_team'
+  | 'fog_mode'
+  | 'ai_difficulty'
+  | 'multi_line'
+  | 'map_mode'
+  | 'map_region'
+  | 'map_token'
+  | 'map_size';
 
 const FIXED_WIDTH_RATIO = 0.5;
 const FIXED_HEIGHT_RATIO = 0.5;
@@ -39,6 +48,7 @@ const FIXED_SWAMP_RATIO = 0.5;
 export { FIXED_SWAMP_RATIO };
 const MAP_TOKEN_MAX_LENGTH = 32;
 const RATING_K = 128;
+export const SIMPLE_AI_RATING_PENALTY = 400;
 export const REFERRAL_MIN_TURNS = 60;
 export const REFERRAL_MIN_DURATION_MS = 60_000;
 /** 房间准备阶段的心跳超时：超过 600 秒无心跳的成员被自动移出房间。 */
@@ -60,6 +70,7 @@ const confStr: Record<EditableLobbyKey, string> = {
   speed: '游戏速度',
   allow_team: '允许组队',
   fog_mode: '迷雾模式',
+  ai_difficulty: 'AI 难度',
   multi_line: '多线争锋',
   map_mode: '地图类型',
   map_region: '华夏地区',
@@ -703,6 +714,7 @@ class LobbyService {
       speed: conf.speed,
       allow_team: conf.allow_team,
       fog_mode: conf.fog_mode,
+      ai_difficulty: conf.ai_difficulty,
       multi_line: conf.multi_line === true,
       map_token: conf.map_token,
       map_token_custom: conf.map_token_custom === true,
@@ -833,6 +845,9 @@ class LobbyService {
     if (key === 'fog_mode') {
       return { normal: '正常', explored: '已探索', visible: '全部可视' }[value as FogMode];
     }
+    if (key === 'ai_difficulty') {
+      return value === 'simple' ? '简单' : '正常';
+    }
     if (key === 'multi_line') {
       return value ? '开启' : '关闭';
     }
@@ -944,14 +959,13 @@ class LobbyService {
       ...this.getMapSizeConfigByPlayers(players, conf),
       player_names: playerNames,
       player_teams: playerTeams,
+      server_bot_seats: players.flatMap((player, index) => (player.serverBot === true ? [index + 1] : [])),
     };
 
     io.to(`game_${gameId}`).emit('starting', {});
     if (allAI) {
       this.sendLobbySystemMessage(io, gameId, '房间内全部为 AI 玩家，本局强制以 4x 速度进行。');
     }
-    this.emitRoomUpdate(io, lobbyId);
-
     const game = await GameEngine.create(gameConf, playerSids, playerIds, gameId, {
       update: (sid, data) => {
         io.to(`sid_${sid}`).emit('update', data);
@@ -988,6 +1002,7 @@ class LobbyService {
           completedGame && humanUsernames
             ? { gameId: gid, ...completedGame.getCompletionStats(), humanUsernames }
             : undefined,
+          gameConf.ai_difficulty,
         ).finally(() => {
           io.emit('home_leaderboard');
         });
@@ -1057,6 +1072,7 @@ class LobbyService {
     this.syncLobbyHostActivity(lobbyId);
     this.gameLobbyId.set(gameId, lobbyId);
     this.gamePlayers.set(gameId, activePlayers);
+    this.emitRoomUpdate(io, lobbyId);
     this.emitHomeRooms(io);
   }
 
@@ -1186,7 +1202,14 @@ class LobbyService {
    * 服务端托管 bot 复用真实用户名，若不做此校验，同名人类打开房间页会把
    * bot 的席位换绑走（bot 从此收不到 update 而卡死），反之亦然。
    */
-  tryRejoin(io: SocketIOServer, sid: string, username: string, room: string, isBot = false): boolean {
+  tryRejoin(
+    io: SocketIOServer,
+    sid: string,
+    username: string,
+    room: string,
+    isBot = false,
+    isServerBot = false,
+  ): boolean {
     const gameId = this.getLobbyVal(room);
     const game = this.gameInstances.get(gameId);
     if (!game) {
@@ -1204,7 +1227,8 @@ class LobbyService {
     // checkLeave 登记的身份。都不可考时按人类连接处理（保持历史行为）。
     const oldSocket = io.sockets.sockets.get(oldSid);
     const oldIsBot = oldSocket ? oldSocket.data.isBot === true : (pending?.isBot ?? false);
-    if (oldIsBot !== isBot) {
+    const member = this.lobbyPlayers.get(room)?.find((player) => player.sid === oldSid);
+    if (oldIsBot !== isBot || (member?.serverBot === true) !== isServerBot) {
       return false;
     }
 
@@ -1220,7 +1244,6 @@ class LobbyService {
       participants.delete(oldSid);
       participants.add(sid);
     }
-    const member = this.lobbyPlayers.get(room)?.find((player) => player.uid === username);
     if (member) {
       member.sid = sid;
     }
@@ -1333,6 +1356,10 @@ class LobbyService {
       return;
     }
     if (players.some((player) => player.bot !== true)) {
+      const conf = this.lobbyConfig.get(lobbyId);
+      if (conf && !players.some((player) => player.serverBot === true)) {
+        conf.ai_difficulty = 'normal';
+      }
       return;
     }
     const conf = this.defaultLobbyConfig();
@@ -1351,6 +1378,7 @@ class LobbyService {
       speed: 1,
       allow_team: false,
       fog_mode: 'normal',
+      ai_difficulty: 'normal',
       multi_line: false,
       map_token: this.normalizeMapToken(this.randomHexToken()),
       map_token_custom: false,
@@ -1449,6 +1477,7 @@ class LobbyService {
       elapsedMs: number;
       humanUsernames: ReadonlySet<string>;
     },
+    aiDifficulty: AiDifficulty = 'normal',
   ): Promise<void> {
     const uniqueResult = [
       ...new Map(result.map((entry) => [entry.uid.trim().toLowerCase(), entry])).values(),
@@ -1504,7 +1533,14 @@ class LobbyService {
       const members = result.filter((entry) => entry.team === team);
       const strength =
         members.length ** 3 *
-        members.reduce((sum, entry) => sum + 10 ** (this.userStore.getRating(entry.uid).rating / 400), 0);
+        members.reduce((sum, entry) => {
+          const rating = this.userStore.getRating(entry.uid).rating;
+          const effective =
+            aiDifficulty === 'simple' && entry.server_bot === true
+              ? Math.max(0, rating - SIMPLE_AI_RATING_PENALTY)
+              : rating;
+          return sum + 10 ** (effective / 400);
+        }, 0);
       teamRating.set(team, 400 * Math.log10(strength));
     }
 

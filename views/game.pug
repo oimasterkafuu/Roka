@@ -160,6 +160,12 @@ html
             div.inline-button 全部可视
           p 队友共享视野；普通己方格提供 3×3 视野，指挥所和主城提供 5×5 视野，断联格只看自身。正常模式下，探索前不显示地形，离开视野的建筑保留灰化符号和颜色但不显示兵力，重新可见时刷新。
           p#fog-mode-bot-hint(style='display: none') 房间内有不支持迷雾的 Bot，只能全部可视。
+        div#ai-difficulty-section(style='display: none')
+          h3 AI 难度：
+          div#tabs-ai-difficulty.tabs.background.unselectable
+            input(type='hidden', value='正常')
+            div.inline-button.inverted 正常
+            div.inline-button 简单
         div#multi-line-mode-section
           h3 多线争锋：
           div#tabs-multi-line-mode.tabs.background.unselectable

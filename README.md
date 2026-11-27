@@ -19,6 +19,7 @@ Roka 是一个实时方格领土战争游戏，玩法类似 generals.io。玩家
 - 对局回放观看、下载、本地上传，以及按用户和日期查询历史回放。
 - GitHub 绑定与 Star 金色前半名；关于页公开展示贡献者和全部 Star 支持者。
 - 可独立运行或由服务端托管的策略 Bot，协议说明见 `/develop/bot`。
+- 含官方托管 Bot 的房间可选择「正常」或「简单」AI 难度。
 - 首次访问介绍片、静态资源 CDN 与故障回源。
 
 ## 峡谷回廊
@@ -153,6 +154,12 @@ pnpm run test:mega-random
 - [Relay](bot-template/relay-bot/README.md)：基于原 Bot 3.0 的小图策略，加入迷宫走廊、迷雾侦察和多线搜索，保留裁剪棋盘的开局搜索与增援定价。运行 `BOT_ROOM=房间号 BOT_TOKEN=令牌 pnpm run bot:relay`；回归 `pnpm run test:relay`；构建后通过 `pnpm run eval:relay` 跑真实引擎换边矩阵。`BOT_ONCE=1` 让 Relay 等整局结算后退出，即使中途被淘汰也会等到结算。
 
 两者均默认连接 `http://127.0.0.1:23333`，可用 `BOT_SERVER` 覆盖。Relay 的[原始 2048 局数据和复现条件](bot-template/relay-bot/BASELINE.md)是历史基线，并非整合后重新测得的成绩。
+
+### AI 难度
+
+含官方托管 Bot 的房间中，房主可在开局前更改 `ai_difficulty`：`normal`（正常，默认）或 `simple`（简单）。所有托管模板均适用；房间重置后回到正常。简单模式只让官方托管席位的皇冠由每 Tick +1 改为偶数 Tick +1。普通地块的第 26–50 Tick 爆发、指挥所、人类和第三方 Bot 均不受影响。
+
+每局按照开局时确定的难度和托管席位结算。简单局的 Elo 期望值使用官方托管 Bot 的有效 Rating「原始分减 400、最低 0」；档案只结算比赛本身的分差，排行榜不展示这个临时扣减。开局、重连和观战的 `init_map` 与原始 `ops-v3` 回放都记录难度和托管席位（从 1 开始，对应 `player_ids`／`player_names` 的顺序）。构建后运行 `pnpm run test:ai-difficulty` 可验证引擎、房间、回放和 Rating。
 
 ### 迷雾与回放
 
