@@ -1,5 +1,7 @@
 import { build2D, computeBaseMapDimensions, SeededRandom, shuffle } from './map-core';
 import type { GeneralPos, Tile } from './map-core';
+import { CROWN_AREA_PER_SEAT } from './crown-spacing';
+import { resolveMapSizeRatioByPlayers } from './map-size';
 import {
   crossingStart,
   paintCrossing,
@@ -22,6 +24,7 @@ interface Canvas {
   districts: District[];
   partition: SeatPartition;
   surrounded: boolean;
+  dense: boolean;
   teams: number[];
   crossings: number[][][];
 }
@@ -119,11 +122,16 @@ const painters = {
     });
   },
   inland_continent(canvas) {
-    const coast = range(canvas.rng, 0.78, 0.88),
+    const coast = canvas.dense ? range(canvas.rng, 0.86, 0.91) : range(canvas.rng, 0.78, 0.88),
       peninsula = range(canvas.rng, 0.13, 0.31);
     return brush(canvas, (_row, _col, vertical, horizontal) => {
-      const edge = (Math.abs(vertical) ** 3 + Math.abs(horizontal) ** 3) ** (1 / 3);
+      const power = canvas.dense ? 8 : 3;
+      const edge = (Math.abs(vertical) ** power + Math.abs(horizontal) ** power) ** (1 / power);
       if (edge < coast || (Math.abs(vertical) < peninsula && edge < coast + 0.055)) return 0;
+      if (canvas.dense)
+        return edge < coast + 0.05 && (Math.abs(vertical) < peninsula || Math.abs(horizontal) < peninsula)
+          ? 2
+          : 1;
       return edge < coast + 0.08 || (Math.abs(horizontal) < peninsula && edge > 0.9) ? 2 : 1;
     });
   },
@@ -175,11 +183,13 @@ const painters = {
     );
   },
   opposed_coasts(canvas) {
-    const edge = range(canvas.rng, 0.64, 0.84),
+    const edge = canvas.dense ? range(canvas.rng, 0.84, 0.9) : range(canvas.rng, 0.64, 0.84),
       capes = canvas.rng.intInclusive(2, 4);
     return brush(canvas, (_row, _col, vertical, horizontal) => {
-      const shore = edge + 0.12 * Math.cos(capes * vertical * Math.PI);
-      return horizontal < -shore ? 1 : horizontal > shore ? (Math.abs(vertical) > 0.68 ? 1 : 2) : 0;
+      const along = canvas.width > canvas.height * 2 ? horizontal : vertical;
+      const across = canvas.width > canvas.height * 2 ? vertical : horizontal;
+      const shore = edge + (canvas.dense ? 0.045 : 0.12) * Math.cos(capes * along * Math.PI);
+      return across < -shore ? 1 : across > shore ? (Math.abs(along) > 0.68 ? 1 : 2) : 0;
     });
   },
   three_marches(canvas) {
@@ -203,7 +213,7 @@ const painters = {
   },
   clearing(canvas) {
     const { rng } = canvas;
-    const reach = range(rng, 0.56, 0.76),
+    const reach = canvas.dense ? range(rng, 0.81, 0.91) : range(rng, 0.56, 0.76),
       frequency = rng.intInclusive(3, 6);
     return brush(canvas, (_row, _col, vertical, horizontal) => {
       if (Math.max(Math.abs(vertical), Math.abs(horizontal)) < reach) return 0;
@@ -321,21 +331,38 @@ export const megaFamilies = Object.keys(painters) as (keyof typeof painters)[];
 export const drawMegaFamily = (rng: SeededRandom) =>
   megaFamilies[rng.intInclusive(0, megaFamilies.length - 1)];
 
-export function generateMegaRandomMap(
+function findMegaLayout(
   rng: SeededRandom,
+  family: keyof typeof painters,
   heightRatio: number,
   widthRatio: number,
   teams: number[],
+  shapeLimit: number,
 ) {
-  const family = drawMegaFamily(rng);
-  for (let shape = 0; shape < 20; shape++) {
+  const countsByTeam = teams.map((team) => teams.filter((other) => team === other).length);
+  const surrounded = Math.max(...countsByTeam) === teams.length - 1 && teams.length >= 6;
+  const minSide = Math.max(19, 2 * Math.ceil((Math.sqrt(teams.length * CROWN_AREA_PER_SEAT) - 1) / 2) + 1);
+  for (let shape = 0; shape < shapeLimit; shape++) {
     const base = computeBaseMapDimensions(rng, heightRatio, widthRatio);
     const transpose = rng.next() < 0.5,
       flipRows = rng.next() < 0.5,
       flipCols = rng.next() < 0.5;
-    const extra = 2 * Math.min(9, Math.floor(shape / 2));
-    const height = Math.max(transpose ? base.m : base.n, 19) + extra,
-      width = Math.max(transpose ? base.n : base.m, 19) + extra;
+    const lanes =
+      shape === 0 || teams.length < 5 || surrounded
+        ? 0
+        : Math.min(Math.ceil(teams.length / 3), [2, 4, 3, 2][shape % 4]);
+    const area = Math.max(base.n * base.m, minSide ** 2, teams.length * (54 + Math.min(8, shape) * 9));
+    const pitch = Math.sqrt(area / Math.max(1, teams.length));
+    const columns = Math.ceil(teams.length / (lanes || 1));
+    const span = columns * pitch * range(rng, 1.44, 1.7);
+    const scaleUp = lanes ? Math.max(1, ((6 + 2 * columns) * span) / area) : 1;
+    const odd = (value: number) => 2 * Math.round((value - 1) / 2) + 1;
+    const height = lanes
+        ? odd((area / span) * scaleUp)
+        : Math.max(transpose ? base.m : base.n, minSide) + 2 * Math.min(shape, 19),
+      width = lanes
+        ? odd(span * scaleUp)
+        : Math.max(transpose ? base.n : base.m, minSide) + 2 * Math.min(shape, 19);
     const n = transpose ? width : height,
       m = transpose ? height : width;
     const point = (row: number, col: number): GeneralPos => {
@@ -347,9 +374,10 @@ export function generateMegaRandomMap(
     shuffle(order, rng);
     const groups = [...new Set(order.map((index) => teams[index]))];
     order.sort((left, right) => groups.indexOf(teams[left]) - groups.indexOf(teams[right]));
-    const districts = seatDistricts(height, width, Math.max(1, order.length));
+    const districts = lanes
+      ? seatDistricts(lanes * lanes, teams.length, teams.length)
+      : seatDistricts(height, width, Math.max(1, order.length));
     const counts = groups.map((group) => teams.filter((team) => team === group).length);
-    const surrounded = groups.length === 2 && Math.max(...counts) === teams.length - 1 && teams.length >= 6;
     const partition = surrounded
       ? surroundedPartition(order.length, rng.next())
       : rectangularPartition(districts);
@@ -384,7 +412,7 @@ export function generateMegaRandomMap(
     const terrainCol = (col: number) => Math.floor((col * coarseWidth) / width);
     const landPartition =
       family === 'inland_continent'
-        ? insetPartition(partition, 0.8)
+        ? insetPartition(partition, shape ? 0.89 : 0.8)
         : family === 'home_atolls' || family === 'team_shelves'
           ? {
               ...partition,
@@ -395,7 +423,22 @@ export function generateMegaRandomMap(
                 ),
             }
           : partition;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    const slope = rng.next() < 0.5 ? 1 : -1;
+    const guide = landPartition.centers.map(([row, col], slot): [number, number] => {
+      if (!lanes || surrounded) return [row, col];
+      const district = districts[slot];
+      const lane = Math.round(district.top * lanes);
+      const across = Math.round(district.left / (district.right - district.left));
+      const length = Math.round(1 / (district.right - district.left));
+      const shift = columns === length && teams.length % lanes === 0 ? (lane % 2 ? 0.25 : -0.25) : 0;
+      const aim = (across + (columns - length + 1) / 2 + shift) / columns;
+      const scale = family === 'inland_continent' ? 0.89 : 1;
+      return [
+        row + scale * ((lane / (lanes - 1) - 0.5) * 0.2 + (slope * (across - (length - 1) / 2)) / height),
+        0.5 + (aim - 0.5) * scale,
+      ];
+    });
+    for (let attempt = 0; attempt < (shape === 0 && teams.length >= 7 ? 1 : 3); attempt++) {
       const coarseCrossings: number[][][] = [];
       const coarse = painters[family]({
         height: coarseHeight,
@@ -404,6 +447,7 @@ export function generateMegaRandomMap(
         districts,
         partition,
         surrounded,
+        dense: shape > 0,
         teams: seatedTeams,
         crossings: coarseCrossings,
       });
@@ -434,7 +478,7 @@ export function generateMegaRandomMap(
           }),
         ),
       );
-      const seats = chooseMegaSeats(tiles, width, landPartition, seatedTeams, crossings, rng);
+      const seats = chooseMegaSeats(tiles, width, landPartition, seatedTeams, crossings, rng, guide);
       if (!seats) continue;
       const gridType = build2D<Tile>(n, m, 0);
       tiles.forEach((tile, index) => {
@@ -462,5 +506,28 @@ export function generateMegaRandomMap(
       };
     }
   }
-  throw new Error(`No fair ${family} layout for ${teams.length} seats`);
+}
+
+export function repackMegaCrowns(family: keyof typeof painters, teams: number[]) {
+  const groups = [...new Set(teams)]
+    .map((team) => teams.flatMap((other, seat) => (other === team ? [seat] : [])))
+    .sort((first, second) => first.length - second.length);
+  const order = groups.flat();
+  const canonical = groups.flatMap((group, index) => group.map(() => index + 1));
+  const ratio = 2 * resolveMapSizeRatioByPlayers(teams.length);
+  const map = findMegaLayout(new SeededRandom('repack-mega-crowns'), family, ratio, ratio, canonical, 64);
+  if (!map) throw new Error(`Unverified crown packing: ${family}/${groups.map((group) => group.length)}`);
+  const generals: GeneralPos[] = [];
+  order.forEach((seat, index) => (generals[seat] = map.generals[index]));
+  return { ...map, generals };
+}
+
+export function generateMegaRandomMap(
+  rng: SeededRandom,
+  heightRatio: number,
+  widthRatio: number,
+  teams: number[],
+) {
+  const family = drawMegaFamily(rng);
+  return findMegaLayout(rng, family, heightRatio, widthRatio, teams, 20) ?? repackMegaCrowns(family, teams);
 }

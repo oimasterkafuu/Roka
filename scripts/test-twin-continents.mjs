@@ -6,8 +6,9 @@ import { GameEngine } from '../src/game-engine.ts';
 import { encodeReplayPatchBinary } from '../src/replay-patch-binary.ts';
 import { MAX_MOUNTAIN_RATIO, MAX_SWAMP_RATIO, SeededRandom, resolveMapSeed } from '../src/map/map-core.ts';
 import { resolveMapSizeRatioByPlayers } from '../src/map/map-size.ts';
-import { generateTwinContinentsMap } from '../src/map/twin-continents-map-generator.ts';
+import { generateTwinContinentsMap, repackTwinCrowns } from '../src/map/twin-continents-map-generator.ts';
 import { LobbyService } from '../src/server/lobby-service.ts';
+import { checkSeatConfigurations, checkIncidents, crownAudit } from './check-crown-spacing.mjs';
 
 const REPORT_DIR = '/tmp/roka-twin-continents';
 const FOCUS_PLAYERS = [2, 4, 8, 16];
@@ -290,10 +291,6 @@ const validateMap = (map, players) => {
     assert.notEqual(map.gridType[x][y], 2);
     assert.ok(neighbors(map.n, map.m, x * map.m + y).filter((cell) => flat[cell] === 0).length >= 2);
   }
-  if (players % 2 === 0) {
-    const spawnSet = new Set(map.layout.spawnPoints.map(cellKey));
-    for (const point of map.layout.spawnPoints) assert.ok(spawnSet.has(cellKey(mirrorPoint(map, point))));
-  }
   assert.ok(flat.filter((tile) => tile === 1).length <= map.n * map.m * MAX_MOUNTAIN_RATIO);
   assert.ok(flat.filter((tile) => tile === 2).length <= map.n * map.m * MAX_SWAMP_RATIO);
 };
@@ -333,6 +330,8 @@ const extraMetrics = [];
 const regressions = {};
 const shapeHashes = new Set();
 const orientationSet = new Set();
+const rush = crownAudit();
+const incidents = await checkIncidents('twin_continents', configFor, rush);
 const checkFairness = (engineMap, token) => {
   const metrics = analyzeMap(engineMap);
   assert.ok(metrics.local[6].plains.cv <= 0.25, `${token} radius6 plain fairness`);
@@ -341,7 +340,7 @@ const checkFairness = (engineMap, token) => {
   assert.ok(metrics.nearest.cv <= 0.25, `${token} opponent distance fairness`);
   const spacing = Math.sqrt(engineMap.gridType.flat().filter(passable).length / metrics.nearestSteps.length);
   assert.ok(
-    metrics.nearest.min >= Math.floor(0.5 * spacing),
+    metrics.nearest.min >= Math.max(14, Math.floor(1.5 * spacing)),
     `${token} crowded seat: ${metrics.nearestSteps}`,
   );
   assert.ok(!metrics.exclusiveSwamp && !metrics.exclusiveBothPlains, `${token} uncontested bridge access`);
@@ -366,19 +365,27 @@ const checkFairness = (engineMap, token) => {
     metrics.bridgeLeaders.every((leaders) => leaders.length >= 2),
     `${token} single leader on a bridge`,
   );
-  const { spawnPoints } = engineMap.layout;
+  const { spawnPoints, orientation, wallStart } = engineMap.layout;
   if (spawnPoints.length % 2 === 0) {
-    for (const [seat, point] of spawnPoints.entries()) {
-      const reflected = spawnPoints.findIndex(
-        (other) => cellKey(other) === cellKey(mirrorPoint(engineMap, point)),
+    const positions = new Set(spawnPoints.map(cellKey));
+    metrics.mirrorLayout = spawnPoints.every((point) =>
+      positions.has(cellKey(mirrorPoint(engineMap, point))),
+    );
+    for (const leaders of metrics.bridgeLeaders)
+      assert.equal(
+        new Set(leaders.map((seat) => spawnPoints[seat][orientation === 'horizontal' ? 1 : 0] < wallStart))
+          .size,
+        2,
+        `${token}: both banks must contest each bridge`,
       );
-      for (const approach of metrics.bridgeSteps)
-        assert.equal(approach[seat], approach[reflected], `${token} asymmetric bridge access`);
-      assert.equal(metrics.nearestSteps[seat], metrics.nearestSteps[reflected]);
-    }
   }
   return metrics;
 };
+for (let players = 2; players <= 16; players++) {
+  const repacked = repackTwinCrowns(players);
+  validateMap(repacked, players);
+  checkFairness(repacked, `repacked twin/${players}`);
+}
 for (const size of SIZES) {
   for (const players of FOCUS_PLAYERS) {
     for (let index = 0; index < SEED_COUNT; index += 1) {
@@ -387,7 +394,9 @@ for (const size of SIZES) {
       validateMap(map, players);
       const repeated = makeMap(players, size, token);
       assert.deepEqual(repeated, map, `${size}/${players}/${index} is deterministic`);
-      const engineBoard = await GameEngine.buildReplayBaseMap(configFor(players, size, token));
+      const meta = configFor(players, size, token);
+      const engineBoard = await GameEngine.buildReplayBaseMap(meta);
+      rush.check(engineBoard, meta, `${size}/${players}`);
       assert.deepEqual(
         engineTerrainSignature(engineBoard, players),
         generatedTerrainSignature(map),
@@ -413,7 +422,9 @@ for (let players = 2; players <= 16; players += 1) {
     for (let index = 0; index < 32; index += 1) {
       const token = `twin-odd-count-${players}-${index}`;
       const map = makeMap(players, size, token);
-      const board = await GameEngine.buildReplayBaseMap(configFor(players, size, token));
+      const meta = configFor(players, size, token);
+      const board = await GameEngine.buildReplayBaseMap(meta);
+      rush.check(board, meta, `${size}/${players}`);
       assert.deepEqual(engineTerrainSignature(board, players), generatedTerrainSignature(map));
       const engineMap = decodeEngineBoard(board, map.layout, players);
       validateMap(engineMap, players);
@@ -430,7 +441,7 @@ for (let players = 2; players <= 16; players += 1) {
           'odd layout and seat assignment reproduce',
         );
         assert.ok(
-          metrics.nearest.min >= 6 && metrics.nearest.max - metrics.nearest.min <= 3,
+          metrics.nearest.min >= 14 && metrics.nearest.max - metrics.nearest.min <= 3,
           `three-player regression: ${metrics.nearestSteps}`,
         );
         assert.equal(new Set(metrics.bridgeLeaders.flat()).size, 3, 'each of three seats contests a bridge');
@@ -444,6 +455,18 @@ for (let players = 2; players <= 16; players += 1) {
   console.log(`PASS extended ${players}: both sizes, 32 engine boards each`);
 }
 assert.equal(orientationSet.size, 2);
+for (const size of SIZES) {
+  for (let players = 2; players <= 16; players += 2) {
+    const layouts = [...focusMetrics, ...extraMetrics].filter(
+      (entry) => entry.players === players && entry.size === size,
+    );
+    assert.ok(
+      layouts.filter((entry) => !entry.mirrorLayout).length >= layouts.length / 2,
+      `${size}/${players}: too many mirror layouts`,
+    );
+  }
+}
+const cramped = await checkSeatConfigurations(configFor, rush);
 assert.ok(shapeHashes.size > 32);
 
 const lobby = Object.create(LobbyService.prototype);
@@ -493,11 +516,9 @@ const groupedLive = await GameEngine.create(groupedConfig, groupedIds, groupedId
 assert.equal(groupedSeats.length, 4);
 assert.ok(groupedSeats.every(([x, y]) => x >= 0 && y >= 0));
 assert.deepEqual(groupedLive.replayMeta.player_teams, [1, 1, 2, 2]);
-const groupedMap = decodeEngineBoard(
-  await GameEngine.buildReplayBaseMap(groupedConfig),
-  makeMap(4, 'normal', 'twin-team-init').layout,
-  4,
-);
+const groupedBoard = await GameEngine.buildReplayBaseMap(groupedConfig);
+rush.check(groupedBoard, groupedConfig);
+const groupedMap = decodeEngineBoard(groupedBoard, makeMap(4, 'normal', 'twin-team-init').layout, 4);
 assert.deepEqual(groupedMap.layout.spawnPoints, groupedSeats);
 const groupedNearest = analyzeMap(groupedMap, groupedConfig.player_teams).nearestSteps;
 assert.ok(groupedNearest.every((steps) => steps > 0));
@@ -545,6 +566,7 @@ for (const field of ['grid_type', 'army_cnt', 'isolated']) {
 }
 
 process.env.ROKA_DATA_DIR = `${REPORT_DIR}/api-data`;
+process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = 'twin-continents-test-secret';
 process.env.WEBHOOK_SECRET = 'twin-continents-test-secret';
 process.env.ROKA_STATIC_CDN = '0';
@@ -569,6 +591,9 @@ const summary = {
   allFocusMaps: focusMetrics.length,
   extraEngineMaps: extraMetrics.length,
   regressions,
+  incidents,
+  cramped,
+  crownRush: rush.summary(),
   orientationSet: [...orientationSet],
   distinctTerrainHashes: shapeHashes.size,
   fairnessSource: 'GameEngine.buildReplayBaseMap() decoded initial output',

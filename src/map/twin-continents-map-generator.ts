@@ -1,12 +1,7 @@
-import {
-  GeneralPos,
-  MAX_MOUNTAIN_RATIO,
-  SeededRandom,
-  Tile,
-  build2D,
-  computeBaseMapDimensions,
-} from './map-core';
-import { MazeGraph } from './maze-layout';
+import { GeneralPos, SeededRandom, Tile, build2D, computeBaseMapDimensions, shuffle } from './map-core';
+import { CROWN_AREA_PER_SEAT, crownMinimum, openCrownLine } from './crown-spacing';
+import { resolveMapSizeRatioByPlayers } from './map-size';
+import { MazeGraph, localCounts, variation } from './maze-layout';
 import { crossingStart, paintCrossing } from './map-geometry';
 import type { GeneratedMap, MapGenerationConfig } from './random-map-generator';
 
@@ -36,272 +31,286 @@ interface TwinContinentsGeneratedMap extends GeneratedMap {
   layout: TwinContinentsLayout;
 }
 
-const clamp = (value: number, low: number, high: number): number => Math.max(low, Math.min(high, value));
+interface Band {
+  start: number;
+  end: number;
+}
+
+interface Candidate {
+  cell: number;
+  along: number;
+  depth: number;
+  approach: number[];
+}
+
 const nearestOdd = (value: number): number => 2 * Math.round((value - 1) / 2) + 1;
 
-const evenSeats = (
-  length: number,
-  bank: number,
-  cross: number,
-  players: number,
-  openings: number[],
-): number[] => {
-  const pairs = players / 2;
-  const rows = Math.max(1, Math.round(Math.sqrt((pairs * bank) / length)));
-  const bridgeBudget = Math.floor(2 * Math.sqrt((2 * length * bank) / players));
-  const seats: number[] = [];
-  let used = 0;
-  for (let row = 0; row < rows; row += 1) {
-    const end = Math.round(((row + 1) * pairs) / rows);
-    const count = end - used;
-    const depth = clamp(Math.floor((bank * (used + count / 2)) / pairs), 1, bank - 2);
-    for (let column = 0; column < count; column += 1) {
-      const along = Math.floor((length * (column + 0.5)) / count);
-      const detour = Math.min(...openings.map((opening) => Math.abs(along - opening)));
-      const across = Math.max(depth, bank + detour - bridgeBudget);
-      seats.push(along * cross + across, along * cross + cross - 1 - across);
-    }
-    used = end;
-  }
-  return seats;
-};
-
-const variation = (values: number[]): number => {
-  const mean = values.reduce((total, value) => total + value, 0) / values.length;
-  return mean
-    ? Math.sqrt(values.reduce((total, value) => total + (value - mean) ** 2, 0) / values.length) / mean
-    : 0;
-};
-
-const scoreSeats = (graph: MazeGraph, seats: number[], bridgeEntries: number[], spacing: number): number => {
-  if (new Set(seats).size !== seats.length) return Infinity;
-  const fields = seats.map((start) => graph.field(start));
-  const nearest = fields.map((field, seat) =>
-    Math.min(...seats.map((start, other) => (seat === other ? Infinity : field.distances[start]))),
+const fairLayout = (graph: MazeGraph, seats: number[], minimum: number, cross: number): boolean => {
+  const fields = seats.map((seat) => graph.field(seat));
+  const nearest = fields.map(({ distances }, index) =>
+    Math.min(...seats.map((seat, other) => (index === other ? Infinity : distances[seat]))),
   );
-  const local = fields.map(({ distances, opening }) => {
-    let near = 0;
-    let wide = 0;
-    let swamp = 0;
-    for (const target of opening) {
-      if (graph.tiles[target] === 2) swamp++;
-      else if (!seats.includes(target)) {
-        wide++;
-        if (distances[target] <= 6) near++;
-      }
-    }
-    return { near, wide, swamp };
-  });
+  if (
+    Math.min(...nearest) < minimum ||
+    Math.max(...nearest) > 1.8 * Math.min(...nearest) ||
+    variation(nearest) > 0.25 ||
+    (seats.length === 3 && Math.max(...nearest) - Math.min(...nearest) > 3) ||
+    seats.some((seat, index) =>
+      seats.slice(0, index).some((other) => openCrownLine(graph.tiles, cross, seat, other)),
+    )
+  )
+    return false;
+  const counts = localCounts(graph, seats, fields);
+  for (const [plain, swamp] of [
+    ['near', 'swampNear'],
+    ['wide', 'swampWide'],
+  ] as const) {
+    const values = counts.map((count) => count[plain]);
+    const weakest = Math.min(...values);
+    if (
+      weakest < 12 ||
+      variation(values) > 0.25 ||
+      weakest < (0.65 * values.reduce((sum, value) => sum + value, 0)) / seats.length ||
+      Math.max(...counts.map((count) => count[swamp])) > weakest / 3
+    )
+      return false;
+  }
   const territory = graph.territory(seats).plains;
-  const weakestShare =
-    (seats.length * Math.min(...territory)) / territory.reduce((sum, area) => sum + area, 0);
-  const deviations = [
-    variation(nearest),
-    variation(territory),
-    variation(local.map((row) => row.near)),
-    variation(local.map((row) => row.wide)),
-  ];
-  const swampCounts = local.map((row) => row.swamp);
-  const furthestBridgeAccess = Math.max(
-    ...fields.map((field) => Math.min(...bridgeEntries.map((entry) => field.distances[entry]))),
-  );
-  const peak = Math.max(...deviations);
   return (
-    4 * peak +
-    12 * Math.max(0, peak - 0.2) +
-    deviations.reduce((total, value) => total + value, 0) +
-    4 * Math.max(0, Math.max(...nearest) / Math.min(...nearest) - 1.45) +
-    6 * Math.max(0, 0.7 - weakestShare) +
-    4 * Math.max(0, 0.65 - Math.min(...nearest) / spacing) +
-    Math.max(0, furthestBridgeAccess / spacing - 1.25) +
-    0.01 * (Math.max(...swampCounts) - Math.min(...swampCounts))
+    variation(territory) <= 0.25 &&
+    Math.min(...territory) >= (0.55 * territory.reduce((sum, value) => sum + value, 0)) / seats.length
   );
 };
 
-const oddSeats = (
-  tiles: Uint8Array,
+const chooseSeats = (
+  rng: SeededRandom,
+  graph: MazeGraph,
   length: number,
   cross: number,
   bank: number,
-  leftEnd: number,
-  middleStart: number,
+  bands: Band[],
   players: number,
-  rng: SeededRandom,
-): number[] => {
-  const graph = new MazeGraph(tiles, cross);
-  const spacing = Math.sqrt(graph.cells.length / players);
-  const bridgeEntries = graph.cells.filter(
-    (start) => start % cross === bank || start % cross === cross - 1 - bank,
+): number[] | undefined => {
+  if (!players) return [];
+  const minimum = crownMinimum(graph.cells.length, players);
+  const access = Math.ceil(2 * Math.sqrt(graph.cells.length / players));
+  const sizes = [Math.ceil(players / 2), Math.floor(players / 2)];
+  const slots = sizes.flatMap((size, side) =>
+    Array.from({ length: size }, (_, index) => ({
+      side,
+      start: Math.floor((index * length) / size),
+      end: Math.floor(((index + 1) * length) / size),
+      leads: bands.map(
+        ({ start, end }) =>
+          Math.min(size - 1, Math.floor((((start + end) / 2 + 0.5) * size) / length)) === index,
+      ),
+    })),
   );
-  const cell = (along: number, depth: number, opposite = false): number =>
-    along * cross + (opposite ? cross - 1 - bank + depth : bank - depth);
-
-  // Moving out along either diagonal trades one step along the coast for one step inland.
-  // The left bridge therefore ties hinge/left, and the other two tie hinge/right.
-  const layout = (params: number[]): number[] => {
-    const [hinge, depth, left, right] = params;
-    const seats = [
-      cell(hinge, depth),
-      cell(hinge - left, depth + left, true),
-      cell(hinge + right, depth + right),
-    ];
-    for (let index = 4; index < params.length; index += 2) {
-      seats.push(cell(params[index], params[index + 1]), cell(params[index], params[index + 1], true));
-    }
-    return seats;
-  };
-  const constrain = (params: number[]): void => {
-    params[0] = clamp(params[0], leftEnd + 1, middleStart - 1);
-    params[1] = clamp(params[1], 2, bank - 1);
-    params[2] = clamp(params[2], 1, Math.min(params[0] - leftEnd, bank - params[1]));
-    params[3] = clamp(params[3], 1, Math.min(middleStart - params[0], bank - params[1]));
-    for (let index = 4; index < params.length; index += 2) {
-      params[index] = clamp(params[index], 1, length - 2);
-      params[index + 1] = clamp(params[index + 1], 2, bank - 1);
-    }
-  };
-  let best: number[] = [];
-  let bestScore = Infinity;
-  for (let restart = 0; restart < 4; restart++) {
-    const hinge = Math.round((leftEnd + middleStart) / 2);
-    let params = [hinge, Math.max(2, Math.round(bank * 0.25)), hinge - leftEnd, middleStart - hinge];
-    constrain(params);
-    while (layout(params).length < players) {
-      const occupied = layout(params);
-      let bestPair: number[] = [];
-      let room = -1;
-      for (let trial = 0; trial < 48; trial++) {
-        const along = rng.intInclusive(1, length - 2);
-        const depth = rng.intInclusive(2, bank - 1);
-        const pair = [cell(along, depth), cell(along, depth, true)];
-        const clearance = Math.min(
-          ...occupied.flatMap((start) => pair.map((target) => graph.field(start).distances[target])),
-          depth * 2,
-          2 * (bank - depth + 1),
-          2 * Math.min(along + 1, length - along),
-        );
-        if (clearance > room) {
-          room = clearance;
-          bestPair = [along, depth];
-        }
-      }
-      params.push(...bestPair);
-    }
-    let current = scoreSeats(graph, layout(params), bridgeEntries, spacing);
-    for (const scale of [0.45, 0.2, 0.08]) {
-      const stride = Math.max(1, Math.round(spacing * scale));
-      for (let pass = 0; pass < 2; pass++) {
-        for (let index = 0; index < params.length; index++) {
-          const origin = params;
-          for (const delta of [-stride, stride]) {
-            const candidate = [...origin];
-            candidate[index] += delta;
-            constrain(candidate);
-            if (candidate.every((value, offset) => value === params[offset])) continue;
-            const cost = scoreSeats(graph, layout(candidate), bridgeEntries, spacing);
-            if (cost < current) {
-              current = cost;
-              params = candidate;
-            }
-          }
-        }
-      }
-    }
-    if (current < bestScore) {
-      bestScore = current;
-      best = layout(params);
-    }
-    if (bestScore < 0.65 || players === 3) break;
+  if (players === 3) {
+    // The lone crown contests the first two bridges. The crowded bank shares the far bridge
+    // so its crowns can claim some of the opposite bank's opening territory.
+    slots[0].leads = [true, true, true];
+    slots[1].leads = [false, false, true];
+    slots[2].leads = [true, true, false];
   }
-  return best;
+  const pools = slots.map(({ side, start, end }) => {
+    const interior: Candidate[] = [];
+    const fringe: Candidate[] = [];
+    for (let along = start; along < end; along++) {
+      for (let depth = 1; depth <= bank; depth++) {
+        const approach = bands.map(({ start, end }) => depth + Math.max(0, start - along, along - end));
+        const closest = Math.min(...approach);
+        if (closest < 2 || closest > access) continue;
+        const across = side ? cross - 1 - bank + depth : bank - depth;
+        const margin = Math.min(along - start + 0.5, end - along - 0.5);
+        const pool =
+          players >= 4 && (margin < 0.16 * (end - start) || depth < 0.13 * bank || depth > 0.91 * bank)
+            ? fringe
+            : interior;
+        pool.push({ along, depth, approach, cell: along * cross + across });
+      }
+    }
+    shuffle(interior, rng);
+    shuffle(fringe, rng);
+    return interior.concat(fringe);
+  });
+  if (players === 1) return [pools[0][0].cell];
+  if (players === 2) {
+    const signatures = new Map<string, Candidate[]>();
+    for (const peer of pools[1]) {
+      const key = peer.approach.join(',');
+      const peers = signatures.get(key);
+      if (peers) peers.push(peer);
+      else signatures.set(key, [peer]);
+    }
+    for (const first of pools[0]) {
+      if (2 * Math.min(...first.approach) + cross - 2 * bank - 1 < minimum) continue;
+      for (const peer of signatures.get(first.approach.join(',')) ?? []) {
+        if (first.along !== peer.along && fairLayout(graph, [first.cell, peer.cell], minimum, cross))
+          return [first.cell, peer.cell];
+      }
+    }
+    return;
+  }
+  const compatible = (
+    first: Candidate,
+    firstSlot: number,
+    second: Candidate,
+    secondSlot: number,
+  ): boolean => {
+    if (openCrownLine(graph.tiles, cross, first.cell, second.cell)) return false;
+    const alongSteps = Math.abs(first.along - second.along);
+    if (slots[firstSlot].side === slots[secondSlot].side) {
+      if (alongSteps + Math.abs(first.depth - second.depth) < minimum) return false;
+    } else {
+      // Crossing outside the interval between the crowns adds an out-and-back coastal detour.
+      const direct = alongSteps + first.depth + second.depth + cross - 2 * bank - 1;
+      if (
+        direct < minimum &&
+        bands.some(
+          ({ start, end }) =>
+            direct +
+              2 *
+                Math.max(
+                  0,
+                  start - Math.max(first.along, second.along),
+                  Math.min(first.along, second.along) - end,
+                ) <
+            minimum,
+        )
+      )
+        return false;
+    }
+    return bands.every(
+      (_, index) =>
+        (!slots[firstSlot].leads[index] || first.approach[index] <= second.approach[index]) &&
+        (!slots[secondSlot].leads[index] || second.approach[index] <= first.approach[index]),
+    );
+  };
+  const chosen: number[] = [];
+  let budget = players === 3 ? 180 : 70;
+  const search = (remaining: number[], options: Candidate[][]): number[] | undefined => {
+    if (!remaining.length) return fairLayout(graph, chosen, minimum, cross) ? [...chosen] : undefined;
+    const slot = remaining.reduce((best, other) =>
+      options[other].length < options[best].length ? other : best,
+    );
+    const next = remaining.filter((other) => other !== slot);
+    const trials = next.length < 2 && players >= 4 ? 3 : 15;
+    for (const candidate of options[slot].slice(0, trials)) {
+      if (--budget < 0) break;
+      const filtered = [...options];
+      if (
+        next.some((other) => {
+          filtered[other] = options[other].filter((peer) => compatible(candidate, slot, peer, other));
+          return !filtered[other].length;
+        })
+      )
+        continue;
+      chosen[slot] = candidate.cell;
+      const result = search(next, filtered);
+      if (result) return result;
+    }
+  };
+  return search(
+    slots.map((_, index) => index),
+    pools,
+  );
 };
 
-const generateTwinContinentsMap = (
+const findTwinLayout = (
   rng: SeededRandom,
-  config: TwinContinentsMapGenerationConfig,
-): TwinContinentsGeneratedMap => {
-  const base = computeBaseMapDimensions(rng, config.heightRatio, config.widthRatio);
-  const orientation: TwinContinentsOrientation = rng.intInclusive(0, 1) === 0 ? 'horizontal' : 'vertical';
-  const players = config.requiredPlayers;
-  let length = orientation === 'horizontal' ? base.n : base.m;
-  let cross = orientation === 'horizontal' ? base.m : base.n;
-  if (players % 2 && players >= 3) {
-    const area = length * cross;
-    const aspect = players === 3 ? 2.7 : players === 5 ? 1.85 : 1.55;
-    length = Math.max(25, nearestOdd(Math.sqrt(area * aspect)));
-    cross = Math.max(13, nearestOdd(area / length));
-  }
-  const n = orientation === 'horizontal' ? length : cross;
-  const m = orientation === 'horizontal' ? cross : length;
-  const diagonalOpening = players === 3 || players === 5;
-  const wallLimit = Math.min(
-    5,
-    Math.max(1, Math.floor(cross * (diagonalOpening ? 0.1 : MAX_MOUNTAIN_RATIO))),
-  );
-  const thickness = 1 + 2 * rng.intInclusive(0, Math.floor((wallLimit - 1) / 2));
-  const wallStart = (cross - thickness) / 2;
-  const wallEnd = cross - 1 - wallStart;
-  const flipAlong = rng.next() < 0.5;
-  const flipBanks = rng.next() < 0.5;
-  const point = (along: number, across: number): GeneralPos => {
-    const longCoord = flipAlong ? length - 1 - along : along;
-    const crossCoord = flipBanks ? cross - 1 - across : across;
-    return orientation === 'horizontal' ? [longCoord, crossCoord] : [crossCoord, longCoord];
-  };
-  const tiles = new Uint8Array(length * cross);
-  for (let along = 0; along < length; along++)
-    tiles.fill(1, along * cross + wallStart, along * cross + wallEnd + 1);
-  const starts: number[] = [];
-  const bridges = [0.18, 0.5, 0.82].map((fraction, index): TwinContinentsBridge => {
-    const width = length >= 27 && rng.next() > 0.35 ? 3 : 2;
-    const start = crossingStart(length, fraction, width);
-    starts.push(start);
-    const cells: GeneralPos[] = [];
-    const headlands: GeneralPos[] = [];
-    paintCrossing(tiles, cross, start, width, wallStart, wallEnd, index === 1 ? 2 : 0);
-    for (let along = start; along < start + width; along++) {
-      for (let across = wallStart; across <= wallEnd; across++) {
-        cells.push(point(along, across));
-      }
-      headlands.push(point(along, wallStart - 1), point(along, wallEnd + 1));
-    }
-    return { index, kind: index === 1 ? 'swamp' : 'plain', width, cells, headlands };
-  });
-  const seats =
-    players === 1
-      ? [Math.floor(length / 2) * cross + Math.floor(wallStart / 2)]
-      : players % 2
-        ? oddSeats(tiles, length, cross, wallStart, starts[0] + bridges[0].width - 1, starts[1], players, rng)
-        : evenSeats(
-            length,
-            wallStart,
-            cross,
-            players,
-            starts.flatMap((start, index) =>
-              Array.from({ length: bridges[index].width }, (_, offset) => start + offset),
-            ),
-          );
-  const spawnPoints = seats.map((start) => point(Math.floor(start / cross), start % cross));
-  const gridType = build2D<Tile>(n, m, 0);
-  tiles.forEach((tile, index) => {
-    const [x, y] = point(Math.floor(index / cross), index % cross);
-    gridType[x][y] = tile as Tile;
-  });
-  for (const [x, y] of spawnPoints) gridType[x][y] = -2;
-  if (flipAlong)
-    bridges.reverse().forEach((bridge, index) => {
-      bridge.index = index;
+  heightRatio: number,
+  widthRatio: number,
+  players: number,
+): TwinContinentsGeneratedMap | undefined => {
+  const base = computeBaseMapDimensions(rng, heightRatio, widthRatio);
+  const orientation: TwinContinentsOrientation = rng.next() < 0.5 ? 'horizontal' : 'vertical';
+  for (let attempt = 0; attempt < 160; attempt++) {
+    const area = Math.max(
+      base.n * base.m,
+      players * CROWN_AREA_PER_SEAT * (1 + Math.floor(attempt / 40) / 4),
+    );
+    const aspect = players === 3 ? 3.8 + 1.2 * rng.next() : Math.max(2, players) * (0.42 + 0.19 * rng.next());
+    const length = Math.max(15, nearestOdd(Math.sqrt(area * aspect)));
+    const cross = Math.max(2 * Math.ceil(players / 2) + 7, nearestOdd(area / length));
+    const wallLimit = Math.max(1, Math.min(5, Math.floor(cross * 0.22)));
+    const thickness = players === 3 ? 1 : 1 + 2 * rng.intInclusive(0, Math.floor((wallLimit - 1) / 2));
+    const wallStart = (cross - thickness) / 2;
+    const wallEnd = cross - 1 - wallStart;
+    const n = orientation === 'horizontal' ? length : cross;
+    const m = orientation === 'horizontal' ? cross : length;
+    const tiles = new Uint8Array(length * cross);
+    for (let along = 0; along < length; along++)
+      tiles.fill(1, along * cross + wallStart, along * cross + wallEnd + 1);
+    const fractions =
+      players === 2 ? [0.25, 0.5, 0.75] : players === 3 ? [0.08, 0.29, 0.67] : [0.16, 0.5, 0.84];
+    const bands = fractions.map((fraction, index) => {
+      const width = length >= 27 && rng.next() < 0.65 ? 3 : 2;
+      const start = crossingStart(length, fraction + (rng.next() - 0.5) * 0.09, width);
+      paintCrossing(tiles, cross, start, width, wallStart, wallEnd, index === 1 ? 2 : 0);
+      return { start, end: start + width - 1 };
     });
-  return {
-    n,
-    m,
-    gridType,
-    st: gridType.map((row) => row.map((tile) => tile !== 1)),
-    owner: build2D(n, m, 0),
-    armyCnt: build2D(n, m, 0),
-    layout: { orientation, wallStart, wallEnd, bridges, spawnPoints },
-  };
+    if (
+      bands.some(
+        ({ start }, index) => index && start - bands[index - 1].end < Math.max(2, Math.floor(length * 0.16)),
+      )
+    )
+      continue;
+    const graph = new MazeGraph(tiles, cross);
+    const seats = chooseSeats(rng, graph, length, cross, wallStart, bands, players);
+    if (!seats) continue;
+    const flipAlong = rng.next() < 0.5;
+    const flipBanks = rng.next() < 0.5;
+    const point = (along: number, across: number): GeneralPos => {
+      const longCoord = flipAlong ? length - 1 - along : along;
+      const crossCoord = flipBanks ? cross - 1 - across : across;
+      return orientation === 'horizontal' ? [longCoord, crossCoord] : [crossCoord, longCoord];
+    };
+    const bridges = bands.map(({ start, end }, index): TwinContinentsBridge => {
+      const cells: GeneralPos[] = [];
+      const headlands: GeneralPos[] = [];
+      for (let along = start; along <= end; along++) {
+        for (let across = wallStart; across <= wallEnd; across++) cells.push(point(along, across));
+        headlands.push(point(along, wallStart - 1), point(along, wallEnd + 1));
+      }
+      return {
+        index: flipAlong ? 2 - index : index,
+        kind: index === 1 ? 'swamp' : 'plain',
+        width: end - start + 1,
+        cells,
+        headlands,
+      };
+    });
+    if (flipAlong) bridges.reverse();
+    const spawnPoints = seats.map((cell) => point(Math.floor(cell / cross), cell % cross));
+    const gridType = build2D<Tile>(n, m, 0);
+    tiles.forEach((tile, cell) => {
+      const [row, col] = point(Math.floor(cell / cross), cell % cross);
+      gridType[row][col] = tile as Tile;
+    });
+    for (const [row, col] of spawnPoints) gridType[row][col] = -2;
+    return {
+      n,
+      m,
+      gridType,
+      st: gridType.map((row) => row.map((tile) => tile !== 1)),
+      owner: build2D(n, m, 0),
+      armyCnt: build2D(n, m, 0),
+      layout: { orientation, wallStart, wallEnd, bridges, spawnPoints },
+    };
+  }
 };
+
+export function repackTwinCrowns(players: number): TwinContinentsGeneratedMap {
+  const ratio = 2 * resolveMapSizeRatioByPlayers(players);
+  const map = findTwinLayout(new SeededRandom('repack-twin-crowns'), ratio, ratio, players);
+  if (!map) throw new Error(`Unverified twin crown packing: ${players}`);
+  return map;
+}
+
+const generateTwinContinentsMap = (rng: SeededRandom, config: TwinContinentsMapGenerationConfig) =>
+  findTwinLayout(rng, config.heightRatio, config.widthRatio, config.requiredPlayers) ??
+  repackTwinCrowns(config.requiredPlayers);
 
 export { generateTwinContinentsMap };
 export type {
