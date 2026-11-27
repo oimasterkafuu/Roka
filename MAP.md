@@ -400,6 +400,8 @@ _一句话：服务器重启期间 SW 接管导航显示「正在更新」页并
 
 - **scripts/test-home-room-refresh.mjs** — `pnpm run test:home-room-refresh`（纳入 `pnpm test`，需先生成首页并准备 Playwright Chromium）：运行生成的首页，使用内存 API/Socket 替身与浏览器假时钟，验证房间刷新合并、慢响应、失败恢复、重连、模拟 BFCache、渲染及进房返回。不访问生产环境。
 
+- **scripts/test-home-replay-time.mjs** — `pnpm run test:home-replay-time`（需先生成首页并准备 Playwright Chromium）：拦截首页 API，以浏览器假时钟验证回放时间逐秒更新、恢复可见时立即刷新、列表替换后仍可更新，以及 390px 布局与点击跳转。
+
 - **scripts/test-rate-limit-html.mjs** — `pnpm run test:rate-limit-html`（纳入 `pnpm test`，需先构建）：以真实 dist 服务和 `app.inject` 覆盖认证页 60 次/分钟、认证操作 20 次/分钟与全局 1000 次/分钟；验证浏览器 HTML 导航的中文 429、真实 TTL/`Retry-After` 一致性、HEAD，以及默认 `Accept: */*`、API、静态资源、socket 的原有 JSON 错误结构。
 
 - **scripts/test-referral-ambassador.mjs** — `pnpm run test:referral-ambassador`（纳入 `pnpm test`）：UserStore 覆盖邀请注册、自邀/旧账号/无邀请、重复与并发激活、同局多新玩家、异常撤销、徽章阈值、公开字段和文件重启一致；LobbyService 覆盖真人/60 Tick/60 秒门槛及 Rating/积分不变；真实 dist HTTP 服务（仅验证码为测试桩）覆盖首入口 Cookie、注册/登录清理、匿名聚合、管理员权限与撤销；DOM 桩验证感谢墙安全渲染、登录态邀请链接与复制成功/降级/失败；HTTP 覆盖游客邀请入口的 302、大小写归一与 404 提示。需先 `pnpm run build`。
