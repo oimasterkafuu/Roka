@@ -341,8 +341,10 @@ _一句话：后台管理页：真实安全仪表盘、用户/IP 管理、风险
 **static/login.html** — 登录/注册表单 + 图形验证码 + 离屏蜜罐字段。
 _一句话：登录/注册表单 + 验证码 + 蜜罐。_
 
-**views/tutorial-text.pug → static/tutorial-text.html** — 文字版规则教程 + 「地图示例」生成器（走 `/api/map-examples`，用与对局相同的 grid_type 编码渲染）；HTML 为 Pug 生成物。
+**views/tutorial-text.pug → static/tutorial-text.html** — 文字版规则教程 + 「地图示例」生成器（走 `/api/map-examples`，用与对局相同的 grid_type 编码渲染）；华夏选项仅在活动期插入下拉框，活动结束时移除，并将已选中的华夏回退为标准地图。HTML 为 Pug 生成物。
 _一句话：文字规则教程 + 示例地图生成器。_
+
+**scripts/test-tutorial-huaxia-option.mjs** — 使用 Chromium 和真实 HTTP 服务回归华夏选项的加入、移除、跨活动边界回退、请求与棋盘渲染。
 
 **views/tutorial.pug → static/tutorial.html / tutorial.js** — 互动教程 `/tutorial/interactive`：纯本地迷你引擎（复刻正式规则：推兵、队列、连通/孤军、灭主城）+ 15 步引导流程。
 _一句话：互动教程本地迷你引擎 + 15 步引导。_

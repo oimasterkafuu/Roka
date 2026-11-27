@@ -72,6 +72,8 @@ pnpm run start
 
 共享 Header 仅用于 about、ambassadors、login、develop、develop-bot 五页。index、game、tutorial、tutorial-text、replays 保留各自专用布局与控件；profile、admin、updating 也使用各自的专用或独立结构，以上页面均不加载共享 Header。
 
+文字教程的地图示例仅在中国时区 10 月 1 日至 7 日将「华夏系列」加入地图类型下拉框。页面每分钟检查一次；活动结束时若仍选中华夏，会切回标准地图并隐藏地区控件。活动期外直接请求华夏示例仍返回 403。
+
 运行数据默认保存在 `data/`。环境配置示例见 `.env.example`；常用变量包括：
 
 - `PORT`：HTTP 监听端口。
@@ -127,6 +129,8 @@ pnpm run test:mega-random
 ```
 
 `test:build-pages` 覆盖全部 13 页的同名 Pug/HTML 集合、连续构建字节一致性、关键 DOM 与脚本顺序，并断言共享 Header 只出现在指定五页，其余八页保留专用控件且不加载共享 Header 资源。
+
+构建后运行 `pnpm run test:tutorial-huaxia-option`，在真实 Chromium 中验证文字教程华夏下拉选项、活动边界回退和地图渲染。
 
 部分浏览器测试需要 Playwright 和 Chromium，可通过 `ROKA_PLAYWRIGHT_MODULE` 与 `CHROMIUM_PATH` 指定已有安装。
 
