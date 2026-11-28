@@ -144,6 +144,8 @@ window.addEventListener('beforeunload', function (e) {
 });
 
 function showReplayError() {
+  if (typeof replayErrorMessage === 'string' && replayErrorMessage.startsWith('回放'))
+    $('#replay-error-alert p').text(replayErrorMessage);
   $('#replay-loading').css('display', 'none');
   $('#replay-error-alert').css('display', '');
 }
@@ -167,14 +169,14 @@ function updateReplayLoading(loaded, total) {
     text =
       '回放加载中… ' + percent + '%（' + formatReplaySize(loaded) + ' / ' + formatReplaySize(total) + '）';
   } else {
-    // 服务端未给出 X-Replay-Size（仍在转码重建）时进度「虚」显示：填充条从左向右横贯轨道。
+    // 服务端未给出 X-Replay-Size时进度「虚」显示：填充条从左向右横贯轨道。
     $fill.addClass('indeterminate').css('width', '');
     text = '回放加载中… 已下载 ' + formatReplaySize(loaded);
   }
   $('#replay-loading-text').text(text);
 }
 
-// 流式下载回放二进制并按 X-Replay-Size（解压后大小）更新加载进度。
+// 流式下载回放二进制并按 X-Replay-Size（原档大小）更新加载进度。
 function fetchReplayWithProgress(url) {
   return fetch(url).then(function (res) {
     if (!res.ok) {
@@ -204,6 +206,10 @@ function fetchReplayWithProgress(url) {
         updateReplayLoading(loaded, loaded || total);
         return { buffer: buf.buffer, etag: metadata.etag, lastModified: metadata.lastModified };
       }
+      if (loaded + result.value.byteLength > 8 * 1024 * 1024) {
+        reader.cancel();
+        throw Error('回放过大');
+      }
       chunks.push(result.value);
       loaded += result.value.byteLength;
       updateReplayLoading(loaded, total);
@@ -225,10 +231,10 @@ function loadServerReplay(id) {
   var url = '/api/getreplay/' + encodeURIComponent(id);
   function fromNetwork() {
     return fetchReplayWithProgress(url).then(function (result) {
-      var decoded = decodeReplayBinary(result.buffer);
-      // 存储失败（隐私模式、配额不足等）不影响本次观看。
-      replayCachePut(id, result).catch(function () {});
-      return decoded;
+      return decodeReplayBinary(result.buffer).then(function (decoded) {
+        replayCachePut(id, result).catch(function () {});
+        return decoded;
+      });
     });
   }
   return replayCacheGet(id)
@@ -237,16 +243,12 @@ function loadServerReplay(id) {
     })
     .then(function (entry) {
       if (!entry) return fromNetwork();
-      try {
-        var decoded = decodeReplayBinary(entry.buffer);
-        updateReplayLoading(entry.size, entry.size);
-        return decoded;
-      } catch {
-        // 魔数通过但内容损坏：删掉坏条目，并且只回源一次。
+      updateReplayLoading(entry.size, entry.size);
+      return decodeReplayBinary(entry.buffer).catch(function () {
         return replayCacheDelete(id)
           .catch(function () {})
           .then(fromNetwork);
-      }
+      });
     });
 }
 
@@ -255,10 +257,11 @@ if (location.pathname.substr(0, 8) == '/replays') {
   // pathname 中是 URL 编码后的 id（含 + 的回放 id 会变成 %2B），先解码一次，
   // 后续请求时统一再做一次 encodeURIComponent，避免双重编码导致服务端找不到回放。
   replay_id = decodeURIComponent(location.pathname.substr(9));
-  var replayLoadFailed = false;
+  var replayLoadFailed = false,
+    replayErrorMessage;
   var replayFetch;
   if (replay_id == 'local') {
-    // 首页“上传并查看回放”：服务器已把上传的 .rpl 转码为可播放二进制，暂存于 sessionStorage。
+    // 首页“上传并查看回放”：服务器已校验原始 .rpl，暂存于 sessionStorage。
     replayFetch = new Promise(function (resolve, reject) {
       var b64 = sessionStorage.getItem('roka_local_replay');
       if (!b64) {
@@ -277,7 +280,8 @@ if (location.pathname.substr(0, 8) == '/replays') {
       replay_data = decoded;
       replayStart();
     })
-    .catch(function () {
+    .catch(function (error) {
+      replayErrorMessage = error.message;
       replayLoadFailed = true;
       showReplayError();
     });
@@ -316,9 +320,6 @@ function init_map(_n, _m, general) {
   have_build = Array(n);
   fog = Array(n);
   replay_building_memory = [];
-  replay_building_changes = [];
-  replay_building_frame = -1;
-  replay_building_team = null;
   for (var i = 0; i < n; i++) {
     isolated[i] = Array(m);
     have_build[i] = Array(m);
@@ -998,7 +999,7 @@ $(document).ready(function () {
   if (is_replay) {
     // 加载提示在 DOM 就绪后显示：若在就绪前已失败（如 404），直接改显错误弹窗。
     if (replayLoadFailed) showReplayError();
-    else if (replay_id != 'local') $('#replay-loading').css('display', '');
+    else $('#replay-loading').css('display', '');
     $('#replay-top-left').css('display', '');
     $('#replay-bottom').css('display', '');
     $('#replay-turn-jump-input').on('keypress', function (e) {
@@ -1014,7 +1015,7 @@ $(document).ready(function () {
       var a = document.createElement('a');
       if (replay_id == 'local') {
         // 本地上传的回放：把用户上传的原始 .rpl 文件原样给回。
-        var b64 = sessionStorage.getItem('roka_local_replay_raw');
+        var b64 = sessionStorage.getItem('roka_local_replay');
         if (!b64) {
           return;
         }

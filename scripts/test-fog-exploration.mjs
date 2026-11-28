@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { GameEngine } from '../dist/game-engine.js';
 import { computeTeamVisibility, FogVision } from '../dist/game-engine/fog-vision.js';
 import { buildFullVisionArrays } from '../dist/game-engine/map-encoding.js';
-import { encodeReplayPatchBinary } from '../dist/replay-patch-binary.js';
+import {encodeRpl,decodeRpl} from '../dist/rpl.js';
 
 const grid = (rows, cols, value) => Array.from({ length: rows }, () => Array(cols).fill(value));
 const visibilityBoard = {
@@ -154,15 +154,12 @@ for (const mode of ['normal', 'explored']) {
   if (mode === 'explored') {
     assert.equal(first.grid_type[16], 201);
     assert.equal(first.grid_type[17], 204);
-    assert.deepEqual(vision.archive(), []);
+    assert.ok(!first.fog.includes(2));
   } else {
-    const initial = vision.archive()[0][1];
-    assert.deepEqual([...initial], [0, 0, 1, 0, 7, 0, 8, 0, 24, 0]);
-    vision.advance(board, 1);
-    assert.deepEqual(vision.archive()[0][1], initial, 'isolated neighbors do not become explored');
-    board.isolated[3][3] = false;
-    vision.advance(board, 2);
-    assert.equal(vision.archive()[0][1].length - initial.length, 16);
+    const known = () => snapshot().fog.flatMap((fog,cell)=>fog!==2?[cell]:[]);
+    const initial=known();assert.deepEqual(initial,[0,1,7,8,24]);
+    vision.advance(board);assert.deepEqual(known(),initial,'isolated neighbors do not become explored');
+    board.isolated[3][3]=false;vision.advance(board);assert.equal(known().length-initial.length,8);
     board.isolated[3][3] = true;
     vision.advance(board, 3);
     const last = snapshot();
@@ -220,7 +217,7 @@ for (const map_mode of [
   }
   assert.ok(initial.fog.includes(2), map_mode);
   assert.equal(initial, engine.buildSnapshotFor(1), map_mode);
-  assert.ok(engine.fogVision.archive()[0][1].length > 0, map_mode);
+  assert.ok(engine.buildSnapshotFor(0).fog.includes(0), map_mode);
 }
 
 const engine = await GameEngine.create(config, ids, ids, 'exploration-test', {
@@ -319,19 +316,10 @@ assert.ok(
     .at(-1)
     .fog.every((state) => state === 0),
 );
-assert.deepEqual(saved.exploration, engine.fogVision.archive());
-const damaged = structuredClone(saved);
-damaged.exploration[0][1][1] += 1;
-await assert.rejects(GameEngine.buildReplayFromActions(damaged), /探索记录/);
-const replay = await GameEngine.buildReplayFromActions(saved);
-const binary = encodeReplayPatchBinary(replay);
-const context = vm.createContext({
-  replay_binary_magic: [...Buffer.from('RPB5')],
-  replay_text_decoder: new TextDecoder(),
-  replay_class_from_code: ['', 'dead', 'afk'],
-});
-vm.runInContext(readFileSync('static/main/replay-binary.js', 'utf8'), context);
-const decoded = context.decodeReplayBinary(Uint8Array.from(binary).buffer);
+assert.ok(!Object.hasOwn(saved,'exploration'));
+const binary=Buffer.from(await encodeRpl(saved));
+const decoded=await GameEngine.buildReplayFromActions(await decodeRpl(binary));
+const context=vm.createContext({});vm.runInContext(readFileSync('static/main/replay-binary.js','utf8'),context);
 assert.equal(decoded.meta.fog_mode, 'normal');
 for (const [player, team] of config.player_teams.entries()) {
   const live = views.get(ids[player]);
@@ -347,13 +335,12 @@ for (const [player, team] of config.player_teams.entries()) {
     }
     if (recorded.cells.has(cell)) firstSeen.push([cell, recorded.cells.get(cell)[0]]);
   }
-  const archived = saved.exploration.find(([id]) => id === team)[1];
-  assert.deepEqual(
-    firstSeen,
-    [...archived.filter((_, offset) => offset % 2 === 0)]
-      .map((cell, index) => [cell, archived[index * 2 + 1]])
-      .sort((left, right) => left[0] - right[0]),
-  );
+  const expected=[];
+  for(let cell=0;cell<engine.n*engine.m;cell++) {
+    const first=live.findIndex((frame,tick)=>(recorded.omniscientFrom===null||tick<recorded.omniscientFrom)&&frame.fog[cell]===0);
+    if(first>=0)expected.push([cell,first]);
+  }
+  assert.deepEqual(firstSeen,expected);
 }
 
 const { chromium } = createRequire(import.meta.url)(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
@@ -450,5 +437,5 @@ try {
   await browser.close();
 }
 console.log(
-  'PASS: isolated vision, all generators, team snapshots and deltas, deterministic ops-v3/RPB5 and Chromium seeks at 1440/390',
+  'PASS: isolated vision, all generators, team snapshots and deltas, deterministic RKL1 and Chromium seeks at 1440/390',
 );

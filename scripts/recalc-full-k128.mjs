@@ -9,7 +9,7 @@
  *
  * 数据路径（服务器上写死，可用 --data-dir 覆盖）：
  *   <dataDir>/replays/index.bin   v8.deserialize 的对局索引（ReplayListItem[]：id/time/rank/turn）
- *   <dataDir>/replays/<id>.rpl    v8.deserialize(brotliDecompress(...))，回放存档，meta 含
+ *   <dataDir>/replays/<id>.rpl    RKL1，回放存档，meta 含
  *                                 player_names / player_teams / map_mode 等
  *   <dataDir>/users.bin           v8.deserialize(brotliDecompress(...))，{ users: StoredUser[] }
  *
@@ -77,6 +77,7 @@ const encodeUserFileBinary = async (value) => {
   });
 };
 
+import { decodeRpl } from '../dist/rpl.js';
 const decodeBrotliV8 = async (content) => deserialize(await brotliDecompressAsync(content));
 
 // ---- 参数 ----
@@ -140,7 +141,7 @@ const main = async () => {
   for (const item of games) {
     let replay;
     try {
-      replay = await decodeBrotliV8(await readFile(path.join(REPLAY_DIR, `${item.id}.rpl`)));
+      replay = await decodeRpl(await readFile(path.join(REPLAY_DIR, `${item.id}.rpl`)));
     } catch {
       stats.skippedMissingReplay += 1;
       console.warn(`[skip] ${item.id}: 回放文件缺失或无法解码`);

@@ -42,11 +42,9 @@ export function computeTeamVisibility(
   }
 }
 
-type Exploration = { bits: Uint32Array; discoveries: number[] };
-
 export class FogVision {
   private readonly visible = new Map<number, Uint8Array>();
-  private readonly exploration = new Map<number, Exploration>();
+  private readonly exploration = new Map<number, Uint32Array>();
   private readonly buildingMemory = new Map<number, Uint8Array>();
   private readonly snapshots = new Map<number, VisionSnapshot>();
   private readonly zeroFog: number[];
@@ -62,12 +60,12 @@ export class FogVision {
       this.visible.set(team, new Uint8Array(area));
       this.buildingMemory.set(team, new Uint8Array(area));
       if (mode === 'normal') {
-        this.exploration.set(team, { bits: new Uint32Array(Math.ceil(area / 32)), discoveries: [] });
+        this.exploration.set(team, new Uint32Array(Math.ceil(area / 32)));
       }
     }
   }
 
-  advance(board: VisibilityInput, turn: number): void {
+  advance(board: VisibilityInput): void {
     this.invalidateSnapshots();
     computeTeamVisibility(board, this.playerTeams, this.visible);
     for (const [team, visible] of this.visible) {
@@ -81,16 +79,13 @@ export class FogVision {
         }
       }
     }
-    for (const [team, { bits, discoveries }] of this.exploration) {
+    for (const [team, bits] of this.exploration) {
       const visible = this.visible.get(team)!;
       for (let index = 0; index < visible.length; index += 1) {
         if (!visible[index]) continue;
         const word = index >>> 5;
         const bit = 1 << (index & 31);
-        if (!(bits[word] & bit)) {
-          bits[word] |= bit;
-          discoveries.push(index, turn);
-        }
+        bits[word] |= bit;
       }
     }
   }
@@ -104,7 +99,7 @@ export class FogVision {
     if (!visible) return { ...full, fog: this.zeroFog };
     const cached = this.snapshots.get(team);
     if (cached) return cached;
-    const explored = this.exploration.get(team)?.bits;
+    const explored = this.exploration.get(team);
     const remembered = this.buildingMemory.get(team)!;
     const grid_type = full.grid_type.slice();
     const army_cnt = full.army_cnt.slice();
@@ -127,19 +122,16 @@ export class FogVision {
     return snapshot;
   }
 
-  archive(): [number, Uint32Array][] {
-    return Array.from(this.exploration, ([team, state]) => [team, Uint32Array.from(state.discoveries)]);
-  }
-
   recordTimeline(
     timeline: Map<number, ReplayTeamVision>,
     turn: number,
     isAlive: (team: number) => boolean,
-  ): void {
+  ): number {
+    let added = 0;
     for (const [team, visible] of this.visible) {
       let history = timeline.get(team);
       if (!history) {
-        history = { omniscientFrom: null, cells: new Map() };
+        history = { omniscientFrom: null, cells: new Map(), buildings: new Map() };
         timeline.set(team, history);
       }
       if (history.omniscientFrom !== null) continue;
@@ -148,11 +140,22 @@ export class FogVision {
         continue;
       }
       for (let index = 0; index < visible.length; index += 1) {
+        if (visible[index]) {
+          const code = this.buildingMemory.get(team)[index];
+          const remembered = history.buildings.get(index);
+          if ((remembered?.at(-1) ?? 0) !== code) {
+            if (remembered) remembered.push(turn, code);
+            else history.buildings.set(index, [turn, code]);
+            added += remembered ? 32 : 192;
+          }
+        }
         const changes = history.cells.get(index);
         if (visible[index] === ((changes?.length ?? 0) & 1)) continue;
         if (changes) changes.push(turn);
         else history.cells.set(index, [turn]);
+        added += changes ? 16 : 176;
       }
     }
+    return added;
   }
 }

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import {encodeRpl,decodeRpl} from '../dist/rpl.js';
+import { recordFixture } from './rpl-fixture.mjs';
 import { createRequire } from 'node:module';
-import vm from 'node:vm';
 import { GameEngine } from '../dist/game-engine.js';
 import { ReplayStore } from '../dist/replay-store.js';
 
@@ -161,23 +161,11 @@ for (const result of [live, single])
 
 const [x, y] = live.crown;
 const [dx, dy] = live.branches[0];
-const opening = {
-  ...live.raw,
-  total_turns: 51,
-  player_ops: [[{ op: 'q', actions: [{ kind: 'm', x, y, dx, dy, mode: 2 }] }], []],
-};
+const opening=await recordFixture(config,51,(engine,tick)=>{if(tick===1)engine.addMove('alice',x,y,dx,dy,2);});
 {
-  const raw = opening;
-  for (const oldFlags of [
-    {},
-    {
-      multi_line_burst: true,
-      map_size_version: 1,
-      auto_crown_transfer: false,
-      isolated_reinforcement_fix: false,
-    },
-  ]) {
-    const replay = await GameEngine.buildReplayFromActions({ ...raw, meta: { ...raw.meta, ...oldFlags } });
+  const raw=opening;
+  {
+    const replay=await GameEngine.buildReplayFromActions(raw);
     assert.equal(replay.patches.length, 51);
     assert.deepEqual(replay.initial.grid_type, live.frames[0].grid_type);
     for (const { forward: frame } of replay.patches) {
@@ -221,9 +209,7 @@ await assert.rejects(GameEngine.buildReplayFromActions(malformed), /Single-line 
 
 const dir = await mkdtemp(path.join(tmpdir(), 'roka-multiline-replay-'));
 try {
-  const store = new ReplayStore(dir, {
-    buildReplayFromActions: (raw) => GameEngine.buildReplayFromActions(raw),
-  });
+  const store=new ReplayStore(dir);
   await store.ensureReady();
   const id = await store.saveReplay(live.raw, { rank: ['alice', 'bob'], teams: [], turn: 124 });
   const rawBytes = await store.readRawReplay(id);
@@ -232,36 +218,16 @@ try {
       path.join(process.env.ROKA_REPLAY_ARTIFACT_DIR, 'multiline-replay-fixture.rpl'),
       rawBytes,
     );
-  compareReplay(await store.buildReplayFromRaw(rawBytes), live.frames);
-  const { gzip } = await store.readReplayViewGzip(id);
-  const cached = await store.readReplayViewGzip(id);
-  assert.deepEqual(cached.gzip, gzip);
-  const binary = gunzipSync(gzip);
-  if (process.env.ROKA_REPLAY_ARTIFACT_DIR)
-    await writeFile(path.join(process.env.ROKA_REPLAY_ARTIFACT_DIR, 'multiline-replay-fixture.rpb'), binary);
-  const context = vm.createContext({
-    ArrayBuffer,
-    Uint8Array,
-    DataView,
-    replay_binary_magic: [82, 80, 66, 53],
-    replay_text_decoder: new TextDecoder(),
-    replay_class_from_code: ['', 'dead', 'afk'],
-  });
-  vm.runInContext(
-    await readFile(new URL('../static/main/replay-binary.js', import.meta.url), 'utf8'),
-    context,
-  );
-  const decoded = context.decodeReplayBinary(
-    binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength),
-  );
-  compareReplay(JSON.parse(JSON.stringify(decoded)), live.frames);
-  assert.throws(() => context.decodeReplayBinary(Uint8Array.of(82, 80, 66, 52).buffer), /格式不支持/);
+  const decoded=await decodeRpl(rawBytes);
+  compareReplay(await GameEngine.buildReplayFromActions(decoded),live.frames);
+  assert.deepEqual(decoded,live.raw);
+  const binary=rawBytes;
   await assert.rejects(GameEngine.buildReplayFromActions({ ...opening, version: 'ops-v2' }), /版本不兼容/);
   if (process.argv.includes('--browser')) {
     await browserCheck(binary, live, rawBytes);
   }
   console.log(
-    `PASS: live -> raw ops -> ReplayStore raw upload/cache -> RPB5 decoder; ${live.frames.length} frames forward/backward; single-line <=1 action/tick`,
+    `PASS: live -> raw ops -> RKL1 archive -> shared engine; ${live.frames.length} frames forward/backward; single-line <=1 action/tick`,
   );
 } finally {
   await rm(dir, { recursive: true, force: true });
@@ -303,8 +269,11 @@ async function browserCheck(binary, live, rawBytes) {
       data: rawBytes,
     });
     assert.equal(uploaded.status(), 200, 'real authenticated raw upload route');
+    for(const bad of [Buffer.from('RPB5'),Buffer.from('ops-v3'),rawBytes.subarray(0,-1)]) {
+      const invalid=await page.request.post(base+'/api/replay-upload',{headers:{'content-type':'application/octet-stream'},data:bad});assert.equal(invalid.status(),422);
+    }
     const uploadedBinary = await uploaded.body();
-    assert.deepEqual(uploadedBinary, binary, 'HTTP transcode matches ReplayStore view');
+    assert.deepEqual(uploadedBinary, binary, 'HTTP upload returns identical archive');
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.addInitScript(
@@ -335,6 +304,8 @@ async function browserCheck(binary, live, rawBytes) {
     });
     if (process.env.ROKA_REPLAY_SCREENSHOT)
       await page.screenshot({ path: process.env.ROKA_REPLAY_SCREENSHOT });
+    await page.route('**/api/getreplay/bad',route=>route.fulfill({body:Buffer.from('RPB5')}));
+    await page.goto(base+'/replays/bad');await page.locator('#replay-error-alert').waitFor({state:'visible'});assert.equal(await page.evaluate(()=>in_game),false);
     assert.deepEqual(errors, []);
     console.log(
       'PASS: real authenticated HTTP upload -> Chromium game.html/main scripts, forward/reverse seek, autoplay ticks 241–244, zero page errors',

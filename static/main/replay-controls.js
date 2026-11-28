@@ -45,21 +45,7 @@ function jumpToTurn() {
   if (isNaN(turn)) {
     return;
   }
-  var targetFrame = -1;
-  if (replay_data.initial.turn == turn) {
-    targetFrame = 0;
-  } else {
-    for (var i = 0; i < replay_data.patches.length; i++) {
-      if (replay_data.patches[i].forward.turn == turn) {
-        targetFrame = i + 1;
-        break;
-      }
-    }
-  }
-  if (targetFrame < 0) {
-    return;
-  }
-  jumpToFrame(targetFrame);
+  if (turn >= 0 && turn <= replay_data.patches.length) jumpToFrame(turn);
 }
 
 // 跳转到指定帧下标（0 = 初始帧，k = 应用第 k 个 forward patch 之后），
@@ -75,6 +61,13 @@ function jumpToFrame(targetFrame) {
   if (is_autoplaying) switchAutoplay();
   // 中间帧走静默路径（issue #87）：只应用局面补丁，跳过视野查询/render()/
   // 排行榜/统计图等界面刷新；落点帧走完整 update() 一次，保证视角与界面正确。
+  var checkpoint = Math.floor(targetFrame / replay_data.stride) * replay_data.stride;
+  if (Math.abs(cur_turn - targetFrame) > targetFrame - checkpoint) {
+    cur_turn = checkpoint;
+    update(checkpoint ? replay_data.keyframes.get(checkpoint) : replay_data.initial, {
+      silent: checkpoint !== targetFrame,
+    });
+  }
   while (cur_turn < targetFrame) {
     if (!nextTurn(true, cur_turn + 1 < targetFrame)) break;
   }

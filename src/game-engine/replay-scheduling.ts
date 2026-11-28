@@ -11,7 +11,6 @@ const buildScheduledReplayActions = (replay: ReplayActionData, rows: number, col
     throw new Error('回放不兼容：无效的回合数或玩家操作流。');
   }
   const scheduledBatches = replay.player_ops.map(() => new Map<number, ReplayExecutedOp[]>());
-  const scheduledSurrenders = replay.player_ops.map(() => new Set<number>());
   const onMap = (x: number, y: number) =>
     Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < rows && y >= 0 && y < cols;
 
@@ -41,9 +40,6 @@ const buildScheduledReplayActions = (replay: ReplayActionData, rows: number, col
             throw invalid();
           turn += op.n;
           break;
-        case 'r':
-          scheduledSurrenders[player].add(turn++);
-          break;
         case 'q':
           batch(op.actions);
           break;
@@ -52,7 +48,7 @@ const buildScheduledReplayActions = (replay: ReplayActionData, rows: number, col
       }
     }
   }
-  return { scheduledBatches, scheduledSurrenders };
+  return { scheduledBatches };
 };
 
 export { buildScheduledReplayActions };

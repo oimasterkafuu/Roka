@@ -4,3 +4,5 @@ static/vendor
 
 static/intro/player.js
 static/intro/assets
+
+static/main/replay-worker.bundle.js

@@ -50,10 +50,10 @@ const todayStartSec = () => {
 
 const loadIndex = async () => deserialize(await readFile(path.join(REPLAY_DIR, 'index.bin')));
 
+import { decodeRpl } from '../dist/rpl.js';
 const loadReplayMeta = async (id) => {
   const content = await readFile(path.join(REPLAY_DIR, `${id}.rpl`));
-  const raw = await brotliDecompressAsync(content);
-  const replay = deserialize(raw);
+  const replay = await decodeRpl(content);
   return replay.meta;
 };
 

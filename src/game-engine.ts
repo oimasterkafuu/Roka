@@ -30,7 +30,8 @@ import { buildFullVisionArrays, FlatMapArrays } from './game-engine/map-encoding
 import { FogVision, VisionSnapshot } from './game-engine/fog-vision';
 import { buildReplayPatch, getDiff } from './game-engine/replay-helpers';
 import { buildScheduledReplayActions } from './game-engine/replay-scheduling';
-import { buildReplayPlayerOps, buildTurnMoves } from './game-engine/replay-turns';
+import { stateCrc } from './rpl-check';
+import type { ReplayPlayerOp } from './types';
 import { applyTickGrowth } from './game-engine/tick-growth';
 import {
   AiDifficulty,
@@ -240,14 +241,10 @@ export class GameEngine {
 
   private readonly deadOrder: number[];
 
-  private readonly replayTurnMoves: QueuedOp[][][];
-
-  /** Successful actions, in live execution order, including every parallel head. */
+  private readonly replayOps: ReplayPlayerOp[][];
   private executedTurnMoves: QueuedOp[][] = [];
-
-  private readonly replayTurnSurrenders: Array<Set<number>>;
-
-  private readonly replayAfkSurrenders: Array<[number, number]> = [];
+  private readonly lastActionTick: number[];
+  private readonly surrenders: ReplayActionData['surrenders'] = [];
 
   private isolatedReinforced: Grid<boolean> = [];
 
@@ -391,8 +388,8 @@ export class GameEngine {
     this.isolatedLast = Array.from({ length: pcnt }, () => []);
     this.fogLast = Array.from({ length: pcnt }, () => []);
     this.deadOrder = Array.from({ length: pcnt }, () => 0);
-    this.replayTurnMoves = [];
-    this.replayTurnSurrenders = Array.from({ length: pcnt }, () => new Set<number>());
+    this.replayOps = Array.from({ length: pcnt }, () => []);
+    this.lastActionTick = Array(pcnt).fill(0);
     this.externalSpectatorSids = new Set<string>();
     this.spectatorViewTeams = new Map<string, number>();
     this.afkLastMoveTurn = Array.from({ length: pcnt }, () => 0);
@@ -483,94 +480,63 @@ export class GameEngine {
     };
   }
 
-  static async buildReplayFromActions(replay: ReplayActionData): Promise<ReplayData> {
+  static async buildReplayFromActions(
+    replay: ReplayActionData,
+    progress?: (tick: number) => void,
+  ): Promise<ReplayData> {
     if (
-      !replay ||
-      replay.version !== REPLAY_OPS_VERSION ||
-      !isFogMode(replay.meta?.fog_mode) ||
-      (replay.meta.ai_difficulty !== undefined && !isAiDifficulty(replay.meta.ai_difficulty)) ||
-      (replay.meta.ai_difficulty === 'simple' && !Array.isArray(replay.meta.server_bot_seats)) ||
-      (replay.meta.server_bot_seats !== undefined &&
-        (!Array.isArray(replay.meta.server_bot_seats) ||
-          replay.meta.server_bot_seats.some(
-            (seat) => !Number.isInteger(seat) || seat < 1 || seat > replay.meta.player_names.length,
-          ))) ||
-      !Array.isArray(replay.exploration)
-    ) {
-      throw new Error('回放版本不兼容。');
-    }
-    if ((replay.meta.map_mode as string) === ['twin', 'continents'].join('_')) {
-      throw new Error('该地图模式已移除，只能播放已有的观看缓存。');
-    }
+      replay?.version !== REPLAY_OPS_VERSION ||
+      !isFogMode(replay.meta.fog_mode) ||
+      !isAiDifficulty(replay.meta.ai_difficulty)
+    )
+      throw Error('回放版本不兼容。');
     const dummyPlayerSids = replay.meta.player_names.map((_, index) => `replay_sid_${index}`);
     const dummyPlayerIds = replay.meta.player_names.map((_, index) => `replay_id_${index}`);
 
-    const engine = new GameEngine(
-      {
-        ...replay.meta,
-        allow_team: replay.meta.allow_team ?? false,
-        ai_difficulty: replay.meta.ai_difficulty ?? 'normal',
-        server_bot_seats: replay.meta.server_bot_seats ?? [],
-        multi_line: replay.meta.multi_line === true,
-        map_size: replay.meta.map_size ?? 'normal',
-        map_region: normalizeMapRegion(replay.meta.map_region),
-      },
-      dummyPlayerSids,
-      dummyPlayerIds,
-      '__replay_build__',
-      {
-        update: () => undefined,
-        emitInitMap: () => undefined,
-        chatMessage: () => undefined,
-        endGame: () => undefined,
-        disciplineEvent: () => undefined,
-        md5: (input) => input,
-        replayStore: {
-          saveReplay: async () => '',
-        } as unknown as ReplayStore,
-      },
-    );
+    const engine = new GameEngine(replay.meta, dummyPlayerSids, dummyPlayerIds, '__replay_build__', {
+      update: () => undefined,
+      emitInitMap: () => undefined,
+      chatMessage: () => undefined,
+      endGame: () => undefined,
+      disciplineEvent: () => undefined,
+      md5: (input) => input,
+      replayStore: {
+        saveReplay: async () => '',
+      } as unknown as ReplayStore,
+    });
 
     await engine.initializeMap();
     engine.selectGenerals();
 
-    const { scheduledBatches, scheduledSurrenders } = buildScheduledReplayActions(replay, engine.n, engine.m);
-
-    const afkSurrenders = new Map<number, number[]>();
-    for (const [turn, player] of replay.afk_surrenders ?? []) {
-      if (
-        !Number.isInteger(turn) ||
-        turn < 1 ||
-        turn > replay.total_turns ||
-        !Number.isInteger(player) ||
-        player < 0 ||
-        player >= dummyPlayerSids.length
-      ) {
-        throw new Error('回放不兼容：无效的挂机投降记录。');
-      }
-      const players = afkSurrenders.get(turn) ?? [];
-      players.push(player);
-      afkSurrenders.set(turn, players);
+    if (engine.n !== replay.rows || engine.m !== replay.cols) throw Error('回放损坏：地图尺寸不匹配');
+    const { scheduledBatches } = buildScheduledReplayActions(replay, engine.n, engine.m);
+    const manual = new Map<number, number[]>(),
+      afkSurrenders = new Map<number, number[]>();
+    for (const [tick, seat, phase] of replay.surrenders) {
+      const map = phase ? manual : afkSurrenders;
+      if (!map.has(tick)) map.set(tick, []);
+      map.get(tick).push(seat);
     }
-
+    const surrender = (tick: number) => {
+      for (const seat of manual.get(tick) ?? [])
+        if (!engine.applySurrenderByIndex(seat, 'manual_surrender')) throw Error('回放损坏：投降时序');
+    };
+    if (!replay.total_turns) surrender(0);
     const initial = engine.buildReplayFrame(false);
     const vision = new Map<number, ReplayTeamVision>();
-    const recordVision = () =>
-      engine.fogVision?.recordTimeline(vision, engine.turn, (team) => engine.isTeamAlive(team));
+    let estimatedBytes = 0;
+    const recordVision = () => {
+      estimatedBytes +=
+        engine.fogVision?.recordTimeline(vision, engine.turn, (team) => engine.isTeamAlive(team)) ?? 0;
+    };
     recordVision();
     let prevFrame = initial;
+    const keyframes = new Map<number, ReplayFrame>();
+    const stride = Math.max(64, Math.ceil((replay.total_turns * engine.n * engine.m * 24) / (8 << 20)));
     const patches: ReplayPatch[] = [];
     while (engine.turn < replay.total_turns) {
       const nextTurn = engine.turn + 1;
-      for (let p = 0; p < scheduledSurrenders.length; p += 1) {
-        if (!scheduledSurrenders[p].has(nextTurn)) {
-          continue;
-        }
-        if (!engine.applySurrenderByIndex(p, 'manual_surrender')) {
-          throw new Error(`回放不兼容：玩家 ${p + 1} 无法在 Tick ${nextTurn} 投降。`);
-        }
-      }
-
+      surrender(engine.turn);
       // These are already-executed batches, not pending topology/queue snapshots.
       const executedPlayers = new Set<number>();
       for (let p = 0; p < scheduledBatches.length; p += 1) {
@@ -590,9 +556,20 @@ export class GameEngine {
         throw new Error(`回放不兼容：对局在 Tick ${nextTurn} 提前结束。`);
       }
       const isFinalFrame = gameEnd || engine.turn >= replay.total_turns;
+      if (isFinalFrame) surrender(engine.turn);
       const nextFrame = engine.buildReplayFrame(isFinalFrame);
       recordVision();
-      patches.push(buildReplayPatch(prevFrame, nextFrame));
+      const patch = buildReplayPatch(prevFrame, nextFrame);
+      for (const part of [patch.forward, patch.backward]) {
+        estimatedBytes +=
+          512 +
+          part.leaderboard.length * 160 +
+          8 * (part.grid_type.length + part.army_cnt.length + part.isolated.length);
+      }
+      if (estimatedBytes > 96 * 1024 * 1024) throw Error('回放超过客户端播放内存限制');
+      patches.push(patch);
+      if (engine.turn % stride === 0) keyframes.set(engine.turn, nextFrame);
+      if (engine.turn % 32 === 0 || isFinalFrame) progress?.(engine.turn);
       prevFrame = nextFrame;
       if (gameEnd) {
         break;
@@ -603,27 +580,13 @@ export class GameEngine {
       initial.game_end = true;
     }
 
-    const exploration = engine.fogVision?.archive() ?? [];
-    if (
-      replay.exploration.length !== exploration.length ||
-      exploration.some(([team, discoveries], index) => {
-        const saved = replay.exploration[index];
-        return (
-          !Array.isArray(saved) ||
-          saved[0] !== team ||
-          !(saved[1] instanceof Uint32Array) ||
-          saved[1].length !== discoveries.length ||
-          discoveries.some((value, offset) => value !== saved[1][offset])
-        );
-      })
-    ) {
-      throw new Error('回放的探索记录与操作流不一致。');
-    }
-
+    if (stateCrc(prevFrame) !== replay.state_crc) throw Error('回放损坏：终局校验失败');
     return {
       n: engine.n,
       m: engine.m,
       meta: engine.replayMeta,
+      keyframes,
+      stride,
       initial,
       patches,
       vision,
@@ -836,11 +799,20 @@ export class GameEngine {
   }
 
   private recordReplayTurnMoves(): void {
-    this.replayTurnMoves.push(buildTurnMoves(this.executedTurnMoves));
-  }
-
-  private buildReplayPlayerOps() {
-    return buildReplayPlayerOps(this.playerSids.length, this.replayTurnMoves, this.replayTurnSurrenders);
+    for (const [seat, moves] of this.executedTurnMoves.entries()) {
+      if (!moves.length) continue;
+      const gap = this.turn - this.lastActionTick[seat] - 1;
+      if (gap) this.replayOps[seat].push({ op: 'w', n: gap });
+      this.replayOps[seat].push({
+        op: 'q',
+        actions: moves.map((action) =>
+          action.kind === 'm'
+            ? { kind: action.kind, x: action.x, y: action.y, dx: action.dx, dy: action.dy, mode: action.mode }
+            : { kind: action.kind, x: action.x, y: action.y },
+        ),
+      });
+      this.lastActionTick[seat] = this.turn;
+    }
   }
 
   private buildFinalRank(): string[] {
@@ -894,7 +866,7 @@ export class GameEngine {
 
   private advanceVision(): void {
     this.fullVision = null;
-    this.fogVision?.advance(this.boardState(), this.turn);
+    this.fogVision?.advance(this.boardState());
   }
 
   /**
@@ -1834,11 +1806,7 @@ export class GameEngine {
     if (this.pstat[playerIndex] === LEFT_GAME) {
       return false;
     }
-    if (cause === 'afk') {
-      this.replayAfkSurrenders.push([this.turn, playerIndex]);
-    } else {
-      this.replayTurnSurrenders[playerIndex].add(this.turn + 1);
-    }
+    this.surrenders.push([this.turn, playerIndex, cause === 'afk' ? 0 : 1]);
     const heir = this.findSurrenderHeir(playerIndex);
     if (heir >= 0) {
       this.transferEmpire(playerIndex + 1, heir + 1);
@@ -1903,15 +1871,11 @@ export class GameEngine {
         version: REPLAY_OPS_VERSION,
         meta: this.replayMeta,
         total_turns: this.turn,
-        player_ops: this.buildReplayPlayerOps(),
-        exploration: this.fogVision?.archive() ?? [],
-        ...(this.replayAfkSurrenders.length > 0
-          ? {
-              afk_surrenders: this.replayAfkSurrenders.map(
-                ([turn, player]) => [turn, player] as [number, number],
-              ),
-            }
-          : {}),
+        player_ops: this.replayOps,
+        rows: this.n,
+        cols: this.m,
+        state_crc: stateCrc(this.buildReplayFrame(true)),
+        surrenders: this.surrenders,
       },
       {
         rank: this.buildFinalRank(),

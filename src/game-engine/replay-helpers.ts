@@ -1,4 +1,4 @@
-import { LeaderboardEntry, ReplayPatch, ReplayPatchPayload, ReplayFrame } from '../types';
+import { ReplayPatch, ReplayPatchPayload, ReplayFrame } from '../types';
 
 const getDiff = (next: number[], prev: number[]): number[] => {
   const diff: number[] = [];
@@ -10,27 +10,6 @@ const getDiff = (next: number[], prev: number[]): number[] => {
   return diff;
 };
 
-const cloneMovePayload = (move: ReplayFrame['lst_move']): ReplayFrame['lst_move'] => ({
-  x: move.x,
-  y: move.y,
-  dx: move.dx,
-  dy: move.dy,
-  half: move.half,
-  mode: move.mode,
-  op: move.op,
-});
-
-const cloneLeaderboard = (leaderboard: LeaderboardEntry[]): LeaderboardEntry[] =>
-  leaderboard.map((item) => ({
-    team: item.team,
-    uid: item.uid,
-    army: item.army,
-    land: item.land,
-    class_: item.class_,
-    dead: item.dead,
-    id: item.id,
-  }));
-
 const buildReplayPatchPayload = (
   frame: ReplayFrame,
   gridDiff: number[],
@@ -40,10 +19,12 @@ const buildReplayPatchPayload = (
   grid_type: gridDiff,
   army_cnt: armyDiff,
   isolated: isolatedDiff,
-  lst_move: cloneMovePayload(frame.lst_move),
-  leaderboard: cloneLeaderboard(frame.leaderboard),
+  is_diff: true,
+  lst_moves: frame.lst_moves,
+  lst_move: frame.lst_move,
+  leaderboard: frame.leaderboard,
   turn: frame.turn,
-  kills: { ...frame.kills },
+  kills: frame.kills,
   game_end: frame.game_end,
 });
 

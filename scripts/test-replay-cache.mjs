@@ -4,14 +4,14 @@ import vm from 'node:vm';
 
 const context = vm.createContext({ ArrayBuffer, Uint8Array, Number });
 vm.runInContext(
-  'var replay_binary_magic = [0x52, 0x50, 0x42, 0x35];\n' +
+  'var replay_binary_magic = [0x52, 0x4b, 0x4c, 1];\n' +
     readFileSync(new URL('../static/main/replay-cache.js', import.meta.url), 'utf8'),
   context,
 );
 
 const id = 'a+b-Cdefghij';
 assert.equal(context.replayCacheKey(id), id, 'ID 原样作为键，保留 + 和 -');
-const buffer = Uint8Array.from([0x52, 0x50, 0x42, 0x35, 1]).buffer;
+const buffer = Uint8Array.from([0x52, 0x4b, 0x4c, 1, 1]).buffer;
 const entry = {
   id,
   version: context.REPLAY_CACHE_VERSION,
@@ -24,7 +24,7 @@ const entry = {
 };
 assert.ok(context.replayCacheValid(entry, id), '当前魔数和版本命中');
 assert.ok(!context.replayCacheValid(entry, 'another-id'), '不同 ID 不命中');
-assert.ok(!context.replayCacheValid({ ...entry, version: 0 }, id), '版本不一致失效');
+assert.ok(!context.replayCacheValid({ ...entry, version: 5 }, id), '版本不一致失效');
 assert.ok(!context.replayCacheValid({ ...entry, size: 4 }, id), '长度不一致失效');
 assert.ok(
   !context.replayCacheValid({ ...entry, buffer: Uint8Array.from([0x52, 0x50, 0x42, 0x34, 1]).buffer }, id),

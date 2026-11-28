@@ -1,92 +1,24 @@
 function applyReplayFogView() {
   var history = replay_data.vision.get(replay_view_team);
-  var turn = cur_turn ? replay_data.patches[cur_turn - 1].forward.turn : replay_data.initial.turn;
-  var mode = replay_data.meta.fog_mode;
-  for (var i = 0; i < n; i++) {
-    for (var j = 0; j < m; j++) {
-      fog[i][j] = replayFogAt(history, mode, i * m + j, turn);
+  for (var row = 0; row < n; row++)
+    for (var col = 0; col < m; col++) {
+      var cell = row * m + col;
+      fog[row][col] = replayFogAt(history, replay_data.meta.fog_mode, cell, cur_turn);
+      if (fog[row][col] !== 1) continue;
+      var changes = history.buildings.get(cell),
+        low = 0,
+        high = changes ? changes.length / 2 : 0;
+      while (low < high) {
+        var mid = (low + high) >>> 1;
+        if (changes[mid * 2] <= cur_turn) low = mid + 1;
+        else high = mid;
+      }
+      replay_building_memory[cell] = low ? changes[low * 2 - 1] : 0;
     }
-  }
-  syncReplayBuildingMemory(cur_turn);
 }
-
 function replayBuildingCode(cellType) {
   return cellType >= 50 && cellType < 150 && cellType % 50 > 0 ? cellType : 0;
 }
-
-function replayCurrentGridType() {
-  var board = new Array(n * m);
-  for (var i = 0; i < n; i++) {
-    for (var j = 0; j < m; j++) board[i * m + j] = grid_type[i][j];
-  }
-  return board;
-}
-
-function applyReplayGridDiff(board, diff) {
-  for (var i = 0; i * 2 < diff.length; i++) board[diff[i * 2]] = diff[i * 2 + 1];
-}
-
-function updateReplayBuildingMemory(frame, board) {
-  var history = replay_data.vision.get(replay_view_team);
-  var turn = frame ? replay_data.patches[frame - 1].forward.turn : replay_data.initial.turn;
-  var changes = [];
-  if (!history || replay_view_team <= 0) {
-    replay_building_changes[frame] = changes;
-    return;
-  }
-  for (var cell = 0; cell < board.length; cell++) {
-    if (replayFogAt(history, replay_data.meta.fog_mode, cell, turn) !== 0) continue;
-    var next = replayBuildingCode(board[cell]);
-    if (replay_building_memory[cell] === next) continue;
-    changes.push([cell, replay_building_memory[cell], next]);
-    replay_building_memory[cell] = next;
-  }
-  replay_building_changes[frame] = changes;
-}
-
-function rebuildReplayBuildingMemory(targetFrame) {
-  replay_building_memory = new Array(n * m).fill(0);
-  replay_building_changes = [];
-  replay_building_frame = -1;
-  replay_building_team = replay_view_team;
-  if (replay_view_team <= 0) {
-    replay_building_frame = targetFrame;
-    return;
-  }
-  var board = replay_data.initial.grid_type.slice();
-  for (var frame = 0; frame <= targetFrame; frame++) {
-    if (frame > 0) applyReplayGridDiff(board, replay_data.patches[frame - 1].forward.grid_type);
-    updateReplayBuildingMemory(frame, board);
-    replay_building_frame = frame;
-  }
-}
-
-function syncReplayBuildingMemory(targetFrame) {
-  if (!is_replay || !replay_data || !replay_data.initial) return;
-  if (replay_building_team !== replay_view_team || replay_building_frame < 0) {
-    rebuildReplayBuildingMemory(targetFrame);
-    return;
-  }
-  if (targetFrame === replay_building_frame + 1) {
-    updateReplayBuildingMemory(targetFrame, replayCurrentGridType());
-    replay_building_frame = targetFrame;
-    return;
-  }
-  if (targetFrame === replay_building_frame - 1) {
-    var changes = replay_building_changes[replay_building_frame];
-    if (!changes) {
-      rebuildReplayBuildingMemory(targetFrame);
-      return;
-    }
-    for (var i = changes.length - 1; i >= 0; i--) {
-      replay_building_memory[changes[i][0]] = changes[i][1];
-    }
-    replay_building_frame = targetFrame;
-    return;
-  }
-  rebuildReplayBuildingMemory(targetFrame);
-}
-
 // 排行榜兵力/领土列宽锁定（issue #93）：把本帧显示的最大位数并入锁定值
 // （只增不减、封顶 LB_LOCK_DIGITS_MAX），锁定值变化时经 CSS 变量下发列宽。
 function lockLeaderboardColumnDigits(armyDigits, landDigits) {
@@ -317,9 +249,7 @@ function update(data, options) {
       }
     }
   }
-  if (is_replay) {
-    applyReplayFogView();
-  }
+  if (is_replay && !options?.silent) applyReplayFogView();
   if (options && options.silent) {
     // 回放跳转的中间帧（issue #87）：只应用上面的局面补丁，视野查询、
     // render()、排行榜/统计图/回合计数器等界面刷新留待落点帧的完整

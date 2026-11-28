@@ -200,7 +200,6 @@ $('#replay-upload-view').on('click', async function () {
     });
     if (!response.ok) throw new Error('incompatible');
     var viewable = await response.arrayBuffer();
-    sessionStorage.setItem('roka_local_replay_raw', arrayBufferToBase64(await file.arrayBuffer()));
     sessionStorage.setItem('roka_local_replay', arrayBufferToBase64(viewable));
     location.href = '/replays/local';
   } catch (error) {

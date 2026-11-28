@@ -9,8 +9,6 @@ import { gzipSync } from 'node:zlib';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const require = createRequire(import.meta.url);
-const { ReplayStore, sweepReplayViewCaches, DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS } = require('../dist/replay-store.js');
-const { REPLAY_BINARY_MAGIC } = require('../dist/replay-patch-binary.js');
 const { UserStore } = require('../dist/auth-store.js');
 const { buildReplayStats } = require('../dist/server/replay-stats.js');
 const dataDir = await mkdtemp(path.join(tmpdir(), 'roka-replays-page-'));
@@ -18,39 +16,16 @@ const replayDir = path.join(dataDir, 'replays');
 let app;
 try {
   await mkdir(replayDir);
-  const old = new Date(Date.now() - DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS - 60000);
-  const cached = gzipSync(Buffer.from(REPLAY_BINARY_MAGIC + 'cached'));
-  for (const name of ['hit.rpb.gz', 'expired.rpb.gz', 'fresh.rpb.gz', 'archive.rpl', 'index.bin']) {
-    await writeFile(path.join(replayDir, name), name.endsWith('.gz') ? cached : Buffer.from(name));
-    if (name !== 'fresh.rpb.gz') await utimes(path.join(replayDir, name), old, old);
-  }
-  const store = new ReplayStore(replayDir, { buildReplayFromActions: async () => { throw new Error('cache should hit'); } });
-  const view = await store.readReplayViewGzip('hit');
-  assert.deepEqual(view.gzip, cached);
-  for (let i = 0; i < 100 && (await stat(path.join(replayDir, 'hit.rpb.gz'))).mtimeMs <= old.getTime(); i++) await delay(10);
-  assert.ok((await stat(path.join(replayDir, 'hit.rpb.gz'))).mtimeMs > Date.now() - 10000);
-  await sweepReplayViewCaches(replayDir);
-  await assert.rejects(stat(path.join(replayDir, 'expired.rpb.gz')), { code: 'ENOENT' });
-  for (const name of ['hit.rpb.gz', 'fresh.rpb.gz']) assert.deepEqual(await readFile(path.join(replayDir, name)), cached);
-  for (const name of ['archive.rpl', 'index.bin']) assert.equal(await readFile(path.join(replayDir, name), 'utf8'), name);
-  console.log('PASS cache: hit refreshes mtime; expired removed; fresh cache, .rpl and index bytes intact');
-
   const users = new UserStore(dataDir);
   await users.ensureReady();
   await users.register('Alice', 'test-password-123');
   const now = Math.floor(Date.now() / 1000);
   const items = Array.from({ length: 105 }, (_, i) => ({ id: 'replay' + i, time: now - i, turn: i, rank: [i < 102 ? 'Alice' : 'Bob'], teams: [] }));
   await writeFile(path.join(replayDir, 'index.bin'), serialize(items));
-  // Startup must honor the configured age, without touching original archives.
-  await writeFile(path.join(replayDir, 'boot.rpb.gz'), cached);
-  const bootOld = new Date(Date.now() - 5000);
-  await utimes(path.join(replayDir, 'boot.rpb.gz'), bootOld, bootOld);
-  Object.assign(process.env, { ROKA_DATA_DIR: dataDir, JWT_SECRET: 'replays-page-test-secret', WEBHOOK_SECRET: 'replays-page-test-secret', NODE_ENV: 'test', ROKA_STATIC_CDN: '0', ROKA_REPLAY_VIEW_CACHE_MAX_AGE_MS: '1000' });
+  Object.assign(process.env, { ROKA_DATA_DIR: dataDir, JWT_SECRET: 'replays-page-test-secret', WEBHOOK_SECRET: 'replays-page-test-secret', NODE_ENV: 'test', ROKA_STATIC_CDN: '0' });
   const server = require('../dist/server.js');
   app = server.app;
   await server.boot(false);
-  await assert.rejects(stat(path.join(replayDir, 'boot.rpb.gz')), { code: 'ENOENT' });
-  assert.equal(await readFile(path.join(replayDir, 'archive.rpl'), 'utf8'), 'archive.rpl');
   let ip = 1;
   const get = async (url) => {
     const response = await app.inject({ method: 'GET', url, headers: { 'x-real-ip': '198.51.100.' + ip++ } });
@@ -94,7 +69,7 @@ try {
   for (const url of ['/replays/local', '/replays/example', '/replays.js']) assert.equal((await app.inject(url)).statusCode, 200, url);
   assert.equal((await app.inject({ method: 'POST', url: '/api/replay-upload', headers: { 'content-type': 'application/octet-stream' }, payload: Buffer.from('invalid') })).statusCode, 401);
   console.log('PASS API: normalized/unknown username, inclusive from/to, invalid dates, total, 50/page, unfiltered stats regression');
-  console.log('PASS guest: /replays, viewer routes and script 200; upload 401; startup cache sweep honors env');
+  console.log('PASS guest: /replays, viewer routes and script 200; upload 401');
 
   // Run the actual page controller with inert DOM handles to check URL, local-day and socket semantics.
   const calls = [];

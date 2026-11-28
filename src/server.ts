@@ -21,14 +21,9 @@ import { isHuaxiaSeasonActive } from './map/huaxia-season';
 import { resolveMapSizeRatioByPlayers } from './map/map-size';
 import { DEFAULT_MAP_REGION, isMapRegion, normalizeMapRegion } from './map/huaxia-regions';
 import { ratingTier } from './rating-color';
-import { encodeReplayPatchBinary } from './replay-patch-binary';
+import { decodeRpl } from './rpl';
 import { buildReplayStats } from './server/replay-stats';
-import {
-  DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS,
-  isReplayIdValid,
-  ReplayStore,
-  sweepReplayViewCaches,
-} from './replay-store';
+import { isReplayIdValid, ReplayStore } from './replay-store';
 import { ensureRuntimeEnv } from './runtime-env';
 import { renderRichText, renderRichTextWithMentions } from './text-render';
 import {
@@ -94,9 +89,7 @@ app.addContentTypeParser(
 const dataDir = process.env.ROKA_DATA_DIR
   ? path.resolve(process.env.ROKA_DATA_DIR)
   : path.join(process.cwd(), 'data');
-const replayStore = new ReplayStore(path.join(dataDir, 'replays'), {
-  buildReplayFromActions: GameEngine.buildReplayFromActions,
-});
+const replayStore = new ReplayStore(path.join(dataDir, 'replays'));
 const userStore = new UserStore(dataDir);
 const feedStore = new FeedStore(dataDir);
 const chatModeration = new ChatModeration(dataDir);
@@ -294,6 +287,10 @@ const buildMapExample = async (
   const playerNames = Array.from({ length: playerCount }, (_, index) => `P${index + 1}`);
   const playerTeams = Array.from({ length: playerCount }, (_, index) => index + 1);
   const generated = await GameEngine.buildReplayBaseMap({
+    ai_difficulty: 'normal',
+    server_bot_seats: [],
+    multi_line: false,
+    map_size: 'normal',
     width_ratio: mapSizeRatio,
     height_ratio: mapSizeRatio,
     city_ratio: 0.5,
@@ -468,6 +465,10 @@ const admitReplayDownload = (request: FastifyRequest): ReplayDownloadAdmission =
   };
 };
 
+const replayReadError = (error: unknown, reply: FastifyReply) =>
+  (error as NodeJS.ErrnoException).code === 'ENOENT'
+    ? reply.code(404).send({ error: '回放不存在。' })
+    : reply.code(422).send({ error: '回放格式不支持或回放损坏。' });
 const handleReplayDownload = async (
   request: FastifyRequest,
   reply: FastifyReply,
@@ -513,22 +514,6 @@ if (runtimeEnv.createdKeys.length > 0) {
 
 const boot = async (listen = true): Promise<void> => {
   await replayStore.ensureReady();
-  const configuredCacheAge = Number(process.env.ROKA_REPLAY_VIEW_CACHE_MAX_AGE_MS?.trim() || NaN);
-  const cacheMaxAge =
-    Number.isFinite(configuredCacheAge) && configuredCacheAge >= 0
-      ? configuredCacheAge
-      : DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS;
-  const sweepViewCaches = async (): Promise<void> => {
-    try {
-      await sweepReplayViewCaches(path.join(dataDir, 'replays'), cacheMaxAge);
-    } catch (error) {
-      app.log.error({ err: error }, 'replay view cache sweep failed');
-    }
-  };
-  await sweepViewCaches();
-  const replayCacheSweepTimer = setInterval(() => void sweepViewCaches(), 24 * 60 * 60 * 1000);
-  replayCacheSweepTimer.unref();
-  app.addHook('onClose', async () => clearInterval(replayCacheSweepTimer));
   await userStore.ensureReady();
   await feedStore.ensureReady();
   await chatModeration.ensureReady();
@@ -1803,40 +1788,33 @@ const boot = async (listen = true): Promise<void> => {
         return reply.code(404).send({ error: '回放不存在。' });
       }
       try {
-        // 直接下发 gzip 压缩后的转码二进制（按回放 id 落盘缓存，不再每次重建整场对局）；
-        // X-Replay-Size 告知解压后大小，客户端据此显示下载进度。
-        const view = await replayStore.readReplayViewGzip(id);
+        const raw = await replayStore.readRawReplay(id);
         return reply
-          .header('Content-Encoding', 'gzip')
-          .header('X-Replay-Size', String(view.size))
+          .header('X-Replay-Size', raw.length)
+          .header('ETag', '"' + id + '"')
           .type('application/octet-stream')
-          .send(view.gzip);
-      } catch {
-        return reply.code(404).send({ error: '回放不存在或与当前版本不兼容。' });
+          .send(raw);
+      } catch (error) {
+        return replayReadError(error, reply);
       }
     }),
   );
-
-  // 下载回放：直接返回原始 .rpl 存储文件。
   app.get('/api/downloadreplay/:id', async (request, reply) =>
     handleReplayDownload(request, reply, async () => {
       const { id } = request.params as { id: string };
-      if (!isReplayIdValid(id)) {
-        return reply.code(404).send({ error: '回放不存在。' });
-      }
+      if (!isReplayIdValid(id)) return reply.code(404).send({ error: '回放不存在。' });
       try {
         const raw = await replayStore.readRawReplay(id);
         return reply
           .header('Content-Disposition', `attachment; filename="roka-replay-${id}.rpl"`)
+          .header('X-Replay-Size', raw.length)
           .type('application/octet-stream')
           .send(raw);
-      } catch {
-        return reply.code(404).send({ error: '回放不存在。' });
+      } catch (error) {
+        return replayReadError(error, reply);
       }
     }),
   );
-
-  // 上传回放：客户端 POST 原始 .rpl 文件，服务端解码重建并转码为可观看的 RPB 二进制。
   app.post('/api/replay-upload', async (request, reply) => {
     const authUser = (request as AuthRequest).authUser;
     if (!authUser) {
@@ -1847,9 +1825,8 @@ const boot = async (listen = true): Promise<void> => {
       if (!Buffer.isBuffer(content) || content.length === 0) {
         throw new Error('empty body');
       }
-      const replay = await replayStore.buildReplayFromRaw(content);
-      const binary = encodeReplayPatchBinary(replay);
-      return reply.type('application/octet-stream').send(binary);
+      await decodeRpl(content);
+      return reply.header('X-Replay-Size', content.length).type('application/octet-stream').send(content);
     } catch {
       return reply.code(422).send({ error: '回放文件不兼容或已损坏。' });
     }
