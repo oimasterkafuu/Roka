@@ -3,11 +3,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import vm from 'node:vm';
-import { gunzipSync } from 'node:zlib';
 import { GameEngine } from '../dist/game-engine.js';
 import { ReplayStore } from '../dist/replay-store.js';
-import { decodeBinary } from '../dist/binary-store.js';
+import {decodeRpl} from '../dist/rpl.js';
 import { LobbyService, SIMPLE_AI_RATING_PENALTY } from '../dist/server/lobby-service.js';
 
 const players = ['human', 'hosted', 'third_party'];
@@ -111,10 +109,10 @@ function checkPlayback(initial, patches, live) {
   }
 }
 
-test('recorded ops-v3 and cached RPB5 reconstruct the simple match board at every tick', async () => {
+test('recorded RKL1 reconstruct the simple match board at every tick', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'roka-difficulty-replay-'));
   try {
-    const replayStore = new ReplayStore(dir, { buildReplayFromActions: GameEngine.buildReplayFromActions });
+    const replayStore = new ReplayStore(dir);
     await replayStore.ensureReady();
     const engine = await createGame({ ai_difficulty: 'simple', fog_mode: 'normal' }, { replayStore });
     const live = [engine.buildReplayFrame(false)];
@@ -141,31 +139,15 @@ test('recorded ops-v3 and cached RPB5 reconstruct the simple match board at ever
     );
     const [entry] = await replayStore.listReplays();
     const raw = await replayStore.readRawReplay(entry.id);
-    const actions = await decodeBinary(raw);
-    assert.equal(actions.version, 'ops-v3');
+    const actions = await decodeRpl(raw);
+    assert.equal(actions.version, 'RKL1');
     assert.equal(actions.meta.ai_difficulty, 'simple');
     assert.deepEqual(actions.meta.server_bot_seats, [2]);
-    const { initial, patches } = await replayStore.buildReplayFromRaw(raw);
+    const { initial, patches } = await GameEngine.buildReplayFromActions(actions);
     checkPlayback(initial, patches, live);
 
-    const { gzip } = await replayStore.readReplayViewGzip(entry.id);
-    const cached = await replayStore.readReplayViewGzip(entry.id);
-    assert.deepEqual(cached.gzip, gzip);
-    const context = {
-      buffer: Uint8Array.from(gunzipSync(gzip)).buffer,
-      replay_binary_magic: [...Buffer.from('RPB5')],
-      replay_text_decoder: new TextDecoder(),
-      replay_class_from_code: ['', 'dead', 'afk'],
-    };
-    vm.runInNewContext(
-      await readFile(new URL('../static/main/replay-binary.js', import.meta.url), 'utf8'),
-      context,
-    );
-    const viewed = vm.runInNewContext('decodeReplayBinary(buffer)', context);
-    checkPlayback(viewed.initial, viewed.patches, live);
-
-    const invalidMeta = { ...actions.meta, server_bot_seats: undefined };
-    await assert.rejects(GameEngine.buildReplayFromActions({ ...actions, meta: invalidMeta }), /不兼容/);
+    assert.deepEqual(await replayStore.readRawReplay(entry.id),raw);
+    await assert.rejects(GameEngine.buildReplayFromActions({...actions,state_crc:(actions.state_crc+1)>>>0}),/终局校验/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

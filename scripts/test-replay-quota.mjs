@@ -16,12 +16,10 @@ delete process.env.REPLAY_DOWNLOAD_CONCURRENCY_LIMIT;
 
 const require = createRequire(import.meta.url);
 const { ReplayStore } = require('../dist/replay-store.js');
-const fixture = await readFile(new URL('./fixtures/replay-143-danrgjM9hfR7.rpl', import.meta.url));
+const fixture = Buffer.from('quota test body');
 let rawCalls = 0;
-let viewCalls = 0;
 let deleteCalls = 0;
 let rawError = false;
-let viewError = false;
 let rawGate = null;
 let gatedCalls = 0;
 ReplayStore.prototype.readRawReplay = async function () {
@@ -32,11 +30,6 @@ ReplayStore.prototype.readRawReplay = async function () {
     await rawGate;
   }
   return fixture;
-};
-ReplayStore.prototype.readReplayViewGzip = async function () {
-  viewCalls += 1;
-  if (viewError) throw new Error('view failed');
-  return { gzip: Buffer.from('view'), size: 4 };
 };
 ReplayStore.prototype.deleteReplay = async function () {
   deleteCalls += 1;
@@ -69,7 +62,6 @@ try {
     assertRetryAfter(response);
   }
   assert.equal(rawCalls, 0);
-  assert.equal(viewCalls, 0);
   assert.equal(deleteCalls, 0);
 
   process.env.REPLAY_DOWNLOAD_DISABLED = '0';
@@ -165,15 +157,15 @@ try {
 
   rawError = true;
   for (let i = 0; i < 3; i += 1) {
-    assert.equal((await download('198.51.100.5')).statusCode, 404, 'read errors release concurrency');
+    assert.equal((await download('198.51.100.5')).statusCode, 422, 'read errors release concurrency');
   }
   rawError = false;
   assert.equal((await download('198.51.100.5')).statusCode, 200);
 
-  viewError = true;
-  assert.equal((await download('198.51.100.6', '/api/getreplay/broken')).statusCode, 404);
+  rawError = true;
+  assert.equal((await download('198.51.100.6', '/api/getreplay/broken')).statusCode, 422);
   assert.equal(deleteCalls, 0, 'an unreadable viewing replay must not delete the original archive');
-  viewError = false;
+  rawError = false;
   assert.equal((await download('198.51.100.6')).statusCode, 200, 'getreplay error releases concurrency');
 
   for (const [url, ip] of [

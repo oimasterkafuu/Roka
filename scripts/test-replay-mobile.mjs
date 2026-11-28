@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { encodeReplayPatchBinary } from '../dist/replay-patch-binary.js';
+import {encodeRpl} from '../dist/rpl.js';
+import {recordFixture} from './rpl-fixture.mjs';
 
 const { chromium } = createRequire(import.meta.url)(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
-const boardSize = 12;
 const lastFrame = 24;
 const leaderboard = Array.from({ length: 14 }, (_, index) => ({
   uid: `Participant_with_a_long_name_${index + 1}`,
@@ -14,34 +14,9 @@ const leaderboard = Array.from({ length: 14 }, (_, index) => ({
   dead: 0,
   class_: '',
 }));
-const frameData = (turn) => ({
-  turn,
-  leaderboard: leaderboard.map((entry) => ({ ...entry, army: entry.army + turn * 2000 * entry.id })),
-  grid_type: [],
-  army_cnt: [],
-  isolated: [],
-  game_end: turn === lastFrame,
-});
-const replay = encodeReplayPatchBinary({
-  n: boardSize,
-  m: boardSize,
-  initial: {
-    ...frameData(0),
-    grid_type: Array(boardSize ** 2).fill(200),
-    army_cnt: Array(boardSize ** 2).fill(0),
-    isolated: Array(boardSize ** 2).fill(0),
-  },
-  patches: Array.from({ length: lastFrame }, (_, index) => ({
-    forward: frameData(index + 1),
-    backward: frameData(index),
-  })),
-  meta: {
-    fog_mode: 'explored',
-    player_names: leaderboard.map(({ uid }) => uid),
-    player_teams: leaderboard.map(({ team }) => team),
-  },
-  vision: new Map(leaderboard.map(({ team }) => [team, { omniscientFrom: null, cells: new Map() }])),
-});
+const replay=Buffer.from(await encodeRpl(await recordFixture({map_mode:'random',map_region:'china',map_token:'mobile',
+  width_ratio:0.85,height_ratio:0.85,swamp_ratio:0.1,speed:1,fog_mode:'explored',allow_team:true,
+  player_names:leaderboard.map(p=>p.uid),player_teams:leaderboard.map(p=>p.team)},lastFrame)));
 
 const browser = await chromium.launch({
   headless: true,
@@ -194,8 +169,9 @@ try {
   await next.tap();
   assert.equal(await getFrame(), 19, 'controls keep working after all gesture end paths');
 
-  await page.locator('#t6_6').tap();
-  assert.deepEqual(await page.evaluate(() => window.getSelectedCells()), [[6, 6]]);
+  const selected=await page.evaluate(()=>{for(const row of cell_elems)for(const cell of row){const rect=cell.getBoundingClientRect(),x=rect.x+rect.width/2,y=rect.y+rect.height/2;if(x>0&&x<innerWidth&&y>0&&y<innerHeight&&document.elementFromPoint(x,y)===cell)return cell.id.slice(1).split('_').map(Number);}throw Error('no visible board cell');});
+  await page.locator('#t'+selected[0]+'_'+selected[1]).tap();
+  assert.deepEqual(await page.evaluate(()=>window.getSelectedCells()),[selected]);
   await page.mouse.move(30, 420);
   await page.mouse.down();
   await page.mouse.move(55, 439);

@@ -1,9 +1,6 @@
-const fs = require('fs'),
-  z = require('zlib'),
-  v8 = require('v8');
-const { GameEngine } = require('../dist/game-engine.js');
-const replay = v8.deserialize(z.brotliDecompressSync(fs.readFileSync(process.argv[2])));
-console.log(JSON.stringify({ meta: replay.meta, total_turns: replay.total_turns }));
+const fs=require('node:fs');
+const {GameEngine}=require('../dist/game-engine.js');
+const {decodeRpl}=require('../dist/rpl.js');
 const events = [],
   deaths = [];
 const attack = GameEngine.prototype.attack,
@@ -39,6 +36,8 @@ GameEngine.prototype.applyConnectivity = function () {
     deaths.push({ tick: this.turn, pstat: this.pstat[ssr], deadOrder: this.deadOrder[ssr] });
 };
 (async () => {
+  const replay=await decodeRpl(fs.readFileSync(process.argv[2]));
+  console.log(JSON.stringify({meta:replay.meta,total_turns:replay.total_turns}));
   const built = await GameEngine.buildReplayFromActions(replay);
   console.log(JSON.stringify({ ssr: deaths, events, patches: built.patches.length }));
 })().catch((e) => {

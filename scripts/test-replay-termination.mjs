@@ -1,27 +1,15 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
-import vm from 'node:vm';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { REPLAY_OPS_VERSION } from '../dist/types.js';
+import {encodeRpl,decodeRpl} from '../dist/rpl.js';
+import { recordFixture } from './rpl-fixture.mjs';
 const require = createRequire(import.meta.url);
 const { GameEngine } = require('../dist/game-engine.js');
 const { MOVE_DX, MOVE_DY } = require('../dist/map/map-core.js');
 const { serialize } = require('node:v8');
-const { gunzipSync } = require('node:zlib');
 const { ReplayStore } = require('../dist/replay-store.js');
-const { encodeReplayPatchBinary } = require('../dist/replay-patch-binary.js');
-const context = vm.createContext({
-  ArrayBuffer,
-  Uint8Array,
-  DataView,
-  replay_binary_magic: [82, 80, 66, 53],
-  replay_text_decoder: new TextDecoder(),
-  replay_class_from_code: ['', 'dead', 'afk'],
-});
-vm.runInContext(readFileSync(new URL('../static/main/replay-binary.js', import.meta.url), 'utf8'), context);
 const realNow = Date.now;
 let now = realNow();
 Date.now = () => now;
@@ -76,7 +64,7 @@ try {
         frames.push(e.buildReplayFrame(true));
       }
       assert.ok(saved, 'live termination saves the raw operation stream');
-      const replay = await GameEngine.buildReplayFromActions(saved);
+      const replay = await GameEngine.buildReplayFromActions(await decodeRpl(await encodeRpl(saved)));
       assert.equal(replay.patches.length, saved.total_turns);
       const arrays = Object.fromEntries(
         ['grid_type', 'army_cnt', 'isolated'].map((key) => [key, [...replay.initial[key]]]),
@@ -94,11 +82,7 @@ try {
           assert.deepEqual(arrays[key], frames[i][key], `${key} at tick ${i + 1}`);
         }
       }
-      // Verify the actual viewer decoder, including the terminal frame and reverse patch.
-      const binary = encodeReplayPatchBinary(replay);
-      const decoded = context.decodeReplayBinary(
-        binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength),
-      );
+      const decoded=replay;
       assert.equal(decoded.patches.length, saved.total_turns);
       assert.equal(decoded.patches.at(-1).forward.game_end, true);
       assert.equal(decoded.patches.at(-1).forward.leaderboard.filter((p) => p.class_ !== 'dead').length, 1);
@@ -106,25 +90,14 @@ try {
       const dir = await mkdtemp(path.join(tmpdir(), 'roka-replay143-'));
       try {
         await writeFile(path.join(dir, 'index.bin'), serialize([]));
-        let rebuilds = 0;
-        const store = new ReplayStore(dir, {
-          buildReplayFromActions: (r) => {
-            rebuilds++;
-            return GameEngine.buildReplayFromActions(r);
-          },
-        });
+        const store=new ReplayStore(dir);
         await store.ensureReady();
         const id = await store.saveReplay(saved, {
           rank: config.player_names,
           teams: [],
           turn: frames.length,
         });
-        const uploaded = await store.buildReplayFromRaw(await store.readRawReplay(id));
-        assert.deepEqual(encodeReplayPatchBinary(uploaded), binary, 'raw upload preserves AFK events');
-        const first = await store.readReplayViewGzip(id);
-        assert.deepEqual(gunzipSync(first.gzip), binary, 'fresh server view matches live termination');
-        assert.deepEqual(await store.readReplayViewGzip(id), first, 'cache hit preserves complete view');
-        assert.equal(rebuilds, 2, 'second view uses the cache');
+        assert.deepEqual(await decodeRpl(await store.readRawReplay(id)),saved);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -133,7 +106,7 @@ try {
 } finally {
   Date.now = realNow;
 }
-console.log('replay AFK termination, mid-game elimination, manual surrender and RPB round-trip passed');
+console.log('replay AFK termination, mid-game elimination, manual surrender and RKL1 round-trip passed');
 
 const meta = {
   speed: 1,
@@ -164,25 +137,12 @@ const direction = MOVE_DX.findIndex((rowOffset, index) => {
   );
 });
 assert.ok(direction >= 0, 'the first seat needs an adjacent plain tile');
-const replay = await GameEngine.buildReplayFromActions({
-  version: REPLAY_OPS_VERSION,
-  exploration: [],
-  meta,
-  total_turns: 2151,
-  player_ops: [
-    [
-      { op: 'w', n: 600 },
-      {
-        op: 'q',
-        actions: [
-          { kind: 'm', x: row, y: col, dx: row + MOVE_DX[direction], dy: col + MOVE_DY[direction], mode: 2 },
-        ],
-      },
-    ],
-    [{ op: 'w', n: 2150 }, { op: 'r' }],
-    [{ op: 'w', n: 138 }, { op: 'r' }],
-  ],
+const archive=await recordFixture(meta,2151,(engine,tick)=>{
+  if(tick===139)engine.surrender('carol');
+  if(tick===601)engine.addMove('alice',row,col,row+MOVE_DX[direction],col+MOVE_DY[direction],2);
+  if(tick===2151)engine.surrender('bob');
 });
+const replay=await GameEngine.buildReplayFromActions(await decodeRpl(await encodeRpl(archive)));
 const destination = (row + MOVE_DX[direction]) * cols + col + MOVE_DY[direction];
 assert.equal(replay.patches.length, 2151);
 assert.equal(replay.patches[599].forward.game_end, false);

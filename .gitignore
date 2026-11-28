@@ -10,6 +10,7 @@ yarn-error.log*
 
 # Build output
 dist/
+static/main/replay-worker.bundle.js
 coverage/
 *.tsbuildinfo
 

@@ -55,7 +55,7 @@ block content
 
     section.doc-panel
       h2 3. 项目结构
-      p 迷雾模式由房间配置 fog_mode 声明。服务端按队伍维护实时视野和建筑记忆；原始回放 ops-v3 保存首见增量，RPB5 保存棋盘与队伍可见性，观看端据此还原各 Tick 的视野。
+      p 迷雾模式由房间配置 fog_mode 声明。服务端按队伍维护实时视野和建筑记忆；RKL1 仅保存生成参数和操作事件，浏览器 worker 逐 Tick 运行同一引擎，还原队伍视野和最后所见建筑。
       pre.code-snippet
         code.
           src/           后端 TypeScript 源码
@@ -113,9 +113,7 @@ block content
             code &lt;id&gt;.rpl
             |  操作流、
             code index.bin
-            |  索引与&#32;
-            code &lt;id&gt;.rpb.gz
-            |  观看缓存。
+            |  索引。播放时由浏览器重建。
 
     section.doc-panel
       h2 4. 常用命令

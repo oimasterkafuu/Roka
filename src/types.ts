@@ -7,7 +7,7 @@ export const isFogMode = (value: unknown): value is FogMode => FOG_MODES.some((m
 export type AiDifficulty = 'normal' | 'simple';
 export const isAiDifficulty = (value: unknown): value is AiDifficulty =>
   value === 'normal' || value === 'simple';
-export const REPLAY_OPS_VERSION = 'ops-v3';
+export const REPLAY_OPS_VERSION = 'RKL1';
 
 export type MapRegion = 'qin' | 'han' | 'tang' | 'song' | 'yuan' | 'ming' | 'liao' | 'china' | 'taiwan';
 
@@ -178,6 +178,7 @@ export interface ReplayFrame extends UpdatePayload {
 }
 
 export interface ReplayPatchPayload {
+  is_diff: true;
   grid_type: number[];
   army_cnt: number[];
   isolated: number[];
@@ -197,6 +198,8 @@ export interface ReplayPatch {
 export interface ReplayData {
   n: number;
   m: number;
+  keyframes: Map<number, ReplayFrame>;
+  stride: number;
   initial: ReplayFrame;
   patches: ReplayPatch[];
   meta: ReplayMeta;
@@ -206,6 +209,7 @@ export interface ReplayData {
 export interface ReplayTeamVision {
   omniscientFrom: number | null;
   cells: Map<number, number[]>;
+  buildings: Map<number, number[]>;
 }
 
 export interface GameConfig extends LobbyConfig {
@@ -214,28 +218,26 @@ export interface GameConfig extends LobbyConfig {
   server_bot_seats: number[];
 }
 
-export interface ReplayMeta {
-  width_ratio: number;
-  height_ratio: number;
-  city_ratio: number;
-  mountain_ratio: number;
-  swamp_ratio: number;
-  speed: number;
-  allow_team: boolean;
-  fog_mode: FogMode;
-  ai_difficulty?: AiDifficulty;
-  server_bot_seats?: number[];
-  /** 对局是否开启多线争锋（仅作元信息记录；回放操作流与单线局同构）。 */
-  multi_line?: boolean;
-  map_token: string;
-  map_mode: MapMode;
-  /** 新回放写入地区；旧回放缺省时按汉重建。 */
-  map_region?: MapRegion;
-  player_names: string[];
-  player_teams: number[];
-  /** 对局是否使用大地图（仅作元信息记录；实际尺寸由 width/height_ratio 编码）。 */
-  map_size?: 'normal' | 'large';
-}
+export type ReplayMeta = Pick<
+  GameConfig,
+  | 'width_ratio'
+  | 'height_ratio'
+  | 'city_ratio'
+  | 'mountain_ratio'
+  | 'swamp_ratio'
+  | 'speed'
+  | 'allow_team'
+  | 'fog_mode'
+  | 'ai_difficulty'
+  | 'server_bot_seats'
+  | 'multi_line'
+  | 'map_token'
+  | 'map_mode'
+  | 'map_region'
+  | 'player_names'
+  | 'player_teams'
+  | 'map_size'
+>;
 
 export interface ReplayListItem {
   time: number;
@@ -256,10 +258,6 @@ export interface ReplayPlayerOpWait {
   n: number;
 }
 
-export interface ReplayPlayerOpSurrender {
-  op: 'r';
-}
-
 /** Successful actions in execution order; one batch consumes exactly one tick. */
 export type ReplayExecutedOp =
   | { kind: 'm'; x: number; y: number; dx: number; dy: number; mode: MoveMode }
@@ -270,17 +268,18 @@ export interface ReplayPlayerOpBatch {
   actions: ReplayExecutedOp[];
 }
 
-export type ReplayPlayerOp = ReplayPlayerOpBatch | ReplayPlayerOpWait | ReplayPlayerOpSurrender;
+export type ReplayPlayerOp = ReplayPlayerOpBatch | ReplayPlayerOpWait;
 
 export interface ReplayActionData {
   version: typeof REPLAY_OPS_VERSION;
   meta: ReplayMeta;
   total_turns: number;
   player_ops: ReplayPlayerOp[][];
-  /** 正常模式按队伍存首见增量 [格子下标, Tick, ...]；其他模式为空。 */
-  exploration: [number, Uint32Array][];
-  /** AFK eliminations after tick movement/connectivity: [tick, zero-based player index]. */
-  afk_surrenders?: Array<[number, number]>;
+  rows: number;
+  cols: number;
+  state_crc: number;
+  /** [completed tick, zero-based seat, phase: 0=AFK inside tick, 1=manual between ticks]. */
+  surrenders: Array<[number, number, number]>;
 }
 
 export interface RoomListItem {

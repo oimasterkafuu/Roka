@@ -39,7 +39,7 @@ for (const mapMode of MAP_MODES) {
     };
     assert.deepEqual(play(), play());
     assert.equal(a.engine.tickTimer, null);
-    assert.equal(a.engine.replayTurnMoves.length, 0);
+    assert.equal(a.engine.replayOps.flat().length, 0);
   });
 }
 

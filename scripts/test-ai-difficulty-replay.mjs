@@ -8,9 +8,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
-import vm from 'node:vm';
-import { gunzipSync } from 'node:zlib';
-import { decodeBinary } from '../dist/binary-store.js';
+import {decodeRpl} from '../dist/rpl.js';
+import {GameEngine} from '../dist/game-engine.js';
 import { UserStore } from '../dist/auth-store.js';
 
 const require = createRequire(import.meta.url);
@@ -100,24 +99,6 @@ function replayFrames(decoded) {
     });
   }
   return frames;
-}
-
-async function decodeRpb5(gzipOrBinary) {
-  const content = Buffer.from(gzipOrBinary);
-  const binary = content[0] === 0x1f && content[1] === 0x8b ? gunzipSync(content) : content;
-  const source = await readFile(new URL('../static/main/replay-binary.js', import.meta.url), 'utf8');
-  const context = vm.createContext({
-    ArrayBuffer,
-    DataView,
-    TextDecoder,
-    Uint8Array,
-    replay_binary_magic: [82, 80, 66, 53],
-    replay_class_from_code: ['', 'dead', 'afk'],
-    replay_text_decoder: new TextDecoder(),
-  });
-  vm.runInContext(source, context);
-  const buffer = binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength);
-  return { binary, decoded: context.decodeReplayBinary(buffer) };
 }
 
 async function findPort() {
@@ -262,16 +243,16 @@ test(
         const rawResponse = await fetch(`${base}/api/downloadreplay/${encodeURIComponent(replayId)}`);
         assert.equal(rawResponse.status, 200);
         const raw = Buffer.from(await rawResponse.arrayBuffer());
-        const actions = await decodeBinary(raw);
-        assert.equal(actions.version, 'ops-v3');
+        const actions = await decodeRpl(raw);
+        assert.equal(actions.version, 'RKL1');
         assert.equal(actions.meta.ai_difficulty, difficulty);
         assert.deepEqual(actions.meta.server_bot_seats, [2]);
         assert.equal(actions.meta.map_token, MAP_TOKEN);
 
         const viewResponse = await fetch(`${base}/api/getreplay/${encodeURIComponent(replayId)}`);
         assert.equal(viewResponse.status, 200);
-        const view = await decodeRpb5(Buffer.from(await viewResponse.arrayBuffer()));
-        assert.equal(view.binary.subarray(0, 4).toString('latin1'), 'RPB5');
+        const viewBytes=Buffer.from(await viewResponse.arrayBuffer());assert.deepEqual(viewBytes,raw);
+        const view={decoded:await GameEngine.buildReplayFromActions(await decodeRpl(viewBytes))};
         assert.equal(view.decoded.meta.ai_difficulty, difficulty);
         assert.deepEqual(Array.from(view.decoded.meta.server_bot_seats), [2]);
 
@@ -367,7 +348,7 @@ test(
         assert.deepEqual(errors, [], `${result.difficulty} Chromium replay has no JS errors`);
         await page.close();
       }
-      console.log('PASS real official simple/normal bot replay, RPB5 playback, Chromium seek/autoplay, and growth contrast');
+      console.log('PASS real official simple/normal bot replay, RKL1 playback, Chromium seek/autoplay, and growth contrast');
     } catch (error) {
       console.error(serverLog);
       throw error;

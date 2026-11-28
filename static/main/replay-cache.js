@@ -1,5 +1,5 @@
 // 回放 ID 由原始内容哈希生成；同一 ID 的观看数据不可变，无需命中时重新请求服务器。
-var REPLAY_CACHE_VERSION = 5;
+var REPLAY_CACHE_VERSION = 6;
 var REPLAY_CACHE_MAX_BYTES = 1024 * 1024 * 1024;
 var REPLAY_CACHE_MAX_ENTRIES = 200;
 
@@ -13,7 +13,7 @@ function replayCacheValid(entry, id) {
     return false;
   if (!Number.isFinite(entry.downloadedAt) || !Number.isFinite(entry.lastViewedAt)) return false;
   if (typeof entry.etag !== 'string' || typeof entry.lastModified !== 'string') return false;
-  // 无 HTTP 验证器时，以首次下载时间和解压后长度作为本地兜底元数据。
+  // 无 HTTP 验证器时，以首次下载时间和原始长度作为本地兜底元数据。
   var bytes = new Uint8Array(entry.buffer);
   for (var i = 0; i < replay_binary_magic.length; i++) {
     if (bytes[i] !== replay_binary_magic[i]) return false;

@@ -197,15 +197,13 @@ async function scenarioFeedStore() {
 async function scenarioReplayStore() {
   console.log('场景 5：ReplayStore 索引缓存 + 损坏回退 + 删除');
   const replayDir = await mkdtemp(path.join(tmpdir(), 'roka-storage-replays-'));
-  const dummyBuilder = async (replay) => ({ replay });
   try {
-    const store = new ReplayStore(replayDir, { buildReplayFromActions: dummyBuilder });
+    const store = new ReplayStore(replayDir);
     await store.ensureReady();
 
     const mkReplay = (n) => ({
-      version: 'ops-v3',
-      exploration: [],
-      meta: {
+      version:'RKL1',rows:11,cols:11,state_crc:0,surrenders:[],
+      meta: { map_region:'china',map_mode:'random',map_token:'store',player_names:['alice'],player_teams:[1],server_bot_seats:[],allow_team:false,
         width_ratio: 1,
         height_ratio: 1,
         city_ratio: 0,
@@ -230,13 +228,13 @@ async function scenarioReplayStore() {
     );
 
     // 重启（新实例）：索引从磁盘恢复。
-    const restarted = new ReplayStore(replayDir, { buildReplayFromActions: dummyBuilder });
+    const restarted = new ReplayStore(replayDir);
     await restarted.ensureReady();
     check('重启后索引从磁盘恢复', (await restarted.listReplays()).length === 3);
 
     // index.bin 损坏 → 回退 .bak（ restarted.ensureReady() 重写索引后 .bak 即为全量）。
     await writeFile(path.join(replayDir, 'index.bin'), Buffer.from('garbage-index'));
-    const fallback = new ReplayStore(replayDir, { buildReplayFromActions: dummyBuilder });
+    const fallback = new ReplayStore(replayDir);
     await fallback.ensureReady();
     const fallbackItems = await fallback.listReplays();
     check('index.bin 损坏后从 .bak 恢复索引', fallbackItems.length === 3);

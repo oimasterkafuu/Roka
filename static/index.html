@@ -623,7 +623,7 @@
         }
         var $btn = $(this).prop('disabled', true);
         try {
-          // 把原始 .rpl 文件 POST 给服务器，由服务器解码重建并转码为可播放二进制。
+          // 把原始 .rpl 文件 POST 给服务器，服务器校验后返回原档。
           var res = await fetch('/api/replay-upload', {
             method: 'POST',
             headers: { 'Content-Type': 'application/octet-stream' },
@@ -634,7 +634,6 @@
           }
           var viewable = await res.arrayBuffer();
           // 原始 .rpl 一并暂存，回放页“下载回放”可原样取回。
-          sessionStorage.setItem('roka_local_replay_raw', arrayBufferToBase64(await file.arrayBuffer()));
           sessionStorage.setItem('roka_local_replay', arrayBufferToBase64(viewable));
           location.href = '/replays/local';
         } catch (e) {

@@ -13,7 +13,7 @@ import {
   megaFamilies,
   repackMegaCrowns,
 } from '../src/map/mega-random-map-generator.ts';
-import { encodeReplayPatchBinary } from '../src/replay-patch-binary.ts';
+import {encodeRpl,decodeRpl} from '../src/rpl.ts';
 import { mapConfig, measureMap } from './evaluate-maze-fairness.mjs';
 import { checkSeatConfigurations, checkIncidents, crownAudit } from './check-crown-spacing.mjs';
 import { measurePlainRegions, interiorObstacleMasks, obstacleDistance } from './measure-mega-terrain.mjs';
@@ -461,11 +461,7 @@ const spawnSpread = spawnDistricts.map(({ radii, nearest, positions }, slot) => 
   return { min, max, nearest, positions: positions.size };
 });
 
-const viewer = vm.createContext({
-  replay_binary_magic: [...Buffer.from('RPB5')],
-  replay_text_decoder: new TextDecoder(),
-  replay_class_from_code: ['', 'dead', 'afk'],
-});
+const viewer=vm.createContext({});
 
 for (const [token, minority] of [
   ['qa-12', 1],
@@ -500,13 +496,14 @@ for (const [family, { token }] of witnesses) {
       player_teams: teams,
     });
   const ids = meta.player_names;
+  let actions;
   const live = await GameEngine.create(meta, ids, ids, 'mega-test', {
     update() {},
     emitInitMap() {},
     chatMessage() {},
     endGame() {},
     md5: (value) => value,
-    replayStore: { saveReplay: async () => '' },
+    replayStore: { saveReplay: async (raw) => {actions=raw;return '';} },
   });
   const board = await GameEngine.buildReplayBaseMap(meta);
   rush.check(board, meta);
@@ -537,15 +534,7 @@ for (const [family, { token }] of witnesses) {
     vision.push(live.buildSnapshotFor(0).fog.slice());
   }
   assert.notDeepEqual(frames[0].grid_type, frames[3].grid_type, `${family} move executed`);
-  const actions = {
-    version: 'ops-v3',
-    meta: live.replayMeta,
-    total_turns: 3,
-    player_ops: live.buildReplayPlayerOps(),
-    exploration: live.fogVision.archive(),
-  };
-  const rebuilt = await GameEngine.buildReplayFromActions(actions);
-  const decoded = viewer.decodeReplayBinary(Uint8Array.from(encodeReplayPatchBinary(rebuilt)).buffer);
+  await live.saveHistory();const decoded=await GameEngine.buildReplayFromActions(await decodeRpl(await encodeRpl(actions)));
   for (const field of ['grid_type', 'army_cnt', 'isolated']) {
     const actual = Array.from(decoded.initial[field]);
     assert.deepEqual(actual, frames[0][field]);
@@ -645,5 +634,5 @@ await writeFile(
   ),
 );
 console.log(
-  `PASS ${focus + extended} engine boards, ${spawnSamples} spawn-spread boards, ${witnesses.size} family previews, team/fog/ops-v3/RPB5 and ${newFamilies.length} public examples`,
+  `PASS ${focus + extended} engine boards, ${spawnSamples} spawn-spread boards, ${witnesses.size} family previews, team/fog/RKL1 and ${newFamilies.length} public examples`,
 );

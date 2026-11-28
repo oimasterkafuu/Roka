@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import {decodeRpl} from '../dist/rpl.js';
 import { GameEngine } from '../dist/game-engine.js';
 import { ReplayStore } from '../dist/replay-store.js';
 
@@ -73,9 +73,7 @@ try {
   let baselineBoard;
   let normalBinary;
   for (const fog_mode of ['visible', 'normal']) {
-    const store = new ReplayStore(path.join(directory, fog_mode), {
-      buildReplayFromActions: GameEngine.buildReplayFromActions,
-    });
+    const store=new ReplayStore(path.join(directory,fog_mode));
     await store.ensureReady();
     const baselineMemory = memory();
     let transmitted = 0;
@@ -102,12 +100,12 @@ try {
     const finalBoard = [final.grid_type, final.army_cnt, final.isolated];
     if (baselineBoard) assert.deepEqual(finalBoard, baselineBoard);
     else baselineBoard = finalBoard;
-    const exploration = engine.fogVision?.archive() ?? [];
+    const discoveries=engine.fogVision?teams.reduce((sum,team)=>sum+engine.fogVision.snapshot(team,final).fog.filter(value=>value!==2).length,0):0;
     const liveMemory = memory();
     const id = await engine.saveHistory();
     const start = performance.now();
-    const { gzip, size } = await store.readReplayViewGzip(id);
-    const rebuildEncodeGzipMs = performance.now() - start;
+    const binary=await store.readRawReplay(id);await GameEngine.buildReplayFromActions(await decodeRpl(binary));
+    const readDecodeRebuildMs = performance.now() - start;
     results[fog_mode] = {
       dims: [engine.n, engine.m],
       turns,
@@ -116,14 +114,12 @@ try {
       msPerTick: tickMs / turns,
       liveRetainedDelta: sizeDelta(liveMemory, baselineMemory),
       transmittedArrayEntries: transmitted,
-      discoveries: exploration.reduce((total, [, entries]) => total + entries.length / 2, 0),
-      discoveryArchiveBytes: exploration.reduce((total, [, entries]) => total + entries.byteLength, 0),
+      discoveries, discoveryArchiveBytes:0,
       rplBytes: (await store.readRawReplay(id)).byteLength,
-      rpbBytes: size,
-      gzipBytes: gzip.byteLength,
-      rebuildEncodeGzipMs,
+      wireBytes: binary.length,
+      readDecodeRebuildMs,
     };
-    if (fog_mode === 'normal') normalBinary = gunzipSync(gzip);
+    if (fog_mode === 'normal') normalBinary = binary;
   }
   const { chromium } = createRequire(import.meta.url)(process.env.ROKA_PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({

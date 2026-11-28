@@ -1,9 +1,6 @@
 {
-  "version": "ops-v3",
-  "exploration": [],
+  "version": "RKL1",
   "meta": {
-    "isolated_reinforcement_fix": true,
-    "auto_crown_transfer": true,
     "width_ratio": 0.5,
     "height_ratio": 0.5,
     "city_ratio": 0.9230632486457618,
@@ -18,9 +15,14 @@
     "map_token": "multiline-replay-fixture",
     "map_mode": "random",
     "map_region": "china",
-    "player_names": ["alice", "bob"],
-    "player_teams": [1, 2],
-    "map_size_version": 2,
+    "player_names": [
+      "alice",
+      "bob"
+    ],
+    "player_teams": [
+      1,
+      2
+    ],
     "map_size": "normal"
   },
   "total_turns": 249,
@@ -94,20 +96,18 @@
             "mode": 2
           }
         ]
-      },
-      {
-        "op": "w",
-        "n": 6
       }
     ],
+    []
+  ],
+  "rows": 25,
+  "cols": 21,
+  "state_crc": 1872207862,
+  "surrenders": [
     [
-      {
-        "op": "w",
-        "n": 248
-      },
-      {
-        "op": "r"
-      }
+      248,
+      1,
+      1
     ]
   ]
 }

@@ -5,8 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
-import v8 from 'node:v8';
+import {decodeRpl} from '../dist/rpl.js';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -20,7 +19,7 @@ const outDir =
   outIdx >= 0 ? process.argv[outIdx + 1] : path.join(rootDir, 'data', `observe-${replayId}`);
 
 const buf = fs.readFileSync(path.join(rootDir, 'data', 'replays', `${replayId}.rpl`));
-const replay = v8.deserialize(zlib.brotliDecompressSync(buf));
+const replay = await decodeRpl(buf);
 const meta = replay.meta;
 const { initial, patches, n, m } = await GameEngine.buildReplayFromActions(replay);
 

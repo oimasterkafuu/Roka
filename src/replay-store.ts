@@ -1,96 +1,18 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, rm, stat, utimes } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
-import { createGunzip, gzip } from 'node:zlib';
-import {
-  CoalescingFileWriter,
-  decodeBinary,
-  encodeBinary,
-  readFileWithBackup,
-  writeFileAtomicWithBackup,
-} from './binary-store';
-import { encodeReplayPatchBinary, REPLAY_BINARY_MAGIC } from './replay-patch-binary';
-import { REPLAY_OPS_VERSION, ReplayActionData, ReplayData, ReplayListItem } from './types';
-
-const gzipAsync = promisify(gzip);
-
-/**
- * 流式解压 gzip 数据的前 length 字节，拿到足够内容即销毁流。
- * 缓存魔数校验只需前 4 字节；完整 gunzip 会把数十 MB 的解压结果整体堆进内存，
- * 超长回放下与重建/编码叠加容易把进程打到 OOM（issue #83）。
- */
-const gunzipPrefix = (content: Buffer, length: number): Promise<Buffer> =>
-  new Promise((resolve, reject) => {
-    const gunzip = createGunzip();
-    const chunks: Buffer[] = [];
-    let received = 0;
-    let settled = false;
-    const finish = (error?: Error): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (error) {
-        reject(error);
-      } else {
-        resolve(Buffer.concat(chunks).subarray(0, length));
-      }
-    };
-    gunzip.on('data', (chunk: Buffer) => {
-      if (settled) {
-        return;
-      }
-      chunks.push(chunk);
-      received += chunk.length;
-      if (received >= length) {
-        gunzip.destroy();
-        finish();
-      }
-    });
-    gunzip.on('error', (error: Error) => finish(error));
-    gunzip.on('end', () => finish());
-    gunzip.end(content);
-  });
-
+import { CoalescingFileWriter, readFileWithBackup, writeFileAtomicWithBackup } from './binary-store';
+import { encodeRpl, inspectRpl } from './rpl';
+import type { ReplayActionData, ReplayListItem } from './types';
 const REPLAY_FILENAME_REGEX = /^[0-9A-Za-z+-]+$/;
 const REPLAY_EXT = '.rpl';
-const REPLAY_VIEW_EXT = '.rpb.gz';
 const REPLAY_INDEX_BIN = 'index.bin';
-
-export const DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-
-/** Only derived viewing caches are eligible; original archives and index stay untouched. */
-export const sweepReplayViewCaches = async (
-  replayDir: string,
-  maxAgeMs = DEFAULT_REPLAY_VIEW_CACHE_MAX_AGE_MS,
-): Promise<void> => {
-  const cutoff = Date.now() - maxAgeMs;
-  for (const entry of await readdir(replayDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(REPLAY_VIEW_EXT)) continue;
-    const cachePath = path.join(replayDir, entry.name);
-    try {
-      if ((await stat(cachePath)).mtimeMs < cutoff) await rm(cachePath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-  }
-};
-
-interface ReplayStoreOptions {
-  buildReplayFromActions: (replay: ReplayActionData) => Promise<ReplayData>;
-}
-
 interface ReplaySaveSummary {
   rank: string[];
   teams: { members: string[]; color: number }[];
   turn: number;
 }
-
-const encodeReplayBinary = <T>(value: T): Promise<Buffer> => encodeBinary(value);
-
-const decodeReplayBinary = <T>(content: Buffer): Promise<T> => decodeBinary<T>(content);
 
 export const getReplayId = (content: Buffer): string => {
   const hash = createHash('sha256').update(content).digest().subarray(0, 9);
@@ -104,19 +26,16 @@ export class ReplayStore {
 
   private readonly indexFile: string;
 
-  private readonly buildReplayFromActions: ReplayStoreOptions['buildReplayFromActions'];
-
   // 索引内存缓存：读路径不再每次读盘反序列化，写路径更新缓存后合并落盘。
   private indexCache: ReplayListItem[] | null = null;
 
   // 索引写盘合并串行化：突发连续写入只落盘一次（见 binary-store）。
   private readonly indexWriter: CoalescingFileWriter;
 
-  constructor(replayDir: string, options: ReplayStoreOptions) {
+  constructor(replayDir: string) {
     this.replayDir = replayDir;
     this.indexFile = path.join(replayDir, REPLAY_INDEX_BIN);
     this.indexWriter = new CoalescingFileWriter(this.indexFile);
-    this.buildReplayFromActions = options.buildReplayFromActions;
   }
 
   async ensureReady(): Promise<void> {
@@ -153,7 +72,7 @@ export class ReplayStore {
   }
 
   async saveReplay(replay: ReplayActionData, summary: ReplaySaveSummary): Promise<string> {
-    const binary = await encodeReplayBinary(replay);
+    const binary = Buffer.from(await encodeRpl(replay));
     const replayId = getReplayId(binary);
     const replayPath = path.join(this.replayDir, `${replayId}${REPLAY_EXT}`);
 
@@ -176,16 +95,11 @@ export class ReplayStore {
     return replayId;
   }
 
-  async loadReplay(id: string): Promise<ReplayData> {
-    const content = await this.readRawReplay(id);
-    return this.buildReplayFromRaw(content);
-  }
-
-  /**
-   * 读取原始操作流及探索记录，用于下载回放。
-   */
   async readRawReplay(id: string): Promise<Buffer> {
-    return readFile(this.resolveReplayPath(id, REPLAY_EXT));
+    const bytes = await readFile(this.resolveReplayPath(id, REPLAY_EXT));
+    inspectRpl(bytes);
+    if (getReplayId(bytes) !== id) throw Error('回放损坏：内容 ID 不匹配');
+    return bytes;
   }
 
   private resolveReplayPath(id: string, ext: string): string {
@@ -200,55 +114,11 @@ export class ReplayStore {
     return replayPath;
   }
 
-  /**
-   * 读取回放的可观看二进制（RPB）gzip 压缩缓存。
-   * 回放内容不可变：首次请求时重建整场对局、转码、压缩后落盘缓存，
-   * 之后直接读缓存文件，避免每次观看都重复重建。
-   * 返回的 size 为解压后大小（缓存命中时取自 gzip 尾部 ISIZE），供客户端显示加载进度。
-   */
-  async readReplayViewGzip(id: string): Promise<{ gzip: Buffer; size: number }> {
-    const cachePath = this.resolveReplayPath(id, REPLAY_VIEW_EXT);
-    try {
-      const cached = await readFile(cachePath);
-      if (cached.length >= 4) {
-        // 观看缓存以当前魔数校验，旧缓存不用于解码。
-        // 只流式解压前 4 字节，不为校验把几十 MB 的缓存整体解压进内存。
-        const raw = await gunzipPrefix(cached, 4);
-        if (raw.length >= 4 && raw.toString('latin1') === REPLAY_BINARY_MAGIC) {
-          void utimes(cachePath, new Date(), new Date()).catch(() => {});
-          return { gzip: cached, size: cached.readUInt32LE(cached.length - 4) };
-        }
-      }
-    } catch {
-      // 缓存不存在或损坏，走下方重建。
-    }
-
-    const replay = await this.loadReplay(id);
-    const binary = encodeReplayPatchBinary(replay);
-    const compressed = (await gzipAsync(binary)) as Buffer;
-    await writeFileAtomicWithBackup(cachePath, compressed);
-    return { gzip: compressed, size: binary.length };
-  }
-
-  /**
-   * 将原始操作流及探索记录解码并重建为可观看的回放数据。
-   * 版本不符或数据损坏时抛错，由上层返回“不兼容”。
-   */
-  async buildReplayFromRaw(content: Buffer): Promise<ReplayData> {
-    const replay = await decodeReplayBinary<ReplayActionData>(content);
-    if (replay?.version !== REPLAY_OPS_VERSION) throw new Error('回放版本不兼容。');
-    return this.buildReplayFromActions(replay);
-  }
-
-  /**
-   * 显式删除回放、观看缓存与索引项。
-   */
   async deleteReplay(id: string): Promise<void> {
     if (!isReplayIdValid(id)) {
       return;
     }
     await rm(this.resolveReplayPath(id, REPLAY_EXT), { force: true });
-    await rm(this.resolveReplayPath(id, REPLAY_VIEW_EXT), { force: true });
     const items = await this.loadIndex();
     const next = items.filter((item) => item.id !== id);
     if (next.length !== items.length) {

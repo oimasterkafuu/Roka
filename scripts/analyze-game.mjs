@@ -4,8 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
-import v8 from 'node:v8';
+import {decodeRpl} from '../dist/rpl.js';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,9 +18,7 @@ const frames = fs
   .split('\n')
   .filter(Boolean)
   .map((l) => JSON.parse(l));
-const replay = v8.deserialize(
-  zlib.brotliDecompressSync(fs.readFileSync(path.join(rootDir, 'data', 'replays', `${replayId}.rpl`))),
-);
+const replay = await decodeRpl(fs.readFileSync(path.join(rootDir, 'data', 'replays', `${replayId}.rpl`)));
 
 const { n, m } = meta;
 const total = n * m;
